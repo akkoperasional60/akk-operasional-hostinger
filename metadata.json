@@ -1,0 +1,8 @@
+{
+  "name": "AKK Operasional - PT Anugrah Kemasan Kreatif",
+  "description": "Sistem terpadu operasional logistik, distribusi kemasan karton box, dan aktivitas admin penjualan PT Anugrah Kemasan Kreatif (AKK) dengan GPS Tracksolid, manajemen SLA muat, dan persetujuan akun.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,19 @@
+node_modules/
+build/
+dist/
+dist-portal/
+dist-driver/
+.vercel/
+coverage/
+.DS_Store
+*.log
+.env
+.env.local
+.env.*
+!.env.example
+*.keystore
+*.jks
+
+# Editor/AI Studio temporary artifacts (not part of Hostinger runtime)
+.aistudio/
+public/assets/aistudio/
