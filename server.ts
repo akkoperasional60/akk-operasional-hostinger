@@ -290,14 +290,14 @@ async function startServer() {
   };
 
   // In-memory preview session store (HANYA untuk preview lokal/AI Studio).
-  // Tidak ada credential default/hardcoded. Preview admin hanya aktif bila PREVIEW_ADMIN_*
-  // (atau BOOTSTRAP_ADMIN_* pada database baru) sengaja diisi di environment preview.
-  // Di production Hostinger, autentikasi selalu melalui MySQL.
-  const previewAdminEmail = String(process.env.PREVIEW_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
-  const previewAdminPass = String(process.env.PREVIEW_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || '').trim();
-  const previewAdminName = String(process.env.PREVIEW_ADMIN_NAME || process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
+  // Tidak ada credential default/hardcoded. Preview hanya aktif bila PREVIEW_ADMIN_*
+  // diberikan secara eksplisit di environment preview, bukan di Hostinger production.
+  const isPreviewRuntime = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+  const previewAdminEmail = String(process.env.PREVIEW_ADMIN_EMAIL || '').trim().toLowerCase();
+  const previewAdminPass = String(process.env.PREVIEW_ADMIN_PASSWORD || '').trim();
+  const previewAdminName = String(process.env.PREVIEW_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
   const previewSessionUsers = new Map<string, any>();
-  if (previewAdminEmail && previewAdminPass.length >= 8) {
+  if (isPreviewRuntime && previewAdminEmail && previewAdminPass.length >= 8) {
     previewSessionUsers.set('usr-preview-admin', {
       id: 'usr-preview-admin',
       email: previewAdminEmail,
@@ -309,7 +309,7 @@ async function startServer() {
       status: 'approved',
       created_at: new Date().toISOString(),
       approved_at: new Date().toISOString(),
-      notes: 'Preview admin (environment only)'
+      notes: 'Preview admin (environment-only; bukan akun production)'
     });
   }
 
@@ -610,21 +610,28 @@ async function startServer() {
     }
   };
 
-  const publicUser = (u: any) => ({
-    id: u.id,
-    email: u.email,
-    name: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
-    fullName: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
-    role: u.role,
-    department: u.department || 'Logistics Operations',
-    phone: u.phone || '',
-    status: u.status || 'pending',
-    createdAt: u.created_at || undefined,
-    approvedAt: u.approved_at || undefined,
-    approvedBy: u.approved_by || undefined,
-    notes: u.notes || undefined,
-    permissions: parsePermissionsJson(u.permissions_json ?? u.permissions)
-  });
+  const publicUser = (u: any) => {
+    const rawName = String(u.full_name || u.fullName || u.name || '').trim();
+    const isHendriEmail = String(u.email || '').trim().toLowerCase() === 'hendri123@gmail.com';
+    const resolvedName = (isHendriEmail && (!rawName || rawName.toLowerCase() === 'super admin'))
+      ? 'Hendri'
+      : (rawName || (u.role === 'super_admin' ? 'Super Admin' : 'User'));
+    return {
+      id: u.id,
+      email: u.email,
+      name: resolvedName,
+      fullName: resolvedName,
+      role: u.role,
+      department: u.department || 'Logistics Operations',
+      phone: u.phone || '',
+      status: u.status || 'pending',
+      createdAt: u.created_at || undefined,
+      approvedAt: u.approved_at || undefined,
+      approvedBy: u.approved_by || undefined,
+      notes: u.notes || undefined,
+      permissions: parsePermissionsJson(u.permissions_json ?? u.permissions)
+    };
+  };
 
   const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
     const cleanId = loginIdentifier.trim().toLowerCase();
@@ -739,24 +746,20 @@ async function startServer() {
     }
     try {
       await ensureDatabaseSchema();
-      const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS total FROM users`);
-      const isFirstUser = Number(countRows?.[0]?.total || 0) === 0;
-      const assignedRole = isFirstUser ? 'super_admin' : 'unassigned';
-      const assignedStatus = isFirstUser ? 'approved' : 'pending';
+      // Pendaftaran mandiri tidak pernah boleh membuat Super Admin, termasuk saat tabel users kosong.
+      // Database baru harus diinisialisasi lewat BOOTSTRAP_ADMIN_* secara eksplisit.
       const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
       await mysqlQuery(
         `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, created_at, approved_at, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ${isFirstUser ? 'NOW()' : 'NULL'}, ?)`,
+         VALUES (?, ?, ?, ?, 'unassigned', ?, ?, 'pending', NOW(), NULL, ?)`,
         [
           id,
           cleanEmail,
           hashPassword(cleanPassword),
           cleanName,
-          assignedRole,
-          String(department || (isFirstUser ? 'Manajemen & Direksi' : 'Logistik')),
+          String(department || 'Logistik'),
           String(phone || ''),
-          assignedStatus,
-          isFirstUser ? 'Inisialisasi Super Admin Pertama' : 'Pendaftaran mandiri - menunggu persetujuan Super Admin'
+          'Pendaftaran mandiri - menunggu persetujuan Super Admin'
         ]
       );
       const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, notes FROM users WHERE id = ? LIMIT 1', [id]);
@@ -2016,29 +2019,6 @@ Tugas Anda:
     });
   }
 
-  // Production Hostinger: pastikan database/schema siap SEBELUM menerima trafik.
-  // Preview/development boleh start cepat; pengecekan DB dilakukan non-blocking setelah port bind.
-  if (isProduction && !process.env.K_SERVICE) {
-    try {
-      if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
-        console.warn('[Startup Production] SESSION_SECRET belum diisi atau kurang dari 32 karakter; menggunakan derived SHA-256 session key.');
-      }
-      if (!isDatabaseConfigured()) {
-        console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap di Environment Variables.');
-      } else {
-        const conn = await testMysqlConnection();
-        if (!conn.success) {
-          console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
-        } else {
-          await ensureDatabaseSchema();
-          await ensureBootstrapAdmin();
-        }
-      }
-    } catch (err: any) {
-      console.warn('[Startup Production] Peringatan inisialisasi database:', err?.message || err);
-    }
-  }
-
   const preferredPort = Number(process.env.PORT) || 3000;
 
   function listenOnPort(port: number) {
@@ -2073,25 +2053,40 @@ Tugas Anda:
 
   listenOnPort(preferredPort);
 
-  if (!isProduction || process.env.K_SERVICE) {
-    void (async () => {
-      try {
-        if (isDatabaseConfigured()) {
+  // Cek koneksi database, pastikan schema tabel tersedia, dan bootstrap Super Admin secara non-blocking
+  void (async () => {
+    try {
+      const isHostingerEnv = isProduction && !process.env.K_SERVICE;
+      if (isHostingerEnv) {
+        if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
+          console.warn('[Startup Production] SESSION_SECRET belum diisi atau kurang dari 32 karakter; menggunakan derived SHA-256 session key.');
+        }
+        if (!isDatabaseConfigured()) {
+          console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap di Environment Variables.');
+        } else {
           const conn = await testMysqlConnection();
-          if (conn.success) {
+          if (!conn.success) {
+            console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
+          } else {
             await ensureDatabaseSchema();
             await ensureBootstrapAdmin();
-          } else {
-            console.log('ℹ️ [Startup Database] Hostinger MySQL belum aktif di environment lokal/preview.');
           }
-        } else {
-          console.log('ℹ️ [Startup Database] Mode development/preview berjalan (konfigurasi DB diisi di Hostinger ENV saat production).');
         }
-      } catch (err: any) {
-        console.warn('[Startup Database] Peringatan inisialisasi database preview:', err?.message || err);
+      } else if (isDatabaseConfigured()) {
+        const conn = await testMysqlConnection();
+        if (conn.success) {
+          await ensureDatabaseSchema();
+          await ensureBootstrapAdmin();
+        } else {
+          console.log('ℹ️ [Startup Database] Hostinger MySQL belum aktif di environment lokal/preview.');
+        }
+      } else {
+        console.log('ℹ️ [Startup Database] Mode development/preview berjalan (konfigurasi DB diisi di Hostinger ENV saat production).');
       }
-    })();
-  }
+    } catch (err: any) {
+      console.warn('[Startup Database] Peringatan inisialisasi database:', err?.message || err);
+    }
+  })();
 }
 
 startServer();

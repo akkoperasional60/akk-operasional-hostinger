@@ -432,8 +432,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('Akses Ditolak', 'Hanya Super Admin yang dapat menonaktifkan akun pengguna.', 'warning');
       return;
     }
-    if (user.role === 'super_admin') {
-      showNotification('Tindakan Dibatasi', 'Akun utama Super Admin tidak dapat dinonaktifkan.', 'warning');
+    const isPrimaryOrSelfSuperAdmin =
+      user.id === currentUser.id ||
+      (user.email || '').trim().toLowerCase() === 'akkoperasional60@gmail.com';
+    if (user.role === 'super_admin' && isPrimaryOrSelfSuperAdmin) {
+      showNotification('Tindakan Dibatasi', 'Akun utama Super Admin yang sedang aktif tidak dapat dinonaktifkan.', 'warning');
       return;
     }
     logisticsStore.deactivateUser(user.id);
@@ -975,7 +978,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                         <span>Edit Pengguna</span>
                       </button>
                     )}
-                    {isSuperAdmin && selectedUser.role !== 'super_admin' && (
+                    {isSuperAdmin && !(selectedUser.role === 'super_admin' && (selectedUser.id === currentUser.id || (selectedUser.email || '').trim().toLowerCase() === 'akkoperasional60@gmail.com')) && (
                       selectedUser.status === 'inactive' ? (
                         <button
                           onClick={() => handleActivateUser(selectedUser)}

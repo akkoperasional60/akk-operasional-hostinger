@@ -654,43 +654,77 @@ class LogisticsStore {
   private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
     const isProd = Boolean(import.meta.env.PROD);
     let primarySuperAdmin: UserProfile | null = null;
+    const seenIds = new Set<string>();
+    const seenEmails = new Set<string>();
     const filtered: UserProfile[] = [];
 
-    for (const u of usersList) {
-      // Fix legacy usr-hendri role if still super_admin
-      if (u.id === 'usr-hendri' && u.role === 'super_admin') {
-        filtered.push({
-          ...u,
-          role: 'operasional',
-          permissions: { modules: getDefaultPermissionsForRole('operasional') }
-        });
-        continue;
-      }
+    for (const rawUser of usersList) {
+      const cleanEmail = (rawUser.email || '').trim().toLowerCase();
+      const rawFullName = (rawUser.fullName || '').trim();
 
-      const isDuplicateSuperAdmin =
-        u.role === 'super_admin' ||
-        u.id === 'usr-001' ||
-        u.id.startsWith('usr-preview-') ||
-        u.id.startsWith('usr-bootstrap-') ||
-        (u.fullName || '').trim().toLowerCase().startsWith('super admin') ||
-        (u.email || '').trim().toLowerCase() === 'admin@gmail.com';
+      // Pastikan akun Hendri (hendri123@gmail.com / usr-hendri) tidak pernah berubah nama menjadi "Super Admin"
+      // dan tidak pernah digabung dengan akun utama akkoperasional60@gmail.com
+      const isHendriAccount =
+        rawUser.id === 'usr-hendri' ||
+        cleanEmail === 'hendri123@gmail.com' ||
+        rawFullName.toLowerCase() === 'hendri';
 
-      if (isDuplicateSuperAdmin) {
+      const u: UserProfile = isHendriAccount
+        ? {
+            ...rawUser,
+            fullName: (!rawFullName || rawFullName.toLowerCase() === 'super admin') ? 'Hendri' : rawFullName
+          }
+        : rawUser;
+
+      // Hanya gabungkan duplikat akun Super Admin generik/utama (akkoperasional60@gmail.com / admin@gmail.com / bootstrap / preview),
+      // JANGAN gabungkan user berbeda yang kebetulan memiliki role super_admin (seperti hendri123@gmail.com).
+      const isGenericPrimarySuperAdmin =
+        !isHendriAccount &&
+        (
+          cleanEmail === 'akkoperasional60@gmail.com' ||
+          cleanEmail === 'admin@gmail.com' ||
+          u.id === 'usr-001' ||
+          u.id.startsWith('usr-preview-') ||
+          u.id.startsWith('usr-bootstrap-') ||
+          (u.role === 'super_admin' && (!cleanEmail || rawFullName.toLowerCase() === 'super admin'))
+        );
+
+      if (isGenericPrimarySuperAdmin) {
         if (!primarySuperAdmin) {
-          // Di production pertahankan identitas dari MySQL apa adanya.
-          // Jangan pernah mengganti email/id user production menjadi nilai mock/default.
           primarySuperAdmin = {
             ...u,
+            fullName: rawFullName || 'Super Admin',
             role: 'super_admin',
             department: u.department || 'Manajemen & Direksi',
             status: 'approved',
-            permissions: { modules: getDefaultPermissionsForRole('super_admin') }
+            permissions: u.permissions?.modules ? u.permissions : { modules: getDefaultPermissionsForRole('super_admin') }
           };
+          seenIds.add(primarySuperAdmin.id);
+          if (cleanEmail) seenEmails.add(cleanEmail);
           filtered.push(primarySuperAdmin);
+        } else if (cleanEmail === 'akkoperasional60@gmail.com' && (primarySuperAdmin.email || '').toLowerCase() !== 'akkoperasional60@gmail.com') {
+          // Utamakan record resmi akkoperasional60@gmail.com dari MySQL dibanding placeholder lokal
+          const idx = filtered.indexOf(primarySuperAdmin);
+          primarySuperAdmin = {
+            ...u,
+            fullName: rawFullName || 'Super Admin',
+            role: 'super_admin',
+            department: u.department || 'Manajemen & Direksi',
+            status: 'approved',
+            permissions: u.permissions?.modules ? u.permissions : { modules: getDefaultPermissionsForRole('super_admin') }
+          };
+          if (idx >= 0) filtered[idx] = primarySuperAdmin;
+          seenIds.add(primarySuperAdmin.id);
+          seenEmails.add(cleanEmail);
         }
         continue;
       }
 
+      if (seenIds.has(u.id) || (cleanEmail && seenEmails.has(cleanEmail))) {
+        continue;
+      }
+      seenIds.add(u.id);
+      if (cleanEmail) seenEmails.add(cleanEmail);
       filtered.push(u);
     }
 
@@ -2243,15 +2277,25 @@ class LogisticsStore {
       const payload = await response.json();
       if (!Array.isArray(payload?.data)) return false;
       const localById = new Map(this.users.map(u => [u.id, u]));
+      const localByEmail = new Map(
+        this.users
+          .filter(u => u.email)
+          .map(u => [u.email.trim().toLowerCase(), u])
+      );
       const mappedUsers = payload.data.map((r: any) => {
-        const local = localById.get(r.id);
+        const cleanEmail = String(r.email || '').trim().toLowerCase();
+        const local = localById.get(r.id) || (cleanEmail ? localByEmail.get(cleanEmail) : undefined);
         const role = (r.role || local?.role || 'unassigned') as UserRole;
         const remotePerms = r.permissions && r.permissions.modules ? r.permissions : undefined;
+        const rawRemoteName = String(r.fullName || r.name || '').trim();
+        const resolvedFullName = (cleanEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
+          ? 'Hendri'
+          : (rawRemoteName || local?.fullName || r.email || 'User');
         return {
           ...(local || {} as UserProfile),
           id: r.id,
           email: r.email || local?.email || '',
-          fullName: r.fullName || r.name || local?.fullName || r.email || 'User',
+          fullName: resolvedFullName,
           role,
           department: r.department || local?.department || 'Logistics Operations',
           phone: r.phone || local?.phone || '',
@@ -2266,6 +2310,19 @@ class LogisticsStore {
       });
       this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+
+      // Pastikan currentUser tetap mengacu pada ID & email akun yang sedang login (tidak tertukar dengan super_admin lain)
+      if (this.currentUser && this.currentUser.id !== 'usr-guest') {
+        const currentEmail = (this.currentUser.email || '').trim().toLowerCase();
+        const matchedCurrent =
+          this.users.find(u => u.id === this.currentUser.id) ||
+          (currentEmail ? this.users.find(u => (u.email || '').trim().toLowerCase() === currentEmail) : undefined);
+        if (matchedCurrent) {
+          this.currentUser = { ...matchedCurrent, password: undefined };
+          this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        }
+      }
+
       this.syncUsersWithCrews();
       this.notify();
       return true;
@@ -2724,18 +2781,21 @@ class LogisticsStore {
       const remote = payload?.user;
       if (!remote?.id) return null;
 
-      const isRemoteSuperAdmin = remote.role === 'super_admin';
+      const remoteEmail = String(remote.email || '').trim().toLowerCase();
       const existing = this.users.find(u =>
         u.id === remote.id ||
-        u.email?.toLowerCase() === String(remote.email || '').toLowerCase() ||
-        (isRemoteSuperAdmin && u.role === 'super_admin')
+        (remoteEmail && u.email?.toLowerCase() === remoteEmail)
       );
       const role = (remote.role || existing?.role || 'unassigned') as UserRole;
+      const rawRemoteName = String(remote.fullName || remote.name || '').trim();
+      const resolvedFullName = (remoteEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
+        ? 'Hendri'
+        : (rawRemoteName || existing?.fullName || (role === 'super_admin' ? 'Super Admin' : (remote.email || 'User')));
       const user: UserProfile = {
         ...(existing || {} as UserProfile),
-        id: isRemoteSuperAdmin ? (existing?.id || remote.id) : remote.id,
+        id: remote.id,
         email: remote.email || existing?.email || '',
-        fullName: isRemoteSuperAdmin ? 'Super Admin' : (remote.name || existing?.fullName || remote.email || 'User'),
+        fullName: resolvedFullName,
         role,
         department: remote.department || existing?.department || 'Logistics Operations',
         phone: remote.phone || existing?.phone || '',
@@ -2747,7 +2807,6 @@ class LogisticsStore {
 
       const idx = this.users.findIndex(u =>
         u.id === user.id ||
-        (isRemoteSuperAdmin && u.role === 'super_admin') ||
         (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
       );
       if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
@@ -2830,17 +2889,20 @@ class LogisticsStore {
 
       const remote = payload.user;
       const role = (remote.role || 'unassigned') as UserRole;
-      const isRemoteSuperAdmin = role === 'super_admin';
+      const remoteEmail = String(remote.email || '').trim().toLowerCase();
       const existing = this.users.find(u =>
         u.id === remote.id ||
-        u.email?.toLowerCase() === String(remote.email || '').toLowerCase() ||
-        (isRemoteSuperAdmin && u.role === 'super_admin')
+        (remoteEmail && u.email?.toLowerCase() === remoteEmail)
       );
+      const rawRemoteName = String(remote.fullName || remote.name || '').trim();
+      const resolvedFullName = (remoteEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
+        ? 'Hendri'
+        : (rawRemoteName || existing?.fullName || (role === 'super_admin' ? 'Super Admin' : 'Pengguna'));
       const user: UserProfile = {
         ...(existing || {} as UserProfile),
-        id: isRemoteSuperAdmin ? (existing?.id || remote.id) : remote.id,
+        id: remote.id,
         email: remote.email || existing?.email || '',
-        fullName: isRemoteSuperAdmin ? 'Super Admin' : (remote.name || remote.fullName || existing?.fullName || 'Pengguna'),
+        fullName: resolvedFullName,
         role,
         department: remote.department || existing?.department || 'Logistik',
         phone: remote.phone || existing?.phone || '',
@@ -2857,7 +2919,6 @@ class LogisticsStore {
 
       const idx = this.users.findIndex(u =>
         u.id === user.id ||
-        (isRemoteSuperAdmin && u.role === 'super_admin') ||
         (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
       );
       if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;

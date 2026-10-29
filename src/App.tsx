@@ -35,6 +35,7 @@ import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Be
 import { useToast } from './context/ToastContext';
 import { canAccess, getDefaultTabForRole } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
+import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
@@ -70,15 +71,18 @@ const LiveClockBadge: React.FC = () => {
 export default function App() {
   const { user: currentUser, canManageFleet, isDriver, isAdmin } = useRoleAccess();
 
+  const initialRequestedTabRef = useRef<NavTab | null>((() => {
+    try {
+      return resolveTabFromUrl(window.location).tab;
+    } catch {
+      return null;
+    }
+  })());
+
   const [currentTab, setCurrentTab] = useState<NavTab>(() => {
     try {
-      const searchParams = new URLSearchParams(window.location.search);
-      const tabParam = searchParams.get('tab');
-      if (tabParam) return tabParam as NavTab;
-      if (window.location.hash) {
-        const hash = window.location.hash.replace('#', '');
-        if (hash) return hash as NavTab;
-      }
+      const resolved = resolveTabFromUrl(window.location);
+      if (resolved.tab) return resolved.tab;
       if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('AKKDriverMobile')) {
         return 'driver_portal';
       }
@@ -140,12 +144,20 @@ export default function App() {
   });
 
   useEffect(() => {
+    if (isAuthChecking || !isAuthenticated) return;
+
     const userOrRoleChanged =
       prevUserRef.current.id !== currentUser.id ||
       prevUserRef.current.role !== currentUser.role;
 
     if (userOrRoleChanged) {
       prevUserRef.current = { id: currentUser.id, role: currentUser.role };
+      const requestedTab = initialRequestedTabRef.current;
+      initialRequestedTabRef.current = null;
+      if (requestedTab && canAccess(currentUser, requestedTab)) {
+        setCurrentTab(requestedTab);
+        return;
+      }
       setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
       return;
     }
@@ -156,7 +168,7 @@ export default function App() {
     if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
       setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
     }
-  }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin]);
+  }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin, isAuthChecking, isAuthenticated]);
 
   const getTabTitle = (tab: NavTab): string => {
     switch (tab) {
@@ -211,6 +223,53 @@ export default function App() {
     }
   };
 
+  // Sinkronisasi URL Browser (/login, /manajemen-user, /dashboard, dll.) & Judul Tab
+  useEffect(() => {
+    if (isAuthChecking) return;
+
+    try {
+      const currentPath = normalizePathname(window.location.pathname);
+
+      if (!isAuthenticated) {
+        document.title = 'Login Portal | AKK Operasional - PT Anugrah Kemasan Kreatif';
+        const resolved = resolveTabFromUrl(window.location);
+        if (resolved.tab) {
+          initialRequestedTabRef.current = resolved.tab;
+        }
+        if (currentPath !== '/login') {
+          window.history.replaceState({ tab: 'login' }, '', '/login');
+        }
+        return;
+      }
+
+      const activeTitle = getTabTitle(currentTab);
+      document.title = `${activeTitle} | AKK Operasional - PT Anugrah Kemasan Kreatif`;
+
+      const targetPath = getTabPath(currentTab);
+      if (currentPath !== targetPath) {
+        if (currentPath === '/' || currentPath === '/login') {
+          window.history.replaceState({ tab: currentTab }, '', targetPath);
+        } else {
+          window.history.pushState({ tab: currentTab }, '', targetPath);
+        }
+      }
+    } catch {}
+  }, [currentTab, isAuthenticated, isAuthChecking]);
+
+  // Dukungan tombol Back / Forward pada browser
+  useEffect(() => {
+    const handlePopState = () => {
+      try {
+        const resolved = resolveTabFromUrl(window.location);
+        if (isAuthenticated && resolved.tab && canAccess(currentUser, resolved.tab)) {
+          setCurrentTab(resolved.tab);
+        }
+      } catch {}
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isAuthenticated, currentUser]);
+
   const handleScheduleForStore = (store: RetailStore) => {
     setPreselectedStore(store);
     setCurrentTab('schedules');
@@ -239,14 +298,12 @@ export default function App() {
       <LoginPage
         onLoginSuccess={(loggedInUser) => {
           setIsAuthenticated(true);
-          try {
-            const searchParams = new URLSearchParams(window.location.search);
-            const tabParam = searchParams.get('tab');
-            if (tabParam) {
-              setCurrentTab(tabParam as NavTab);
-              return;
-            }
-          } catch {}
+          const requestedTab = initialRequestedTabRef.current;
+          initialRequestedTabRef.current = null;
+          if (requestedTab && canAccess(loggedInUser, requestedTab)) {
+            setCurrentTab(requestedTab);
+            return;
+          }
           const defaultTab = getDefaultTabForRole(loggedInUser.role) as NavTab;
           setCurrentTab(defaultTab);
         }}
@@ -279,6 +336,10 @@ export default function App() {
                 <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
                 <span>&middot;</span>
                 <span>Banyuwangi Hub</span>
+                <span>&middot;</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700">
+                  {getTabPath(currentTab)}
+                </span>
               </div>
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                 {getTabTitle(currentTab)}

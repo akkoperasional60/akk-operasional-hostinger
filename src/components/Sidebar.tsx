@@ -56,6 +56,7 @@ import { UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
 import { driverReportService } from '../services/driverReportService';
 import { canAccess } from '../utils/rbac';
+import { getTabPath } from '../utils/navigationRoutes';
 
 export type NavTab =
   | 'dashboard'
@@ -204,13 +205,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     badge?: React.ReactNode
   ) => {
     const isActive = currentTab === tab;
+    const targetPath = getTabPath(tab);
 
     return (
-      <button
+      <a
         key={tab}
-        onClick={() => handleTabClick(tab)}
-        title={isMinimized ? label : undefined}
-        className={`group relative w-full flex items-center ${
+        href={targetPath}
+        onClick={(e) => {
+          if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
+            e.preventDefault();
+            handleTabClick(tab);
+          }
+        }}
+        title={isMinimized ? `${label} (${targetPath})` : `${label} — ${targetPath}`}
+        className={`group relative w-full flex items-center no-underline ${
           isMinimized ? 'justify-center px-2' : 'justify-between px-3'
         } py-2 rounded-lg text-xs font-medium cursor-pointer transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] select-none overflow-hidden ${
           isActive
@@ -250,7 +258,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {badge}
           </span>
         )}
-      </button>
+      </a>
     );
   };
 

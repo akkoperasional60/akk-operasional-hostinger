@@ -1,0 +1,30 @@
+<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="akk-blue-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1E8AD5" />
+      <stop offset="100%" stop-color="#0B6BB6" />
+    </linearGradient>
+    <clipPath id="akk-squircle-clip">
+      <rect width="100" height="100" rx="18" ry="18" />
+    </clipPath>
+  </defs>
+  <rect width="100" height="100" rx="18" ry="18" fill="url(#akk-blue-grad)" />
+  <g clip-path="url(#akk-squircle-clip)">
+    <path
+      d="M 50.5 15.5 L 94.5 94 L 81.5 94 L 68 73 C 55.5 67.5, 41 61.5, 30.5 51 Z"
+      fill="#FFFFFF"
+    />
+    <path
+      d="M 30.5 61 C 42 67, 54 71.5, 68 73.5 L 66 79 C 51 77, 38 72, 28 66 Z"
+      fill="#FFFFFF"
+    />
+    <path
+      d="M 6.5 94 C 12 77.5, 26 64.5, 46 64.5 C 60 64.5, 72.5 72.5, 79.5 94 L 69.5 94 C 64.5 79.5, 56.5 74.5, 46 74.5 C 34 74.5, 23 82.5, 17 94 Z"
+      fill="#FFFFFF"
+    />
+    <path
+      d="M 25 94 C 25 79, 75 79, 75 94 Z"
+      fill="#CB4E2A"
+    />
+  </g>
+</svg>

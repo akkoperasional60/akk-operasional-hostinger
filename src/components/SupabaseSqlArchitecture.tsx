@@ -17,10 +17,7 @@ export const SupabaseSqlArchitecture: React.FC = () => {
     'DB_USER=u649808503_ops_node',
     'DB_PASSWORD=<secret>',
     'SESSION_SECRET=<minimal 32 karakter acak>',
-    'BOOTSTRAP_ADMIN_EMAIL=<hanya saat bootstrap awal>',
-    'BOOTSTRAP_ADMIN_PASSWORD=<hapus setelah login pertama>',
-    'BOOTSTRAP_ADMIN_NAME=<opsional, hapus setelah bootstrap>',
-    'WHATSAPP_API_KEY=<secret>'
+    'GEMINI_API_KEY=<opsional; hapus jika tidak dipakai>'
   ];
 
   const removedApkVars = [

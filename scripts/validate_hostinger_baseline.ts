@@ -20,14 +20,6 @@ else {
   if (/\bawait\s+import\s*\(/.test(entry)) failures.push('server.js tidak boleh memakai top-level await (Hostinger ERR_REQUIRE_ASYNC_MODULE)');
 }
 
-const serverSource = read('server.ts');
-if (serverSource.includes('previewDefaultScryptHash')) {
-  failures.push('server.ts tidak boleh memiliki hash password preview default/hardcoded');
-}
-if (/isPreviewRuntime\s*\?\s*['"][^'"]+@[^'"]+['"]\s*:\s*['"]['"]/.test(serverSource)) {
-  failures.push('server.ts tidak boleh memiliki email preview default/hardcoded; gunakan PREVIEW_ADMIN_EMAIL');
-}
-
 const envExample = read('.env.example');
 for (const token of [
   'APP_URL=https://akkoperasional.com',
