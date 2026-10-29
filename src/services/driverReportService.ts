@@ -7,7 +7,7 @@ export interface DriverHelperReport {
   userRole?: string;
   helperName?: string;
   plateNumber: string;
-  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline';
+  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
   areaName: string;
   deliveryId?: string;
   notes: string;
@@ -18,6 +18,9 @@ export interface DriverHelperReport {
   status: 'pending' | 'verified' | 'follow_up' | 'resolved';
   verifiedBy?: string;
   verifiedAt?: string;
+  // Data Pengisian BBM (Solar) di Farly / Gajah Mada
+  fuelLocation?: 'Farly' | 'Gajah Mada' | string;
+  fuelLiters?: string;
   // Data Presensi Check-In & Check-Out Terpadu + PIN Keamanan
   shiftId?: string;
   checkinTimeFormatted?: string;
@@ -612,7 +615,7 @@ class DriverReportService {
     driverName: string;
     driverPhone?: string;
     plateNumber: string;
-    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline';
+    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
     reportText?: string;
     notes?: string;
     latitude?: number;
@@ -621,6 +624,8 @@ class DriverReportService {
     areaName?: string;
     helperName?: string;
     photoUrl?: string;
+    fuelLocation?: 'Farly' | 'Gajah Mada' | string;
+    fuelLiters?: string;
   }): DriverHelperReport {
     return this.addReport({
       driverId: params.driverId,

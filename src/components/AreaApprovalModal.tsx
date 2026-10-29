@@ -48,10 +48,10 @@ export const AreaApprovalModal: React.FC<AreaApprovalModalProps> = ({
             <div>
               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 mb-1">
                 <AlertTriangle className="w-3 h-3" />
-                <span>Persetujuan Khusus: Batas Rotasi Wilayah Tercapai</span>
+                <span>Rincian Riwayat &amp; Batas Rotasi Wilayah</span>
               </div>
               <h3 className="text-base font-bold text-white tracking-tight">
-                Konfirmasi Otorisasi Pengiriman Berulang di 1 Area
+                Rincian Pengiriman &amp; Otorisasi Area
               </h3>
               <p className="text-xs text-slate-300 mt-1">
                 Kru <strong className="text-white">{crewName}</strong> telah melakukan{' '}

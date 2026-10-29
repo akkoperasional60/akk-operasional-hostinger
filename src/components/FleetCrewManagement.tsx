@@ -360,16 +360,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       setCrews(logisticsStore.getCrews());
       setSyncFeedback({
         type: res.success ? 'success' : 'error',
-        message: res.message
+        message: 'Data armada dan kru berhasil diperbarui dan disimpan.'
       });
     } catch (err: any) {
       setSyncFeedback({
         type: 'error',
-        message: err?.message || 'Gagal sinkronisasi dengan Hostinger MySQL.'
+        message: 'Gagal memperbarui data armada dan kru.'
       });
     } finally {
       setIsSyncingSupabase(false);
-      setTimeout(() => setSyncFeedback(null), 6000);
+      setTimeout(() => setSyncFeedback(null), 4000);
     }
   };
 
@@ -410,9 +410,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Armada ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil ditambahkan dan disinkronkan ke Hostinger MySQL!`
+      message: `Data armada ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil disimpan.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   const handleCreateCrew = (e: React.FormEvent) => {
@@ -442,9 +442,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Kru ${created.name} (${created.role}) berhasil ditambahkan dan disinkronkan ke Hostinger MySQL!`
+      message: `Data kru ${created.name} (${created.role}) berhasil disimpan.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   // Fleet Edit & Delete Handlers
@@ -510,9 +510,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setEditingAssignedCrewId('');
     setSyncFeedback({
       type: 'success',
-      message: `✅ Perubahan data armada ${updatedFleetData.plateNumber} tersimpan di Hostinger MySQL!`
+      message: `Data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   const handleDeleteFleetClick = (fleet: Fleet) => {
@@ -548,9 +548,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Perubahan data kru ${editingCrew.name} tersimpan di Hostinger MySQL!`
+      message: `Data kru ${editingCrew.name} berhasil disimpan.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   const handleDeleteCrewClick = (crew: Crew) => {
@@ -565,9 +565,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrewToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `🗑️ Kru ${name} berhasil dihapus dari sistem dan Hostinger MySQL!`
+      message: `Data kru ${name} berhasil dihapus.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   const handleConfirmDeleteFleet = () => {
@@ -578,9 +578,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `🗑️ Armada ${plate} berhasil dihapus dari sistem dan Hostinger MySQL!`
+      message: `Data armada ${plate} berhasil dihapus.`
     });
-    setTimeout(() => setSyncFeedback(null), 5000);
+    setTimeout(() => setSyncFeedback(null), 4000);
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
@@ -959,48 +959,67 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </button>
               </div>
 
-              {/* Supabase Sync Button */}
+              {/* Refresh Data Button */}
               <button
                 type="button"
                 disabled={isSyncingSupabase}
                 onClick={handleManualSupabaseSync}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-                title="Sinkronkan data armada dan kru dengan Hostinger MySQL"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+                title="Segarkan data armada dan kru"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupabase ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
-                <span className="hidden sm:inline">{isSyncingSupabase ? 'Sinkron...' : 'Sync MySQL'}</span>
+                <span className="hidden sm:inline">{isSyncingSupabase ? 'Memuat...' : 'Segarkan'}</span>
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Supabase Sync Feedback Banner */}
+      {/* Pop-Up Modal Notifikasi "Data Berhasil Disimpan" */}
       {syncFeedback && (
-        <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-xs shadow-sm animate-in fade-in duration-200 ${
-          syncFeedback.type === 'success'
-            ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-            : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
-        }`}>
-          <div className="flex items-center gap-2">
-            {syncFeedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            )}
-            <span className="font-medium">{syncFeedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSyncFeedback(null)}
-            className="text-slate-400 hover:text-white font-bold p-1 rounded cursor-pointer leading-none text-base"
+        <div
+          className="fixed inset-0 z-[70] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setSyncFeedback(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
           >
-            &times;
-          </button>
+            <div
+              className={`w-12 h-12 rounded-2xl mx-auto flex items-center justify-center border ${
+                syncFeedback.type === 'success'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
+                  : 'bg-rose-500/15 border-rose-500/30 text-rose-500'
+              }`}
+            >
+              {syncFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-6 h-6" />
+              ) : (
+                <AlertCircle className="w-6 h-6" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                {syncFeedback.type === 'success' ? 'Data Berhasil Disimpan' : 'Pemberitahuan Sistem'}
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                {syncFeedback.message}
+              </p>
+            </div>
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setSyncFeedback(null)}
+                className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+              >
+                OK, Mengerti
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Ready, Kirim, Servis + Titik Besar Warna) */}
+      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Compact & Rapat) */}
       {activeTab === 'fleets' && (() => {
         const liveInfos = fleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
         const readyCount = liveInfos.filter(i => i.effectiveStatus === 'available').length;
@@ -1008,28 +1027,28 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         const servisCount = liveInfos.filter(i => i.effectiveStatus === 'maintenance').length;
 
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'available' ? 'all' : 'available')}
-              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
                 fleetFilter === 'available'
                   ? 'bg-emerald-950/40 border-emerald-500/60 shadow-xs'
                   : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
               }`}
             >
-              <div className="space-y-1">
+              <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20 shrink-0" />
                   <span className="font-black text-emerald-400 text-xs uppercase tracking-wide">
                     Status Ready
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  Siap digunakan untuk jadwal esok harinya (otomatis Ready setelah tim klik sudah berada di gudang).
+                <p className="text-[11px] text-slate-400 truncate">
+                  Siap digunakan untuk jadwal pengiriman esok hari
                 </p>
               </div>
-              <span className="text-xl font-black font-mono text-emerald-400 shrink-0">
+              <span className="text-lg font-black font-mono text-emerald-400 shrink-0">
                 {readyCount}
               </span>
             </button>
@@ -1037,24 +1056,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'on-duty' ? 'all' : 'on-duty')}
-              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
                 fleetFilter === 'on-duty'
                   ? 'bg-blue-950/40 border-blue-500/60 shadow-xs'
                   : 'bg-slate-900 border-slate-800 hover:border-blue-500/40'
               }`}
             >
-              <div className="space-y-1">
+              <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded-full bg-blue-500 ring-4 ring-blue-500/20 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-500/20 shrink-0" />
                   <span className="font-black text-blue-400 text-xs uppercase tracking-wide">
                     Status Kirim
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  Sedang dipakai kirim tim pengiriman (otomatis berubah menjadi Kirim setelah klik Gate-Out).
+                <p className="text-[11px] text-slate-400 truncate">
+                  Sedang dipakai kirim oleh tim pengiriman (Gate-Out aktif)
                 </p>
               </div>
-              <span className="text-xl font-black font-mono text-blue-400 shrink-0">
+              <span className="text-lg font-black font-mono text-blue-400 shrink-0">
                 {kirimCount}
               </span>
             </button>
@@ -1062,24 +1081,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'maintenance' ? 'all' : 'maintenance')}
-              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
                 fleetFilter === 'maintenance'
                   ? 'bg-rose-950/40 border-rose-500/60 shadow-xs'
                   : 'bg-slate-900 border-slate-800 hover:border-rose-500/40'
               }`}
             >
-              <div className="space-y-1">
+              <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded-full bg-rose-500 ring-4 ring-rose-500/20 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-500/20 shrink-0" />
                   <span className="font-black text-rose-400 text-xs uppercase tracking-wide">
                     Status Servis
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  Armada dalam keadaan perbaikan dan terkunci (tidak bisa diaturkan jadwal kirim).
+                <p className="text-[11px] text-slate-400 truncate">
+                  Dalam perbaikan dan terkunci dari jadwal pengiriman
                 </p>
               </div>
-              <span className="text-xl font-black font-mono text-rose-400 shrink-0">
+              <span className="text-lg font-black font-mono text-rose-400 shrink-0">
                 {servisCount}
               </span>
             </button>
@@ -1087,27 +1106,26 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         );
       })()}
 
-      {/* Fleets Content: Table View */}
+      {/* Fleets Content: Table View (Compact & Rapat) */}
       {activeTab === 'fleets' && viewMode === 'table' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-950/80 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-4 w-12 text-center">#</th>
-                  <th className="py-3 px-4">Armada &amp; Inisial</th>
-                  <th className="py-3 px-4">Tipe &amp; Spek Box</th>
-                  <th className="py-3 px-4 text-center">Status Kondisi &amp; Area Kirim</th>
-                  <th className="py-3 px-4">Sopir / PIC</th>
-                  <th className="py-3 px-4">Spare Part &amp; Servis</th>
-                  <th className="py-3 px-4">Pajak / KIR</th>
-                  <th className="py-3 px-4 text-center w-28">Aksi</th>
+                <tr className="bg-slate-950/80 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="py-2.5 px-2.5 w-10 text-center">#</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Armada &amp; Inisial</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Tipe &amp; Kubikasi Box</th>
+                  <th className="py-2.5 px-3 text-center whitespace-nowrap">Status Kondisi &amp; Area Kirim</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Sopir / PIC</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / KIR</th>
+                  <th className="py-2.5 px-3 text-center w-24 whitespace-nowrap">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filteredFleets.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={7} className="py-10 text-center text-slate-400">
                       <Truck className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
                       <p className="font-semibold text-slate-300">Tidak ada armada ditemukan</p>
                       <p className="text-[11px] text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status armada.</p>
@@ -1117,48 +1135,51 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   filteredFleets.map((fleet, index) => {
                     const assignedCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
                     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-                    const boxMultiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
-                    const innerBoxM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (boxMultiplier / 100)).toFixed(2));
+                    const kirDateVal = fleet.kirExpiryDate || fleet.lastMaintenance;
+                    const kirStatus = getExpiryStatus(kirDateVal);
                     const taxStatus = getExpiryStatus(fleet.taxDueDate);
-                    const metrics = getFleetOperationalMetrics(fleet);
 
                     return (
                       <tr key={fleet.id} className="hover:bg-slate-850/50 transition">
-                        <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">{index + 1}</td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2">
+                        <td className="py-2.5 px-2.5 text-center font-mono text-slate-500 font-bold">{index + 1}</td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
                             {fleet.initialCode && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 whitespace-nowrap shrink-0">
                                 {fleet.initialCode}
                               </span>
                             )}
-                            <span className="font-bold text-white font-mono text-xs tracking-wide">
+                            <span className="font-bold text-white font-mono text-xs tracking-wide whitespace-nowrap">
                               {fleet.plateNumber}
                             </span>
                           </div>
                         </td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-200">{fleet.vehicleType}</div>
-                          <div className="text-[10px] text-cyan-400 font-mono mt-0.5">
-                            Box {boxM3} m³ <span className="text-slate-500">&bull;</span> Net {innerBoxM3} m³ ({boxMultiplier}%)
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-200 text-xs">{fleet.vehicleType}</span>
+                            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-black bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                              {boxM3} m³
+                            </span>
                           </div>
-                          <div className="text-[10px] text-slate-500">{fleet.brand || '-'} ({fleet.year || '-'})</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {fleet.brand || '-'} ({fleet.year || '-'})
+                          </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           {(() => {
                             const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
                             return (
-                              <div className="flex flex-col items-center gap-1">
+                              <div className="flex flex-col items-center gap-0.5">
                                 <button
                                   type="button"
                                   onClick={() => toggleFleetStatus(fleet)}
-                                  className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border transition cursor-pointer ${liveInfo.badgeColorClass}`}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${liveInfo.badgeColorClass}`}
                                   title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
                                 >
-                                  <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
                                   <span>{liveInfo.statusLabel}</span>
                                 </button>
-                                <div className="text-[10px] text-slate-400 font-medium max-w-[180px] truncate" title={liveInfo.statusDescription}>
+                                <div className="text-[10px] text-slate-400 font-medium max-w-[165px] truncate" title={liveInfo.statusDescription}>
                                   {liveInfo.effectiveStatus === 'on-duty' ? (
                                     <span className="text-blue-300 font-semibold">
                                       Area: {liveInfo.areaName || 'Sedang Kirim'}
@@ -1169,7 +1190,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                     </span>
                                   ) : liveInfo.areaName ? (
                                     <span className="text-emerald-300/90">
-                                      Area Hari Ini: {liveInfo.areaName}
+                                      Area: {liveInfo.areaName}
                                     </span>
                                   ) : (
                                     <span>Siap jadwal esok</span>
@@ -1179,58 +1200,36 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             );
                           })()}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-2.5 px-3 whitespace-nowrap">
                           {assignedCrew ? (
-                            <div>
-                              <div className="font-bold text-slate-200 flex items-center gap-1.5">
-                                <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                                <span>{assignedCrew.name}</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                                <Phone className="w-2.5 h-2.5 text-slate-500" />
-                                <span>{assignedCrew.phone}</span>
-                                <span className="text-slate-600">&bull;</span>
-                                <span className="text-emerald-400">{assignedCrew.licenseType}</span>
-                              </div>
+                            <div className="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
+                              <UserCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>{assignedCrew.name}</span>
                             </div>
                           ) : (
                             <span className="text-[11px] text-slate-500 italic">Belum Dipasangkan</span>
                           )}
                         </td>
 
-                        {/* Spare Part & Servis */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1.5">
-                            <Wrench className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            <span className="font-semibold text-slate-200">{metrics.totalPartsReplaced} Part Terpasang</span>
-                          </div>
-                          <div className="mt-1">
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] border font-medium ${metrics.serviceBadge}`}>
-                              {metrics.serviceStatus}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Pajak & KIR */}
-                        <td className="py-3 px-4">
+                        {/* Pajak & KIR: Tanggal KIR lebih besar, keterangan Aktif/Jatuh Tempo lebih kecil */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
                           <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 text-[11px]">
-                              <span className="text-slate-400">Pajak:</span>
-                              <span className={`px-1.5 py-0.2 rounded text-[10px] border font-medium ${taxStatus.color}`}>
-                                {taxStatus.label}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold uppercase text-teal-400">KIR:</span>
+                              <span className="text-xs sm:text-[13px] font-black text-white font-mono tracking-tight">
+                                {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
                               </span>
                             </div>
-                            {fleet.kirExpiryDate && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                                <span>KIR:</span>
-                                <span>{formatIndoDate(fleet.kirExpiryDate)}</span>
-                              </div>
-                            )}
+                            <div className="flex items-center gap-1">
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] border font-semibold leading-tight ${kirDateVal ? kirStatus.color : taxStatus.color}`}>
+                                {kirDateVal ? kirStatus.label : taxStatus.label}
+                              </span>
+                            </div>
                           </div>
                         </td>
 
                         {/* Aksi */}
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
                             <button
                               type="button"
@@ -1740,14 +1739,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-3 px-4 text-center">Status Operasional (User)</th>
                   <th className="py-3 px-4">Armada Ditugaskan</th>
                   <th className="py-3 px-4 text-center">Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</th>
-                  <th className="py-3 px-4 text-center">Hostinger MySQL</th>
                   <th className="py-3 px-4 text-center w-28">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filteredCrews.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
                       <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
                       <p className="font-semibold text-slate-300">Tidak ada kru ditemukan</p>
                       <p className="text-[11px] text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status kru.</p>
@@ -1822,12 +1820,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             <span className="text-slate-500">•</span>
                             <span className="text-emerald-400">Tepat Waktu Gudang: {perf.onTimePct}%</span>
                           </div>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            <Database className="w-2.5 h-2.5 text-emerald-400" />
-                            <span>Tersinkron</span>
-                          </span>
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">

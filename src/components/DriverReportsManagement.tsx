@@ -33,9 +33,13 @@ import {
   WifiOff,
   Wifi,
   Edit,
-  UserCheck
+  UserCheck,
+  Fuel,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
+import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
 import { FleetChecklistReportView } from './FleetChecklistReportView';
@@ -62,14 +66,17 @@ export const DriverReportsManagement: React.FC = () => {
     );
   }, [currentUser]);
 
-  // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Checklist Armada | Laporan Peringatan Mode Offline
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checklist_armada' | 'peringatan_offline'>('operasional');
+  // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline'>('operasional');
   const [offlineStatusFilter, setOfflineStatusFilter] = useState<'all' | 'masih_offline' | 'sudah_online'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
+  const [checkinSearchQuery, setCheckinSearchQuery] = useState<string>('');
+  const [fuelSearchQuery, setFuelSearchQuery] = useState<string>('');
+  const [fuelLocationFilter, setFuelLocationFilter] = useState<'all' | 'Farly' | 'Gajah Mada'>('all');
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'presensi_shift' | 'pin_keamanan' | 'update_lokasi' | 'mode_offline'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_umum' | 'antri_customer'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'verified' | 'follow_up' | 'resolved'>('all');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<DriverHelperReport | null>(null);
   const [revealedPinIds, setRevealedPinIds] = useState<Record<string, boolean>>({});
@@ -189,7 +196,12 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, []);
 
-  // Map of reports count & solution status per calendar date (termasuk Kendala Masuk & Akhir Kiriman)
+  // Hanya laporan Kendala (kendala_jalan) agar tidak tercampur dengan absen kiriman, check-in/out, pengisian BBM, dll.
+  const kendalaOnlyReports = useMemo(() => {
+    return reports.filter(r => r.category === 'kendala_jalan');
+  }, [reports]);
+
+  // Map of reports count & solution status per calendar date (Khusus Kendala)
   const reportsByDateMap = useMemo(() => {
     const map = new Map<
       string,
@@ -204,7 +216,7 @@ export const DriverReportsManagement: React.FC = () => {
         akhirItems: string[];
       }
     >();
-    reports.forEach(r => {
+    kendalaOnlyReports.forEach(r => {
       const d = r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : '');
       if (d) {
         const curr = map.get(d) || {
@@ -218,41 +230,25 @@ export const DriverReportsManagement: React.FC = () => {
           akhirItems: []
         };
         curr.total += 1;
-        const hasSolution = Boolean(r.solution && r.solution.trim());
+        curr.kendala += 1;
+        const hasSolution = Boolean(r.solution && r.solution.trim()) || r.status === 'verified' || r.status === 'resolved';
         const shortDriver = (r.driverName || 'Kru').split(' ')[0];
         const shortArea = r.areaName || 'Rute';
         const labelSummary = `${shortDriver} • ${shortArea}`;
 
-        if (r.category === 'kendala_jalan' || r.category === 'mode_offline') {
-          curr.kendala += 1;
-          if (curr.kendalaItems.length < 2) {
-            curr.kendalaItems.push(labelSummary);
-          }
-          if (hasSolution || r.offlineStatus === 'sudah_online') {
-            curr.sentToPortalCount += 1;
-          } else {
-            curr.needsActionCount += 1;
-          }
-        } else if (r.category === 'akhir_kiriman') {
-          curr.akhirKirimanCount += 1;
-          curr.otherReportsCount += 1;
-          if (curr.akhirItems.length < 2) {
-            curr.akhirItems.push(labelSummary);
-          }
-          if (hasSolution) {
-            curr.sentToPortalCount += 1;
-          }
+        if (curr.kendalaItems.length < 2) {
+          curr.kendalaItems.push(labelSummary);
+        }
+        if (hasSolution) {
+          curr.sentToPortalCount += 1;
         } else {
-          curr.otherReportsCount += 1;
-          if (hasSolution) {
-            curr.sentToPortalCount += 1;
-          }
+          curr.needsActionCount += 1;
         }
         map.set(d, curr);
       }
     });
     return map;
-  }, [reports]);
+  }, [kendalaOnlyReports]);
 
   // Daftar laporan siapa saja yang mengaktifkan Mode Offline
   const offlineModeReports = useMemo(() => {
@@ -399,8 +395,8 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, [calendarMonth, calendarYear, reportsByDateMap]);
 
-  // Filtered reports berdasarkan DateFilterMode
-  const filteredReports = reports.filter((rep) => {
+  // Filtered reports berdasarkan DateFilterMode (Khusus Kendala)
+  const filteredReports = kendalaOnlyReports.filter((rep) => {
     const rDate = rep.date || (rep.timestamp ? getLocalDateStr(new Date(rep.timestamp)) : '');
 
     if (dateFilterMode === 'single_date') {
@@ -412,7 +408,8 @@ export const DriverReportsManagement: React.FC = () => {
     }
     // if 'all', tidak menyaring berdasarkan tanggal
 
-    if (categoryFilter !== 'all' && rep.category !== categoryFilter) return false;
+    if (categoryFilter === 'kendala_umum' && Boolean(rep.customerQueueStatus)) return false;
+    if (categoryFilter === 'antri_customer' && !rep.customerQueueStatus) return false;
     if (statusFilter !== 'all' && rep.status !== statusFilter) return false;
 
     if (searchQuery.trim()) {
@@ -428,18 +425,18 @@ export const DriverReportsManagement: React.FC = () => {
     return true;
   });
 
-  // KPI Statistics (keseluruhan & filtered scope)
-  const totalCount = reports.length;
-  const kendalaCount = reports.filter((r) => r.category === 'kendala_jalan').length;
-  const akhirCount = reports.filter((r) => r.category === 'akhir_kiriman').length;
-  const pendingCount = reports.filter((r) => r.status === 'pending').length;
+  // KPI Statistics (Khusus Kendala)
+  const totalCount = kendalaOnlyReports.length;
+  const kendalaCount = kendalaOnlyReports.filter((r) => !r.customerQueueStatus).length;
+  const akhirCount = kendalaOnlyReports.filter((r) => Boolean(r.customerQueueStatus)).length;
+  const pendingCount = kendalaOnlyReports.filter((r) => r.status === 'pending').length;
   const absenTimKirimanCount = reports.filter(
     (r) => r.category === 'istirahat'
   ).length;
 
   const inScopeTotal = filteredReports.length;
-  const inScopeKendala = filteredReports.filter((r) => r.category === 'kendala_jalan').length;
-  const inScopeAkhir = filteredReports.filter((r) => r.category === 'akhir_kiriman').length;
+  const inScopeKendala = filteredReports.filter((r) => !r.customerQueueStatus).length;
+  const inScopeAkhir = filteredReports.filter((r) => Boolean(r.customerQueueStatus)).length;
   const inScopePending = filteredReports.filter((r) => r.status === 'pending').length;
 
   const handleVerify = (id: string) => {
@@ -546,10 +543,111 @@ export const DriverReportsManagement: React.FC = () => {
     });
   }, [offlineModeReports, offlineStatusFilter, offlineSearchQuery]);
 
+  // Data Laporan Check-In & Check-Out Terpadu
+  const checkinCheckoutList = useMemo(() => {
+    const shiftRecords = driverShiftService.getShifts();
+    const reportShiftRecords = reports.filter(r => r.category === 'presensi_shift');
+    const combinedMap = new Map<string, {
+      id: string;
+      date: string;
+      driverName: string;
+      userRole: string;
+      plateNumber: string;
+      areaName: string;
+      checkinTime: string;
+      checkoutTime: string;
+      status: 'sedang_bertugas' | 'selesai_shift';
+      notes: string;
+    }>();
+
+    reportShiftRecords.forEach(r => {
+      const key = r.shiftId || `${r.driverName.toLowerCase()}-${r.date || getLocalDateStr(r.timestamp)}`;
+      combinedMap.set(key, {
+        id: r.id,
+        date: r.date || getLocalDateStr(r.timestamp),
+        driverName: r.driverName,
+        userRole: r.userRole || 'Driver',
+        plateNumber: r.plateNumber || '-',
+        areaName: r.areaName || 'Operasional DC',
+        checkinTime: r.checkinTimeFormatted || new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+        checkoutTime: r.checkoutTimeFormatted || '-',
+        status: r.checkoutTimeFormatted ? 'selesai_shift' : 'sedang_bertugas',
+        notes: r.notes
+      });
+    });
+
+    shiftRecords.forEach(s => {
+      const key = s.id || `${s.driverName.toLowerCase()}-${s.date}`;
+      const existing = combinedMap.get(key);
+      if (existing) {
+        if (!existing.checkoutTime || existing.checkoutTime === '-') {
+          if (s.checkoutTimeFormatted) {
+            existing.checkoutTime = s.checkoutTimeFormatted;
+            existing.status = 'selesai_shift';
+          }
+        }
+      } else {
+        combinedMap.set(key, {
+          id: s.id,
+          date: s.date,
+          driverName: s.driverName,
+          userRole: 'Driver',
+          plateNumber: s.plateNumber || '-',
+          areaName: s.locationName || 'DC Banyuwangi',
+          checkinTime: s.checkinTimeFormatted || '-',
+          checkoutTime: s.checkoutTimeFormatted || '-',
+          status: s.status === 'checked_out' || Boolean(s.checkoutTimeFormatted) ? 'selesai_shift' : 'sedang_bertugas',
+          notes: s.notes || 'Presensi Shift Operasional'
+        });
+      }
+    });
+
+    const list = Array.from(combinedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+    if (!checkinSearchQuery.trim()) return list;
+    const q = checkinSearchQuery.toLowerCase().trim();
+    return list.filter(item =>
+      item.driverName.toLowerCase().includes(q) ||
+      item.plateNumber.toLowerCase().includes(q) ||
+      item.areaName.toLowerCase().includes(q) ||
+      item.date.includes(q)
+    );
+  }, [reports, checkinSearchQuery]);
+
+  // Data Laporan Pengisian BBM (Solar)
+  const fuelReportsList = useMemo(() => {
+    const raw = reports.filter(r =>
+      r.category === 'isi_bbm' ||
+      r.notes.toLowerCase().includes('isi bbm') ||
+      r.notes.toLowerCase().includes('pengisian bbm')
+    );
+    return raw.filter(r => {
+      const resolvedLoc = r.fuelLocation || (r.notes.toLowerCase().includes('gajah mada') || r.areaName.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+      if (fuelLocationFilter !== 'all' && resolvedLoc !== fuelLocationFilter) return false;
+      if (fuelSearchQuery.trim()) {
+        const q = fuelSearchQuery.toLowerCase().trim();
+        return (
+          r.driverName.toLowerCase().includes(q) ||
+          r.plateNumber.toLowerCase().includes(q) ||
+          resolvedLoc.toLowerCase().includes(q) ||
+          r.notes.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [reports, fuelLocationFilter, fuelSearchQuery]);
+
+  const totalFuelReportsCount = useMemo(() => {
+    return reports.filter(r =>
+      r.category === 'isi_bbm' ||
+      r.notes.toLowerCase().includes('isi bbm') ||
+      r.notes.toLowerCase().includes('pengisian bbm')
+    ).length;
+  }, [reports]);
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
       
-      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
+      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -560,8 +658,8 @@ export const DriverReportsManagement: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
             }`}
           >
-            <MapPin className="w-4 h-4" />
-            <span>Laporan &amp; Kendala Lapangan</span>
+            <AlertTriangle className="w-4 h-4" />
+            <span>Laporan Kendala Lapangan</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {totalCount}
             </span>
@@ -579,6 +677,36 @@ export const DriverReportsManagement: React.FC = () => {
             <span>Laporan Absen Tim Kiriman</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'absen_tim_kiriman' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {absenTimKirimanCount}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubMenu('checkin_checkout')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeSubMenu === 'checkin_checkout'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Laporan Check-In &amp; Check-Out</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'checkin_checkout' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+              {checkinCheckoutList.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubMenu('pengisian_bbm')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeSubMenu === 'pengisian_bbm'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Fuel className="w-4 h-4" />
+            <span>Laporan Pengisian BBM (Solar)</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'pengisian_bbm' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+              {totalFuelReportsCount}
             </span>
           </button>
 
@@ -646,6 +774,438 @@ export const DriverReportsManagement: React.FC = () => {
         <CrewAttendanceReportView onBackToOperationalReports={() => setActiveSubMenu('operasional')} />
       ) : activeSubMenu === 'checklist_armada' ? (
         <FleetChecklistReportView onBackToOperationalReports={() => setActiveSubMenu('operasional')} />
+      ) : activeSubMenu === 'checkin_checkout' ? (
+        /* 🕒 SUB-MENU BARU 1: LAPORAN CHECK-IN & CHECK-OUT KRU PENGIRIMAN */
+        <div className="space-y-5 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                    Laporan Check-In &amp; Check-Out Kru Pengiriman
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30">
+                    Presensi Shift Terpadu
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  Rekapitulasi jam masuk (Check-In) dan jam selesai bertugas (Check-Out) tim Driver &amp; Helper dari Portal Driver.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={loadReports}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Segarkan</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (checkinCheckoutList.length === 0) return;
+                  const headers = ['Tanggal', 'Nama Kru', 'Peran', 'Armada', 'Area / Lokasi', 'Waktu Check-In', 'Waktu Check-Out', 'Status Shift'];
+                  const rows = checkinCheckoutList.map(item => [
+                    item.date,
+                    `"${item.driverName}"`,
+                    item.userRole,
+                    item.plateNumber,
+                    `"${item.areaName}"`,
+                    item.checkinTime,
+                    item.checkoutTime,
+                    item.status === 'selesai_shift' ? 'Sudah Check-Out' : 'Sedang Bertugas (Check-In)'
+                  ]);
+                  const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                  const link = document.createElement('a');
+                  link.setAttribute('href', encodeURI(csvContent));
+                  link.setAttribute('download', `Laporan_CheckIn_CheckOut_Kru_${getLocalDateStr()}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Ekspor Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
+                  Total Presensi Shift
+                </span>
+                <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
+                  {checkinCheckoutList.length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Total log Check-In &amp; Check-Out
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <Clock className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400 block">
+                  Sedang Bertugas (Check-In Aktif)
+                </span>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
+                  {checkinCheckoutList.filter(i => i.status === 'sedang_bertugas').length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Sudah Check-In, belum Check-Out
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <LogIn className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 block">
+                  Selesai Shift (Sudah Check-Out)
+                </span>
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+                  {checkinCheckoutList.filter(i => i.status === 'selesai_shift').length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Check-In &amp; Check-Out lengkap
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                <LogOut className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={checkinSearchQuery}
+                onChange={(e) => setCheckinSearchQuery(e.target.value)}
+                placeholder="Cari nama driver/helper, plat nomor armada, atau tanggal (YYYY-MM-DD)..."
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <th className="py-3 px-4 w-12 text-center">#</th>
+                    <th className="py-3 px-4">Tanggal</th>
+                    <th className="py-3 px-4">Nama Kru &amp; Peran</th>
+                    <th className="py-3 px-4">Nomor Kendaraan</th>
+                    <th className="py-3 px-4">Area / Lokasi</th>
+                    <th className="py-3 px-4 text-center">Waktu Check-In</th>
+                    <th className="py-3 px-4 text-center">Waktu Check-Out</th>
+                    <th className="py-3 px-4 text-center">Status Shift</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {checkinCheckoutList.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-10 text-center text-slate-500">
+                        Belum ada data laporan Check-In &amp; Check-Out kru pengiriman.
+                      </td>
+                    </tr>
+                  ) : (
+                    checkinCheckoutList.map((item, idx) => (
+                      <tr key={item.id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                        <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                          {item.date}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900 dark:text-white">{item.driverName}</div>
+                          <div className="text-[10px] text-slate-500">{item.userRole}</div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
+                            {item.plateNumber}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{item.areaName}</td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-mono font-bold text-[11px]">
+                            {item.checkinTime}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {item.checkoutTime && item.checkoutTime !== '-' ? (
+                            <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 font-mono font-bold text-[11px]">
+                              {item.checkoutTime}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic text-[11px]">Belum Check-Out</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {item.status === 'selesai_shift' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Selesai Shift
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
+                              <Clock className="w-3 h-3" /> Sedang Bertugas
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : activeSubMenu === 'pengisian_bbm' ? (
+        /* ⛽ SUB-MENU BARU 2: LAPORAN PENGISIAN BBM (SOLAR) DI FARLY / GAJAH MADA */
+        <div className="space-y-5 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <Fuel className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                    Laporan Pengisian BBM (Solar) Armada
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
+                    Lokasi: Farly &amp; Gajah Mada
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  Dokumentasi pengisian BBM (Solar) armada beserta foto bukti berstempel dan lokasi SPBU (Farly / Gajah Mada).
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={loadReports}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Segarkan</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (fuelReportsList.length === 0) return;
+                  const headers = ['Tanggal', 'Waktu', 'Nama Driver', 'Nomor Kendaraan', 'Lokasi SPBU', 'Status'];
+                  const rows = fuelReportsList.map(r => {
+                    const loc = r.fuelLocation || (r.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+                    return [
+                      r.date || getLocalDateStr(r.timestamp),
+                      new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                      `"${r.driverName}"`,
+                      r.plateNumber,
+                      `"SPBU ${loc}"`,
+                      r.status === 'verified' ? 'Terverifikasi' : 'Tercatat'
+                    ];
+                  });
+                  const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                  const link = document.createElement('a');
+                  link.setAttribute('href', encodeURI(csvContent));
+                  link.setAttribute('download', `Laporan_Pengisian_BBM_Solar_${getLocalDateStr()}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Ekspor Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
+                  Total Laporan Isi BBM (Solar)
+                </span>
+                <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
+                  {totalFuelReportsCount}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Total dokumentasi masuk
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <Fuel className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400 block">
+                  Lokasi: Farly
+                </span>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
+                  {reports.filter(r => r.category === 'isi_bbm' && (r.fuelLocation === 'Farly' || (!r.fuelLocation && !r.notes.toLowerCase().includes('gajah mada')))).length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Pengisian Solar di SPBU Farly
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <MapPin className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 block">
+                  Lokasi: Gajah Mada
+                </span>
+                <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono mt-1">
+                  {reports.filter(r => r.category === 'isi_bbm' && (r.fuelLocation === 'Gajah Mada' || r.notes.toLowerCase().includes('gajah mada'))).length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Pengisian Solar di SPBU Gajah Mada
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <MapPin className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter & Search Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={fuelSearchQuery}
+                onChange={(e) => setFuelSearchQuery(e.target.value)}
+                placeholder="Cari nama supir, plat nomor armada, atau lokasi SPBU (Farly / Gajah Mada)..."
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              {(['all', 'Farly', 'Gajah Mada'] as const).map(loc => (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => setFuelLocationFilter(loc)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    fuelLocationFilter === loc
+                      ? 'bg-amber-600 text-white border-amber-500'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {loc === 'all' ? 'Semua Lokasi' : `SPBU ${loc}`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <th className="py-3 px-4 w-12 text-center">#</th>
+                    <th className="py-3 px-4">Tanggal &amp; Waktu</th>
+                    <th className="py-3 px-4">Driver / Kru</th>
+                    <th className="py-3 px-4">Nomor Kendaraan</th>
+                    <th className="py-3 px-4">Lokasi BBM (Solar)</th>
+                    <th className="py-3 px-4 text-center">Foto Bukti</th>
+                    <th className="py-3 px-4 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {fuelReportsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-slate-500">
+                        Belum ada laporan pengisian BBM (Solar) di lokasi Farly maupun Gajah Mada.
+                      </td>
+                    </tr>
+                  ) : (
+                    fuelReportsList.map((rep, idx) => {
+                      const loc = rep.fuelLocation || (rep.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+                      return (
+                        <tr key={rep.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                          <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className="font-mono font-bold text-slate-900 dark:text-white">
+                              {rep.date || getLocalDateStr(rep.timestamp)}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              {new Date(rep.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
+                            {rep.driverName}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
+                              {rep.plateNumber}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                              loc === 'Gajah Mada'
+                                ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
+                                : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
+                            }`}>
+                              <MapPin className="w-3 h-3" />
+                              <span>SPBU {loc}</span>
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {rep.photoUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPhotoModal(rep)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 text-[11px] font-bold cursor-pointer transition"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>Lihat Foto</span>
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Tercatat
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       ) : activeSubMenu === 'peringatan_offline' ? (
         /* 🚨 DESAIN BARU UI/UX: LAPORAN PERINGATAN AKTIVASI MODE OFFLINE TIM PENGIRIMAN */
         <div className="space-y-5 animate-in fade-in duration-200">
@@ -1022,13 +1582,13 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 📊 KPI STATS CARDS (Angka Diperbesar & Padat) */}
+          {/* 📊 KPI STATS CARDS (Fokus Khusus Kendala Lapangan) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400">Total Laporan Masuk</span>
-                <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                  <Layers className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-bold text-slate-400">Total Kendala Masuk</span>
+                <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                  <AlertTriangle className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="text-3xl sm:text-4xl font-black text-white mt-1 font-mono flex items-baseline gap-1.5 leading-none">
@@ -1038,13 +1598,13 @@ export const DriverReportsManagement: React.FC = () => {
                 )}
               </div>
               <div className="text-[10px] text-slate-400 mt-1.5 font-medium">
-                Tanggal {selectedCalendarDate}
+                Khusus kendala tanggal {selectedCalendarDate}
               </div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-rose-300">Kendala di Jalan</span>
+                <span className="text-[11px] font-bold text-rose-300">Kendala di Jalan &amp; Rute</span>
                 <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
                   <AlertTriangle className="w-3.5 h-3.5" />
                 </div>
@@ -1055,28 +1615,28 @@ export const DriverReportsManagement: React.FC = () => {
                   <span className="text-xs text-slate-500 font-semibold font-sans">/ {kendalaCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Macet, antri customer &amp; rute</div>
+              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Macet, akses jalan &amp; gangguan rute</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-emerald-300">Tiba di Gudang (POD)</span>
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-bold text-cyan-300">Kendala Antri Customer</span>
+                <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                  <Clock className="w-3.5 h-3.5" />
                 </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-emerald-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
+              <div className="text-3xl sm:text-4xl font-black text-cyan-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeAkhir}</span>
                 {dateFilterMode !== 'all' && (
                   <span className="text-xs text-slate-500 font-semibold font-sans">/ {akhirCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-300 mt-1.5 font-semibold">Tiba di gudang</div>
+              <div className="text-[10px] text-slate-300 mt-1.5 font-semibold">Antrean bongkar di gudang toko</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-amber-300">Menunggu Solusi / Cek</span>
+                <span className="text-[11px] font-bold text-amber-300">Menunggu Solusi SPV</span>
                 <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
                   <Clock className="w-3.5 h-3.5" />
                 </div>
@@ -1153,10 +1713,6 @@ export const DriverReportsManagement: React.FC = () => {
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
                   <span>⚠️ Kendala Masuk</span>
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                  <span>✅ Tiba di Gudang</span>
                 </span>
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -1297,14 +1853,9 @@ export const DriverReportsManagement: React.FC = () => {
                 onChange={(e) => setCategoryFilter(e.target.value as any)}
                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
               >
-                <option value="all">Semua Kategori Laporan</option>
-                <option value="mode_offline">📴 Peringatan Mode Offline Kru</option>
-                <option value="presensi_shift">🕒 Check-In &amp; Check-Out Shift (Gabungan)</option>
-                <option value="pin_keamanan">🔐 Data PIN Keamanan (2x Verifikasi)</option>
-                <option value="kendala_jalan">⚠️ Kendala di Jalan &amp; Antri Customer</option>
-                <option value="akhir_kiriman">📦 Tiba di Gudang (POD &amp; Argo)</option>
-                <option value="istirahat">✅ Absen Kiriman Pelanggan</option>
-                <option value="update_lokasi">📍 Update Titik GMaps</option>
+                <option value="all">Semua Jenis Kendala</option>
+                <option value="kendala_umum">⚠️ Kendala di Jalan &amp; Rute</option>
+                <option value="antri_customer">⏳ Kendala Antri di Customer</option>
               </select>
 
               <select

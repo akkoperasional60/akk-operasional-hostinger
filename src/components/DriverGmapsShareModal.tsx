@@ -16,7 +16,9 @@ import {
   Clock,
   LogOut,
   Play,
-  Store
+  Store,
+  Fuel,
+  Upload
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
@@ -24,7 +26,7 @@ import { driverReportService, DriverHelperReport } from '../services/driverRepor
 import { driverWaybillService } from '../services/driverWaybillService';
 import { logisticsStore } from '../services/store';
 
-export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi';
+export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'isi_bbm';
 
 interface DriverGmapsShareModalProps {
   isOpen: boolean;
@@ -57,7 +59,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   driverId,
   onReportSubmitted
 }) => {
-  const [category, setCategory] = useState<GmapsReportCategory>('kendala_jalan');
+  const [category, setCategory] = useState<GmapsReportCategory>('isi_bbm');
   const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
@@ -68,6 +70,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
   const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
   const [customerNameInput, setCustomerNameInput] = useState<string>('');
+  const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada'>('Farly');
+  const [fuelLiters, setFuelLiters] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [simulatedExtraMin, setSimulatedExtraMin] = useState<number>(0);
   const [elapsedQueueSeconds, setElapsedQueueSeconds] = useState<number>(0);
@@ -103,6 +107,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     setPhotoDataUrl(null);
     setCustomerOutletInput('');
     setCustomerNameInput('');
+    setFuelLiters('');
     setValidationError(null);
     setCameraError(null);
     setSimulatedExtraMin(0);
@@ -397,19 +402,21 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     ctx.fillStyle = grad;
     ctx.fillRect(0, bannerY, w, bannerHeight);
 
-    ctx.fillStyle = category === 'kendala_jalan' ? '#e11d48' : '#2563eb';
+    ctx.fillStyle = category === 'kendala_jalan' ? '#e11d48' : category === 'isi_bbm' ? '#d97706' : '#2563eb';
     ctx.fillRect(0, bannerY, w, 4);
 
     const fontSize = Math.max(12, Math.floor(w * 0.024));
     ctx.textBaseline = 'top';
 
-    ctx.fillStyle = '#60a5fa';
+    ctx.fillStyle = category === 'isi_bbm' ? '#fbbf24' : '#60a5fa';
     ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
     const titleTag =
       category === 'kendala_jalan' && reportSubMode === 'antri_customer'
         ? '⏳ ANTRI DI CUSTOMER'
         : category === 'kendala_jalan'
         ? '⚠️ KENDALA DI JALAN'
+        : category === 'isi_bbm'
+        ? `⛽ ISI BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
         : category === 'akhir_kiriman'
         ? '📦 AKHIR KIRIMAN (POD)'
         : '✅ ABSEN KIRIMAN PELANGGAN';
@@ -421,6 +428,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const targetCustomerLabel =
       category === 'istirahat' && customerNameInput.trim()
         ? `Pelanggan: ${customerNameInput.trim()} (${currentAreaName})`
+        : category === 'isi_bbm'
+        ? `Lokasi BBM: SPBU ${fuelLocation}`
         : `Area: ${currentAreaName}`;
     ctx.fillText(`${targetCustomerLabel} | Driver: ${driverName} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
 
@@ -493,6 +502,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         ? '⏳ LAPORAN ANTRI DI CUSTOMER'
         : category === 'kendala_jalan'
         ? '🚨 LAPORAN KENDALA DI JALAN'
+        : category === 'isi_bbm'
+        ? `⛽ LAPORAN PENGISIAN BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
         : category === 'akhir_kiriman'
         ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
         : '✅ ABSEN KIRIMAN KE PELANGGAN';
@@ -500,6 +511,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const customerLine =
       category === 'istirahat' && customerNameInput.trim()
         ? `*Nama Pelanggan:* ${customerNameInput.trim()}\n`
+        : category === 'isi_bbm'
+        ? `*Lokasi SPBU:* ${fuelLocation}\n`
         : '';
 
     return encodeURIComponent(
@@ -509,7 +522,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
       customerLine +
       `*No. Surat Jalan:* ${currentWaybillNo}\n` +
-      `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` +
+      (category !== 'isi_bbm' ? `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` : '') +
       `*Titik Google Maps:* ${gmapsLink}\n` +
       `*Waktu:* ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
     );
@@ -534,9 +547,18 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       }
     }
 
+    if (category === 'isi_bbm') {
+      if (!photoDataUrl) {
+        setValidationError('Harap ambil atau unggah Foto Bukti Pengisian BBM (Solar) terlebih dahulu.');
+        return;
+      }
+    }
+
     const submittedNotes =
       category === 'istirahat'
         ? `[ABSEN KIRIMAN PELANGGAN: ${customerNameInput.trim()}] ${notes.trim() || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}`
+        : category === 'isi_bbm'
+        ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}`
         : notes.trim() || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Laporan kendala pengiriman di jalan');
 
     const submittedPhoto = photoDataUrl;
@@ -547,8 +569,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       driverName: driverName,
       plateNumber: autoPlateNumber,
       category,
-      areaName: currentAreaName,
+      areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
       customerOutletName: submittedCustomer,
+      fuelLocation: category === 'isi_bbm' ? fuelLocation : undefined,
       deliveryId: activeDelivery?.id,
       notes: submittedNotes,
       photoUrl: submittedPhoto,
@@ -571,7 +594,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       driverLng,
       gmapsUrl: gmapsLink,
       plateNumber: autoPlateNumber,
-      areaName: currentAreaName
+      areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation}` : currentAreaName
     });
 
     onClose();
@@ -703,10 +726,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-black text-white">
-                  Lapor Kendala &amp; Absen Pelanggan
+                  Lapor Kendala, Absen &amp; Isi BBM (Solar)
                 </h3>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  Dokumentasi kendala jalan, antri customer, dan absen kiriman ke pelanggan
+                  Dokumentasi kendala jalan, absen pelanggan, dan pengisian BBM (Solar)
                 </p>
               </div>
             </div>
@@ -725,12 +748,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             
-            {/* Category Selector Tabs: Kendala Jalan & Absen Kiriman Pelanggan */}
+            {/* Category Selector Tabs: 1. Isi BBM (Solar), 2. Kendala di Jalan, 3. Absen Kiriman Pelanggan */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Pilih Jenis Laporan:
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFields();
+                    setCategory('isi_bbm');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'isi_bbm'
+                      ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Fuel className="w-3.5 h-3.5 shrink-0" />
+                  <span>Isi BBM (Solar)</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -745,7 +785,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   }`}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Kendala Jalan</span>
+                  <span>Kendala di Jalan</span>
                 </button>
 
                 <button
@@ -771,6 +811,57 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                 <span>{validationError}</span>
+              </div>
+            )}
+
+            {/* ⛽ FITUR ISI BBM (SOLAR) DI FARLY / GAJAH MADA */}
+            {category === 'isi_bbm' && (
+              <div className="p-3.5 rounded-2xl border bg-slate-950 border-amber-500/30 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                    <Fuel className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">
+                      Pengisian BBM (Solar) Armada
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Pilih lokasi pengisian BBM (Farly / Gajah Mada) dan unggah foto bukti pengisian solar
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                    Pilih Lokasi Pengisian BBM (Solar) *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFuelLocation('Farly')}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                        fuelLocation === 'Farly'
+                          ? 'bg-amber-600/25 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
+                      <span>Farly</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFuelLocation('Gajah Mada')}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                        fuelLocation === 'Gajah Mada'
+                          ? 'bg-amber-600/25 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
+                      <span>Gajah Mada</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -964,7 +1055,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => startLiveCamera()}
@@ -980,8 +1071,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       </div>
                       <div className="text-[11px] text-slate-400 font-medium mt-0.5">
                         {category === 'istirahat'
-                          ? 'Ambil foto bukti penyerahan kiriman ke pelanggan'
-                          : 'Ambil foto bukti berstempel resmi operasional'}
+                          ? 'Foto penyerahan kiriman'
+                          : category === 'isi_bbm'
+                          ? `Foto isi BBM (${fuelLocation})`
+                          : 'Ambil foto bukti kamera'}
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isCapturing}
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Upload Foto
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        Pilih foto dari galeri HP
                       </div>
                     </div>
                   </button>
@@ -989,27 +1101,31 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               )}
             </div>
 
-            {/* Notes Input */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                {category === 'istirahat' ? 'Catatan Kiriman Pelanggan (Opsional):' : 'Keterangan / Catatan Laporan:'}
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={
-                  category === 'kendala_jalan' && reportSubMode === 'antri_customer'
-                    ? 'Contoh: Sedang mengantri bongkar di gudang customer karena ada 2 armada di depan...'
-                    : category === 'kendala_jalan'
-                    ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
-                    : category === 'akhir_kiriman'
-                    ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
-                    : 'Contoh: Barang diterima lengkap oleh PIC toko dalam kondisi baik...'
-                }
-                rows={3}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500"
-              />
-            </div>
+            {/* Notes Input (Hidden for Isi BBM per user request) */}
+            {category !== 'isi_bbm' && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  {category === 'istirahat'
+                    ? 'Catatan Kiriman Pelanggan (Opsional):'
+                    : 'Keterangan / Catatan Laporan:'}
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+                      ? 'Contoh: Sedang mengantri bongkar di gudang customer karena ada 2 armada di depan...'
+                      : category === 'kendala_jalan'
+                      ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
+                      : category === 'akhir_kiriman'
+                      ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
+                      : 'Contoh: Barang diterima lengkap oleh PIC toko dalam kondisi baik...'
+                  }
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                />
+              </div>
+            )}
           </div>
 
           {/* Footer Buttons */}
@@ -1031,7 +1147,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
             >
               <Send className="w-4 h-4" />
               <span>
-                {category === 'istirahat' ? 'Simpan Absen Pelanggan' : 'Simpan Laporan'}
+                {category === 'istirahat'
+                  ? 'Simpan Absen Pelanggan'
+                  : category === 'isi_bbm'
+                  ? 'Simpan Laporan BBM'
+                  : 'Simpan Laporan'}
               </span>
             </button>
           </div>

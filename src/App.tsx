@@ -336,10 +336,6 @@ export default function App() {
                 <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
                 <span>&middot;</span>
                 <span>Banyuwangi Hub</span>
-                <span>&middot;</span>
-                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700">
-                  {getTabPath(currentTab)}
-                </span>
               </div>
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                 {getTabTitle(currentTab)}

@@ -1359,6 +1359,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       totalTrips: number;
       lokalCount: number;
       luarKotaCount: number;
+      kanvasCount: number;
     }> = [];
 
     for (let i = 0; i < startDayOfWeek; i++) {
@@ -1366,7 +1367,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         type: 'padding',
         totalTrips: 0,
         lokalCount: 0,
-        luarKotaCount: 0
+        luarKotaCount: 0,
+        kanvasCount: 0
       });
     }
 
@@ -1380,13 +1382,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       let lokalCount = 0;
       let luarKotaCount = 0;
+      let kanvasCount = 0;
       let totalTrips = 0;
 
       if (scheduleDay) {
         totalTrips = scheduleDay.pengiriman.length;
         scheduleDay.pengiriman.forEach((p: DeliveryAssignment) => {
-          const std = standardizeAreaName(p.area);
-          if (std.includes('DENPASAR') || std.includes('SINGARAJA') || std.includes('NEGARA') || std.includes('GIANYAR') || std.includes('TABANAN') || std.includes('KUTA') || std.includes('BALI')) {
+          const std = standardizeAreaName(p.area).toUpperCase();
+          if (std.includes('KANVAS') || (p.area || '').toUpperCase().includes('KANVAS')) {
+            kanvasCount++;
+          } else if (std.includes('DENPASAR') || std.includes('SINGARAJA') || std.includes('NEGARA') || std.includes('GIANYAR') || std.includes('TABANAN') || std.includes('KUTA') || std.includes('BALI')) {
             luarKotaCount++;
           } else {
             lokalCount++;
@@ -1402,7 +1407,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         scheduleDay,
         totalTrips,
         lokalCount,
-        luarKotaCount
+        luarKotaCount,
+        kanvasCount
       });
     }
 
@@ -2541,6 +2547,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             <span className="font-mono font-black">{cell.luarKotaCount}</span>
                           </div>
                         )}
+                        {cell.kanvasCount > 0 && (
+                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 dark:bg-purple-950/90 text-purple-800 dark:text-purple-300 border border-purple-300/80 dark:border-purple-800 flex items-center justify-between">
+                            <span className="truncate">📦 Kanvas</span>
+                            <span className="font-mono font-black">{cell.kanvasCount}</span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="text-[9px] font-medium text-slate-400 text-center py-1 italic">
@@ -2835,9 +2847,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 {/* Kirim Area */}
                                 <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
                                   <div className="flex flex-col items-start gap-1">
-                                    <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded-md border bg-blue-50 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 border-blue-200 dark:border-blue-800">
-                                      {standardArea}
-                                    </span>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-md border ${
+                                        isKanvasLkt
+                                          ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                                          : 'bg-blue-50 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 border-blue-200 dark:border-blue-800'
+                                      }`}>
+                                        {standardArea}
+                                      </span>
+                                      {isKanvasLkt && (
+                                        <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-purple-600 text-white">
+                                          KANVAS
+                                        </span>
+                                      )}
+                                    </div>
                                     {(p.departureTime || p.targetReturnTime) && (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                                         <Clock className="w-3 h-3 text-blue-500 shrink-0" />
@@ -2894,83 +2917,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         )}
                       </tbody>
                     </table>
-                  </div>
-
-                  {/* JADWAL KANVAS LKT & HISTORY PANEL */}
-                  <div className="bg-slate-950/90 border border-purple-500/30 rounded-xl p-3.5 space-y-2.5">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                          <Truck className="w-4 h-4" />
-                        </span>
-                        <div>
-                          <h4 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
-                            <span>Jadwal Kanvas LKT &amp; History ({selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]} {selectedYear})</span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                              {kanvasLktMonthHistory.length} Riwayat Ritase
-                            </span>
-                          </h4>
-                          <p className="text-[11px] text-slate-400">
-                            Rekapitulasi jadwal dan riwayat keberangkatan armada Kanvas LKT beserta kru bertugas.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {kanvasLktMonthHistory.length === 0 ? (
-                      <div className="text-center py-4 text-xs text-slate-500">
-                        Belum ada jadwal Kanvas LKT pada periode ini.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto rounded-lg border border-slate-800">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead className="bg-slate-900 text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-800">
-                            <tr>
-                              <th className="py-2 px-3">Tanggal &amp; Hari</th>
-                              <th className="py-2 px-3">Driver Kanvas</th>
-                              <th className="py-2 px-3">Helper</th>
-                              <th className="py-2 px-3">Area Tujuan</th>
-                              <th className="py-2 px-3">Armada</th>
-                              <th className="py-2 px-3 text-center">Status History</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/70 text-slate-300">
-                            {kanvasLktMonthHistory.map((item, idx) => (
-                              <tr
-                                key={`kanvas-hist-${idx}-${item.dateString}`}
-                                onClick={() => setSelectedCalendarDate(item.dateString)}
-                                className="hover:bg-slate-900/70 transition cursor-pointer"
-                              >
-                                <td className="py-2 px-3 font-mono font-bold text-white whitespace-nowrap">
-                                  {item.dayName}, {item.dateString}
-                                </td>
-                                <td className="py-2 px-3 font-bold text-purple-300">
-                                  {item.driver}
-                                </td>
-                                <td className="py-2 px-3 text-slate-300">
-                                  {item.helper || '-'}
-                                </td>
-                                <td className="py-2 px-3">
-                                  <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold text-[10px] uppercase">
-                                    {standardizeAreaName(item.area)}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3">
-                                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold text-[11px]">
-                                    {item.armada}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3 text-center">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                    <CheckCircle2 className="w-3 h-3" /> Terjadwal &amp; Tercatat
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </div>
                 </div>
               );

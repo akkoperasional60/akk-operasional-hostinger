@@ -130,10 +130,65 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     [allCustomerAttendanceReports]
   );
 
+  const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
+  const schedules = useMemo(() => logisticsStore.getSchedules(), [reports]);
+
+  // Helper untuk mencocokkan laporan absen ke jadwal pengiriman & Nama Area Kirim resmi
+  const resolveScheduleAndArea = (rep: DriverHelperReport) => {
+    const rDate = rep.date || (rep.timestamp ? getLocalDateStr(new Date(rep.timestamp)) : '');
+    const repPlateClean = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const repDriverClean = (rep.driverName || '').trim().toLowerCase();
+
+    let matchedSchedule = schedules.find(s => rep.deliveryId && s.id === rep.deliveryId);
+    if (!matchedSchedule) {
+      matchedSchedule = schedules.find(s => {
+        const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        const sDriver = (s.crew?.name || '').trim().toLowerCase();
+        return s.departureDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
+      });
+    }
+    if (!matchedSchedule && rep.areaName) {
+      const cleanRepArea = rep.areaName.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+      matchedSchedule = schedules.find(
+        s => (s.areaName || s.store?.storeName || '').trim().toLowerCase() === cleanRepArea
+      );
+    }
+
+    const scheduledAreaName = (
+      matchedSchedule?.areaName ||
+      matchedSchedule?.store?.storeName ||
+      rep.areaName ||
+      'Area Kirim Umum'
+    ).trim();
+
+    return {
+      scheduledAreaName,
+      matchedSchedule,
+      rDate
+    };
+  };
+
+  // Daftar Nama Area Kirim unik (disesuaikan dengan jadwal)
+  const availableScheduledAreas = useMemo(() => {
+    const areaSet = new Set<string>();
+    allCustomerAttendanceReports.forEach(rep => {
+      const { scheduledAreaName } = resolveScheduleAndArea(rep);
+      if (scheduledAreaName) areaSet.add(scheduledAreaName);
+    });
+    schedules.forEach(s => {
+      const aName = (s.areaName || s.store?.storeName || '').trim();
+      if (aName) areaSet.add(aName);
+    });
+    return Array.from(areaSet);
+  }, [allCustomerAttendanceReports, schedules]);
+
   const filteredAttendance = useMemo(() => {
     return allCustomerAttendanceReports.filter(rep => {
-      const rDate = rep.date || (rep.timestamp ? getLocalDateStr(new Date(rep.timestamp)) : '');
+      const { scheduledAreaName, rDate } = resolveScheduleAndArea(rep);
       if (dateFilterMode === 'single_date' && selectedDate && rDate !== selectedDate) {
+        return false;
+      }
+      if (selectedAreaFilter !== 'all' && scheduledAreaName.toLowerCase() !== selectedAreaFilter.toLowerCase()) {
         return false;
       }
       const isVer = rep.status === 'verified' || rep.status === 'resolved';
@@ -148,14 +203,62 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
         const matchDriver = (rep.driverName || '').toLowerCase().includes(q);
         const matchHelper = (rep.helperName || '').toLowerCase().includes(q);
         const matchPlate = (rep.plateNumber || '').toLowerCase().includes(q);
-        const matchArea = (rep.areaName || '').toLowerCase().includes(q);
+        const matchArea = scheduledAreaName.toLowerCase().includes(q) || (rep.areaName || '').toLowerCase().includes(q);
         const matchCustomer = (rep.customerOutletName || '').toLowerCase().includes(q);
         const matchNotes = (rep.notes || '').toLowerCase().includes(q);
         return matchDriver || matchHelper || matchPlate || matchArea || matchCustomer || matchNotes;
       }
       return true;
     });
-  }, [allCustomerAttendanceReports, dateFilterMode, selectedDate, statusFilter, searchQuery]);
+  }, [allCustomerAttendanceReports, dateFilterMode, selectedDate, selectedAreaFilter, statusFilter, searchQuery, schedules]);
+
+  // Pengelompokan terstruktur per Nama Area Kirim & Jadwal (agar tidak tercampur semua dalam 1 tabel tanggal)
+  const groupedByAreaSchedule = useMemo(() => {
+    const groupsMap = new Map<
+      string,
+      {
+        groupKey: string;
+        areaName: string;
+        scheduleDate: string;
+        driverName: string;
+        helperName: string;
+        plateNumber: string;
+        fleetInitial?: string;
+        trackingNumber?: string;
+        items: DriverHelperReport[];
+      }
+    >();
+
+    filteredAttendance.forEach(rep => {
+      const { scheduledAreaName, matchedSchedule, rDate } = resolveScheduleAndArea(rep);
+      const scheduleDate = matchedSchedule?.departureDate || rDate || '-';
+      const groupKey = `${scheduledAreaName.toUpperCase()}__${scheduleDate}`;
+
+      const matchedFleetObj = fleets.find(
+        f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '').replace(/\s+/g, '').toUpperCase()
+      );
+
+      if (!groupsMap.has(groupKey)) {
+        groupsMap.set(groupKey, {
+          groupKey,
+          areaName: scheduledAreaName,
+          scheduleDate,
+          driverName: matchedSchedule?.crew?.name || rep.driverName || '-',
+          helperName: matchedSchedule?.crewHelper?.name || rep.helperName || '-',
+          plateNumber: matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '-',
+          fleetInitial: matchedFleetObj?.initialCode || matchedSchedule?.fleet?.initialCode,
+          trackingNumber: matchedSchedule?.trackingNumber,
+          items: []
+        });
+      }
+      groupsMap.get(groupKey)!.items.push(rep);
+    });
+
+    return Array.from(groupsMap.values()).sort((a, b) => {
+      if (a.scheduleDate !== b.scheduleDate) return b.scheduleDate.localeCompare(a.scheduleDate);
+      return a.areaName.localeCompare(b.areaName);
+    });
+  }, [filteredAttendance, schedules, fleets]);
 
   const handleVerifyAttendance = (id: string) => {
     if (!isAuthorizedSpvOrAdmin) {
@@ -244,10 +347,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
     const headers = [
       'ID Absen',
-      'Tanggal',
+      'Tanggal Jadwal',
       'Waktu Absen',
+      'Nama Area Kirim (Sesuai Jadwal)',
       'Nama Pelanggan / Toko Tujuan',
-      'Area Kirim',
       'Nama Driver',
       'Nama Helper',
       'Plat Armada',
@@ -255,18 +358,21 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       'Status Verifikasi'
     ];
 
-    const rows = filteredAttendance.map(r => [
-      r.id,
-      r.date || new Date(r.timestamp).toISOString().slice(0, 10),
-      new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
-      `"${r.customerOutletName || '-'}"`,
-      `"${r.areaName}"`,
-      `"${r.driverName}"`,
-      `"${r.helperName || '-'}"`,
-      `"${r.plateNumber}"`,
-      `"${(r.notes || '').replace(/"/g, '""')}"`,
-      r.status === 'verified' || r.status === 'resolved' ? 'Terverifikasi' : 'Menunggu Verifikasi'
-    ]);
+    const rows = filteredAttendance.map(r => {
+      const { scheduledAreaName } = resolveScheduleAndArea(r);
+      return [
+        r.id,
+        r.date || new Date(r.timestamp).toISOString().slice(0, 10),
+        new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+        `"${scheduledAreaName}"`,
+        `"${r.customerOutletName || '-'}"`,
+        `"${r.driverName}"`,
+        `"${r.helperName || '-'}"`,
+        `"${r.plateNumber}"`,
+        `"${(r.notes || '').replace(/"/g, '""')}"`,
+        r.status === 'verified' || r.status === 'resolved' ? 'Terverifikasi' : 'Menunggu Verifikasi'
+      ];
+    });
 
     const csvContent =
       'data:text/csv;charset=utf-8,\uFEFF' +
@@ -276,7 +382,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     link.setAttribute('href', encodedUri);
     link.setAttribute(
       'download',
-      `Laporan_Absen_Pelanggan_Tim_Kiriman_${dateFilterMode === 'single_date' ? selectedDate : 'Semua'}.csv`
+      `Laporan_Absen_Pelanggan_Per_Area_${dateFilterMode === 'single_date' ? selectedDate : 'Semua'}.csv`
     );
     document.body.appendChild(link);
     link.click();
@@ -285,46 +391,34 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     addNotification(
       'schedule',
       'Ekspor Excel Selesai',
-      'Data Laporan Absen Tim Kiriman di Pelanggan berhasil diunduh.'
+      'Data Laporan Absen Tim Kiriman per Area berhasil diunduh.'
     );
   };
 
   return (
-    <div className="space-y-5 animate-in fade-in duration-200">
+    <div className="space-y-4 animate-in fade-in duration-200">
       {/* Top Header Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-            <Store className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <Store className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Laporan Absen Tim Kiriman di Pelanggan
+                Laporan Absen Tim Kiriman per Area Jadwal
               </h2>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-600/15 text-blue-600 dark:text-blue-300 border border-blue-500/30">
-                Khusus Absen di Pelanggan
+                Terstruktur per Nama Area Kirim
               </span>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Rekapitulasi absen tim pengiriman (Driver &amp; Helper) pada setiap titik pelanggan yang dikunjungi, lengkap dengan foto bukti kiriman dan nama pelanggan.
+              Rekapitulasi absen tim pengiriman (Driver &amp; Helper) yang dikelompokkan secara terstruktur per <strong>Nama Area Kirim sesuai Jadwal Pengiriman</strong> beserta daftar toko pelanggan dan bukti foto.
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              resetAddForm();
-              setIsAddModalOpen(true);
-            }}
-            className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Catat Absen Pelanggan</span>
-          </button>
-
           <button
             type="button"
             onClick={loadAttendanceReports}
@@ -342,51 +436,24 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
             <span>Ekspor Excel</span>
           </button>
-
-          {onBackToOperationalReports && (
-            <button
-              type="button"
-              onClick={onBackToOperationalReports}
-              className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700 cursor-pointer transition"
-            >
-              Kembali ke Kendala
-            </button>
-          )}
         </div>
       </div>
 
-      {/* 4 KPI Summary Cards (Fokus Absen di Pelanggan) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+      {/* 4 KPI Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Total Absen di Pelanggan
+              Area Kirim Terjadwal Aktif
             </span>
-            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
-              {filteredAttendance.length}
+            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono mt-0.5">
+              {groupedByAreaSchedule.length}
               <span className="text-xs text-slate-400 font-sans font-semibold ml-1.5">
-                / {allCustomerAttendanceReports.length} total
+                Area Kirim
               </span>
             </div>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Data absen kiriman di toko / pelanggan
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-            <Store className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Pelanggan / Toko Dikunjungi
-            </span>
-            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono mt-1">
-              {uniqueCustomerCount}
-            </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Titik pelanggan tujuan kiriman
+              Dikelompokkan sesuai jadwal rute
             </span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
@@ -394,12 +461,32 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
+              Total Absen di Pelanggan
+            </span>
+            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
+              {filteredAttendance.length}
+              <span className="text-xs text-slate-400 font-sans font-semibold ml-1.5">
+                ({uniqueCustomerCount} toko)
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Titik pelanggan tujuan kiriman
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
+            <Store className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
               Foto Bukti Pelanggan
             </span>
-            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
+            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
               {withPhotoCount}
             </div>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -411,12 +498,12 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
               Absen Pelanggan Terverifikasi
             </span>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
               {verifiedAttendanceCount}
             </div>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -429,13 +516,13 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
+      {/* Filter & Search Bar (Termasuk Filter Nama Area Kirim Sesuai Jadwal) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Status Filter Pills */}
           <div className="flex items-center gap-1.5 flex-wrap">
             {[
-              { key: 'all', label: `Semua Absen Pelanggan (${allCustomerAttendanceReports.length})` },
+              { key: 'all', label: `Semua Absen (${allCustomerAttendanceReports.length})` },
               { key: 'verified', label: `Terverifikasi (${verifiedAttendanceCount})` },
               { key: 'pending', label: `Menunggu Verifikasi (${pendingAttendanceCount})` }
             ].map(tab => (
@@ -454,8 +541,24 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             ))}
           </div>
 
-          {/* Date Filter Controls */}
+          {/* Area Kirim Dropdown & Date Filter Controls */}
           <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5">
+              <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <select
+                value={selectedAreaFilter}
+                onChange={(e) => setSelectedAreaFilter(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-white dark:bg-slate-900">Semua Area Kirim ({availableScheduledAreas.length})</option>
+                {availableScheduledAreas.map(area => (
+                  <option key={area} value={area} className="bg-white dark:bg-slate-900">
+                    Area: {area}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1">
               <Calendar className="w-3.5 h-3.5 text-blue-500" />
               <input
@@ -498,6 +601,41 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           </div>
         </div>
 
+        {/* Quick Area Filter Pills */}
+        {availableScheduledAreas.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+              Pilih Area Jadwal:
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedAreaFilter('all')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                selectedAreaFilter === 'all'
+                  ? 'bg-blue-600 text-white border-blue-500'
+                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Semua Area
+            </button>
+            {availableScheduledAreas.map(area => (
+              <button
+                key={area}
+                type="button"
+                onClick={() => setSelectedAreaFilter(area)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border flex items-center gap-1 ${
+                  selectedAreaFilter.toLowerCase() === area.toLowerCase()
+                    ? 'bg-blue-600 text-white border-blue-500'
+                    : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3 h-3 shrink-0" />
+                <span>{area}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Search Input */}
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -505,7 +643,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari nama pelanggan / toko tujuan, nama supir, helper, plat nomor armada, atau area kirim..."
+            placeholder="Cari nama area kirim, nama pelanggan / toko tujuan, nama supir, helper, atau plat nomor armada..."
             className="w-full pl-10 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
           />
           {searchQuery && (
@@ -520,175 +658,234 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
         </div>
       </div>
 
-      {/* Customer Attendance Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-        {filteredAttendance.length === 0 ? (
-          <div className="p-10 text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 mx-auto">
-              <Store className="w-6 h-6" />
-            </div>
-            <div className="text-sm font-black text-slate-900 dark:text-white">
-              Belum Ada Data Absen Tim Kiriman di Pelanggan
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-              Setiap kali tim pengiriman (Driver / Helper) mengirim <strong>Absen Pelanggan</strong> (beserta foto bukti &amp; nama pelanggan) dari Portal Driver Mobile, datanya otomatis tampil di sini.
-            </p>
+      {/* Daftar Terstruktur Per Nama Area Kirim (Sesuai Jadwal Pengiriman) */}
+      {groupedByAreaSchedule.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center space-y-3 shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 mx-auto">
+            <Store className="w-6 h-6" />
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-800">
-                <tr>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Waktu &amp; Tanggal</th>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Tim Kiriman (Driver &amp; Helper)</th>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Armada</th>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Nama Pelanggan / Toko Tujuan</th>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Area Kirim &amp; Titik GPS</th>
-                  <th className="py-3 px-3.5 text-center whitespace-nowrap">Foto Bukti Absen</th>
-                  <th className="py-3 px-3.5 whitespace-nowrap">Keterangan Kiriman</th>
-                  <th className="py-3 px-3.5 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/70 text-slate-700 dark:text-slate-300">
-                {filteredAttendance.map(item => {
-                  const isVerified = item.status === 'verified' || item.status === 'resolved';
-                  const customerName =
-                    item.customerOutletName ||
-                    (item.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
-                    item.areaName;
+          <div className="text-sm font-black text-slate-900 dark:text-white">
+            Belum Ada Data Absen Tim Kiriman pada Area / Filter Ini
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+            Setiap kali tim pengiriman (Driver / Helper) mengirim <strong>Absen Kiriman Pelanggan</strong> dari Portal Driver Mobile, datanya otomatis dikelompokkan per <strong>Nama Area Kirim sesuai Jadwal</strong> di sini.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groupedByAreaSchedule.map((group, groupIdx) => {
+            const verifiedInGroup = group.items.filter(
+              i => i.status === 'verified' || i.status === 'resolved'
+            ).length;
+            const formattedScheduleDate = group.scheduleDate && group.scheduleDate !== '-'
+              ? new Date(group.scheduleDate + 'T00:00:00').toLocaleDateString('id-ID', {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric'
+                })
+              : '-';
 
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                      {/* 1. Waktu & Tanggal */}
-                      <td className="py-3 px-3.5 align-middle whitespace-nowrap">
-                        <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">
-                          {new Date(item.timestamp).toLocaleTimeString('id-ID', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}{' '}
-                          WIB
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          {item.date ||
-                            new Date(item.timestamp).toLocaleDateString('id-ID', {
-                              day: 'numeric',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
-                        </div>
-                      </td>
-
-                      {/* 2. Tim Kiriman */}
-                      <td className="py-3 px-3.5 align-middle whitespace-nowrap">
-                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span>{item.driverName}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
-                            {item.userRole || 'Driver'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 pl-5">
-                          Helper: <strong className="text-slate-700 dark:text-slate-300">{item.helperName || '-'}</strong>
-                        </div>
-                      </td>
-
-                      {/* 3. Armada */}
-                      <td className="py-3 px-3.5 align-middle whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 font-mono font-bold text-slate-800 dark:text-slate-200 text-[11px] bg-slate-100 dark:bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800">
-                          <Truck className="w-3 h-3 text-blue-500 shrink-0" />
-                          {item.plateNumber}
+            return (
+              <div
+                key={group.groupKey}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs"
+              >
+                {/* Header Nama Area Kirim & Rincian Jadwal Rute */}
+                <div className="p-3.5 sm:p-4 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="flex items-start sm:items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                      #{groupIdx + 1}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md bg-blue-600/15 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-[10px] font-black uppercase tracking-wider">
+                          Area Jadwal Kirim
                         </span>
-                      </td>
+                        <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                          {group.areaName}
+                        </h3>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[11px] font-bold font-mono">
+                          <Calendar className="w-3 h-3 text-blue-500" />
+                          {formattedScheduleDate}
+                        </span>
+                      </div>
 
-                      {/* 4. Nama Pelanggan / Toko Tujuan */}
-                      <td className="py-3 px-3.5 align-middle">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
-                          <Store className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span>{customerName}</span>
-                        </div>
-                      </td>
+                      <div className="flex items-center gap-3 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                        <span className="inline-flex items-center gap-1 font-semibold">
+                          <User className="w-3.5 h-3.5 text-blue-500" />
+                          Driver: <strong className="text-slate-900 dark:text-white">{group.driverName}</strong>
+                        </span>
+                        <span>•</span>
+                        <span>
+                          Helper: <strong className="text-slate-900 dark:text-white">{group.helperName || '-'}</strong>
+                        </span>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-1 font-mono font-bold text-slate-800 dark:text-slate-200">
+                          <Truck className="w-3.5 h-3.5 text-blue-500" />
+                          {group.plateNumber}
+                          {group.fleetInitial ? ` (${group.fleetInitial})` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-                      {/* 5. Area Kirim & Titik GPS */}
-                      <td className="py-3 px-3.5 align-middle">
-                        <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{item.areaName}</span>
-                        </div>
-                        {item.gmapsUrl && (
-                          <a
-                            href={item.gmapsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:underline mt-0.5"
-                          >
-                            <Navigation className="w-2.5 h-2.5" />
-                            <span>Buka Titik GPS Maps</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                        )}
-                      </td>
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
+                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-xs font-black">
+                      {group.items.length} Titik Pelanggan Dikunjungi
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-xs font-bold">
+                      {verifiedInGroup}/{group.items.length} Terverifikasi
+                    </span>
+                  </div>
+                </div>
 
-                      {/* 6. Foto Bukti Absen */}
-                      <td className="py-3 px-3.5 align-middle text-center">
-                        {item.photoUrl ? (
-                          <div className="relative group w-12 h-12 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
-                            <img
-                              src={item.photoUrl}
-                              alt={customerName}
-                              className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition"
-                              onClick={() => setSelectedPhotoModal(item)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setSelectedPhotoModal(item)}
-                              className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
-                              title="Perbesar Foto Absen Pelanggan"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="inline-block px-2 py-1 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
-                            Tanpa Foto
-                          </span>
-                        )}
-                      </td>
+                {/* Tabel Pelanggan dalam Area Kirim Ini */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100/70 dark:bg-slate-900 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-2.5 px-3 whitespace-nowrap w-10 text-center">No</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Jam Absen</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Nama Pelanggan / Toko Tujuan</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Kru &amp; Armada</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Titik Lokasi GPS</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Foto Bukti</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Keterangan Kiriman</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800/70 text-slate-700 dark:text-slate-300">
+                      {group.items.map((item, idx) => {
+                        const isVerified = item.status === 'verified' || item.status === 'resolved';
+                        const customerName =
+                          item.customerOutletName ||
+                          (item.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+                          item.areaName;
+                        const cleanNotes = (item.notes || '')
+                          .replace(/\[ABSEN KIRIMAN PELANGGAN:[^\]]*\]\s*/i, '')
+                          .trim();
 
-                      {/* 7. Keterangan Kiriman */}
-                      <td className="py-3 px-3.5 align-middle max-w-[260px]">
-                        <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug line-clamp-3">
-                          {item.notes || '-'}
-                        </p>
-                      </td>
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                            <td className="py-2.5 px-3 align-middle text-center font-mono font-bold text-slate-400">
+                              {idx + 1}
+                            </td>
 
-                      {/* 8. Status & Verifikasi */}
-                      <td className="py-3 px-3.5 align-middle text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {isVerified ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3 shrink-0" />
-                              <span>Terverifikasi</span>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleVerifyAttendance(item.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
-                            >
-                              <Check className="w-3 h-3" />
-                              <span>Verifikasi</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                            {/* Jam Absen */}
+                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">
+                                {new Date(item.timestamp).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}{' '}
+                                WIB
+                              </div>
+                            </td>
+
+                            {/* Nama Pelanggan / Toko Tujuan */}
+                            <td className="py-2.5 px-3 align-middle">
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
+                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                <span>{customerName}</span>
+                              </div>
+                            </td>
+
+                            {/* Kru & Armada */}
+                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                              <div className="font-bold text-slate-900 dark:text-white text-xs">
+                                {item.driverName}
+                                {item.helperName && item.helperName !== '-' ? ` & ${item.helperName}` : ''}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                {item.plateNumber}
+                              </div>
+                            </td>
+
+                            {/* Titik Lokasi GPS */}
+                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                              <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
+                                <span>{group.areaName}</span>
+                              </div>
+                              {item.gmapsUrl && (
+                                <a
+                                  href={item.gmapsUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:underline mt-0.5"
+                                >
+                                  <Navigation className="w-2.5 h-2.5" />
+                                  <span>Buka GPS Maps</span>
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              )}
+                            </td>
+
+                            {/* Foto Bukti Absen */}
+                            <td className="py-2.5 px-3 align-middle text-center">
+                              {item.photoUrl ? (
+                                <div className="relative group w-11 h-11 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
+                                  <img
+                                    src={item.photoUrl}
+                                    alt={customerName}
+                                    className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition"
+                                    onClick={() => setSelectedPhotoModal(item)}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedPhotoModal(item)}
+                                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
+                                    title="Perbesar Foto Absen Pelanggan"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="inline-block px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
+                                  Tanpa Foto
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Keterangan Kiriman */}
+                            <td className="py-2.5 px-3 align-middle max-w-[240px]">
+                              <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug line-clamp-2">
+                                {cleanNotes || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}
+                              </p>
+                            </td>
+
+                            {/* Status & Verifikasi */}
+                            <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {isVerified ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
+                                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                                    <span>Terverifikasi</span>
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerifyAttendance(item.id)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    <span>Verifikasi</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Modal Input Absen Kiriman Pelanggan Baru */}
       {isAddModalOpen && (

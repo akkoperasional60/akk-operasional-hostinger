@@ -217,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             handleTabClick(tab);
           }
         }}
-        title={isMinimized ? `${label} (${targetPath})` : `${label} — ${targetPath}`}
+        title={isMinimized ? label : undefined}
         className={`group relative w-full flex items-center no-underline ${
           isMinimized ? 'justify-center px-2' : 'justify-between px-3'
         } py-2 rounded-lg text-xs font-medium cursor-pointer transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] select-none overflow-hidden ${

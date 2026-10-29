@@ -461,10 +461,193 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   }, [crewAreaStatsList, totalExceededAreasCount]);
 
   const kanvasLktHistoryList = useMemo(() => {
-    return filteredHistory
-      .filter(h => (h.areaName || h.area || '').toLowerCase().includes('kanvas') || (h.storeName || '').toLowerCase().includes('kanvas'))
-      .sort((a, b) => new Date(b.deliveryDate || b.completionDate).getTime() - new Date(a.deliveryDate || a.completionDate).getTime());
-  }, [filteredHistory]);
+    const combined: Array<{
+      id: string;
+      dateStr: string;
+      crewName: string;
+      helperName: string;
+      crewRole: string;
+      plateNumber: string;
+      areaName: string;
+      statusLabel: string;
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    // 1. From CrewDeliveryHistory
+    filteredHistory.forEach(h => {
+      const areaVal = h.areaName || h.area || '';
+      const storeVal = h.storeName || '';
+      if (areaVal.toLowerCase().includes('kanvas') || storeVal.toLowerCase().includes('kanvas')) {
+        const dStr = (h.deliveryDate || h.completionDate || '').slice(0, 10);
+        const key = `${dStr}-${h.crewName.toLowerCase()}-${areaVal.toLowerCase()}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          combined.push({
+            id: h.id,
+            dateStr: h.deliveryDate || h.completionDate,
+            crewName: h.crewName,
+            helperName: '-',
+            crewRole: h.crewRole || (h.notes?.includes('Helper') ? 'Kru Helper' : 'Driver Utama'),
+            plateNumber: h.plateNumber || h.initialCode || h.vehiclePlate || 'NP1',
+            areaName: areaVal || 'KANVAS LKT',
+            statusLabel: 'Selesai / Tercatat'
+          });
+        }
+      }
+    });
+
+    // 2. From Active Operational Schedules
+    const allSchedules = logisticsStore.getSchedules();
+    allSchedules.forEach(s => {
+      const areaVal = s.areaName || s.store?.storeName || '';
+      if (areaVal.toLowerCase().includes('kanvas')) {
+        const dDate = new Date(s.departureDate);
+        if (selectedMonth !== -1 && dDate.getMonth() !== selectedMonth) return;
+        if (dDate.getFullYear() !== selectedYear) return;
+        const driverName = s.crew?.name || 'Driver Kanvas';
+        const dStr = s.departureDate.slice(0, 10);
+        const key = `${dStr}-${driverName.toLowerCase()}-${areaVal.toLowerCase()}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          combined.push({
+            id: s.id,
+            dateStr: s.departureDate,
+            crewName: driverName,
+            helperName: (s as any).helperName || (s.crew as any)?.helperName || '-',
+            crewRole: 'Driver Utama',
+            plateNumber: s.fleet?.initialCode || s.fleet?.plateNumber || 'NP1',
+            areaName: areaVal.toUpperCase(),
+            statusLabel: s.status === 'delivered' ? 'Selesai Kirim' : 'Terjadwal & Tercatat'
+          });
+        }
+      }
+    });
+
+    // 3. From Cached Admin Schedule Weeks (if present)
+    try {
+      const rawWeeks = localStorage.getItem('akk_admin_schedule_weeks_cache');
+      if (rawWeeks) {
+        const parsedWeeks = JSON.parse(rawWeeks);
+        if (Array.isArray(parsedWeeks)) {
+          const effMo = selectedMonth === -1 ? 0 : selectedMonth;
+          parsedWeeks.forEach((w: any) => {
+            (w.days || []).forEach((d: any) => {
+              (d.pengiriman || []).forEach((p: any, idx: number) => {
+                const areaVal = String(p.area || '');
+                if (areaVal.toLowerCase().includes('kanvas')) {
+                  const dayPad = String(d.dayNumber || 1).padStart(2, '0');
+                  const moPad = String(effMo + 1).padStart(2, '0');
+                  const isoDate = `${selectedYear}-${moPad}-${dayPad}`;
+                  const driverName = String(p.driver || 'Driver Kanvas');
+                  const key = `${isoDate}-${driverName.toLowerCase()}-${areaVal.toLowerCase()}`;
+                  if (!seenKeys.has(key)) {
+                    seenKeys.add(key);
+                    combined.push({
+                      id: p.id || `kanvas-wk-${isoDate}-${idx}`,
+                      dateStr: isoDate,
+                      crewName: driverName,
+                      helperName: p.helper || '-',
+                      crewRole: 'Driver Utama',
+                      plateNumber: p.armada || 'NP1',
+                      areaName: areaVal.toUpperCase(),
+                      statusLabel: 'Terjadwal & Tercatat'
+                    });
+                  }
+                }
+              });
+            });
+          });
+        }
+      }
+    } catch {}
+
+    return combined.sort((a, b) => new Date(b.dateStr).getTime() - new Date(a.dateStr).getTime());
+  }, [filteredHistory, selectedMonth, selectedYear]);
+
+  // Urutan & Rekomendasi Giliran Jadwal Kanvas Selanjutnya (Siapa Kru Berikutnya)
+  const kanvasDriverRotationQueue = useMemo(() => {
+    const driverMap = new Map<string, {
+      driverName: string;
+      armada: string;
+      kanvasCount: number;
+      lastKanvasDate: string | null;
+      lastKanvasArea: string | null;
+      totalAllTrips: number;
+    }>();
+
+    // Seed from active drivers in crews list
+    crews
+      .filter(c => !c.role || c.role.toLowerCase().includes('driver') || c.role.toLowerCase().includes('supir'))
+      .forEach(c => {
+        const key = c.name.trim().toLowerCase();
+        if (!key || key === '-') return;
+        const fl = fleets.find(f => f.id === c.currentFleetId || f.id === (c as any).defaultFleetId);
+        driverMap.set(key, {
+          driverName: c.name.trim(),
+          armada: fl?.initialCode || fl?.plateNumber || 'Siap Tugas',
+          kanvasCount: 0,
+          lastKanvasDate: null,
+          lastKanvasArea: null,
+          totalAllTrips: 0
+        });
+      });
+
+    // Also seed from drivers in crewAreaStatsList
+    crewAreaStatsList.forEach(c => {
+      if (c.role.toLowerCase().includes('helper')) return;
+      const key = c.crewName.trim().toLowerCase();
+      if (!key || key === '-') return;
+      const existing = driverMap.get(key);
+      if (existing) {
+        existing.totalAllTrips = c.totalTrips;
+        if (c.fleetCodes.length > 0) existing.armada = c.fleetCodes[0];
+      } else {
+        driverMap.set(key, {
+          driverName: c.crewName.trim(),
+          armada: c.fleetCodes[0] || 'NP1',
+          kanvasCount: 0,
+          lastKanvasDate: null,
+          lastKanvasArea: null,
+          totalAllTrips: c.totalTrips
+        });
+      }
+    });
+
+    // Accumulate Kanvas trips per driver
+    kanvasLktHistoryList.forEach(k => {
+      if (k.crewRole.toLowerCase().includes('helper')) return;
+      const key = k.crewName.trim().toLowerCase();
+      if (!key || key === '-') return;
+      const existing = driverMap.get(key);
+      if (existing) {
+        existing.kanvasCount += 1;
+        if (!existing.lastKanvasDate || new Date(k.dateStr).getTime() > new Date(existing.lastKanvasDate).getTime()) {
+          existing.lastKanvasDate = k.dateStr;
+          existing.lastKanvasArea = k.areaName;
+        }
+        if (k.plateNumber) existing.armada = k.plateNumber;
+      } else {
+        driverMap.set(key, {
+          driverName: k.crewName.trim(),
+          armada: k.plateNumber || 'NP1',
+          kanvasCount: 1,
+          lastKanvasDate: k.dateStr,
+          lastKanvasArea: k.areaName,
+          totalAllTrips: 1
+        });
+      }
+    });
+
+    // Sort so the driver with the FEWEST Kanvas trips (or oldest lastKanvasDate) is #1 Next in Line
+    return Array.from(driverMap.values()).sort((a, b) => {
+      if (a.kanvasCount !== b.kanvasCount) {
+        return a.kanvasCount - b.kanvasCount;
+      }
+      const timeA = a.lastKanvasDate ? new Date(a.lastKanvasDate).getTime() : 0;
+      const timeB = b.lastKanvasDate ? new Date(b.lastKanvasDate).getTime() : 0;
+      return timeA - timeB;
+    });
+  }, [crews, fleets, crewAreaStatsList, kanvasLktHistoryList]);
 
   return (
     <div className="space-y-3">
@@ -572,233 +755,349 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         </div>
       )}
 
-      {/* Main Workspace Split: 2. COLLAPSIBLE SIDEBAR + MAIN CONTENT VIEWPORT */}
-      <div className="flex flex-col lg:flex-row items-start gap-4">
-        {/* 2. SIDEBAR (Filter, Text Fields & Toggle Switches) */}
-        <UiCollapsibleSidebar
-          isOpen={isFilterSidebarOpen}
-          onToggle={() => setIsFilterSidebarOpen(prev => !prev)}
-          title="Filter & Konfigurasi"
-          badgeCount={activeFiltersCount}
-        >
-          {/* 6. TEXT FIELDS */}
-          <UiTextField
-            label="Pencarian Nama Kru / Armada"
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Ketik nama kru atau armada (misal: N4/NS2)..."
-            icon={<Search className="w-3.5 h-3.5" />}
-          />
-
-          <UiTextField
-            label="Filter Nama Area Kirim"
-            value={areaQuickFilter}
-            onChange={setAreaQuickFilter}
-            placeholder="Contoh: Denpasar, Purwo..."
-            icon={<MapPin className="w-3.5 h-3.5" />}
-          />
-
-          {/* Period & Driver Selectors */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+      {/* Main Workspace: Collapsible Filter & Konfigurasi Bar + Full-Width Content Viewport */}
+      <div className="space-y-3">
+        {/* 2. FILTER & KONFIGURASI (Full-width sleek bar when minimized, structured grid when expanded — no empty space below) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 transition-all">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsFilterSidebarOpen(prev => !prev)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-white transition cursor-pointer"
+                title={isFilterSidebarOpen ? 'Sembunyikan Filter & Konfigurasi' : 'Tampilkan Filter & Konfigurasi'}
               >
-                <option value={-1}>Semua Bulan</option>
-                {Array.from({ length: 12 }).map((_, i) => (
-                  <option key={'month-' + i} value={i}>
-                    {new Date(0, i).toLocaleString('id-ID', { month: 'long' })}
-                  </option>
-                ))}
-              </select>
+                <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                <span>Filter &amp; Konfigurasi</span>
+                {activeFiltersCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-blue-600 text-white">
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Ringkasan Filter Aktif saat Diminimize */}
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                <span className="px-2 py-1 rounded-md bg-slate-950 border border-slate-800 font-medium text-slate-300">
+                  Periode: {selectedMonth === -1 ? 'Semua Bulan' : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'short' })} {selectedYear}
+                </span>
+                {selectedCrewId !== 'all' && (
+                  <span className="px-2 py-1 rounded-md bg-blue-500/15 border border-blue-500/30 font-semibold text-blue-300">
+                    Kru Terfilter
+                  </span>
+                )}
+                {selectedFleetFilter !== 'all' && (
+                  <span className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
+                    Armada: {selectedFleetFilter}
+                  </span>
+                )}
+                {onlyExceededFilter && (
+                  <span className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
+                    &ge; {threshold}x Kirim
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+            <div className="flex items-center gap-2">
+              {!isFilterSidebarOpen && (
+                <div className="relative hidden sm:block w-56">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari kru / armada..."
+                    className="w-full pl-8 pr-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+
+              {activeFiltersCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCrewId('all');
+                    setSelectedFleetFilter('all');
+                    setSelectedMonth(0);
+                    setSelectedAreaFilter('all');
+                    setSearchQuery('');
+                    setAreaQuickFilter('');
+                    setOnlyExceededFilter(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold transition cursor-pointer"
+                >
+                  Reset ({activeFiltersCount})
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsFilterSidebarOpen(prev => !prev)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                  isFilterSidebarOpen
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                }`}
               >
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <option key={'year-' + i} value={2024 + i}>
-                    {2024 + i}
-                  </option>
-                ))}
-              </select>
+                {isFilterSidebarOpen ? 'Minimize Filter' : 'Buka Filter'}
+              </button>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
-            <select
-              value={selectedCrewId}
-              onChange={(e) => setSelectedCrewId(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-            >
-              <option value="all">Semua Pengemudi ({crews.length})</option>
-              {crews.map(cr => (
-                <option key={cr.id} value={cr.id}>
-                  {cr.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isFilterSidebarOpen && (
+            <div className="pt-3 mt-3 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+              {/* Kolom 1: Pencarian Teks */}
+              <div className="space-y-2.5">
+                <UiTextField
+                  label="Pencarian Nama Kru / Armada"
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Ketik nama kru atau armada (misal: N4/NS2)..."
+                  icon={<Search className="w-3.5 h-3.5" />}
+                />
+                <UiTextField
+                  label="Filter Nama Area Kirim"
+                  value={areaQuickFilter}
+                  onChange={setAreaQuickFilter}
+                  placeholder="Contoh: Denpasar, Purwo..."
+                  icon={<MapPin className="w-3.5 h-3.5" />}
+                />
+              </div>
 
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
-            <select
-              value={selectedFleetFilter}
-              onChange={(e) => setSelectedFleetFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-            >
-              <option value="all">Semua Armada ({fleets.length})</option>
-              {fleets.map(fl => (
-                <option key={fl.id} value={fl.initialCode || fl.plateNumber}>
-                  Armada {fl.initialCode ? `${fl.initialCode} · ${fl.plateNumber}` : fl.plateNumber} ({fl.vehicleType})
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Kolom 2: Periode & Personel Kru */}
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value={-1}>Semua Bulan</option>
+                      {Array.from({ length: 12 }).map((_, i) => (
+                        <option key={'month-' + i} value={i}>
+                          {new Date(0, i).toLocaleString('id-ID', { month: 'long' })}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-          {/* 5. TOGGLE SWITCHES */}
-          <div className="pt-3 border-t border-slate-800 space-y-2.5">
-            <div className="text-[11px] font-semibold text-slate-400">Preferensi Tampilan &amp; Filter</div>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                    >
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <option key={'year-' + i} value={2024 + i}>
+                          {2024 + i}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-            <UiToggleSwitch
-              checked={useAccordionLayout}
-              onChange={setUseAccordionLayout}
-              label="Mode Accordion Ringkas"
-              description="Susun bertumpuk tanpa perlu scroll panjang"
-            />
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
+                  <select
+                    value={selectedCrewId}
+                    onChange={(e) => setSelectedCrewId(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Semua Pengemudi ({crews.length})</option>
+                    {crews.map(cr => (
+                      <option key={cr.id} value={cr.id}>
+                        {cr.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-            <UiToggleSwitch
-              checked={onlyExceededFilter}
-              onChange={setOnlyExceededFilter}
-              label="Hanya Melebihi Batas"
-              description={`Tampilkan kru dengan >= ${threshold}x kirim`}
-            />
+              {/* Kolom 3: Filter Armada & Ringkasan */}
+              <div className="space-y-2.5">
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
+                  <select
+                    value={selectedFleetFilter}
+                    onChange={(e) => setSelectedFleetFilter(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Semua Armada ({fleets.length})</option>
+                    {fleets.map(fl => (
+                      <option key={fl.id} value={fl.initialCode || fl.plateNumber}>
+                        Armada {fl.initialCode ? `${fl.initialCode} · ${fl.plateNumber}` : fl.plateNumber} ({fl.vehicleType})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <UiToggleSwitch
-              checked={autoSyncEnabled}
-              onChange={setAutoSyncEnabled}
-              label="Auto-Sync Jadwal"
-              description="Integrasi otomatis dari penugasan"
-            />
-          </div>
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">
+                  <div className="text-[11px] font-semibold text-slate-300">Status Data Ditampilkan</div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>Total Kru Aktif:</span>
+                    <strong className="text-white font-mono">{crewAreaStatsList.length} Kru</strong>
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>Total Unit Armada:</span>
+                    <strong className="text-white font-mono">{fleetAreaStatsList.length} Unit</strong>
+                  </div>
+                </div>
+              </div>
 
-          {activeFiltersCount > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedCrewId('all');
-                setSelectedFleetFilter('all');
-                setSelectedMonth(0);
-                setSelectedAreaFilter('all');
-                setSearchQuery('');
-                setAreaQuickFilter('');
-                setOnlyExceededFilter(false);
-              }}
-              className="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
-            >
-              Reset Filter ({activeFiltersCount})
-            </button>
+              {/* Kolom 4: Toggle Switches Preferensi */}
+              <div className="space-y-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
+                <div className="text-[11px] font-semibold text-slate-400">Preferensi Tampilan &amp; Filter</div>
+
+                <UiToggleSwitch
+                  checked={useAccordionLayout}
+                  onChange={setUseAccordionLayout}
+                  label="Mode Accordion Ringkas"
+                  description="Susun bertumpuk tanpa perlu scroll panjang"
+                />
+
+                <UiToggleSwitch
+                  checked={onlyExceededFilter}
+                  onChange={setOnlyExceededFilter}
+                  label="Hanya Melebihi Batas"
+                  description={`Tampilkan kru dengan >= ${threshold}x kirim`}
+                />
+
+                <UiToggleSwitch
+                  checked={autoSyncEnabled}
+                  onChange={setAutoSyncEnabled}
+                  label="Auto-Sync Jadwal"
+                  description="Integrasi otomatis dari penugasan"
+                />
+              </div>
+            </div>
           )}
-        </UiCollapsibleSidebar>
+        </div>
 
-        {/* Right Main Content Area */}
-        <div className="flex-1 min-w-0 w-full space-y-2.5">
+        {/* Main Content Area (100% Full Width) */}
+        <div className="w-full space-y-2.5">
           {/* Sub-Tab Bar & Layout Controls */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
               <button
                 type="button"
                 onClick={() => setActiveSubTab('area_stats')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
                   activeSubTab === 'area_stats'
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-blue-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <MapPin className="w-3.5 h-3.5" />
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
                 <span>Frekuensi Kru per Area</span>
-                <UiBadge
-                  count={crewAreaStatsList.length}
-                  variant={activeSubTab === 'area_stats' ? 'slate' : 'blue'}
-                />
+                <span
+                  className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-mono font-black tabular-nums leading-none ${
+                    activeSubTab === 'area_stats'
+                      ? 'bg-blue-900 text-white border border-white/30'
+                      : 'bg-blue-600 text-white'
+                  }`}
+                >
+                  {crewAreaStatsList.length}
+                </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveSubTab('fleet_stats')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
                   activeSubTab === 'fleet_stats'
-                    ? 'bg-amber-600 text-white'
+                    ? 'bg-amber-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <Truck className="w-3.5 h-3.5" />
+                <Truck className="w-3.5 h-3.5 shrink-0" />
                 <span>Frekuensi Armada</span>
-                <UiBadge
-                  count={fleetAreaStatsList.length}
-                  variant={activeSubTab === 'fleet_stats' ? 'slate' : 'amber'}
-                />
+                <span
+                  className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-mono font-black tabular-nums leading-none ${
+                    activeSubTab === 'fleet_stats'
+                      ? 'bg-amber-900 text-white border border-white/30'
+                      : 'bg-amber-600 text-white'
+                  }`}
+                >
+                  {fleetAreaStatsList.length}
+                </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveSubTab('kanvas_lkt')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
                   activeSubTab === 'kanvas_lkt'
-                    ? 'bg-purple-600 text-white'
+                    ? 'bg-purple-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <Calendar className="w-3.5 h-3.5" />
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
                 <span>Jadwal &amp; History Kanvas LKT</span>
-                <UiBadge
-                  count={kanvasLktHistoryList.length}
-                  variant={activeSubTab === 'kanvas_lkt' ? 'slate' : 'blue'}
-                />
+                <span
+                  className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-mono font-black tabular-nums leading-none ${
+                    activeSubTab === 'kanvas_lkt'
+                      ? 'bg-purple-900 text-white border border-white/30'
+                      : 'bg-purple-600 text-white'
+                  }`}
+                >
+                  {kanvasLktHistoryList.length}
+                </span>
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              {useAccordionLayout && (
-                <div className="flex items-center gap-1.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next: Record<string, boolean> = {};
-                      if (activeSubTab === 'area_stats') {
-                        crewAreaStatsList.forEach(c => {
-                          next[c.crewId || c.crewName] = true;
-                        });
-                      } else {
-                        fleetAreaStatsList.forEach(f => {
-                          next[f.initialCode] = true;
-                        });
-                      }
-                      setExpandedIds(next);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-medium transition cursor-pointer"
-                  >
-                    Buka Semua
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedIds({})}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-medium transition cursor-pointer"
-                  >
-                    Tutup Semua
-                  </button>
-                </div>
-              )}
+            {/* Kontrol Layout Tetap (Stabil & Tidak Berpindah-pindah) */}
+            <div className="flex items-center gap-2 ml-auto shrink-0">
+              <div className="flex items-center gap-1.5 text-xs">
+                <button
+                  type="button"
+                  disabled={!useAccordionLayout}
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    if (activeSubTab === 'area_stats') {
+                      crewAreaStatsList.forEach(c => {
+                        next[c.crewId || c.crewName] = true;
+                      });
+                    } else if (activeSubTab === 'fleet_stats') {
+                      fleetAreaStatsList.forEach(f => {
+                        next[f.initialCode] = true;
+                      });
+                    } else {
+                      kanvasDriverRotationQueue.forEach(drv => {
+                        next[`kanvas-drv-${drv.driverName}`] = true;
+                      });
+                      kanvasLktHistoryList.forEach((entry, idx) => {
+                        next[`kanvas-hist-${entry.id || idx}`] = true;
+                      });
+                    }
+                    setExpandedIds(next);
+                  }}
+                  className={`px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-medium transition ${
+                    useAccordionLayout
+                      ? 'text-slate-300 hover:text-white cursor-pointer'
+                      : 'text-slate-600 opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  Buka Semua
+                </button>
+                <button
+                  type="button"
+                  disabled={!useAccordionLayout}
+                  onClick={() => setExpandedIds({})}
+                  className={`px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-medium transition ${
+                    useAccordionLayout
+                      ? 'text-slate-300 hover:text-white cursor-pointer'
+                      : 'text-slate-600 opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  Tutup Semua
+                </button>
+              </div>
 
-              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
                 <button
                   type="button"
                   onClick={() => setUseAccordionLayout(true)}
@@ -992,21 +1291,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    handleOpenInspectPopover(
-                                      item.crewName,
-                                      item.crewId,
-                                      st.areaName,
-                                      st.tripCount
-                                    )
-                                  }
-                                  className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Eye className="w-3 h-3 text-blue-400" />
-                                  <span>Popover</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
                                     handleOpenSimulateApproval(
                                       item.crewName,
                                       item.crewId,
@@ -1014,13 +1298,13 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                       st.tripCount
                                     )
                                   }
-                                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
+                                  className={`px-3 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
                                     st.isExceeded
                                       ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
                                       : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300'
                                   }`}
                                 >
-                                  {st.isExceeded ? 'Modal Otorisasi' : 'Detail Modal'}
+                                  Rincian
                                 </button>
                               </div>
                             </div>
@@ -1076,21 +1360,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    handleOpenInspectPopover(
-                                      item.crewName,
-                                      item.crewId,
-                                      st.areaName,
-                                      st.tripCount
-                                    )
-                                  }
-                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium cursor-pointer"
-                                  title="Buka Popover Ringkas"
-                                >
-                                  Info
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
                                     handleOpenSimulateApproval(
                                       item.crewName,
                                       item.crewId,
@@ -1098,13 +1367,13 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                       st.tripCount
                                     )
                                   }
-                                  className={`px-2 py-1 rounded text-[10px] font-semibold cursor-pointer ${
+                                  className={`px-2.5 py-1 rounded text-[10px] font-semibold cursor-pointer ${
                                     st.isExceeded
                                       ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
                                       : 'bg-blue-600 text-white hover:bg-blue-500'
                                   }`}
                                 >
-                                  {st.isExceeded ? 'Otorisasi' : 'Modal'}
+                                  Rincian
                                 </button>
                               </div>
                             </div>
@@ -1206,163 +1475,347 @@ export const CrewDeliveryHistoryView: React.FC = () => {
             </>
           )}
 
-          {/* TAB 3: JADWAL & HISTORY KANVAS LKT */}
+          {/* TAB 3: JADWAL & HISTORY KANVAS LKT (Mendukung Mode Accordion & Mode Cards yang Berbeda) */}
           {activeSubTab === 'kanvas_lkt' && (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
-              <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-purple-400" />
-                    <span>Jadwal &amp; History Pengiriman Kanvas LKT</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      {kanvasLktHistoryList.length} Riwayat Tercatat
-                    </span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Rekapitulasi jadwal penugasan dan histori keberangkatan kru serta armada rute Kanvas LKT.
-                  </p>
-                </div>
-              </div>
-
-              {kanvasLktHistoryList.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400">
-                  Belum ada jadwal atau riwayat Kanvas LKT pada filter saat ini.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
-                      <tr>
-                        <th className="py-2.5 px-3 w-10 text-center">#</th>
-                        <th className="py-2.5 px-3">Tanggal Kirim</th>
-                        <th className="py-2.5 px-3">Nama Kru</th>
-                        <th className="py-2.5 px-3">Peran</th>
-                        <th className="py-2.5 px-3">Armada</th>
-                        <th className="py-2.5 px-3">Area Tujuan</th>
-                        <th className="py-2.5 px-3 text-center">Status History</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/70 text-slate-300">
-                      {kanvasLktHistoryList.map((entry, idx) => (
-                        <tr key={entry.id || `klkt-${idx}`} className="hover:bg-slate-800/40 transition">
-                          <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
-                          <td className="py-2 px-3 font-mono font-bold text-white whitespace-nowrap">
-                            {new Date(entry.deliveryDate || entry.completionDate).toLocaleDateString('id-ID', {
-                              weekday: 'short',
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
-                          </td>
-                          <td className="py-2 px-3 font-bold text-white">{entry.crewName}</td>
-                          <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                              {entry.crewRole || 'Driver Utama'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded font-mono font-bold text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              {entry.plateNumber || 'NP1'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded font-bold text-[10px] uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                              {entry.areaName || 'Kanvas LKT'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-center">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3" /> Selesai / Terjadwal
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 4. POPOVER: Quick Inspection of Area Trips (Blocks scroll, closes on outside click) */}
-      <UiPopover
-        isOpen={!!popoverData?.isOpen}
-        onClose={() => setPopoverData(null)}
-        title={popoverData?.title || 'Detail Frekuensi Rute'}
-        subtitle={popoverData?.subtitle}
-        footer={
-          popoverData ? (
-            <div className="flex items-center justify-between w-full">
-              <span className="text-[11px] text-slate-400">
-                Klik di luar jendela untuk menutup
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPopoverData(null)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
-                >
-                  Tutup
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const d = popoverData;
-                    setPopoverData(null);
-                    if (d && d.crewName && d.crewId) {
-                      handleOpenSimulateApproval(d.crewName, d.crewId, d.areaName, d.tripCount);
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer"
-                >
-                  Buka Modal Otorisasi
-                </button>
-              </div>
-            </div>
-          ) : undefined
-        }
-      >
-        {popoverData && (
-          <div className="space-y-3">
-            <UiProgressBar
-              value={popoverData.tripCount}
-              max={popoverData.maxLimit}
-              label="Progres Batas Rotasi Wilayah"
-              valueLabel={`${popoverData.tripCount} / ${popoverData.maxLimit} Kirim`}
-              status={popoverData.tripCount >= popoverData.maxLimit ? 'warning' : 'normal'}
-              size="md"
-            />
-
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-semibold text-slate-400">
-                Riwayat Tanggal &amp; Armada:
-              </div>
-              {popoverData.trips.map((t, idx) => (
-                <div
-                  key={t.id || idx}
-                  className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
-                >
+            <div className="space-y-4">
+              {/* BAGIAN 1: REKOMENDASI GILIRAN JADWAL KANVAS SELANJUTNYA */}
+              <div className="bg-slate-900 border border-purple-500/30 rounded-xl p-4 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
                   <div>
-                    <div className="font-semibold text-white text-xs">{t.trackingNumber}</div>
-                    <div className="text-[11px] text-slate-400">
-                      {new Date(t.completionDate).toLocaleDateString('id-ID', {
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 mb-1">
+                      <Calendar className="w-3 h-3" />
+                      <span>Sistem Rotasi &amp; Antrean Kanvas Otomatis ({useAccordionLayout ? 'Mode Accordion' : 'Mode Cards'})</span>
+                    </div>
+                    <h3 className="text-sm font-black text-white">
+                      Urutan &amp; Giliran Jadwal Kanvas Selanjutnya (Siapa Berikutnya)
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Berdasarkan histori keberangkatan Kanvas, sistem mengurutkan supir yang belum pernah atau paling lama tidak jalan Kanvas untuk dijadwalkan berikutnya.
+                    </p>
+                  </div>
+                </div>
+
+                {kanvasDriverRotationQueue.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    Belum ada data pengemudi aktif untuk rekomendasi giliran Kanvas.
+                  </div>
+                ) : useAccordionLayout ? (
+                  /* MODE ACCORDION: Baris Bertumpuk per Supir yang Bisa Dibuka/Tutup */
+                  <div className="space-y-2">
+                    {kanvasDriverRotationQueue.map((drv, idx) => {
+                      const accId = `kanvas-drv-${drv.driverName}`;
+                      const isExpanded = !!expandedIds[accId];
+                      const driverTrips = kanvasLktHistoryList.filter(
+                        h => h.crewName.toLowerCase() === drv.driverName.toLowerCase()
+                      );
+
+                      return (
+                        <UiAccordionItem
+                          key={accId}
+                          id={accId}
+                          isExpanded={isExpanded}
+                          onToggle={toggleAccordion}
+                          title={
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-2 py-0.5 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 font-mono text-[11px] font-black">
+                                Giliran #{idx + 1}
+                              </span>
+                              <span className="font-bold text-white">{drv.driverName}</span>
+                              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
+                                Armada: {drv.armada}
+                              </span>
+                              {idx === 0 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-slate-950">
+                                  ★ Jadwal Kanvas Selanjutnya
+                                </span>
+                              ) : idx === 1 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                  Urutan Berikutnya
+                                </span>
+                              ) : null}
+                            </div>
+                          }
+                          subtitle={
+                            drv.lastKanvasDate
+                              ? `Terakhir Kanvas: ${new Date(drv.lastKanvasDate).toLocaleDateString('id-ID', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric'
+                                })} (${drv.lastKanvasArea || 'Kanvas'})`
+                              : 'Belum pernah jalan Kanvas · Prioritas Utama'
+                          }
+                          rightMeta={
+                            <UiBadge
+                              count={`${drv.kanvasCount}x Kanvas`}
+                              variant={idx === 0 ? 'emerald' : 'blue'}
+                            />
+                          }
+                        >
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                                <div className="text-[10px] text-slate-400">Status Giliran</div>
+                                <div className="font-bold text-white mt-0.5">
+                                  {idx === 0
+                                    ? 'Prioritas #1 (Jadwal Selanjutnya)'
+                                    : idx === 1
+                                    ? 'Prioritas #2 (Urutan Berikutnya)'
+                                    : `Antrean Rotasi #${idx + 1}`}
+                                </div>
+                              </div>
+                              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                                <div className="text-[10px] text-slate-400">Unit Armada Utama</div>
+                                <div className="font-mono font-bold text-amber-300 mt-0.5">{drv.armada}</div>
+                              </div>
+                              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                                <div className="text-[10px] text-slate-400">Riwayat Perjalanan Kanvas</div>
+                                <div className="font-mono font-bold text-emerald-400 mt-0.5">{drv.kanvasCount} Perjalanan</div>
+                              </div>
+                            </div>
+
+                            {driverTrips.length > 0 && (
+                              <div className="pt-1 space-y-1.5">
+                                <div className="text-[11px] font-semibold text-slate-300">
+                                  Rincian Riwayat Keberangkatan Kanvas ({driverTrips.length}):
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {driverTrips.map((tr, tIdx) => (
+                                    <div
+                                      key={`${accId}-tr-${tIdx}`}
+                                      className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                                    >
+                                      <div>
+                                        <div className="font-semibold text-white">{tr.areaName}</div>
+                                        <div className="text-[10px] text-slate-400">
+                                          {new Date(tr.dateStr).toLocaleDateString('id-ID', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric'
+                                          })}{' '}
+                                          · Helper: {tr.helperName || '-'}
+                                        </div>
+                                      </div>
+                                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                        {tr.plateNumber}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </UiAccordionItem>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* MODE CARDS: Tampilan Grid Kartu Visual per Supir */
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {kanvasDriverRotationQueue.map((drv, idx) => (
+                      <UiCard
+                        key={`card-drv-${drv.driverName}`}
+                        compact
+                        title={drv.driverName}
+                        subtitle={`Armada: ${drv.armada}`}
+                        badge={
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                              idx === 0
+                                ? 'bg-emerald-500 text-slate-950'
+                                : idx === 1
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                : 'bg-slate-800 text-slate-300 border border-slate-700'
+                            }`}
+                          >
+                            #{idx + 1}
+                          </span>
+                        }
+                        headerAction={
+                          <UiBadge
+                            count={`${drv.kanvasCount}x Kanvas`}
+                            variant={idx === 0 ? 'emerald' : 'blue'}
+                          />
+                        }
+                        footer={
+                          <div className="w-full flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">Rekomendasi:</span>
+                            <span
+                              className={`font-bold ${
+                                idx === 0
+                                  ? 'text-emerald-400'
+                                  : idx === 1
+                                  ? 'text-purple-300'
+                                  : 'text-slate-300'
+                              }`}
+                            >
+                              {idx === 0
+                                ? '★ Jadwal Kanvas Selanjutnya'
+                                : idx === 1
+                                ? 'Urutan Berikutnya'
+                                : `Antrean #${idx + 1}`}
+                            </span>
+                          </div>
+                        }
+                      >
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Terakhir Kanvas:</span>
+                            <span className="font-semibold text-white">
+                              {drv.lastKanvasDate
+                                ? new Date(drv.lastKanvasDate).toLocaleDateString('id-ID', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric'
+                                  })
+                                : 'Belum Pernah'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Rute Terakhir:</span>
+                            <span className="font-semibold text-purple-300 truncate max-w-[160px]">
+                              {drv.lastKanvasArea || '-'}
+                            </span>
+                          </div>
+                        </div>
+                      </UiCard>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* BAGIAN 2: RIWAYAT & JADWAL PENGIRIMAN KANVAS */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-purple-400" />
+                      <span>Riwayat &amp; Jadwal Pengiriman Kanvas</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-600 text-white">
+                        {kanvasLktHistoryList.length} Riwayat Tercatat
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Log historis keberangkatan pengiriman Kanvas beserta supir, helper, dan armada yang bertugas ({useAccordionLayout ? 'Tampilan Accordion' : 'Tampilan Cards'}).
+                    </p>
+                  </div>
+                </div>
+
+                {kanvasLktHistoryList.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    Belum ada riwayat pengiriman Kanvas pada filter saat ini.
+                  </div>
+                ) : useAccordionLayout ? (
+                  /* MODE ACCORDION: Riwayat Kanvas Bertumpuk */
+                  <div className="space-y-2">
+                    {kanvasLktHistoryList.map((entry, idx) => {
+                      const histId = `kanvas-hist-${entry.id || idx}`;
+                      const isExpanded = !!expandedIds[histId];
+                      const formattedDate = new Date(entry.dateStr).toLocaleDateString('id-ID', {
                         weekday: 'short',
                         day: '2-digit',
                         month: 'short',
                         year: 'numeric'
-                      })}{' '}
-                      &middot; {t.vehiclePlate}
-                    </div>
+                      });
+
+                      return (
+                        <UiAccordionItem
+                          key={histId}
+                          id={histId}
+                          isExpanded={isExpanded}
+                          onToggle={toggleAccordion}
+                          title={
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-xs font-bold text-purple-300">
+                                {formattedDate}
+                              </span>
+                              <span className="text-slate-500">&middot;</span>
+                              <span className="font-bold text-white">{entry.crewName}</span>
+                              <span className="px-2 py-0.5 rounded font-mono font-bold text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                {entry.plateNumber}
+                              </span>
+                            </div>
+                          }
+                          subtitle={`Tujuan: ${entry.areaName} · Helper: ${entry.helperName || '-'}`}
+                          rightMeta={
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> {entry.statusLabel}
+                            </span>
+                          }
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs">
+                            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                              <div className="text-[10px] text-slate-400">Tanggal Keberangkatan</div>
+                              <div className="font-mono font-bold text-white mt-0.5">{formattedDate}</div>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                              <div className="text-[10px] text-slate-400">Driver &amp; Helper Kanvas</div>
+                              <div className="font-bold text-white mt-0.5">
+                                {entry.crewName} <span className="text-slate-400 font-normal">/ {entry.helperName || '-'}</span>
+                              </div>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                              <div className="text-[10px] text-slate-400">Unit Armada</div>
+                              <div className="font-mono font-bold text-amber-300 mt-0.5">{entry.plateNumber}</div>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                              <div className="text-[10px] text-slate-400">Area Tujuan Kanvas</div>
+                              <div className="font-bold text-purple-300 mt-0.5">{entry.areaName}</div>
+                            </div>
+                          </div>
+                        </UiAccordionItem>
+                      );
+                    })}
                   </div>
-                  <UiBadge count={`Trip #${idx + 1}`} variant="slate" />
-                </div>
-              ))}
+                ) : (
+                  /* MODE CARDS: Riwayat Kanvas dalam Grid Kartu */
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {kanvasLktHistoryList.map((entry, idx) => {
+                      const formattedDate = new Date(entry.dateStr).toLocaleDateString('id-ID', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                      });
+
+                      return (
+                        <UiCard
+                          key={entry.id || `klkt-card-${idx}`}
+                          compact
+                          title={entry.crewName}
+                          subtitle={`Helper: ${entry.helperName || '-'}`}
+                          badge={
+                            <span className="px-2 py-0.5 rounded font-mono font-bold text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              {entry.plateNumber}
+                            </span>
+                          }
+                          headerAction={
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> {entry.statusLabel}
+                            </span>
+                          }
+                          footer={
+                            <div className="w-full flex items-center justify-between text-[11px]">
+                              <span className="text-slate-400">Tanggal Kirim:</span>
+                              <span className="font-mono font-bold text-white">{formattedDate}</span>
+                            </div>
+                          }
+                        >
+                          <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-slate-400">Area Tujuan:</span>
+                            <span className="px-2 py-0.5 rounded font-bold text-[10px] uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              {entry.areaName}
+                            </span>
+                          </div>
+                        </UiCard>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </UiPopover>
+          )}
+        </div>
+      </div>
 
       {/* 4. POPOVER: Rotation Threshold Settings */}
       <UiPopover
