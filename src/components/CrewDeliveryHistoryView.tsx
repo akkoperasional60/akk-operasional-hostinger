@@ -30,6 +30,7 @@ import {
   UiBadge,
   UiProgressBar
 } from './ui/UiPrimitives';
+import { branchStore, BranchRecord } from '../services/branchStore';
 
 export const CrewDeliveryHistoryView: React.FC = () => {
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
@@ -38,6 +39,15 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const [, setApprovalRequests] = useState<AreaApprovalRequest[]>(logisticsStore.getAreaApprovalRequests());
   const [threshold, setThreshold] = useState<number>(logisticsStore.getAreaDeliveryThreshold());
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+
+  useEffect(() => {
+    return branchStore.subscribe(() => {
+      setBranches(branchStore.getActiveBranches());
+      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
+    });
+  }, []);
 
   // Filter & Search States (Text Fields & Selectors)
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
@@ -268,7 +278,11 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         (qNorm.length > 0 && fleetFullNorm.includes(qNorm)) ||
         item.area.toLowerCase().includes(q);
 
+      const crewBranch = branchStore.getCrewBranch(item.crewId, item.crewName);
+      const matchesBranch = selectedBranchId === 'ALL' || crewBranch.id === selectedBranchId;
+
       return (
+        matchesBranch &&
         matchesCrew &&
         matchesFleetDropdown &&
         matchesArea &&
@@ -278,7 +292,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         matchesSearch
       );
     });
-  }, [history, selectedCrewId, selectedFleetFilter, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery, resolveCanonicalFleet]);
+  }, [history, selectedBranchId, selectedCrewId, selectedFleetFilter, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery, resolveCanonicalFleet]);
 
   // Integrated Real-time Crew Area Stats from History Log
   const crewAreaStatsList = useMemo(() => {
@@ -564,7 +578,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     return combined.sort((a, b) => new Date(b.dateStr).getTime() - new Date(a.dateStr).getTime());
   }, [filteredHistory, selectedMonth, selectedYear]);
 
-  // Urutan & Rekomendasi Giliran Jadwal Kanvas Selanjutnya (Siapa Kru Berikutnya)
+  // Urutan & Rekomendasi Giliran Jadwal Kanvas Selanjutnya (Hanya Berlaku untuk User Role Driver yang Aktif)
   const kanvasDriverRotationQueue = useMemo(() => {
     const driverMap = new Map<string, {
       driverName: string;
@@ -575,70 +589,69 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       totalAllTrips: number;
     }>();
 
-    // Seed from active drivers in crews list
-    crews
-      .filter(c => !c.role || c.role.toLowerCase().includes('driver') || c.role.toLowerCase().includes('supir'))
-      .forEach(c => {
-        const key = c.name.trim().toLowerCase();
-        if (!key || key === '-') return;
-        const fl = fleets.find(f => f.id === c.currentFleetId || f.id === (c as any).defaultFleetId);
-        driverMap.set(key, {
-          driverName: c.name.trim(),
-          armada: fl?.initialCode || fl?.plateNumber || 'Siap Tugas',
-          kanvasCount: 0,
-          lastKanvasDate: null,
-          lastKanvasArea: null,
-          totalAllTrips: 0
-        });
+    // Ambil HANYA user dengan role === 'driver' dan status === 'approved' (Aktif) dari Manajemen User
+    const activeDriverUsers = logisticsStore
+      .getUsers()
+      .filter(u => {
+        const displayName = (u.fullName || (u as any).name || '').trim();
+        return u.role === 'driver' && u.status === 'approved' && displayName && displayName !== '-';
       });
 
-    // Also seed from drivers in crewAreaStatsList
+    const findMatchingDriverKey = (rawName: string): string | null => {
+      const clean = rawName.trim().toLowerCase();
+      if (!clean || clean === '-') return null;
+      if (driverMap.has(clean)) return clean;
+      const firstWord = clean.split(/\s+/)[0];
+      for (const [k, val] of driverMap.entries()) {
+        const kFirst = val.driverName.trim().toLowerCase().split(/\s+/)[0];
+        if (k === clean || (firstWord.length >= 3 && kFirst === firstWord)) {
+          return k;
+        }
+      }
+      return null;
+    };
+
+    // Seed HANYA dari user role driver yang aktif
+    activeDriverUsers.forEach(u => {
+      const fullName = (u.fullName || (u as any).name || '').trim();
+      const key = fullName.toLowerCase();
+      if (!key || driverMap.has(key)) return;
+      driverMap.set(key, {
+        driverName: fullName,
+        armada: '-',
+        kanvasCount: 0,
+        lastKanvasDate: null,
+        lastKanvasArea: null,
+        totalAllTrips: 0
+      });
+    });
+
+    // Update totalAllTrips hanya untuk driver aktif yang sudah terdaftar di driverMap
     crewAreaStatsList.forEach(c => {
-      if (c.role.toLowerCase().includes('helper')) return;
-      const key = c.crewName.trim().toLowerCase();
-      if (!key || key === '-') return;
-      const existing = driverMap.get(key);
+      const matchedKey = findMatchingDriverKey(c.crewName);
+      if (!matchedKey) return;
+      const existing = driverMap.get(matchedKey);
       if (existing) {
         existing.totalAllTrips = c.totalTrips;
-        if (c.fleetCodes.length > 0) existing.armada = c.fleetCodes[0];
-      } else {
-        driverMap.set(key, {
-          driverName: c.crewName.trim(),
-          armada: c.fleetCodes[0] || 'NP1',
-          kanvasCount: 0,
-          lastKanvasDate: null,
-          lastKanvasArea: null,
-          totalAllTrips: c.totalTrips
-        });
       }
     });
 
-    // Accumulate Kanvas trips per driver
+    // Akumulasi riwayat perjalanan Kanvas hanya untuk driver aktif yang terdaftar di driverMap
     kanvasLktHistoryList.forEach(k => {
-      if (k.crewRole.toLowerCase().includes('helper')) return;
-      const key = k.crewName.trim().toLowerCase();
-      if (!key || key === '-') return;
-      const existing = driverMap.get(key);
+      if (k.crewRole && k.crewRole.toLowerCase().includes('helper')) return;
+      const matchedKey = findMatchingDriverKey(k.crewName);
+      if (!matchedKey) return;
+      const existing = driverMap.get(matchedKey);
       if (existing) {
         existing.kanvasCount += 1;
         if (!existing.lastKanvasDate || new Date(k.dateStr).getTime() > new Date(existing.lastKanvasDate).getTime()) {
           existing.lastKanvasDate = k.dateStr;
           existing.lastKanvasArea = k.areaName;
         }
-        if (k.plateNumber) existing.armada = k.plateNumber;
-      } else {
-        driverMap.set(key, {
-          driverName: k.crewName.trim(),
-          armada: k.plateNumber || 'NP1',
-          kanvasCount: 1,
-          lastKanvasDate: k.dateStr,
-          lastKanvasArea: k.areaName,
-          totalAllTrips: 1
-        });
       }
     });
 
-    // Sort so the driver with the FEWEST Kanvas trips (or oldest lastKanvasDate) is #1 Next in Line
+    // Urutkan sehingga driver aktif dengan jumlah Kanvas paling sedikit (atau paling lama belum Kanvas) berada di urutan #1
     return Array.from(driverMap.values()).sort((a, b) => {
       if (a.kanvasCount !== b.kanvasCount) {
         return a.kanvasCount - b.kanvasCount;
@@ -917,8 +930,25 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Kolom 3: Filter Armada & Ringkasan */}
+              {/* Kolom 3: Filter Cabang & Armada */}
               <div className="space-y-2.5">
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-medium text-slate-400">Pilih Cabang</label>
+                  <select
+                    value={selectedBranchId}
+                    onChange={(e) => {
+                      setSelectedBranchId(e.target.value);
+                      branchStore.setSelectedOriginBranchId(e.target.value);
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="ALL">Semua Cabang</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>Cabang {b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="space-y-1">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
                   <select
@@ -1220,13 +1250,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         title={
                           <div className="flex items-center gap-2 flex-wrap">
                             <span>{item.crewName}</span>
-                            <span className="text-slate-500">&middot;</span>
-                            <span className="text-slate-400 font-normal">{item.role}</span>
-                            {item.fleetCodes && item.fleetCodes.length > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
-                                Armada: {item.fleetCodes.join(', ')}
-                              </span>
-                            )}
                             {item.exceededCount > 0 && (
                               <UiBadge
                                 count={`${item.exceededCount} Batas`}
@@ -1325,7 +1348,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         key={item.crewId || item.crewName}
                         compact
                         title={item.crewName}
-                        subtitle={`${item.role} · ${areaItems.length} Area Kirim`}
+                        subtitle={`${areaItems.length} Area Kirim · Maks ${item.maxSingleAreaTrips}/${threshold}x di 1 area`}
                         badge={
                           item.exceededCount > 0 ? (
                             <UiBadge count={`${item.exceededCount} Batas`} variant="amber" />
@@ -1521,9 +1544,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                 Giliran #{idx + 1}
                               </span>
                               <span className="font-bold text-white">{drv.driverName}</span>
-                              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
-                                Armada: {drv.armada}
-                              </span>
                               {idx === 0 ? (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-slate-950">
                                   ★ Jadwal Kanvas Selanjutnya
@@ -1552,7 +1572,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                           }
                         >
                           <div className="space-y-2">
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                               <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
                                 <div className="text-[10px] text-slate-400">Status Giliran</div>
                                 <div className="font-bold text-white mt-0.5">
@@ -1562,10 +1582,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                     ? 'Prioritas #2 (Urutan Berikutnya)'
                                     : `Antrean Rotasi #${idx + 1}`}
                                 </div>
-                              </div>
-                              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                                <div className="text-[10px] text-slate-400">Unit Armada Utama</div>
-                                <div className="font-mono font-bold text-amber-300 mt-0.5">{drv.armada}</div>
                               </div>
                               <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
                                 <div className="text-[10px] text-slate-400">Riwayat Perjalanan Kanvas</div>
@@ -1616,7 +1632,6 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         key={`card-drv-${drv.driverName}`}
                         compact
                         title={drv.driverName}
-                        subtitle={`Armada: ${drv.armada}`}
                         badge={
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${

@@ -1,4 +1,5 @@
 import { scheduleImportValidator } from '../services/scheduleImportValidator';
+import { branchStore } from '../services/branchStore';
 
 export interface DeliveryAssignment {
   id?: string;
@@ -11,6 +12,9 @@ export interface DeliveryAssignment {
   target?: string;
   departureTime?: string;
   targetReturnTime?: string;
+  departureDateIso?: string;
+  returnDateIso?: string;
+  branchId?: string;
   isManuallyEdited?: boolean;
 }
 
@@ -432,6 +436,23 @@ export function convertParsedTripsToWeeks(trips: Array<{
 /**
  * Convert real operational Schedule[] items from logisticsStore to AdminScheduleWeek[]
  */
+export function getScheduleCalendarDateObj(sch: any): Date | null {
+  if (!sch || !sch.departureDate) return null;
+  const dep = new Date(sch.departureDate);
+  if (isNaN(dep.getTime())) return null;
+  if (sch.estimatedArrival) {
+    const arr = new Date(sch.estimatedArrival);
+    if (!isNaN(arr.getTime())) {
+      const depKey = `${dep.getFullYear()}-${String(dep.getMonth() + 1).padStart(2, '0')}-${String(dep.getDate()).padStart(2, '0')}`;
+      const arrKey = `${arr.getFullYear()}-${String(arr.getMonth() + 1).padStart(2, '0')}-${String(arr.getDate()).padStart(2, '0')}`;
+      if (arrKey > depKey) {
+        return arr;
+      }
+    }
+  }
+  return dep;
+}
+
 export function convertSchedulesToAdminWeeks(
   schedules: any[], 
   year: number, 
@@ -441,9 +462,8 @@ export function convertSchedulesToAdminWeeks(
   const dayMap = new Map<number, AdminScheduleDay>();
 
   const filtered = (schedules || []).filter(s => {
-    if (!s || !s.departureDate) return false;
-    const d = new Date(s.departureDate);
-    if (isNaN(d.getTime())) return false;
+    const d = getScheduleCalendarDateObj(s);
+    if (!d) return false;
     return d.getFullYear() === year && d.getMonth() === month;
   });
 
@@ -452,7 +472,9 @@ export function convertSchedulesToAdminWeeks(
   }
 
   filtered.forEach(sch => {
-    const d = new Date(sch.departureDate);
+    const d = getScheduleCalendarDateObj(sch)!;
+    const depObj = new Date(sch.departureDate);
+    const arrObj = sch.estimatedArrival ? new Date(sch.estimatedArrival) : d;
     const dayNum = d.getDate();
     const dayNameStr = DAY_NAMES[d.getDay()] || 'SENIN';
     const dayNumFormatted = String(dayNum).padStart(2, '0');
@@ -473,21 +495,41 @@ export function convertSchedulesToAdminWeeks(
     const dayObj = dayMap.get(dayNum)!;
     const driverName = sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : (sch.crewId ? 'Driver ' + sch.crewId.replace('crw-', '') : 'Driver'));
     const helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
-    const helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id === 'string' && !sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
+    const helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id ? (!sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : '-') : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
     const areaName = sch.areaName || sch.store?.storeName || 'Area Kirim';
     const armadaName = sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId || 'DS3';
     const targetDesc = sch.notes || sch.cargoDescription || 'Gudang Pusat AKK Banyuwangi DC';
 
-    dayObj.pengiriman.push({
-      id: sch.id,
-      driver: driverName,
-      helper: helperName || '-',
-      helper2: helper2Name || '-',
-      area: areaName,
-      armada: armadaName,
-      target: targetDesc,
-      isManuallyEdited: !!sch.isManuallyEdited
-    });
+    const depIsoDate = !isNaN(depObj.getTime())
+      ? `${depObj.getFullYear()}-${String(depObj.getMonth() + 1).padStart(2, '0')}-${String(depObj.getDate()).padStart(2, '0')}`
+      : undefined;
+    const retIsoDate = !isNaN(arrObj.getTime())
+      ? `${arrObj.getFullYear()}-${String(arrObj.getMonth() + 1).padStart(2, '0')}-${String(arrObj.getDate()).padStart(2, '0')}`
+      : undefined;
+    const depTimeStr = !isNaN(depObj.getTime())
+      ? `${String(depObj.getHours()).padStart(2, '0')}:${String(depObj.getMinutes()).padStart(2, '0')}`
+      : '07:30';
+    const retTimeStr = !isNaN(arrObj.getTime())
+      ? `${String(arrObj.getHours()).padStart(2, '0')}:${String(arrObj.getMinutes()).padStart(2, '0')}`
+      : '17:00';
+
+    if (!dayObj.pengiriman.some(existing => existing.id && existing.id === sch.id)) {
+      dayObj.pengiriman.push({
+        id: sch.id,
+        driver: driverName,
+        helper: helperName || '-',
+        helper2: helper2Name || '-',
+        area: areaName,
+        armada: armadaName,
+        target: targetDesc,
+        departureTime: depTimeStr,
+        targetReturnTime: retTimeStr,
+        departureDateIso: depIsoDate,
+        returnDateIso: retIsoDate,
+        branchId: sch.originBranchId || (sch.id ? branchStore.getScheduleBranchId(sch.id, sch.originName, sch.fleetId) : undefined),
+        isManuallyEdited: !!sch.isManuallyEdited
+      });
+    }
   });
 
   const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.dayNumber - b.dayNumber);

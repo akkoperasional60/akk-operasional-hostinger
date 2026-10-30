@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wifi, WifiOff, RefreshCw, X, ChevronUp, ChevronDown, Radio, CheckCircle2 } from 'lucide-react';
-import { googleSheetsSyncService } from '../services/googleSheetsSyncService';
-import { dataBridgeService } from '../services/dataBridgeService';
 import { driverOfflineSyncService } from '../services/driverOfflineSyncService';
 
 interface NetworkStatusBannerProps {
@@ -27,8 +25,6 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({ onStat
     try {
       console.info('[NetworkStatusBanner] Connection restored after offline. Automatically triggering Force Data Sync...');
       await Promise.allSettled([
-        googleSheetsSyncService.syncNow('Force Data Sync (Reconnected)', false),
-        dataBridgeService.syncNow('Force Data Sync (Reconnected)'),
         driverOfflineSyncService.syncQueue()
       ]);
     } catch (err) {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -22,6 +22,7 @@ import { downloadScheduleManifestPdf } from '../utils/suratJalanPdfGenerator';
 import { useToast } from '../context/ToastContext';
 import { getAreaScheduleTiming, calculateScheduleTimestamps } from '../utils/areaScheduleRules';
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
+import { branchStore, BranchRecord } from '../services/branchStore';
 
 interface ScheduleManagementProps {
   preselectedStore?: RetailStore | null;
@@ -61,6 +62,183 @@ const AREA_MAP: Record<string, string> = {
   'KANVAS_LKT': 'KANVAS LKT'
 };
 
+const CrewIdCustomDropdown: React.FC<{
+  label: string;
+  value: string;
+  options: Crew[];
+  onChange: (crewId: string) => void;
+  emptyLabel: string;
+  roleBadgeText: string;
+  accentColor?: 'blue' | 'emerald';
+}> = ({
+  label,
+  value,
+  options,
+  onChange,
+  emptyLabel,
+  roleBadgeText,
+  accentColor = 'emerald'
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const activeOptions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return options.filter(c => c.status !== 'off' && (!q || c.name.toLowerCase().includes(q)));
+  }, [options, search]);
+
+  const selectedCrew = options.find(c => c.id === value && c.status !== 'off');
+  const getInitials = (name: string) => {
+    const parts = (name || '').trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (name || 'KR').substring(0, 2).toUpperCase();
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="text-slate-300 flex items-center justify-between mb-1.5 font-bold text-[11px]">
+        <span>{label}</span>
+        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+          {options.filter(c => c.status !== 'off').length} Aktif
+        </span>
+      </label>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(prev => !prev);
+          setSearch('');
+        }}
+        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-slate-900 border text-left transition cursor-pointer ${
+          isOpen ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-800 hover:border-slate-700'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-[10px] shrink-0 border ${
+            !selectedCrew
+              ? 'bg-slate-800 text-slate-500 border-slate-700'
+              : accentColor === 'blue'
+              ? 'bg-blue-600 text-white border-blue-500'
+              : 'bg-emerald-600 text-white border-emerald-500'
+          }`}>
+            {!selectedCrew ? '—' : getInitials(selectedCrew.name)}
+          </div>
+          <div className="min-w-0">
+            <div className={`text-xs font-bold leading-tight truncate ${
+              !selectedCrew ? 'text-slate-500 italic' : 'text-white'
+            }`}>
+              {selectedCrew ? selectedCrew.name : emptyLabel}
+            </div>
+            <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+              {selectedCrew ? `${roleBadgeText} • Status Aktif` : 'Tidak ditugaskan'}
+            </div>
+          </div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180 text-blue-400' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 z-50 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="p-2 bg-slate-950 border-b border-slate-800">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={`Cari nama ${roleBadgeText.toLowerCase()}...`}
+                autoFocus
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto p-1.5 space-y-1">
+            <button
+              type="button"
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+              }}
+              className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition cursor-pointer ${
+                !selectedCrew ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:bg-slate-800/60'
+              }`}
+            >
+              <span className="italic">{emptyLabel}</span>
+              {!selectedCrew && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+            </button>
+
+            {activeOptions.length === 0 ? (
+              <div className="py-4 text-center text-[11px] text-slate-500">
+                Tidak ada kru aktif yang ditemukan.
+              </div>
+            ) : (
+              activeOptions.map(cr => {
+                const isSelected = selectedCrew?.id === cr.id;
+                return (
+                  <button
+                    key={cr.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(cr.id);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
+                      isSelected
+                        ? accentColor === 'blue'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-emerald-600 text-white'
+                        : 'hover:bg-slate-800/80 text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-[10px] shrink-0 border ${
+                        isSelected
+                          ? 'bg-white/20 text-white border-white/30'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        {getInitials(cr.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold leading-snug">{cr.name}</div>
+                        <div className={`text-[10px] ${isSelected ? 'text-white/85' : 'text-emerald-400'}`}>
+                          {roleBadgeText} • ● Aktif
+                        </div>
+                      </div>
+                    </div>
+                    {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   preselectedStore,
   onClearPreselectedStore,
@@ -70,6 +248,38 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   const [stores, setStores] = useState<RetailStore[]>(logisticsStore.getStores());
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
+
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
+  const [selectedOriginBranchId, setSelectedOriginBranchId] = useState<string>(() =>
+    branchStore.getSelectedOriginBranchId()
+  );
+  const [newScheduleOriginBranchId, setNewScheduleOriginBranchId] = useState<string>(() => {
+    const active = branchStore.getSelectedOriginBranchId();
+    return active === 'ALL' ? 'branch-banyuwangi' : active;
+  });
+
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  const branchDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target as Node)) {
+        setIsBranchDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const syncBranches = () => {
+      setBranches(branchStore.getActiveBranches());
+      const sel = branchStore.getSelectedOriginBranchId();
+      setSelectedOriginBranchId(sel);
+      if (sel !== 'ALL') setNewScheduleOriginBranchId(sel);
+    };
+    return branchStore.subscribe(syncBranches);
+  }, []);
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
@@ -609,12 +819,24 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       return;
     }
 
+    const originBranch = branchStore.getBranchById(newScheduleOriginBranchId);
+    const originWarehouseLabel = originBranch
+      ? `Gudang Pusat ${originBranch.name} (${originBranch.slug})`
+      : CENTRAL_WAREHOUSE.name;
+
+    const originTuple: [number, number] =
+      originBranch?.slug === 'sidoarjo'
+        ? [-7.4478, 112.7183]
+        : originBranch?.slug === 'nx-jember'
+        ? [-8.1724, 113.6995]
+        : CENTRAL_WAREHOUSE.coordinates;
+
     const scheduleData = {
       ...newSchedule,
       areaName: targetAreaLabel,
       cargoDescription: `Karton Box & Sheet Kemasan - Area ${targetAreaLabel}`,
-      originName: CENTRAL_WAREHOUSE.name,
-      originCoords: CENTRAL_WAREHOUSE.coordinates,
+      originName: originWarehouseLabel,
+      originCoords: originTuple,
       departureDate: new Date(newSchedule.departureDate).toISOString(),
       estimatedArrival: new Date(newSchedule.estimatedArrival).toISOString(),
       areaApprovalStatus: (areaCheck?.requiresApproval ? 'approved' : 'not_required') as 'approved' | 'not_required',
@@ -638,11 +860,13 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
 
     if ((newSchedule as any).id) {
       logisticsStore.updateSchedule((newSchedule as any).id, scheduleData);
+      branchStore.setScheduleBranch((newSchedule as any).id, newScheduleOriginBranchId);
       logisticsStore.addScheduleChangeLog({
         fileName: `Edit Jadwal Manual (${targetAreaLabel})`,
         actionType: 'edit_jadwal',
         summary: `Memperbarui jadwal pengiriman area ${targetAreaLabel}`,
         changes: [
+          `Gudang Asal: ${originWarehouseLabel}`,
           `Area Kirim: ${targetAreaLabel}`,
           `Armada Truk: ${fleetLabel}`,
           `Kru Supir Utama: ${crew?.name || '-'}`,
@@ -653,12 +877,14 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       });
     } else {
       const created = logisticsStore.addSchedule(scheduleData);
+      branchStore.setScheduleBranch(created.id, newScheduleOriginBranchId);
 
       logisticsStore.addScheduleChangeLog({
         fileName: `Input Jadwal Baru (+ Jadwal Baru)`,
         actionType: 'tambah_jadwal',
-        summary: `Menambahkan jadwal pengiriman baru ke ${targetAreaLabel}`,
+        summary: `Menambahkan jadwal pengiriman baru ke ${targetAreaLabel} dari ${originWarehouseLabel}`,
         changes: [
+          `Gudang Asal: ${originWarehouseLabel}`,
           `Area Kirim: ${targetAreaLabel}`,
           `Armada Truk: ${fleetLabel}`,
           `Kru Supir Utama: ${crew?.name || '-'}`,
@@ -683,7 +909,7 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
         'Jadwal Baru Berhasil Dirilis',
         `Penugasan ke ${targetAreaLabel} (${crew?.name || 'Driver'} • ${fleetLabel}) otomatis masuk ke Jadwal & Penugasan serta Portal Driver Mobile.`
       );
-      setAutoInitMessage(`✅ Jadwal pengiriman baru ke ${targetAreaLabel} (${crew?.name || 'Driver'} • ${fleetLabel}) berhasil ditambahkan dan langsung terbaca di Jadwal & Penugasan serta Portal Driver Mobile!`);
+      setAutoInitMessage(`✅ Jadwal pengiriman baru ke ${targetAreaLabel} (${crew?.name || 'Driver'} • ${fleetLabel}) dari ${originWarehouseLabel} berhasil ditambahkan!`);
       setTimeout(() => setAutoInitMessage(null), 6000);
     }
 
@@ -1062,11 +1288,90 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
         </div>
       )}
 
-      {/* Google Sheets (ALL) / Excel View */}
+      {/* Cabang Selector Toolbar (Design matching image_bbbfdc09.png) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3 shadow-xs no-print">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
+            <Building2 className="w-4.5 h-4.5" />
+          </div>
+          <div>
+            <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+              Jadwal Distribusi &amp; Penugasan Armada
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Sistem jadwal terintegrasi cabang operasional.
+            </p>
+          </div>
+        </div>
+
+        {/* Dropdown UI/UX matching user reference image_bbbfdc09.png */}
+        <div className="relative self-start sm:self-auto" ref={branchDropdownRef}>
+          <div className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider mb-0.5">
+            CABANG
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsBranchDropdownOpen((prev) => !prev)}
+            className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs font-bold shadow-xs hover:border-blue-500 transition cursor-pointer min-w-[150px] justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+              <span>
+                {selectedOriginBranchId === 'ALL'
+                  ? 'Semua Cabang'
+                  : branches.find((b) => b.id === selectedOriginBranchId)?.name || 'Pilih Cabang'}
+              </span>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isBranchDropdownOpen && (
+            <div className="absolute right-0 mt-1.5 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 py-1 z-30 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  branchStore.setSelectedOriginBranchId('ALL');
+                  setIsBranchDropdownOpen(false);
+                }}
+                className={`w-full text-left px-3.5 py-2 text-xs transition cursor-pointer flex items-center justify-between ${
+                  selectedOriginBranchId === 'ALL'
+                    ? 'bg-blue-600 text-white font-black'
+                    : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                }`}
+              >
+                <span>Semua Cabang</span>
+                <span className="text-[10px] opacity-80 font-mono">({schedules.length})</span>
+              </button>
+              {branches.map((b) => {
+                const count = schedules.filter((s) => branchStore.getScheduleBranch(s.id).id === b.id).length;
+                const isSelected = selectedOriginBranchId === b.id;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => {
+                      branchStore.setSelectedOriginBranchId(b.id);
+                      setIsBranchDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-3.5 py-2 text-xs transition cursor-pointer flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-blue-600 text-white font-black'
+                        : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                    }`}
+                  >
+                    <span>{b.name}</span>
+                    <span className="text-[10px] opacity-80 font-mono">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
       <GoogleSheetsAdminScheduleView
-        onSyncComplete={(count) => {
+        onSyncComplete={() => {
           setSchedules(logisticsStore.getSchedules());
-          setAutoInitMessage(`⚡ Berhasil menyinkronkan ${count} rute pengiriman dari Google Sheets (Sheet ALL) ke Jadwal Operasional Aktif!`);
         }}
         onNavigateToCrewHistory={onNavigateToCrewHistory}
         onOpenCreateSchedule={() => {
@@ -1115,6 +1420,25 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
               </div>
 
               <form onSubmit={handleCreateSchedule} className="p-5 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+                {/* Cabang Asal Pengiriman */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <label className="text-slate-300 font-bold flex items-center gap-1.5 text-xs">
+                    <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Cabang Asal Pengiriman *</span>
+                  </label>
+                  <select
+                    value={newScheduleOriginBranchId}
+                    onChange={(e) => setNewScheduleOriginBranchId(e.target.value)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.city || b.slug})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Section 1: Area & Armada */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
@@ -1344,64 +1668,39 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
-                        Kru Supir Utama (Role: Driver) *
-                      </label>
-                      <select
-                        required
-                        value={newSchedule.crewId}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, crewId: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Pilih Supir Utama --</option>
-                        {logisticsStore.getDriverCrews().map(cr => (
-                          <option key={cr.id} value={cr.id}>
-                            {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
-                        Kru Helper 1 / Kernet (Opsional)
-                      </label>
-                      <select
+                  <div className="space-y-3">
+                    <CrewIdCustomDropdown
+                      label="Kru Supir Utama (Role: Driver) *"
+                      value={newSchedule.crewId}
+                      options={logisticsStore.getDriverCrews()}
+                      onChange={(id) => setNewSchedule({ ...newSchedule, crewId: id })}
+                      emptyLabel="-- Pilih Supir Utama --"
+                      roleBadgeText="Kru Supir"
+                      accentColor="blue"
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <CrewIdCustomDropdown
+                        label="Kru Helper 1 / Kernet (Opsional)"
                         value={newSchedule.crewHelperId || ''}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, crewHelperId: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Pilih Helper 1 --</option>
-                        {logisticsStore
+                        options={logisticsStore
                           .getHelperCrews()
-                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)
-                          .map(cr => (
-                            <option key={cr.id} value={cr.id}>
-                              {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
-                        Kru Helper 2 / Kernet (Opsional)
-                      </label>
-                      <select
+                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)}
+                        onChange={(id) => setNewSchedule({ ...newSchedule, crewHelperId: id })}
+                        emptyLabel="-- Pilih Helper 1 --"
+                        roleBadgeText="Kru Helper"
+                        accentColor="emerald"
+                      />
+                      <CrewIdCustomDropdown
+                        label="Kru Helper 2 / Kernet (Opsional)"
                         value={newSchedule.crewHelper2Id || ''}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, crewHelper2Id: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Pilih Helper 2 --</option>
-                        {logisticsStore
+                        options={logisticsStore
                           .getHelperCrews()
-                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)
-                          .map(cr => (
-                            <option key={cr.id} value={cr.id}>
-                              {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
-                            </option>
-                          ))}
-                      </select>
+                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)}
+                        onChange={(id) => setNewSchedule({ ...newSchedule, crewHelper2Id: id })}
+                        emptyLabel="-- Pilih Helper 2 --"
+                        roleBadgeText="Kru Helper"
+                        accentColor="emerald"
+                      />
                     </div>
                   </div>
                 </div>

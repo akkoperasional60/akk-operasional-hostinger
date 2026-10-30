@@ -27,11 +27,13 @@ import { DriverMobileView } from './components/DriverMobileView';
 import { DriverReportsManagement } from './components/DriverReportsManagement';
 import { AnalyticsReportingModule } from './components/AnalyticsReportingModule';
 import { E2ETesterModule } from './components/E2ETesterModule';
+import { MasterCabang } from './components/MasterCabang';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
-import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock } from 'lucide-react';
+import { branchStore, BranchRecord } from './services/branchStore';
+import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock, Building2 } from 'lucide-react';
 import { useToast } from './context/ToastContext';
 import { canAccess, getDefaultTabForRole } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
@@ -105,6 +107,19 @@ export default function App() {
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
+  const [selectedOriginBranchId, setSelectedOriginBranchId] = useState<string>(() =>
+    branchStore.getSelectedOriginBranchId()
+  );
+
+  useEffect(() => {
+    const syncBranches = () => {
+      setBranches(branchStore.getActiveBranches());
+      setSelectedOriginBranchId(branchStore.getSelectedOriginBranchId());
+    };
+    const unsubscribeBranch = branchStore.subscribe(syncBranches);
+    return () => unsubscribeBranch();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -146,6 +161,9 @@ export default function App() {
   useEffect(() => {
     if (isAuthChecking || !isAuthenticated) return;
 
+    // Safety guard: Pending users stay on their current requested tab with warning banner, avoid infinite redirect loop
+    if (currentUser.status === 'pending') return;
+
     const userOrRoleChanged =
       prevUserRef.current.id !== currentUser.id ||
       prevUserRef.current.role !== currentUser.role;
@@ -158,7 +176,10 @@ export default function App() {
         setCurrentTab(requestedTab);
         return;
       }
-      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
+      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      if (currentTab !== defaultTab) {
+        setCurrentTab(defaultTab);
+      }
       return;
     }
 
@@ -166,7 +187,10 @@ export default function App() {
     const isAdminTabBlocked = currentTab === 'users' && !isAdmin(currentUser) && !canAccess(currentUser, 'users');
 
     if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
-      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
+      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      if (currentTab !== defaultTab) {
+        setCurrentTab(defaultTab);
+      }
     }
   }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin, isAuthChecking, isAuthenticated]);
 
@@ -201,7 +225,7 @@ export default function App() {
       case 'ga_aset': return 'General Affair (GA): Manajemen Aset & Fasilitas Pabrik';
       case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
       case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
-      case 'finance_dashboard': return 'Dashboard Departemen Finance & Tax';
+      case 'finance_dashboard': return 'Finance & Tax: Tagihan Pelanggan Belum Terlunasi';
       case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
       case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
       case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
@@ -209,13 +233,16 @@ export default function App() {
       case 'warehouse_scanner': return 'WMS: Pemindaian Foto Barang & Sinkronisasi Inventaris';
       case 'warehouse_slotting': return 'WMS: Denah Rak & Kapasitas Zona Gudang';
       case 'warehouse_opname': return 'WMS: Stok Opname & Kartu Stok Digital';
+      case 'warehouse_cubication': return 'WMS: Kubikasi Barang & Berat Barang';
+      case 'warehouse_fleet_cubication': return 'WMS: Simulasi Kubikasi Box Armada & Item Barang';
       case 'purchasing_dashboard': return 'Dashboard Departemen Adm. Pembelian';
       case 'purchasing_stock_overview': return 'Analisa Stok: Ringkasan & Status';
       case 'purchasing_stock_forecast': return 'Analisa Stok: Prediksi Kebutuhan';
       case 'marketing_online': return 'Departemen Marketing: Prospek & Proaktif Online';
-      case 'marketing_offline': return 'Departemen Marketing: Canvasing & Kunjungan Offline';
+      case 'marketing_offline': return 'Departemen Marketing: Laporan Kunjungan & Laporan Penjualan';
       case 'activity_log': return 'Audit Log & Aktivitas Sistem';
       case 'customer_map': return 'Pemetaan Toko Retail & Mitra';
+      case 'branches': return 'Master Cabang (Multi-Store)';
       case 'users': return 'Approval & Manajemen Pengguna';
       case 'architecture': return 'Arsitektur Database Hostinger MySQL';
       case 'e2e_testing': return 'Pusat Pengujian E2E & Simulasi Akun Pengguna';
@@ -335,7 +362,11 @@ export default function App() {
               <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
                 <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
                 <span>&middot;</span>
-                <span>Banyuwangi Hub</span>
+                <span>
+                  {selectedOriginBranchId === 'ALL'
+                    ? 'Semua Cabang'
+                    : `Cabang ${branchStore.getBranchById(selectedOriginBranchId)?.name || 'Nusantara'}`}
+                </span>
               </div>
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                 {getTabTitle(currentTab)}
@@ -344,6 +375,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
+
             {/* Quick Driver Mobile Mode Switcher */}
             <button
               onClick={() =>
@@ -431,7 +463,7 @@ export default function App() {
         )}
 
         <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${
-          currentUser.status === 'pending' ? 'pt-4' : 'pt-18 lg:pt-6'
+          currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'
         }`}>
           {currentTab === 'dashboard' && (
             isAdmin() || canAccess(currentUser, 'dashboard') ? (
@@ -508,6 +540,10 @@ export default function App() {
               initialTab="crews"
               initialSubTab="history"
             />
+          )}
+
+          {currentTab === 'branches' && (isAdmin() || canAccess(currentUser, 'branches')) && (
+            <MasterCabang />
           )}
 
           {currentTab === 'users' && (isAdmin() || canAccess(currentUser, 'users')) && (
@@ -599,7 +635,9 @@ export default function App() {
             currentTab === 'warehouse_outbound' ||
             currentTab === 'warehouse_scanner' ||
             currentTab === 'warehouse_slotting' ||
-            currentTab === 'warehouse_opname') && (
+            currentTab === 'warehouse_opname' ||
+            currentTab === 'warehouse_cubication' ||
+            currentTab === 'warehouse_fleet_cubication') && (
             <WarehouseManagementSystem
               initialTab={
                 currentTab === 'warehouse_inventory'
@@ -614,6 +652,10 @@ export default function App() {
                   ? 'slotting'
                   : currentTab === 'warehouse_opname'
                   ? 'opname'
+                  : currentTab === 'warehouse_cubication'
+                  ? 'cubication'
+                  : currentTab === 'warehouse_fleet_cubication'
+                  ? 'fleet_cubication'
                   : 'overview'
               }
               onNavigateTab={(tab: WmsSubTab) => {
@@ -624,7 +666,9 @@ export default function App() {
                   outbound: 'warehouse_outbound',
                   scanner: 'warehouse_scanner',
                   slotting: 'warehouse_slotting',
-                  opname: 'warehouse_opname'
+                  opname: 'warehouse_opname',
+                  cubication: 'warehouse_cubication',
+                  fleet_cubication: 'warehouse_fleet_cubication'
                 };
                 setCurrentTab(map[tab] || 'warehouse_dashboard');
               }}

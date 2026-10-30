@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Calendar, Truck, FileSpreadsheet, Map, Radio, Database, Shield, ChevronDown, Bell, LogOut, UserCircle, Menu, X, Building2, History, Users } from 'lucide-react';
+import { LayoutDashboard, Calendar, Truck, FileSpreadsheet, Map, Radio, Database, Shield, ChevronDown, Bell, LogOut, UserCircle, Menu, X, Building2, History, Users, MessageSquare } from 'lucide-react';
 import { UserRole, UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
 import { AkkLogo } from './AkkLogo';
@@ -9,13 +9,25 @@ export type NavTab = 'dashboard' | 'operational_dashboard' | 'schedules' | 'flee
 interface NavigationProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  onOpenChat?: () => void;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab }) => {
+export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab, onOpenChat }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
   const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  useEffect(() => {
+    const updateUnread = () => {
+      const msgs = logisticsStore.getMessages();
+      const count = msgs.filter(m => m.receiverId === currentUser.id && !m.isRead).length;
+      setUnreadCount(count);
+    };
+    updateUnread();
+    return logisticsStore.subscribe(updateUnread);
+  }, [currentUser.id]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -83,10 +95,27 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab 
           <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950 border border-slate-800 text-xs">
             <Building2 className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-slate-400">Hub:</span>
-            <strong className="text-slate-200">Gudang Pusat Banyuwangi DC</strong>
+            <strong className="text-slate-200">Gudang Banyuwangi DC</strong>
             <span className="text-slate-600">&bull;</span>
             <span className="font-mono text-emerald-400">{currentTime}</span>
           </div>
+
+          {/* Internal Chat Button */}
+          {onOpenChat && (
+            <button
+              onClick={onOpenChat}
+              className="relative p-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-blue-400 transition cursor-pointer flex items-center gap-2 text-xs font-semibold"
+              title="Buka Chat Internal Logistik"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span className="hidden sm:inline text-slate-200">Chat</span>
+              {unreadCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-blue-500 text-white text-[10px] font-extrabold animate-pulse">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* User Profile & RBAC Switcher */}
           <div className="relative">

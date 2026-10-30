@@ -32,6 +32,8 @@ export interface ParsedSheetTrip {
   target?: string;
   departureTime?: string;
   targetReturnTime?: string;
+  departureDateIso?: string;
+  returnDateIso?: string;
   notes?: string;
   backup?: string;
 }

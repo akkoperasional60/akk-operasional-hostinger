@@ -1,7 +1,7 @@
 import React from 'react';
-import { Database, Server, ShieldCheck, GitBranch, TerminalSquare, AlertTriangle } from 'lucide-react';
+import { Database, Server, ShieldCheck, GitBranch, TerminalSquare, AlertTriangle, Building2 } from 'lucide-react';
 import { SupabaseConnectivityMonitor } from './SupabaseConnectivityMonitor';
-import { DataBridgeMonitor } from './DataBridgeMonitor';
+import { MULTI_STORE_SQL_DDL } from './MasterCabang';
 
 /**
  * Legacy filename retained so existing imports/routes do not break.
@@ -17,7 +17,10 @@ export const SupabaseSqlArchitecture: React.FC = () => {
     'DB_USER=u649808503_ops_node',
     'DB_PASSWORD=<secret>',
     'SESSION_SECRET=<minimal 32 karakter acak>',
-    'GEMINI_API_KEY=<opsional; hapus jika tidak dipakai>'
+    'BOOTSTRAP_ADMIN_EMAIL=<hanya saat bootstrap awal>',
+    'BOOTSTRAP_ADMIN_PASSWORD=<hapus setelah login pertama>',
+    'BOOTSTRAP_ADMIN_NAME=<opsional, hapus setelah bootstrap>',
+    'WHATSAPP_API_KEY=<secret>'
   ];
 
   const removedApkVars = [
@@ -34,7 +37,7 @@ export const SupabaseSqlArchitecture: React.FC = () => {
         <div className="flex items-start gap-4">
           <div className="p-3 rounded-xl bg-blue-500/10 text-blue-400"><Database className="w-6 h-6" /></div>
           <div>
-            <h2 className="text-xl font-extrabold text-white">Arsitektur Database Hostinger MySQL</h2>
+            <h2 className="text-xl font-extrabold text-white">Arsitektur Database Hostinger MySQL &amp; Multi-Store B2B</h2>
             <p className="text-sm text-slate-400 mt-1">
               Frontend React tidak terhubung langsung ke database. Semua operasi data melewati Express API agar kredensial database, session secret, dan API key tetap aman di sisi server (tanpa prefix <code>VITE_</code>).
             </p>
@@ -56,6 +59,17 @@ export const SupabaseSqlArchitecture: React.FC = () => {
             <div className="text-xs text-slate-400 mt-1">{detail}</div>
           </div>
         ))}
+      </div>
+
+      {/* MULTI-STORE SQL SCHEMA */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center gap-2 text-white font-bold">
+          <Building2 className="w-5 h-5 text-blue-400" />
+          <span>Skema Tabel Database Multi-Store / Multi-Gudang Pusat (master_branches, branch_inventory_stocks, fleet_units, delivery_schedules, user_branch_permissions)</span>
+        </div>
+        <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-96 leading-relaxed">
+          {MULTI_STORE_SQL_DDL}
+        </pre>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
@@ -84,7 +98,6 @@ export const SupabaseSqlArchitecture: React.FC = () => {
       </div>
 
       <SupabaseConnectivityMonitor />
-      <DataBridgeMonitor />
     </div>
   );
 };

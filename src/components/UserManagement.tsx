@@ -3,72 +3,97 @@ import {
   Users, UserCheck, UserX, Clock, ShieldAlert, CheckCircle2, XCircle, 
   Search, Filter, Plus, Shield, User, Building, Phone, Mail, Calendar, 
   AlertTriangle, Edit3, Lock, Save, UserCog, ShieldCheck, X, Key, Copy, Check,
-  ChevronDown, ChevronRight, Settings, Eye, EyeOff, BarChart3
+  ChevronDown, ChevronRight, ChevronUp, Settings, Eye, EyeOff, BarChart3,
+  Truck, Briefcase, Package, Megaphone, ShoppingBag, DollarSign
 } from 'lucide-react';
 import { UserProfile, UserRole, UserApprovalStatus, UserPermissions } from '../types';
 import { logisticsStore } from '../services/store';
 import { getDefaultPermissionsForRole } from '../utils/rbac';
-
+import { branchStore, BranchRecord, UserBranchPermissionEntry } from '../services/branchStore';
 
 const MODULE_DEFINITIONS = [
   {
     id: 'logistics',
     name: 'Logistik & Pengiriman',
+    description: 'Dashboard logistik, jadwal pengiriman, armada, simulasi kubikasi armada, dan portal driver per cabang.',
+    borderClass: 'border-blue-500/30',
+    iconBgClass: 'bg-blue-500/15 text-blue-400',
+    IconComp: Truck,
     subMenus: [
-      { id: 'dashboard_logistik', name: 'Dashboard Logistik' },
-      { id: 'armada_ceklis', name: 'Armada & Ceklis KIR' },
+      { id: 'dashboard_logistik', name: 'Dashboard Logistik & Analitik Armada' },
+      { id: 'armada_ceklis', name: 'Data Armada & Simulasi Kubikasi Armada' },
       { id: 'live_map', name: 'Live Map GPS' },
-      { id: 'monitoring_sla', name: 'Monitoring SLA Pengiriman' },
-      { id: 'rencana_rute', name: 'Rencana Rute & Jadwal' },
+      { id: 'monitoring_sla', name: 'Monitoring SLA, Kru & Evaluasi Jalur' },
+      { id: 'rencana_rute', name: 'Jadwal & Penugasan Pengiriman' },
       { id: 'portal_driver', name: 'Portal Driver Mobile' }
     ]
   },
   {
     id: 'sales_admin',
     name: 'Admin Penjualan',
+    description: 'Aktivitas harian admin, jadwal produksi, durasi muat, matriks skill, dan data KPI penjualan mengikuti cabang.',
+    borderClass: 'border-indigo-500/30',
+    iconBgClass: 'bg-indigo-500/15 text-indigo-400',
+    IconComp: Briefcase,
     subMenus: [
       { id: 'dashboard_penjualan', name: 'Dashboard Penjualan' },
       { id: 'aktivitas_harian', name: 'Aktivitas Harian Admin' },
-      { id: 'jadwal_admin', name: 'Jadwal Admin' },
-      { id: 'durasi_muat', name: 'Durasi Muat' },
-      { id: 'matriks_skil', name: 'Matriks Skil' },
+      { id: 'jadwal_admin', name: 'Jadwal Admin & Produksi' },
+      { id: 'durasi_muat', name: 'Durasi Muat Admin' },
+      { id: 'matriks_skil', name: 'Matriks Skill Admin' },
       { id: 'pengaturan_sop', name: 'Pengaturan SOP & Jobdesk' },
-      { id: 'data_kpi', name: 'Data KPI' }
+      { id: 'data_kpi', name: 'Data KPI & Omset Penjualan' }
     ]
   },
   {
     id: 'warehouse',
-    name: 'Gudang',
+    name: 'Gudang (WMS)',
+    description: 'Dashboard gudang, master SKU & stok bin, inbound/outbound, denah rak, opname, dan kubikasi & berat barang per cabang.',
+    borderClass: 'border-emerald-500/30',
+    iconBgClass: 'bg-emerald-500/15 text-emerald-400',
+    IconComp: Package,
     subMenus: [
-      { id: 'stok_barang', name: 'Stok Barang & Material' },
-      { id: 'permintaan_barang', name: 'Permintaan Barang' },
-      { id: 'opname_stok', name: 'Opname Stok Fisik' },
-      { id: 'ceklis_muat', name: 'Ceklis Muat Barang' }
+      { id: 'stok_barang', name: 'Master SKU, Denah Rak & Kubikasi Barang' },
+      { id: 'permintaan_barang', name: 'Inbound (Barang Masuk)' },
+      { id: 'opname_stok', name: 'Stok Opname & Kartu Stok' },
+      { id: 'ceklis_muat', name: 'Outbound (Picking & Muat)' }
     ]
   },
   {
     id: 'marketing',
     name: 'Marketing',
+    description: 'Marketing online, laporan kunjungan & laporan penjualan marketing offline, serta pemetaan jaringan toko per cabang.',
+    borderClass: 'border-amber-500/30',
+    iconBgClass: 'bg-amber-500/15 text-amber-400',
+    IconComp: Megaphone,
     subMenus: [
-      { id: 'kampanye', name: 'Kampanye & Promosi' },
-      { id: 'leads_pipeline', name: 'Leads Pipeline Toko' },
-      { id: 'laporan_kunjungan', name: 'Laporan Kunjungan Lapangan' }
+      { id: 'kampanye', name: 'Marketing Online' },
+      { id: 'leads_pipeline', name: 'Marketing Offline (Laporan Kunjungan & Penjualan)' },
+      { id: 'laporan_kunjungan', name: 'Jaringan Toko & Mitra' }
     ]
   },
   {
     id: 'purchasing',
-    name: 'Admin Pembelian',
+    name: 'Admin Pembelian (Purchasing)',
+    description: 'Akses stok pembelian, ringkasan stok, dan analisa prediksi kebutuhan reorder mengikuti cabang.',
+    borderClass: 'border-purple-500/30',
+    iconBgClass: 'bg-purple-500/15 text-purple-400',
+    IconComp: ShoppingBag,
     subMenus: [
-      { id: 'permintaan_pembelian', name: 'Permintaan Pembelian (PR)' },
-      { id: 'po_vendor', name: 'Purchase Order (PO) Vendor' },
+      { id: 'permintaan_pembelian', name: 'Dashboard Pembelian' },
+      { id: 'po_vendor', name: 'Analisa Stok & Prediksi Kebutuhan' },
       { id: 'evaluasi_harga', name: 'Evaluasi Harga Supplier' }
     ]
   },
   {
     id: 'finance_tax',
     name: 'Finance & Tax',
+    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan pencatatan cicilan/pembayaran per cabang.',
+    borderClass: 'border-cyan-500/30',
+    iconBgClass: 'bg-cyan-500/15 text-cyan-400',
+    IconComp: DollarSign,
     subMenus: [
-      { id: 'kas_bank', name: 'Kas & Bank Operasional' },
+      { id: 'kas_bank', name: 'Tagihan Pelanggan Belum Terlunasi' },
       { id: 'faktur_pajak', name: 'Faktur Pajak & E-Faktur' },
       { id: 'rekonsiliasi', name: 'Rekonsiliasi Keuangan' },
       { id: 'laba_rugi', name: 'Laporan Laba Rugi' }
@@ -76,9 +101,13 @@ const MODULE_DEFINITIONS = [
   },
   {
     id: 'hr',
-    name: 'Human Resources',
+    name: 'Human Resources & GA',
+    description: 'Data karyawan & presensi, General Affair (Security, Housekeeping, Aset), serta Training & Development per cabang.',
+    borderClass: 'border-rose-500/30',
+    iconBgClass: 'bg-rose-500/15 text-rose-400',
+    IconComp: Users,
     subMenus: [
-      { id: 'hr_data_karyawan', name: 'HR - Data Karyawan & Presensi' },
+      { id: 'hr_data_karyawan', name: 'HR - Dashboard & Presensi' },
       { id: 'hr_gaji_kpi', name: 'HR - Gaji, Lembur & Penilaian Kinerja' },
       { id: 'ga_security', name: 'GA - Security (Keamanan Pabrik)' },
       { id: 'ga_hk', name: 'GA - HK (Housekeeping & Kebersihan)' },
@@ -89,11 +118,15 @@ const MODULE_DEFINITIONS = [
   },
   {
     id: 'sistem_pengguna',
-    name: 'Sistem Pengguna & Akses Eksekutif',
+    name: 'Sistem & Pengguna',
+    description: 'Master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
+    borderClass: 'border-slate-600/40',
+    iconBgClass: 'bg-slate-700/40 text-slate-300',
+    IconComp: Settings,
     subMenus: [
-      { id: 'daftar_pengguna', name: 'Daftar Pengguna Sistem' },
-      { id: 'manajemen_hak_akses', name: 'Manajemen Hak Akses & Role' },
-      { id: 'dashboard_eksekutif', name: 'Dashboard Eksekutif (Akses Terbatas)' },
+      { id: 'daftar_pengguna', name: 'Master Cabang & Manajemen User' },
+      { id: 'manajemen_hak_akses', name: 'Manajemen Hak Akses & Skema SQL' },
+      { id: 'dashboard_eksekutif', name: 'Dashboard Eksekutif' },
       { id: 'log_aktivitas_sistem', name: 'Log Aktivitas Sistem' },
       { id: 'persetujuan_akun', name: 'Persetujuan Akun (Approval)' }
     ]
@@ -138,14 +171,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
   // Super Admin check
   const isSuperAdmin = currentUser.role === 'super_admin';
+  const visibleUsersForRole = isSuperAdmin
+    ? users
+    : users.filter(u => u.status !== 'inactive' && u.status !== 'rejected');
 
   // Selected User for Split-Screen Detail View
-  const [selectedUserId, setSelectedUserId] = useState<string>(users[0]?.id || '');
-  const selectedUser = users.find(u => u.id === selectedUserId) || users[0] || null;
+  const [selectedUserId, setSelectedUserId] = useState<string>(visibleUsersForRole[0]?.id || '');
+  const selectedUser = visibleUsersForRole.find(u => u.id === selectedUserId) || visibleUsersForRole[0] || null;
 
-  // Granular Access & Menu Permissions State
-  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({ logistics: true, sales_admin: true });
+  // Granular Access & Per-Branch Menu Permissions State
+  const [branches, setBranches] = useState<BranchRecord[]>(branchStore.getBranches());
+  const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
+  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [editingPermissions, setEditingPermissions] = useState<UserPermissions['modules']>({});
+  const [branchPermissions, setBranchPermissions] = useState<Record<string, UserBranchPermissionEntry>>({});
   
   // Copy Access Modal State
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
@@ -189,6 +228,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     type: 'success' | 'warning' | 'error' | 'info';
   } | null>(null);
 
+  // Support pressing Enter or Escape on keyboard when "Oke, Mengerti" modal is open
+  useEffect(() => {
+    if (!pageModalNotification) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setPageModalNotification(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [pageModalNotification]);
+
   const showNotification = (title: string, message: string, type: 'success' | 'warning' | 'error' | 'info' = 'info') => {
     setPageModalNotification({ title, message, type });
   };
@@ -218,7 +271,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   });
 
   useEffect(() => {
-    return logisticsStore.subscribe(() => {
+    const unsubUsers = logisticsStore.subscribe(() => {
       const freshUsers = logisticsStore.getUsers();
       setUsers(freshUsers);
       setCurrentUser(logisticsStore.getCurrentUser());
@@ -226,14 +279,68 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         setSelectedUserId(freshUsers[0].id);
       }
     });
+    const unsubBranches = branchStore.subscribe(() => {
+      setBranches(branchStore.getBranches());
+    });
+    return () => {
+      unsubUsers();
+      unsubBranches();
+    };
   }, [selectedUserId]);
 
-  // Whenever selectedUser changes, initialize editingPermissions from saved permissions or role defaults
+  // Combine per-branch module permissions into effective user.permissions.modules
+  const computeMergedModulesFromBranches = (
+    bPerms: Record<string, UserBranchPermissionEntry>,
+    fallbackRole: UserRole
+  ): UserPermissions['modules'] => {
+    const merged: UserPermissions['modules'] = {};
+    const roleDefaults = getDefaultPermissionsForRole(fallbackRole);
+
+    MODULE_DEFINITIONS.forEach(mod => {
+      let anyModEnabled = false;
+      const subMenus: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+      mod.subMenus.forEach(s => {
+        subMenus[s.id] = 'none';
+      });
+
+      Object.values(bPerms).forEach(entry => {
+        if (!entry.enabled) return;
+        const m = entry.modules?.[mod.id];
+        if (m?.enabled) {
+          anyModEnabled = true;
+          mod.subMenus.forEach(s => {
+            const val = m.subMenus?.[s.id] || 'none';
+            if (val === 'full_access') {
+              subMenus[s.id] = 'full_access';
+            } else if (val === 'read_only' && subMenus[s.id] !== 'full_access') {
+              subMenus[s.id] = 'read_only';
+            }
+          });
+        }
+      });
+
+      // Fallback if all branches were unchecked so roleDefaults structure stays valid
+      if (!anyModEnabled && Object.values(bPerms).every(b => !b.enabled)) {
+        merged[mod.id] = {
+          enabled: false,
+          subMenus
+        };
+      } else {
+        merged[mod.id] = {
+          enabled: anyModEnabled || Boolean(roleDefaults[mod.id]?.enabled && false),
+          subMenus
+        };
+      }
+    });
+
+    return merged;
+  };
+
+  // Whenever selectedUser changes, initialize editingPermissions and per-branch permissions
   useEffect(() => {
     if (selectedUser) {
       const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
-      const nextExpanded: Record<string, boolean> = {};
       const isLogisticsLead =
         selectedUser.role === 'spv_logistik' ||
         selectedUser.role === 'operasional' ||
@@ -245,7 +352,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         const defaultMod = roleDefaults[mod.id];
         const subMenuPerms: Record<string, 'read_only' | 'full_access' | 'none'> = {};
 
-        // Detect if a logistics staff user had partial/unassigned 'none' submenus in 'logistics'
         const savedSubValues = Object.values(userMod?.subMenus || {});
         const savedActiveCount = savedSubValues.filter(v => v === 'full_access' || v === 'read_only').length;
         const shouldUseRoleDefaultForLogistics =
@@ -268,14 +374,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           enabled: isEnabled,
           subMenus: subMenuPerms
         };
-        if (isEnabled) {
-          nextExpanded[mod.id] = true;
-        }
       });
+
+      const loadedBranchPerms = branchStore.getUserBranchPermissions(
+        selectedUser.id,
+        selectedUser.role,
+        initialPerms
+      );
+      setBranchPermissions(loadedBranchPerms);
       setEditingPermissions(initialPerms);
-      setExpandedModules(nextExpanded);
+      // Cabang tertutup default (sesuai gambar 2)
+      setExpandedBranches({});
+      setExpandedModules({});
     }
-  }, [selectedUser?.id, selectedUser?.role, selectedUser?.permissions]);
+  }, [selectedUser?.id, selectedUser?.role, selectedUser?.permissions, branches.length]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
     super_admin: 'Super Admin / Manager',
@@ -296,25 +408,104 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     unassigned: '⚠️ Perlu Diisi (Belum Ada Role)'
   };
 
-  const toggleModuleExpansion = (modId: string) => {
-    setExpandedModules(prev => ({ ...prev, [modId]: !prev[modId] }));
+  const toggleBranchExpansion = (branchId: string) => {
+    setExpandedBranches(prev => ({ ...prev, [branchId]: !prev[branchId] }));
   };
 
-  const handleToggleModuleEnabled = (modId: string, enabled: boolean) => {
+  const toggleBranchModuleExpansion = (branchId: string, modId: string) => {
+    const key = `${branchId}:${modId}`;
+    setExpandedModules(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleToggleBranchEnabled = (branchId: string, enabled: boolean) => {
+    if (!isSuperAdmin) {
+      showNotification('Akses Ditolak', 'Hanya Super Admin yang berwenang mengubah akses cabang.', 'warning');
+      return;
+    }
+    setBranchPermissions(prev => {
+      const current = prev[branchId];
+      if (!current) return prev;
+      const roleDefaults = getDefaultPermissionsForRole(selectedUser?.role || 'unassigned');
+      let nextModules = { ...current.modules };
+
+      // If enabling a branch that currently has 0 active modules, populate from role defaults
+      if (enabled && branchStore.countActiveModulesInBranch(nextModules) === 0) {
+        nextModules = JSON.parse(JSON.stringify(roleDefaults));
+      }
+
+      const nextMap = {
+        ...prev,
+        [branchId]: {
+          ...current,
+          enabled,
+          allAccess: enabled ? current.allAccess : false,
+          modules: nextModules
+        }
+      };
+      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      return nextMap;
+    });
+
+    if (enabled) {
+      setExpandedBranches(prev => ({ ...prev, [branchId]: true }));
+    }
+  };
+
+  const handleToggleBranchAllAccess = (branchId: string, allAccess: boolean) => {
+    if (!isSuperAdmin) {
+      showNotification('Akses Ditolak', 'Hanya Super Admin yang berwenang mengubah akses cabang.', 'warning');
+      return;
+    }
+    setBranchPermissions(prev => {
+      const current = prev[branchId];
+      if (!current) return prev;
+      const nextModules: UserPermissions['modules'] = {};
+
+      MODULE_DEFINITIONS.forEach(mod => {
+        const subMenus: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+        mod.subMenus.forEach(sub => {
+          subMenus[sub.id] = allAccess ? 'full_access' : 'none';
+        });
+        nextModules[mod.id] = {
+          enabled: allAccess,
+          subMenus
+        };
+      });
+
+      const nextMap = {
+        ...prev,
+        [branchId]: {
+          ...current,
+          enabled: allAccess ? true : current.enabled,
+          allAccess,
+          modules: nextModules
+        }
+      };
+      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      return nextMap;
+    });
+
+    if (allAccess) {
+      setExpandedBranches(prev => ({ ...prev, [branchId]: true }));
+    }
+  };
+
+  const handleToggleBranchModuleEnabled = (branchId: string, modId: string, enabled: boolean) => {
     if (!isSuperAdmin) {
       showNotification('Akses Ditolak', 'Hanya Super Admin yang berwenang mengubah hak akses modul.', 'warning');
       return;
     }
     const modDef = MODULE_DEFINITIONS.find(m => m.id === modId);
-    setEditingPermissions(prev => {
-      const existingSubMenus = { ...(prev[modId]?.subMenus || {}) };
+    setBranchPermissions(prev => {
+      const branchEntry = prev[branchId];
+      if (!branchEntry) return prev;
+      const existingSubMenus = { ...(branchEntry.modules[modId]?.subMenus || {}) };
       if (modDef) {
         const hasAnyActive = modDef.subMenus.some(
           sub => existingSubMenus[sub.id] === 'full_access' || existingSubMenus[sub.id] === 'read_only'
         );
         modDef.subMenus.forEach(sub => {
           if (enabled) {
-            // If enabling module (or if only <=1 submenu was active), grant full_access to all submenus
             if (!hasAnyActive || existingSubMenus[sub.id] === 'none' || !existingSubMenus[sub.id]) {
               existingSubMenus[sub.id] = 'full_access';
             }
@@ -323,36 +514,70 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           }
         });
       }
-      return {
-        ...prev,
+      const nextModules = {
+        ...branchEntry.modules,
         [modId]: {
           enabled,
           subMenus: existingSubMenus
         }
       };
+      const activeModCount = branchStore.countActiveModulesInBranch(nextModules);
+      const nextMap = {
+        ...prev,
+        [branchId]: {
+          ...branchEntry,
+          enabled: enabled ? true : activeModCount > 0,
+          allAccess: activeModCount === MODULE_DEFINITIONS.length,
+          modules: nextModules
+        }
+      };
+      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      return nextMap;
     });
+
     if (enabled) {
-      setExpandedModules(prev => ({ ...prev, [modId]: true }));
+      setExpandedModules(prev => ({ ...prev, [`${branchId}:${modId}`]: true }));
     }
   };
 
-  const handleSubMenuPermissionChange = (modId: string, subId: string, accessLevel: 'none' | 'read_only' | 'full_access') => {
+  const handleBranchSubMenuPermissionChange = (
+    branchId: string,
+    modId: string,
+    subId: string,
+    accessLevel: 'none' | 'read_only' | 'full_access'
+  ) => {
     if (!isSuperAdmin) {
       showNotification('Akses Ditolak', 'Hanya Super Admin yang berwenang mengubah hak akses sub-menu.', 'warning');
       return;
     }
-    setEditingPermissions(prev => {
-      const mod = prev[modId] || { enabled: true, subMenus: {} };
-      return {
-        ...prev,
+    setBranchPermissions(prev => {
+      const branchEntry = prev[branchId];
+      if (!branchEntry) return prev;
+      const mod = branchEntry.modules[modId] || { enabled: true, subMenus: {} };
+      const nextSubs = {
+        ...mod.subMenus,
+        [subId]: accessLevel
+      };
+      const hasAnyActiveSub = Object.values(nextSubs).some(v => v === 'full_access' || v === 'read_only');
+      const nextModules = {
+        ...branchEntry.modules,
         [modId]: {
-          ...mod,
-          subMenus: {
-            ...mod.subMenus,
-            [subId]: accessLevel
-          }
+          enabled: hasAnyActiveSub,
+          subMenus: nextSubs
         }
       };
+      const activeModCount = branchStore.countActiveModulesInBranch(nextModules);
+      const nextMap = {
+        ...prev,
+        [branchId]: {
+          ...branchEntry,
+          enabled: activeModCount > 0 ? true : branchEntry.enabled,
+          allAccess: activeModCount === MODULE_DEFINITIONS.length,
+          modules: nextModules
+        }
+      };
+      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      return nextMap;
     });
   };
 
@@ -363,17 +588,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       return;
     }
 
+    const mergedModules = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
     const updatedPermissions: UserPermissions = {
-      modules: editingPermissions
+      modules: mergedModules
     };
 
+    branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
     const success = logisticsStore.updateUserProfile(selectedUser.id, {
       permissions: updatedPermissions
     });
 
     if (success) {
-      showNotification('Hak Akses Disimpan', `Hak akses dan pembatasan input untuk "${selectedUser.fullName}" berhasil disimpan ke sistem.`, 'success');
-      setSaveSuccessMessage(`Hak akses dan pembatasan input untuk "${selectedUser.fullName}" berhasil disimpan.`);
+      showNotification('Hak Akses Disimpan', `Akses cabang dan rincian menu website untuk "${selectedUser.fullName}" berhasil disimpan ke sistem.`, 'success');
+      setSaveSuccessMessage(`Akses cabang dan hak akses untuk "${selectedUser.fullName}" berhasil disimpan.`);
       setTimeout(() => setSaveSuccessMessage(null), 4000);
     }
   };
@@ -583,10 +810,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     );
   };
 
-  const pendingCount = users.filter(u => u.status === 'pending').length;
-  const approvedCount = users.filter(u => u.status === 'approved').length;
-  const inactiveCount = users.filter(u => u.status === 'inactive').length;
-  const rejectedCount = users.filter(u => u.status === 'rejected').length;
+  const pendingCount = visibleUsersForRole.filter(u => u.status === 'pending').length;
+  const approvedCount = visibleUsersForRole.filter(u => u.status === 'approved').length;
+  const inactiveCount = visibleUsersForRole.filter(u => u.status === 'inactive').length;
+  const rejectedCount = visibleUsersForRole.filter(u => u.status === 'rejected').length;
 
   const matchUserDepartment = (u: UserProfile, filterKey: string) => {
     if (filterKey === 'all') return true;
@@ -615,11 +842,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   };
 
   const countUsersInDept = (deptId: string) => {
-    if (deptId === 'all') return users.length;
-    return users.filter(u => matchUserDepartment(u, deptId)).length;
+    if (deptId === 'all') return visibleUsersForRole.length;
+    return visibleUsersForRole.filter(u => matchUserDepartment(u, deptId)).length;
   };
 
-  const filteredUsers = users.filter(u => {
+  const filteredUsers = visibleUsersForRole.filter(u => {
     const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
     const matchesDept = matchUserDepartment(u, departmentFilter);
     const matchesQuery =
@@ -632,13 +859,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
   // Auto-select first matching user if current selected user is filtered out
   useEffect(() => {
+    if (!isSuperAdmin && statusFilter === 'inactive') {
+      setStatusFilter('all');
+    }
     if (filteredUsers.length > 0) {
       const isSelectedPresent = filteredUsers.some(u => u.id === selectedUserId);
       if (!isSelectedPresent) {
         setSelectedUserId(filteredUsers[0].id);
       }
     }
-  }, [departmentFilter, statusFilter, searchQuery]);
+  }, [departmentFilter, statusFilter, searchQuery, isSuperAdmin, visibleUsersForRole.length]);
 
   const activeDeptOption = DEPARTMENT_FILTER_OPTIONS.find(opt => opt.id === departmentFilter);
 
@@ -660,7 +890,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           </div>
           <div>
             <div className="font-extrabold text-white text-sm sm:text-base flex items-center gap-2 flex-wrap">
-              <span>{isSuperAdmin ? 'Manajemen User, Hak Akses & Integrasi Jadwal Kru' : 'Hak Akses Pengguna Terbatas'}</span>
+              <span>{isSuperAdmin ? 'Manajemen User & Hak Akses Cabang' : 'Hak Akses Pengguna Terbatas'}</span>
               <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase border ${
                 isSuperAdmin
                   ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
@@ -668,13 +898,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               }`}>
                 {isSuperAdmin ? '👑 Super Admin' : '🔒 Read Only'}
               </span>
-              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                🚚 Sinkron Jadwal Pengiriman ({users.filter(u => u.role === 'driver').length} Driver &bull; {users.filter(u => u.role === 'crew_helper').length} Helper)
-              </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-400 mt-1 leading-relaxed">
               {isSuperAdmin
-                ? 'Setiap pengguna dengan role Kru Supir / Driver atau Kru Helper / Kernet otomatis terintegrasi ke dalam daftar penugasan Jadwal Pengiriman & Status Operasional.'
+                ? 'Pengaturan akun pengguna, pembagian akses cabang (Sidoarjo & Nusantara), serta kontrol hak akses modul sistem.'
                 : `Manajemen user dan perubahan hak akses dikunci khusus untuk Super Admin. Anda login sebagai: ${currentUser.fullName} (${currentUser.role}).`}
             </p>
           </div>
@@ -735,7 +962,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 statusFilter === 'all' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Semua ({users.length})
+              Semua ({visibleUsersForRole.length})
             </button>
             <button
               onClick={() => setStatusFilter('pending')}
@@ -758,14 +985,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             >
               Aktif ({approvedCount})
             </button>
-            <button
-              onClick={() => setStatusFilter('inactive')}
-              className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                statusFilter === 'inactive' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <span>Nonaktif ({inactiveCount})</span>
-            </button>
+            {isSuperAdmin && (
+              <button
+                onClick={() => setStatusFilter('inactive')}
+                className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                  statusFilter === 'inactive' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>Nonaktif ({inactiveCount})</span>
+              </button>
+            )}
           </div>
 
           <div className="relative flex-1 sm:w-64">
@@ -782,12 +1011,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       </div>
 
       {/* ================= SPLIT SCREEN MASTER-DETAIL LAYOUT ================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         
-        {/* LEFT COLUMN: Clean & Simple User List */}
-        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs flex flex-col max-h-[82vh]">
+        {/* LEFT COLUMN: Modern & Crisp User List */}
+        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xs flex flex-col max-h-[82vh]">
           {/* Header */}
-          <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+          <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <h3 className="font-bold text-white text-xs flex items-center gap-2">
               <Users className="w-4 h-4 text-amber-400" />
               <span>Daftar Pengguna ({filteredUsers.length})</span>
@@ -802,11 +1031,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <span>Reset Filter</span>
               </button>
             ) : (
-              <span className="text-[10px] text-slate-400 font-medium">Pilih user untuk rincian</span>
+              <span className="text-[10px] text-slate-400 font-medium">Pilih akun untuk rincian</span>
             )}
           </div>
 
-          <div className="overflow-y-auto divide-y divide-slate-800/80 flex-1">
+          <div className="overflow-y-auto p-2 space-y-1.5 flex-1">
             {filteredUsers.length === 0 ? (
               <div className="p-8 text-center text-slate-500 text-xs">
                 Tidak ada user yang ditemukan.
@@ -821,26 +1050,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   <div
                     key={user.id}
                     onClick={() => setSelectedUserId(user.id)}
-                    className={`px-3.5 py-3 transition cursor-pointer flex items-center justify-between gap-3 ${
+                    className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2.5 ${
                       isSelected 
-                        ? 'bg-amber-500/15 border-l-4 border-amber-500' 
+                        ? 'bg-amber-500/15 border-amber-500/50 shadow-xs' 
                         : isInactive
-                        ? 'bg-slate-950/60 hover:bg-slate-800/50 opacity-85'
-                        : 'hover:bg-slate-800/60'
+                        ? 'bg-slate-950/70 border-slate-800/70 hover:bg-slate-800/50 opacity-75'
+                        : 'bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/70 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-xs border ${
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-xs shrink-0 shadow-xs border ${
                         isSelected
-                          ? 'bg-amber-600 text-white border-amber-500'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
                           : isInactive
-                          ? 'bg-slate-800 text-slate-400 border-slate-700'
-                          : 'bg-slate-800 text-white border-slate-700'
+                          ? 'bg-slate-800 text-slate-500 border-slate-700'
+                          : user.role === 'super_admin'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          : user.role === 'driver' || user.role === 'crew_helper'
+                          ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                          : 'bg-slate-800 text-slate-200 border-slate-700'
                       }`}>
                         {user.fullName === 'Super Admin' ? '👑' : user.fullName.substring(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-bold text-xs truncate flex items-center gap-1.5">
+                        <div className="font-bold text-xs leading-snug flex items-center gap-1.5 flex-wrap">
                           <span className={isSelected ? 'text-amber-400 font-extrabold' : isInactive ? 'text-slate-400 line-through' : 'text-white'}>
                             {user.fullName}
                           </span>
@@ -850,18 +1083,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] truncate mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <div className="text-[10px] mt-0.5 flex items-center gap-1.5 flex-wrap">
                           {user.role === 'unassigned' ? (
                             <span className="text-rose-400 font-bold text-[10px]">
                               ⚠️ Perlu Diisi Role
                             </span>
                           ) : (
                             <span className="text-slate-400 font-medium">{ROLE_LABELS[user.role] || user.role}</span>
-                          )}
-                          {(user.role === 'driver' || user.role === 'crew_helper') && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                              Kru Jadwal
-                            </span>
                           )}
                         </div>
                       </div>
@@ -1053,28 +1281,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     </button>
                   )}
                 </div>
-
-                {/* Live Schedule & Assignment Integration Banner for Driver & Helper Roles */}
-                {(selectedUser.role === 'driver' || selectedUser.role === 'crew_helper') && (
-                  <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
-                        <CheckCircle2 className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-blue-400 flex items-center gap-2 flex-wrap">
-                          <span>Terintegrasi dengan Jadwal Pengiriman &amp; Status Operasional</span>
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            {selectedUser.role === 'driver' ? 'List: Kru Supir Utama' : 'List: Kru Helper / Kernet'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 font-medium">
-                          Akun <strong className="text-white">{selectedUser.fullName}</strong> otomatis masuk ke daftar pilihan <strong className="text-white">{selectedUser.role === 'driver' ? 'Kru Supir Utama' : 'Kru Helper 1 & Helper 2'}</strong> pada menu Jadwal Pengiriman, Kru &amp; Armada, serta Portal Driver Mobile.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Conditional Content: Hide Hak Akses if User is Inactive */}
@@ -1184,99 +1390,275 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     </div>
                   )}
 
-                  {/* Granular Menu & Submenu Permissions Section */}
-                  <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto text-xs">
-                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="font-bold text-white flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-amber-400" />
-                          <span>Rincian Menu &amp; Sub-Menu Hak Akses</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          Centang modul dan sub-menu yang dapat diakses, serta atur pembatasan input data (*Full Akses* vs *Hanya Lihat*).
-                        </div>
+                  {/* AKSES CABANG & MENU WEBSITE SECTION — Matches image_22fe4cd6.png & image_a6bb64da.png */}
+                  <div className="p-5 space-y-4 max-h-[68vh] overflow-y-auto text-xs bg-slate-950/30">
+                    {/* Top Header Row: AKSES CABANG & Copy Akses */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                          AKSES CABANG
+                        </span>
                       </div>
-                      <button
-                        onClick={() => setIsCopyModalOpen(true)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0"
-                        title="Salin hak akses dari user lain"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Akses</span>
-                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
+                          CABANG TERTUTUP DEFAULT
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsCopyModalOpen(true)}
+                          className="px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-[10px] flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                          title="Salin hak akses dari user lain"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Copy Akses</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Modules Accordion List */}
+                    {/* Branch Accordion Cards */}
                     <div className="space-y-3">
-                      {MODULE_DEFINITIONS.map(mod => {
-                        const modState = editingPermissions[mod.id] || { enabled: true, subMenus: {} };
-                        const isExpanded = expandedModules[mod.id];
+                      {branches.map(branch => {
+                        const bEntry = branchPermissions[branch.id] || {
+                          branchId: branch.id,
+                          enabled: false,
+                          allAccess: false,
+                          modules: {}
+                        };
+                        const isBranchExpanded = Boolean(expandedBranches[branch.id]);
+                        const activeModCount = bEntry.enabled
+                          ? branchStore.countActiveModulesInBranch(bEntry.modules)
+                          : 0;
 
                         return (
-                          <div key={mod.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
-                            <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={modState.enabled}
-                                  onChange={(e) => handleToggleModuleEnabled(mod.id, e.target.checked)}
-                                  disabled={!isSuperAdmin}
-                                  className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => toggleModuleExpansion(mod.id)}
-                                  className="font-bold text-white flex items-center gap-2 text-left cursor-pointer hover:text-amber-400"
+                          <div
+                            key={branch.id}
+                            className={`rounded-2xl border transition overflow-hidden ${
+                              bEntry.enabled
+                                ? 'bg-slate-900/90 border-slate-700/90 shadow-xs'
+                                : 'bg-slate-900/50 border-slate-800/80'
+                            }`}
+                          >
+                            {/* Branch Card Header Row (matches image_22fe4cd6.png) */}
+                            <div
+                              onClick={() => toggleBranchExpansion(branch.id)}
+                              className="p-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 transition select-none"
+                            >
+                              <div className="flex flex-wrap items-center gap-2.5">
+                                {/* Branch Checkbox Pill */}
+                                <label
+                                  onClick={e => e.stopPropagation()}
+                                  className={`inline-flex items-center gap-2.5 px-3.5 py-2 rounded-xl border font-extrabold text-xs transition cursor-pointer ${
+                                    bEntry.enabled
+                                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                                  }`}
                                 >
-                                  <span>{mod.name}</span>
-                                  {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                                </button>
+                                  <input
+                                    type="checkbox"
+                                    checked={bEntry.enabled}
+                                    onChange={e => handleToggleBranchEnabled(branch.id, e.target.checked)}
+                                    disabled={!isSuperAdmin}
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  <span>{branch.name}</span>
+                                </label>
+
+                                {/* "Semua akses cabang ini" Checkbox Pill */}
+                                <label
+                                  onClick={e => e.stopPropagation()}
+                                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border font-bold text-xs transition cursor-pointer ${
+                                    bEntry.allAccess
+                                      ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
+                                      : 'bg-blue-500/10 border-blue-500/20 text-blue-400 hover:bg-blue-500/15'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={bEntry.allAccess}
+                                    onChange={e => handleToggleBranchAllAccess(branch.id, e.target.checked)}
+                                    disabled={!isSuperAdmin}
+                                    className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  <span>Semua akses cabang ini</span>
+                                </label>
+
+                                {/* Active Access Count Badge */}
+                                <span
+                                  className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                    activeModCount > 0
+                                      ? 'bg-slate-800 text-slate-200 border border-slate-700'
+                                      : 'bg-slate-950 text-slate-500 border border-slate-800'
+                                  }`}
+                                >
+                                  {activeModCount} AKSES AKTIF
+                                </span>
                               </div>
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                modState.enabled ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-500'
-                              }`}>
-                                {modState.enabled ? 'Aktif' : 'Nonaktif'}
-                              </span>
+
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleBranchExpansion(branch.id);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+                                title={isBranchExpanded ? 'Tutup Menu Cabang' : 'Buka Menu Website Cabang Ini'}
+                              >
+                                {isBranchExpanded ? (
+                                  <ChevronUp className="w-4 h-4 text-blue-400" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4" />
+                                )}
+                              </button>
                             </div>
 
-                            {isExpanded && modState.enabled && (
-                              <div className="p-3 divide-y divide-slate-800/60 space-y-2">
-                                {mod.subMenus.map(sub => {
-                                  const accessLevel = modState.subMenus[sub.id] || 'read_only';
-                                  const isSubActive = accessLevel !== 'none';
+                            {/* Expanded Website Menu Modules inside this Branch (matches image_a6bb64da.png) */}
+                            {isBranchExpanded && (
+                              <div className="px-4 pb-4 pt-1 space-y-2.5 border-t border-slate-800/80 bg-slate-950/50">
+                                {MODULE_DEFINITIONS.map(mod => {
+                                  const modState = bEntry.modules?.[mod.id] || {
+                                    enabled: false,
+                                    subMenus: {}
+                                  };
+                                  const modKey = `${branch.id}:${mod.id}`;
+                                  const isModExpanded = Boolean(expandedModules[modKey]);
+                                  const activeSubCount = branchStore.countActiveSubMenusInModule(modState);
+                                  const IconComp = mod.IconComp;
 
                                   return (
-                                    <div key={sub.id} className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                      <div className="flex items-center gap-2.5">
-                                        <input
-                                          type="checkbox"
-                                          checked={isSubActive}
-                                          onChange={(e) => handleSubMenuPermissionChange(
-                                            mod.id, 
-                                            sub.id, 
-                                            e.target.checked ? 'full_access' : 'none'
+                                    <div
+                                      key={mod.id}
+                                      className={`rounded-2xl border bg-slate-900/90 transition overflow-hidden ${mod.borderClass}`}
+                                    >
+                                      {/* Website Module Header Card */}
+                                      <div
+                                        onClick={() => toggleBranchModuleExpansion(branch.id, mod.id)}
+                                        className="p-3.5 flex items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 transition select-none"
+                                      >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                          <div
+                                            className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${mod.iconBgClass}`}
+                                          >
+                                            <IconComp className="w-4 h-4" />
+                                          </div>
+                                          <div className="min-w-0">
+                                            <div className="font-black text-white text-xs sm:text-sm flex items-center gap-2">
+                                              <span>{mod.name}</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 truncate">
+                                              {mod.description}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2.5 shrink-0">
+                                          <span
+                                            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                                              activeSubCount > 0
+                                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                                : 'bg-slate-950 text-slate-400 border-slate-800'
+                                            }`}
+                                          >
+                                            {activeSubCount} AKSES
+                                          </span>
+                                          {isModExpanded ? (
+                                            <ChevronUp className="w-4 h-4 text-slate-300" />
+                                          ) : (
+                                            <ChevronDown className="w-4 h-4 text-slate-400" />
                                           )}
-                                          disabled={!isSuperAdmin}
-                                          className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-amber-500 cursor-pointer"
-                                        />
-                                        <span className={isSubActive ? 'text-slate-200 font-medium' : 'text-slate-500 line-through'}>
-                                          {sub.name}
-                                        </span>
+                                        </div>
                                       </div>
 
-                                      {isSubActive && (
-                                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                          <span className="text-[10px] text-slate-400">Akses Input:</span>
-                                          <select
-                                            value={accessLevel}
-                                            onChange={(e) => handleSubMenuPermissionChange(mod.id, sub.id, e.target.value as any)}
-                                            disabled={!isSuperAdmin}
-                                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white font-medium focus:outline-none focus:border-amber-500 cursor-pointer"
-                                          >
-                                            <option value="full_access">🟢 Full Akses (Bisa Input/Edit)</option>
-                                            <option value="read_only">🟡 Hanya Lihat (Read Only)</option>
-                                            <option value="none">🔴 Tidak Ada Akses</option>
-                                          </select>
+                                      {/* Expanded Sub-Menus inside Module */}
+                                      {isModExpanded && (
+                                        <div className="px-4 pb-3.5 pt-2.5 border-t border-slate-800/80 bg-slate-950/60 space-y-2.5">
+                                          <div className="flex items-center justify-between pb-2 border-b border-slate-800/70">
+                                            <label className="inline-flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={modState.enabled && activeSubCount > 0}
+                                                onChange={e =>
+                                                  handleToggleBranchModuleEnabled(
+                                                    branch.id,
+                                                    mod.id,
+                                                    e.target.checked
+                                                  )
+                                                }
+                                                disabled={!isSuperAdmin}
+                                                className="w-4 h-4 rounded text-amber-500 cursor-pointer"
+                                              />
+                                              <span>Aktifkan Semua Sub-Menu {mod.name} ({branch.name})</span>
+                                            </label>
+                                          </div>
+
+                                          <div className="divide-y divide-slate-800/60 space-y-2">
+                                            {mod.subMenus.map(sub => {
+                                              const accessLevel = modState.subMenus?.[sub.id] || 'none';
+                                              const isSubActive = accessLevel !== 'none';
+
+                                              return (
+                                                <div
+                                                  key={sub.id}
+                                                  className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                                >
+                                                  <label className="flex items-center gap-2.5 cursor-pointer">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isSubActive}
+                                                      onChange={e =>
+                                                        handleBranchSubMenuPermissionChange(
+                                                          branch.id,
+                                                          mod.id,
+                                                          sub.id,
+                                                          e.target.checked ? 'full_access' : 'none'
+                                                        )
+                                                      }
+                                                      disabled={!isSuperAdmin}
+                                                      className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-amber-500 cursor-pointer"
+                                                    />
+                                                    <span
+                                                      className={
+                                                        isSubActive
+                                                          ? 'text-slate-200 font-semibold'
+                                                          : 'text-slate-500'
+                                                      }
+                                                    >
+                                                      {sub.name}
+                                                    </span>
+                                                  </label>
+
+                                                  {isSubActive && (
+                                                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                                                      <span className="text-[10px] text-slate-400">
+                                                        Akses Input:
+                                                      </span>
+                                                      <select
+                                                        value={accessLevel}
+                                                        onChange={e =>
+                                                          handleBranchSubMenuPermissionChange(
+                                                            branch.id,
+                                                            mod.id,
+                                                            sub.id,
+                                                            e.target.value as 'none' | 'read_only' | 'full_access'
+                                                          )
+                                                        }
+                                                        disabled={!isSuperAdmin}
+                                                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
+                                                      >
+                                                        <option value="full_access">
+                                                          🟢 Full Akses (Bisa Input/Edit)
+                                                        </option>
+                                                        <option value="read_only">
+                                                          🟡 Hanya Lihat (Read Only)
+                                                        </option>
+                                                        <option value="none">🔴 Tidak Ada Akses</option>
+                                                      </select>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
                                         </div>
                                       )}
                                     </div>
@@ -1358,7 +1740,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white"
             >
               <option value="">-- Pilih User Sumber --</option>
-              {users.filter(u => u.id !== selectedUser?.id).map(u => (
+              {visibleUsersForRole.filter(u => u.id !== selectedUser?.id && u.status !== 'inactive').map(u => (
                 <option key={u.id} value={u.id}>
                   {u.fullName} ({ROLE_LABELS[u.role] || u.role})
                 </option>
@@ -1609,12 +1991,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
-
-              {(newUser.role === 'driver' || newUser.role === 'crew_helper') && (
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
-                  ✅ User dengan role <strong>{newUser.role === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'}</strong> otomatis masuk ke daftar penugasan <strong>Jadwal Pengiriman</strong>.
-                </div>
-              )}
 
               <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
                 <button
@@ -1884,8 +2260,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <div className="pt-2 border-t border-slate-800">
               <button
                 type="button"
+                autoFocus
                 onClick={() => setPageModalNotification(null)}
-                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95"
+                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95 focus:outline-none focus:ring-2 focus:ring-amber-300"
               >
                 Oke, Mengerti
               </button>

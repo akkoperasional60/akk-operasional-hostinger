@@ -1106,10 +1106,10 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
                 type="button"
                 onClick={handleRecenterToWarehouse}
                 className="px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md text-white border border-slate-700 text-xs font-semibold shadow-lg hover:bg-slate-800 transition cursor-pointer flex items-center gap-1.5"
-                title="Fokuskan peta ke Gudang Pusat DC Banyuwangi"
+                title="Fokuskan peta ke Gudang DC Banyuwangi"
               >
                 <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Gudang Pusat DC</span>
+                <span className="hidden sm:inline">Gudang DC</span>
               </button>
 
               {selectedRoute && (

@@ -1,749 +1,1245 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  BarChart3,
-  TrendingUp,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ComposedChart
+} from 'recharts';
+import {
+  FileText,
+  Download,
+  Filter,
+  Calendar,
+  Truck,
+  Users,
+  Navigation,
   Gauge,
   Clock,
   CheckCircle2,
   AlertTriangle,
-  Truck,
-  Users,
-  Calendar,
+  TrendingUp,
   Search,
-  Download,
-  Printer,
-  RotateCcw,
-  MapPin,
+  RefreshCw,
+  FileSpreadsheet,
+  Award,
   Activity,
-  FileText,
+  Layers,
+  ChevronDown,
   ChevronRight,
-  X,
-  SlidersHorizontal,
-  Navigation,
+  MapPin,
   Fuel,
-  Percent,
-  Radio,
-  ExternalLink
+  ShieldCheck,
+  Check,
+  X
 } from 'lucide-react';
-import {
-  trackingLogService,
-  TimeRangePreset,
-  AnalyticsFilterParams
-} from '../services/trackingLogService';
+import * as XLSX from 'xlsx';
 import { logisticsStore } from '../services/store';
 import {
-  FleetPerformanceMetric,
-  CrewPerformanceMetric,
-  Schedule,
-  TrackingLog
-} from '../types';
+  trackingLogService,
+  AnalyticsFilterParams,
+  AnalyticsSummaryReport,
+  RouteEvaluationSummary
+} from '../services/trackingLogService';
+
+function getInitials(name: string): string {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'KR';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
 
 export const AnalyticsReportingModule: React.FC = () => {
+  const [fleets, setFleets] = useState(logisticsStore.getFleets());
+  const [crews, setCrews] = useState(logisticsStore.getCrews());
+  const [users, setUsers] = useState(logisticsStore.getUsers());
+
   // Filter States
-  const [timePreset, setTimePreset] = useState<TimeRangePreset>('all');
-  const [customStartDate, setCustomStartDate] = useState<string>('');
-  const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | '7days' | 'month' | 'custom'>('all');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [selectedFleetId, setSelectedFleetId] = useState<string>('all');
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedIsland, setSelectedIsland] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Active Tab: 'fleet' | 'crew' | 'visuals' | 'raw_logs'
-  const [activeTab, setActiveTab] = useState<'fleet' | 'crew' | 'visuals' | 'raw_logs'>('fleet');
+  // Custom Dropdown UI States
+  const [isFleetDropdownOpen, setIsFleetDropdownOpen] = useState(false);
+  const [fleetSearchText, setFleetSearchText] = useState('');
+  const [isCrewDropdownOpen, setIsCrewDropdownOpen] = useState(false);
+  const [crewSearchText, setCrewSearchText] = useState('');
 
-  // Detail Modal States
-  const [selectedDetailFleet, setSelectedDetailFleet] = useState<FleetPerformanceMetric | null>(null);
-  const [selectedDetailCrew, setSelectedDetailCrew] = useState<CrewPerformanceMetric | null>(null);
-  const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
-  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
+  const fleetDropdownRef = useRef<HTMLDivElement>(null);
+  const crewDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Available Fleets & Crews from Store
-  const fleets = logisticsStore.getFleets();
-  const crews = logisticsStore.getCrews();
+  // Active View Tab (Tanpa Telemetri tracking_logs)
+  const [activeTab, setActiveTab] = useState<'overview' | 'fleet_crew' | 'routes'>('overview');
+  const [selectedRouteDetail, setSelectedRouteDetail] = useState<RouteEvaluationSummary | null>(null);
+  const [exportSuccessToast, setExportSuccessToast] = useState<string | null>(null);
 
-  // Filter params object
-  const filterParams: AnalyticsFilterParams = useMemo(() => ({
-    timePreset,
-    customStartDate: timePreset === 'custom' ? customStartDate : undefined,
-    customEndDate: timePreset === 'custom' ? customEndDate : undefined,
-    fleetId: selectedFleetId,
-    crewId: selectedCrewId,
-    status: selectedStatus,
-    searchQuery
-  }), [timePreset, customStartDate, customEndDate, selectedFleetId, selectedCrewId, selectedStatus, searchQuery]);
+  useEffect(() => {
+    const unsubscribe = logisticsStore.subscribe(() => {
+      setFleets([...logisticsStore.getFleets()]);
+      setCrews([...logisticsStore.getCrews()]);
+      setUsers([...logisticsStore.getUsers()]);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  // Derived Analytics Data
-  const summary = useMemo(() => trackingLogService.getOverallSummary(filterParams), [filterParams]);
-  const fleetMetrics = useMemo(() => trackingLogService.getFleetPerformance(filterParams), [filterParams]);
-  const crewMetrics = useMemo(() => trackingLogService.getCrewPerformance(filterParams), [filterParams]);
-  const filteredSchedules = useMemo(() => trackingLogService.filterSchedules(filterParams), [filterParams]);
-  const rawTrackingLogs = useMemo(() => {
-    const schedIds = new Set(filteredSchedules.map(s => s.id));
-    return trackingLogService.getTrackingLogs().filter(l => schedIds.has(l.schedule_id));
-  }, [filteredSchedules]);
+  // Close custom dropdowns on outside click / Escape
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (fleetDropdownRef.current && !fleetDropdownRef.current.contains(e.target as Node)) {
+        setIsFleetDropdownOpen(false);
+      }
+      if (crewDropdownRef.current && !crewDropdownRef.current.contains(e.target as Node)) {
+        setIsCrewDropdownOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsFleetDropdownOpen(false);
+        setIsCrewDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, []);
 
-  // Reset Filters Handler
-  const handleResetFilters = () => {
-    setTimePreset('all');
-    setCustomStartDate('');
-    setCustomEndDate('');
+  // Integrated Active Crew Options (Driver & Helper aktif dari Manajemen User + Kru)
+  const activeCrewOptions = useMemo(() => {
+    const list: Array<{ id: string; name: string; roleBadge: 'Driver' | 'Helper' }> = [];
+    const seen = new Set<string>();
+
+    users
+      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+      .forEach(u => {
+        const clean = (u.fullName || '').trim();
+        if (clean && !seen.has(clean.toLowerCase())) {
+          seen.add(clean.toLowerCase());
+          const matchedCrew = crews.find(c => c.name.toLowerCase() === clean.toLowerCase());
+          list.push({
+            id: matchedCrew?.id || u.id,
+            name: clean,
+            roleBadge: u.role === 'crew_helper' ? 'Helper' : 'Driver'
+          });
+        }
+      });
+
+    crews.forEach(c => {
+      const clean = (c.name || '').trim();
+      if (clean && !seen.has(clean.toLowerCase())) {
+        const nonActiveUser = users.find(
+          u => (u.fullName || '').trim().toLowerCase() === clean.toLowerCase() && u.status !== 'approved'
+        );
+        if (!nonActiveUser) {
+          seen.add(clean.toLowerCase());
+          list.push({
+            id: c.id,
+            name: clean,
+            roleBadge: c.role === 'Kernet / Helper' || c.id.includes('hlp') ? 'Helper' : 'Driver'
+          });
+        }
+      }
+    });
+
+    return list.sort((a, b) => {
+      if (a.roleBadge !== b.roleBadge) return a.roleBadge === 'Driver' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [users, crews]);
+
+  const filteredFleetOptions = useMemo(() => {
+    const q = fleetSearchText.trim().toLowerCase();
+    if (!q) return fleets;
+    return fleets.filter(
+      f =>
+        f.plateNumber.toLowerCase().includes(q) ||
+        (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
+        f.vehicleType.toLowerCase().includes(q)
+    );
+  }, [fleets, fleetSearchText]);
+
+  const filteredCrewOptions = useMemo(() => {
+    const q = crewSearchText.trim().toLowerCase();
+    if (!q) return activeCrewOptions;
+    return activeCrewOptions.filter(
+      c => c.name.toLowerCase().includes(q) || c.roleBadge.toLowerCase().includes(q)
+    );
+  }, [activeCrewOptions, crewSearchText]);
+
+  // Apply Date Presets
+  const handleDatePresetChange = (preset: 'all' | 'today' | '7days' | 'month' | 'custom') => {
+    setDatePreset(preset);
+    const now = new Date();
+    const toIsoDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayStr = toIsoDate(now);
+
+    if (preset === 'all') {
+      setStartDate('');
+      setEndDate('');
+    } else if (preset === 'today') {
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (preset === '7days') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 7);
+      setStartDate(toIsoDate(d));
+      setEndDate(todayStr);
+    } else if (preset === 'month') {
+      const firstDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      setStartDate(firstDay);
+      setEndDate(todayStr);
+    }
+  };
+
+  const resetAllFilters = () => {
+    setDatePreset('all');
+    setStartDate('');
+    setEndDate('');
     setSelectedFleetId('all');
     setSelectedCrewId('all');
-    setSelectedStatus('all');
+    setSelectedIsland('all');
     setSearchQuery('');
   };
 
-  const isFiltered = timePreset !== 'all' || selectedFleetId !== 'all' || selectedCrewId !== 'all' || selectedStatus !== 'all' || searchQuery.trim() !== '';
+  const filterParams: AnalyticsFilterParams = useMemo(() => ({
+    startDate,
+    endDate,
+    fleetId: selectedFleetId,
+    crewId: selectedCrewId,
+    status: 'all',
+    island: selectedIsland,
+    searchQuery
+  }), [startDate, endDate, selectedFleetId, selectedCrewId, selectedIsland, searchQuery, fleets, crews, users]);
+
+  const report: AnalyticsSummaryReport = useMemo(() => {
+    return trackingLogService.getAnalyticsReport(filterParams);
+  }, [filterParams]);
+
+  // Export to CSV Handler
+  const handleExportCSV = (datasetType: 'routes' | 'fleet' | 'crew') => {
+    let dataToExport: any[] = [];
+    let filename = '';
+
+    if (datasetType === 'routes') {
+      filename = `Evaluasi_Rute_AKK_${new Date().toISOString().slice(0, 10)}.csv`;
+      dataToExport = report.routeEvaluations.map(r => ({
+        'No PO / Resi': r.trackingNumber,
+        'Tanggal Kirim': r.date,
+        'Tujuan Area': r.destinationStore,
+        'Kota': r.destinationCity,
+        'Plat Armada': r.plateNumber,
+        'Inisial Armada': r.initialCode || '-',
+        'Driver Utama': r.driverName,
+        'Helper': r.helperName || '-',
+        'KM Awal BBM (KM)': r.bbmStartKm,
+        'Rata2 Kecepatan Evaluasi Jalur (KM/H)': r.avgSpeedKmh,
+        'Kecepatan Maks (KM/H)': r.maxSpeedKmh,
+        'Jadwal Berangkat': r.scheduledDepartureTime,
+        'Aktual Gate-Out': r.actualGateOutTime,
+        'Status Gate-Out': r.gateOutStatus === 'tepat_waktu' ? 'Tepat Waktu' : r.gateOutStatus === 'terlambat' ? 'Terlambat' : 'Belum Gate-Out',
+        'Jadwal Pulang': r.scheduledReturnTime,
+        'Aktual Tiba di Argo': r.actualArgoReturnTime,
+        'Status Kepulangan Argo': r.argoReturnStatus === 'tepat_waktu' ? 'Tepat Waktu' : r.argoReturnStatus === 'terlambat' ? 'Terlambat' : 'Belum Tiba',
+        'Ketepatan Tim': r.isOnTime ? 'Tepat Waktu' : 'Terlambat'
+      }));
+    } else if (datasetType === 'fleet') {
+      filename = `Performa_Armada_AKK_${new Date().toISOString().slice(0, 10)}.csv`;
+      dataToExport = report.fleetMetrics.map(f => ({
+        'Plat Nomor': f.plateNumber,
+        'Inisial': f.initialCode || '-',
+        'Tipe Kendaraan': f.vehicleType,
+        'Total Kiriman Terintegrasi': f.totalTrips,
+        'Frekuensi Kru Pengiriman': f.crewMenuFrequency,
+        'Total KM Awal BBM (KM)': f.totalDistanceKm,
+        'Rata2 Kecepatan Evaluasi Jalur (KM/H)': f.avgSpeedKmh,
+        'Kecepatan Maks (KM/H)': f.maxSpeedKmh,
+        'Konsumsi BBM (Liter)': f.totalFuelLiters,
+        'Rasio BBM (KM/L)': f.avgKmPerLiter,
+        'Ketepatan Waktu SLA (%)': f.onTimeRatePercent
+      }));
+    } else {
+      filename = `Performa_Kru_AKK_${new Date().toISOString().slice(0, 10)}.csv`;
+      dataToExport = report.crewMetrics.map(c => ({
+        'Nama Kru': c.crewName,
+        'Posisi': c.cleanRoleLabel,
+        'Tugas Sebagai Driver': c.totalTripsAsDriver,
+        'Tugas Sebagai Helper': c.totalTripsAsHelper,
+        'Total Kiriman Gabungan': c.totalTripsCombined,
+        'Total KM Awal BBM (KM)': c.totalDistanceKm,
+        'Rata2 Kecepatan (KM/H)': c.avgSpeedKmh,
+        'Kiriman Tepat Waktu': c.onTimeDeliveries,
+        'Kiriman Terlambat': c.lateDeliveries,
+        'SLA Ketepatan (%)': c.onTimeRatePercent,
+        'Skor Keselamatan': c.safetyScore
+      }));
+    }
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const csvOutput = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setExportSuccessToast(`Berhasil mengunduh CSV: ${filename}`);
+    setTimeout(() => setExportSuccessToast(null), 4000);
+  };
+
+  // Export Multi-Sheet Excel (.xlsx)
+  const handleExportMultiSheetExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    const summaryData = [
+      { Metrik: 'Total Jarak Tempuh (KM Awal BBM)', Nilai: `${report.overall.totalDistanceKm} KM (${report.overall.bbmInputCount} Input BBM)` },
+      { Metrik: 'Rata-rata Kecepatan (Evaluasi Jalur)', Nilai: `${report.overall.avgSpeedKmh} KM/H` },
+      { Metrik: 'Kecepatan Tertinggi Tercatat', Nilai: `${report.overall.maxSpeedKmh} KM/H` },
+      { Metrik: 'Total Kiriman (Terintegrasi Jadwal & Kru Pengiriman)', Nilai: `${report.overall.totalDeliveries} Kiriman` },
+      { Metrik: 'Frekuensi Armada pada Kru Pengiriman', Nilai: `${report.overall.fleetFrequencyTotal} Penugasan` },
+      { Metrik: 'Tingkat Ketepatan Waktu (SLA Gate-Out & Tiba di Argo)', Nilai: `${report.overall.onTimeRatePercent}%` },
+      { Metrik: 'Tim Tepat Waktu vs Terlambat', Nilai: `${report.overall.onTimeCount} Tepat Waktu / ${report.overall.lateCount} Terlambat` },
+      { Metrik: 'Gate-Out Tepat Waktu vs Terlambat', Nilai: `${report.overall.gateOutOnTimeCount} Tepat Waktu / ${report.overall.gateOutLateCount} Terlambat` },
+      { Metrik: 'Tiba di Argo Tepat Waktu vs Terlambat', Nilai: `${report.overall.argoReturnOnTimeCount} Tepat Waktu / ${report.overall.argoReturnLateCount} Terlambat` }
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Eksekutif');
+
+    const fleetRows = report.fleetMetrics.map(f => ({
+      'Plat Nomor': f.plateNumber,
+      'Inisial': f.initialCode || '-',
+      'Tipe Armada': f.vehicleType,
+      'Total Kiriman': f.totalTrips,
+      'Frekuensi Kru Pengiriman': f.crewMenuFrequency,
+      'Total KM Awal BBM': f.totalDistanceKm,
+      'Kecepatan Rata2 (KM/H)': f.avgSpeedKmh,
+      'Kecepatan Maks (KM/H)': f.maxSpeedKmh,
+      'Tepat Waktu': f.onTimeTripsCount,
+      'Terlambat': f.lateTripsCount,
+      'SLA On-Time (%)': f.onTimeRatePercent
+    }));
+    const wsFleet = XLSX.utils.json_to_sheet(fleetRows);
+    XLSX.utils.book_append_sheet(wb, wsFleet, 'Performa Armada');
+
+    const crewRows = report.crewMetrics.map(c => ({
+      'Nama Kru': c.crewName,
+      'Peran': c.cleanRoleLabel,
+      'Kiriman Driver': c.totalTripsAsDriver,
+      'Kiriman Helper': c.totalTripsAsHelper,
+      'Total Kiriman': c.totalTripsCombined,
+      'Total KM Awal BBM': c.totalDistanceKm,
+      'Rata2 Kecepatan (KM/H)': c.avgSpeedKmh,
+      'Tepat Waktu': c.onTimeDeliveries,
+      'Terlambat': c.lateDeliveries,
+      'SLA On-Time (%)': c.onTimeRatePercent
+    }));
+    const wsCrew = XLSX.utils.json_to_sheet(crewRows);
+    XLSX.utils.book_append_sheet(wb, wsCrew, 'Performa Kru');
+
+    const routeRows = report.routeEvaluations.map(r => ({
+      'No PO': r.trackingNumber,
+      'Tanggal Kirim': r.date,
+      'Tujuan Area': r.destinationStore,
+      'Plat Armada': r.plateNumber,
+      'Driver': r.driverName,
+      'Helper': r.helperName || '-',
+      'KM Awal BBM': r.bbmStartKm,
+      'Rata2 Kecepatan (KM/H)': r.avgSpeedKmh,
+      'Jadwal Berangkat': r.scheduledDepartureTime,
+      'Aktual Gate-Out': r.actualGateOutTime,
+      'Jadwal Pulang': r.scheduledReturnTime,
+      'Aktual Tiba di Argo': r.actualArgoReturnTime,
+      'Ketepatan Tim': r.isOnTime ? 'Tepat Waktu' : 'Terlambat'
+    }));
+    const wsRoutes = XLSX.utils.json_to_sheet(routeRows);
+    XLSX.utils.book_append_sheet(wb, wsRoutes, 'Evaluasi Rute');
+
+    const filename = `Laporan_Analitik_Performa_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    setExportSuccessToast(`Berhasil mengunduh Workbook Lengkap: ${filename}`);
+    setTimeout(() => setExportSuccessToast(null), 4000);
+  };
+
+  // Pie Chart Data for Punctuality (SLA Gate-Out & Tiba di Argo)
+  const slaPieData = [
+    { name: 'Tepat Waktu (Gate-Out & Argo)', value: Math.max(report.overall.onTimeCount, 1), color: '#10b981' },
+    { name: 'Terlambat', value: report.overall.lateCount, color: '#f43f5e' }
+  ];
+
+  const selectedFleetObj = useMemo(
+    () => fleets.find(f => f.id === selectedFleetId),
+    [fleets, selectedFleetId]
+  );
+
+  const selectedCrewObj = useMemo(
+    () => activeCrewOptions.find(c => c.id === selectedCrewId),
+    [activeCrewOptions, selectedCrewId]
+  );
 
   return (
-    <div className="p-4 lg:p-8 space-y-6 max-w-7xl mx-auto text-slate-100">
-      {/* ========================================================================= */}
-      {/* 1. HEADER SECTION                                                         */}
-      {/* ========================================================================= */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-            <span>Logistik &amp; Distribusi</span>
-            <span aria-hidden="true">&bull;</span>
-            <span className="text-amber-400 font-semibold">Telemetri GPS &amp; Penjadwalan</span>
-            <span aria-hidden="true">&bull;</span>
-            <span>PT AKK Banyuwangi DC</span>
-          </div>
-          <h1 className="text-xl lg:text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-            <BarChart3 className="w-6 h-6 text-amber-400" />
-            <span>Laporan Analitik Performa Armada &amp; Kru</span>
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Ringkasan terpadu efisiensi rute, total jarak tempuh (km), rata-rata kecepatan, persentase idle time, dan indeks ketepatan waktu pengiriman berdasarkan integrasi data <code className="text-cyan-300 font-mono">schedules</code> dan log telemetri <code className="text-cyan-300 font-mono">tracking_logs</code>.
-          </p>
+    <div className="space-y-4">
+      {/* Toast Notification */}
+      {exportSuccessToast && (
+        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 bg-emerald-950/95 border border-emerald-500/50 text-emerald-200 px-4 py-3 rounded-xl shadow-2xl">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="text-xs font-semibold">{exportSuccessToast}</span>
         </div>
+      )}
 
-        <div className="flex items-center gap-2.5 shrink-0 relative">
-          {/* Print / PDF Document Button */}
-          <button
-            onClick={() => setIsPrintModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
-            title="Buka Pratinjau Dokumen Cetak / PDF Resmi"
-          >
-            <Printer className="w-4 h-4 text-cyan-400" />
-            <span>Cetak PDF</span>
-          </button>
+      {/* Top Header & Export Toolbar */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1.5">
+                <Activity className="w-3 h-3" />
+                Evaluasi Performa Operasional Terintegrasi
+              </span>
+            </div>
+            <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+              Laporan Analitik Performa Armada &amp; Kru
+            </h2>
+            <p className="text-slate-400 text-xs max-w-2xl">
+              Terintegrasi langsung dengan KM Awal BBM, Evaluasi Jalur, Jadwal &amp; Penugasan, Frekuensi Armada pada Kru Pengiriman, serta Ketepatan Waktu Gate-Out &amp; Tiba di Gudang Argo.
+            </p>
+          </div>
 
-          {/* Export CSV Dropdown */}
-          <div className="relative">
+          {/* Export Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95"
+              onClick={handleExportMultiSheetExcel}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition cursor-pointer"
             >
-              <Download className="w-4 h-4 text-slate-950" />
-              <span>Ekspor Data</span>
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Unduh Excel (.XLSX)</span>
             </button>
 
-            {isExportDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-1.5 z-30 animate-in fade-in zoom-in-95 duration-150">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 py-1.5">
-                  Format Spreadsheet (CSV)
-                </div>
+            <div className="relative group">
+              <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer">
+                <Download className="w-3.5 h-3.5 text-amber-400" />
+                <span>Ekspor CSV</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+              <div className="absolute right-0 mt-1.5 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-30 hidden group-hover:block">
                 <button
-                  onClick={() => {
-                    trackingLogService.exportToCsv('fleet', filterParams);
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs rounded-lg text-slate-200 hover:bg-slate-800 hover:text-amber-400 flex items-center gap-2 transition"
+                  onClick={() => handleExportCSV('routes')}
+                  className="w-full px-3.5 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between cursor-pointer"
                 >
+                  <span>Evaluasi Rute (CSV)</span>
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                </button>
+                <button
+                  onClick={() => handleExportCSV('fleet')}
+                  className="w-full px-3.5 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between cursor-pointer"
+                >
+                  <span>Performa Armada (CSV)</span>
                   <Truck className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Performa Armada</span>
                 </button>
                 <button
-                  onClick={() => {
-                    trackingLogService.exportToCsv('crew', filterParams);
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs rounded-lg text-slate-200 hover:bg-slate-800 hover:text-amber-400 flex items-center gap-2 transition"
+                  onClick={() => handleExportCSV('crew')}
+                  className="w-full px-3.5 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between cursor-pointer"
                 >
-                  <Users className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Performa Kru Supir</span>
-                </button>
-                <button
-                  onClick={() => {
-                    trackingLogService.exportToCsv('schedules', filterParams);
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs rounded-lg text-slate-200 hover:bg-slate-800 hover:text-amber-400 flex items-center gap-2 transition"
-                >
-                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Riwayat Jadwal &amp; GPS</span>
-                </button>
-                <button
-                  onClick={() => {
-                    trackingLogService.exportToCsv('raw_tracking_logs', filterParams);
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs rounded-lg text-slate-200 hover:bg-slate-800 hover:text-amber-400 flex items-center gap-2 transition border-t border-slate-800 mt-1"
-                >
-                  <Radio className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Log Mentah (tracking_logs)</span>
+                  <span>Performa Kru (CSV)</span>
+                  <Users className="w-3.5 h-3.5 text-emerald-400" />
                 </button>
               </div>
-            )}
+            </div>
           </div>
+        </div>
+
+        {/* Navigation Tabs (3 Tab Utama Tanpa Telemetri tracking_logs) */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-3.5 border-t border-slate-800/80">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === 'overview'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Ringkasan &amp; Grafik Tren</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('fleet_crew')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === 'fleet_crew'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5" />
+            <span>Performa Armada &amp; Kru</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('routes')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === 'routes'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Navigation className="w-3.5 h-3.5" />
+            <span>Evaluasi Per Rute ({report.routeEvaluations.length})</span>
+          </button>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 2. COMPREHENSIVE FILTER CONTROLS BAR                                      */}
-      {/* ========================================================================= */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Preset Buttons for Time Range */}
-          <div className="flex items-center flex-wrap gap-1">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mr-2">
+      {/* Filter Panel: Rentang Disimpelkan, Custom Dropdown UI/UX Armada & Kru, Tanpa Status Pengiriman */}
+      <div className="relative z-30 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-3">
+        {/* Baris 1: Rentang Waktu Simpel + Pencarian */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
               <Calendar className="w-3.5 h-3.5 text-amber-400" />
-              <span>Rentang:</span>
+              RENTANG:
             </span>
             {(
               [
-                { id: 'all', label: 'Semua Waktu' },
+                { id: 'all', label: 'Semua' },
                 { id: 'today', label: 'Hari Ini' },
-                { id: '7days', label: '7 Hari Terakhir' },
-                { id: '30days', label: '30 Hari' },
-                { id: 'this_month', label: 'Bulan Ini' },
-                { id: 'custom', label: 'Kustom Tanggal' }
+                { id: '7days', label: '7 Hari' },
+                { id: 'month', label: 'Bulan Ini' },
+                { id: 'custom', label: 'Kustom' }
               ] as const
-            ).map((item) => (
+            ).map(p => (
               <button
-                key={item.id}
-                onClick={() => setTimePreset(item.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  timePreset === item.id
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700'
+                key={p.id}
+                type="button"
+                onClick={() => handleDatePresetChange(p.id)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  datePreset === p.id
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700/80'
                 }`}
               >
-                {item.label}
+                {p.label}
               </button>
             ))}
+
+            {datePreset === 'custom' && (
+              <div className="flex items-center gap-1.5 ml-1">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+                <span className="text-slate-500 text-xs">s/d</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
           </div>
 
-          {/* Quick Search Input */}
-          <div className="relative min-w-[220px]">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+          {/* Search Input */}
+          <div className="relative w-full lg:w-72">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
+              placeholder="Cari PO, area, sopir, plat..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari PO, toko, sopir, plat..."
-              className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500"
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/60"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-2 text-slate-400 hover:text-white"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
         </div>
 
-        {/* Custom Date Pickers (if 'custom' selected) */}
-        {timePreset === 'custom' && (
-          <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 animate-in fade-in duration-150">
-            <span className="text-xs text-slate-400">Pilih Periode Kustom:</span>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Dari:</span>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Sampai:</span>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Dropdown Filters: Armada, Kru, Status */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800/80">
-          {/* Armada Filter */}
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-              Filter Armada:
+        {/* Baris 2: Custom Modern Dropdown Filter Armada, Filter Kru, dan Reset */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2.5 border-t border-slate-800/60">
+          {/* Custom Filter Armada */}
+          <div ref={fleetDropdownRef} className="relative">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between mb-1">
+              <span>Filter Armada</span>
+              <span className="text-[10px] font-bold text-amber-400">{fleets.length} Unit</span>
             </label>
-            <select
-              value={selectedFleetId}
-              onChange={(e) => setSelectedFleetId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="all">Semua Armada ({fleets.length} Unit)</option>
-              {fleets.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.plateNumber} {f.initialCode ? `[${f.initialCode}]` : ''} - {f.vehicleType}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Kru Filter */}
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-              Filter Kru (Driver / Helper):
-            </label>
-            <select
-              value={selectedCrewId}
-              onChange={(e) => setSelectedCrewId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="all">Semua Kru ({crews.length} Anggota)</option>
-              {crews.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.role})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-              Status Pengiriman:
-            </label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="all">Semua Status Jadwal</option>
-              <option value="delivered">Terkirim / Selesai (Delivered)</option>
-              <option value="in_transit">Sedang Jalan (In Transit)</option>
-              <option value="scheduled">Terjadwal (Scheduled)</option>
-              <option value="delayed">Mengalami Kendala (Delayed)</option>
-            </select>
-          </div>
-
-          {/* Active Filter Indicators & Reset */}
-          <div className="flex items-end">
             <button
-              onClick={handleResetFilters}
-              disabled={!isFiltered}
-              className={`w-full py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                isFiltered
-                  ? 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-rose-500/25 active:scale-95'
-                  : 'bg-slate-950 border-slate-800 text-slate-600 cursor-not-allowed'
+              type="button"
+              onClick={() => {
+                setIsFleetDropdownOpen(prev => !prev);
+                setIsCrewDropdownOpen(false);
+                setFleetSearchText('');
+              }}
+              className={`w-full flex items-center justify-between gap-2 bg-slate-950 border rounded-xl px-3 py-2 text-left transition cursor-pointer ${
+                isFleetDropdownOpen
+                  ? 'border-amber-500 ring-2 ring-amber-500/20'
+                  : 'border-slate-800 hover:border-slate-700'
               }`}
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 border ${
+                  selectedFleetObj
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {selectedFleetObj ? (selectedFleetObj.initialCode || 'TRK') : <Truck className="w-3.5 h-3.5" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">
+                    {selectedFleetObj
+                      ? `${selectedFleetObj.plateNumber}${selectedFleetObj.initialCode ? ` (${selectedFleetObj.initialCode})` : ''}`
+                      : `Semua Armada (${fleets.length} Unit)`}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {selectedFleetObj ? selectedFleetObj.vehicleType : 'Menampilkan seluruh unit armada'}
+                  </div>
+                </div>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isFleetDropdownOpen ? 'rotate-180 text-amber-400' : ''}`} />
+            </button>
+
+            {isFleetDropdownOpen && (
+              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
+                <div className="p-2 border-b border-slate-800 bg-slate-950/60">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={fleetSearchText}
+                      onChange={e => setFleetSearchText(e.target.value)}
+                      placeholder="Cari plat atau inisial armada..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                <div className="max-h-56 overflow-y-auto p-1.5 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFleetId('all');
+                      setIsFleetDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left text-xs font-bold transition cursor-pointer ${
+                      selectedFleetId === 'all'
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>Semua Armada ({fleets.length} Unit)</span>
+                    {selectedFleetId === 'all' && <Check className="w-4 h-4 shrink-0" />}
+                  </button>
+                  {filteredFleetOptions.map(f => {
+                    const isSel = selectedFleetId === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedFleetId(f.id);
+                          setIsFleetDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                          isSel ? 'bg-amber-500 text-slate-950' : 'text-slate-200 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black border shrink-0 ${
+                            isSel
+                              ? 'bg-slate-950/20 text-slate-950 border-slate-950/30'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}>
+                            {f.initialCode || 'UNIT'}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold truncate">{f.plateNumber}</div>
+                            <div className={`text-[10px] truncate ${isSel ? 'text-slate-900/80' : 'text-slate-400'}`}>
+                              {f.vehicleType}
+                            </div>
+                          </div>
+                        </div>
+                        {isSel && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Custom Filter Kru (Driver / Helper) */}
+          <div ref={crewDropdownRef} className="relative">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between mb-1">
+              <span>Filter Kru (Driver / Helper)</span>
+              <span className="text-[10px] font-bold text-emerald-400">{activeCrewOptions.length} Aktif</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCrewDropdownOpen(prev => !prev);
+                setIsFleetDropdownOpen(false);
+                setCrewSearchText('');
+              }}
+              className={`w-full flex items-center justify-between gap-2 bg-slate-950 border rounded-xl px-3 py-2 text-left transition cursor-pointer ${
+                isCrewDropdownOpen
+                  ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                  : 'border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 border ${
+                  selectedCrewObj
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {selectedCrewObj ? getInitials(selectedCrewObj.name) : <Users className="w-3.5 h-3.5" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">
+                    {selectedCrewObj ? selectedCrewObj.name : `Semua Kru (${activeCrewOptions.length} Anggota)`}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {selectedCrewObj ? `Posisi: ${selectedCrewObj.roleBadge} • Aktif` : 'Filter berdasarkan Driver atau Helper'}
+                  </div>
+                </div>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isCrewDropdownOpen ? 'rotate-180 text-emerald-400' : ''}`} />
+            </button>
+
+            {isCrewDropdownOpen && (
+              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
+                <div className="p-2 border-b border-slate-800 bg-slate-950/60">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={crewSearchText}
+                      onChange={e => setCrewSearchText(e.target.value)}
+                      placeholder="Cari nama driver atau helper..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                <div className="max-h-56 overflow-y-auto p-1.5 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCrewId('all');
+                      setIsCrewDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left text-xs font-bold transition cursor-pointer ${
+                      selectedCrewId === 'all'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>Semua Kru ({activeCrewOptions.length} Anggota)</span>
+                    {selectedCrewId === 'all' && <Check className="w-4 h-4 shrink-0" />}
+                  </button>
+                  {filteredCrewOptions.map(c => {
+                    const isSel = selectedCrewId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCrewId(c.id);
+                          setIsCrewDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                          isSel ? 'bg-emerald-600 text-white' : 'text-slate-200 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 border ${
+                            isSel
+                              ? 'bg-white/20 text-white border-white/30'
+                              : c.roleBadge === 'Driver'
+                              ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          }`}>
+                            {getInitials(c.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold truncate">{c.name}</div>
+                            <div className={`text-[10px] flex items-center gap-1.5 ${isSel ? 'text-white/85' : 'text-slate-400'}`}>
+                              <span>{c.roleBadge}</span>
+                              <span>•</span>
+                              <span className={isSel ? 'text-white' : 'text-emerald-400'}>● Aktif</span>
+                            </div>
+                          </div>
+                        </div>
+                        {isSel && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Reset Button */}
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold transition cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
               <span>Reset Semua Filter</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 3. CORE TELEMETRY METRIC CARDS (5 HERO METRICS)                           */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-        {/* Metric 1: Total Jarak Tempuh */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden group hover:border-slate-700 transition shadow-md">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Total Jarak Tempuh</span>
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
+      {/* 4 Kartu Metrik Utama (Tanpa Waktu Idle Mesin) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* 1. Total Jarak Tempuh (Diambil dari Total KM Awal Inputan BBM) */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Total Jarak Tempuh
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
               <Navigation className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white font-mono tracking-tight">
-            {summary.totalDistanceKm.toLocaleString('id-ID')} <span className="text-sm font-normal text-slate-400">KM</span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Rata2 per Rute:</span>
-            <span className="font-mono font-semibold text-cyan-300">
-              {summary.totalScheduledDeliveries > 0 ? (summary.totalDistanceKm / summary.totalScheduledDeliveries).toFixed(0) : 0} KM
+          <div className="mt-2 flex items-baseline gap-1.5">
+            <span className="text-2xl font-black text-white font-mono">
+              {report.overall.totalDistanceKm.toLocaleString('id-ID')}
             </span>
+            <span className="text-xs font-bold text-slate-400">KM</span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Sumber KM Awal BBM:</span>
+            <span className="text-cyan-400 font-bold">{report.overall.bbmInputCount} Input BBM</span>
           </div>
         </div>
 
-        {/* Metric 2: Rata-Rata Kecepatan */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden group hover:border-slate-700 transition shadow-md">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Rata-Rata Kecepatan</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+        {/* 2. Rata-Rata Kecepatan (Diambil dari Evaluasi Jalur) */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Rata-Rata Kecepatan
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
               <Gauge className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white font-mono tracking-tight">
-            {summary.avgFleetSpeedKmh} <span className="text-sm font-normal text-slate-400">KM/H</span>
+          <div className="mt-2 flex items-baseline gap-1.5">
+            <span className="text-2xl font-black text-white font-mono">
+              {report.overall.avgSpeedKmh}
+            </span>
+            <span className="text-xs font-bold text-slate-400">KM/H</span>
           </div>
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Kondisi Mesin Bergerak:</span>
-            <span className="font-semibold text-amber-300">Normal (30-75 KM/H)</span>
-          </div>
-        </div>
-
-        {/* Metric 3: Persentase Waktu Idle */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden group hover:border-slate-700 transition shadow-md">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Waktu Idle Mesin</span>
-            <div className="w-8 h-8 rounded-xl bg-orange-500/15 text-orange-400 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <div className="text-2xl font-black text-white font-mono tracking-tight">
-              {summary.overallIdlePercentage}%
-            </div>
-            <span className={`text-[10px] font-bold ${summary.overallIdlePercentage < 20 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {summary.overallIdlePercentage < 20 ? 'Efisien' : 'Perlu Evaluasi'}
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Sumber Data:</span>
+            <span className="text-amber-400 font-bold">
+              Evaluasi Jalur ({report.overall.evaluationRoutesCount} Rute)
             </span>
           </div>
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Ambang Standar:</span>
-            <span className="font-mono text-slate-300">&le; 20% Durasi Rute</span>
-          </div>
         </div>
 
-        {/* Metric 4: Pengiriman Selesai */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden group hover:border-slate-700 transition shadow-md">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Pengiriman Selesai</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+        {/* 3. Total Kiriman (Terintegrasi Jadwal & Penugasan serta Frekuensi Armada di Kru Pengiriman) */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Total Kiriman
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white font-mono tracking-tight">
-            {summary.totalCompletedDeliveries} <span className="text-sm font-normal text-slate-400">/ {summary.totalScheduledDeliveries}</span>
+          <div className="mt-2 flex items-baseline gap-1.5">
+            <span className="text-2xl font-black text-white font-mono">
+              {report.overall.totalDeliveries}
+            </span>
+            <span className="text-xs font-bold text-slate-400">Kiriman</span>
           </div>
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Total Muatan:</span>
-            <span className="font-mono font-semibold text-emerald-300">
-              {summary.totalCargoTon} Ton
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Jadwal &amp; Frekuensi Kru:</span>
+            <span className="text-emerald-400 font-bold">
+              {report.overall.fleetFrequencyTotal} Ritase Armada
             </span>
           </div>
         </div>
 
-        {/* Metric 5: Data Ketepatan Waktu (On-Time) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden group hover:border-slate-700 transition shadow-md">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Ketepatan Waktu (SLA)</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+        {/* 4. Ketepatan Waktu (SLA: Gate-Out Keluar Gudang & Klik Tiba di Argo) */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Ketepatan Waktu (SLA)
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <div className="text-2xl font-black text-white font-mono tracking-tight">
-              {summary.overallOnTimePercentage}%
-            </div>
-            <span className="text-[10px] font-bold text-emerald-400">On-Time</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-white font-mono">
+              {report.overall.onTimeRatePercent}%
+            </span>
+            <span className={`text-[11px] font-bold ${report.overall.lateCount === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {report.overall.lateCount === 0 ? 'Tepat Waktu' : `${report.overall.lateCount} Terlambat`}
+            </span>
           </div>
-          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Rata2 Waktu Tempuh:</span>
-            <span className="font-mono text-slate-300">{summary.averageDeliveryDurationHours} Jam</span>
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Gate-Out &amp; Tiba Argo:</span>
+            <span className="text-teal-300 font-bold">
+              {report.overall.onTimeCount} Tepat • {report.overall.lateCount} Terlambat
+            </span>
           </div>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 4. SEGMENTED TABS: ARMADA vs KRU vs GRAFIK TREN vs RAW LOGS               */}
-      {/* ========================================================================= */}
-      <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-800 pb-2">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-xl">
-          <button
-            onClick={() => setActiveTab('fleet')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'fleet'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Truck className="w-3.5 h-3.5" />
-            <span>Ringkasan Performa Armada ({fleetMetrics.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('crew')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'crew'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Ringkasan Performa Kru ({crewMetrics.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('visuals')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'visuals'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Grafik &amp; Analisis Komparatif</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('raw_logs')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'raw_logs'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Telemetri tracking_logs ({rawTrackingLogs.length})</span>
-          </button>
-        </div>
-
-        <div className="text-xs text-slate-400 flex items-center gap-2">
-          <span>Menampilkan data untuk:</span>
-          <span className="font-bold text-white">
-            {timePreset === 'all'
-              ? 'Seluruh Riwayat'
-              : timePreset === 'today'
-              ? 'Hari Ini'
-              : timePreset === '7days'
-              ? '7 Hari Terakhir'
-              : timePreset === '30days'
-              ? '30 Hari'
-              : timePreset === 'this_month'
-              ? 'Bulan Berjalan'
-              : `${customStartDate || 'Awal'} s/d ${customEndDate || 'Sekarang'}`}
-          </span>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* TAB 1: PERFORMA ARMADA TABLE                                              */}
-      {/* ========================================================================= */}
-      {activeTab === 'fleet' && (
+      {/* TAB 1: OVERVIEW & CHARTS */}
+      {activeTab === 'overview' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Distance & Speed Trend Composed Chart */}
+            <div className="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-cyan-400" />
+                    <span>Tren Jarak Tempuh (KM Awal BBM) &amp; Kecepatan Evaluasi Jalur</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Akumulasi KM awal inputan BBM (KM) vs kecepatan rata-rata evaluasi jalur (KM/H)
+                  </p>
+                </div>
+              </div>
+
+              <div className="h-72 w-full">
+                {report.dailyTrends.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-slate-500 text-xs">
+                    Tidak ada data tren pada rentang filter ini.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={report.dailyTrends}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                      <XAxis dataKey="formattedDate" stroke="#64748b" fontSize={11} />
+                      <YAxis yAxisId="left" stroke="#22d3ee" fontSize={11} unit=" km" />
+                      <YAxis yAxisId="right" orientation="right" stroke="#f59e0b" fontSize={11} unit=" km/h" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#0f172a',
+                          borderColor: '#334155',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          color: '#f8fafc'
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Bar
+                        yAxisId="left"
+                        dataKey="totalDistanceKm"
+                        name="Total KM Awal BBM (KM)"
+                        fill="#06b6d4"
+                        radius={[6, 6, 0, 0]}
+                        barSize={28}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="avgSpeedKmh"
+                        name="Rata-rata Kecepatan Evaluasi Jalur (KM/H)"
+                        stroke="#f59e0b"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, fill: '#f59e0b' }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            {/* SLA Punctuality Breakdown Pie Chart */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Ketepatan Waktu Tim Pengiriman (SLA)</span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Berdasarkan klik Gate-Out keluar gudang &amp; klik Sudah Tiba di Argo
+                </p>
+              </div>
+
+              <div className="h-52 w-full my-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={slaPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={48}
+                      outerRadius={72}
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {slaPieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#0f172a',
+                        borderColor: '#334155',
+                        borderRadius: '10px',
+                        fontSize: '12px',
+                        color: '#f8fafc'
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80 text-center">
+                <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-2">
+                  <span className="text-[10px] text-emerald-300 block">Tim Tepat Waktu</span>
+                  <span className="text-sm font-black text-emerald-400 font-mono">
+                    {report.overall.onTimeCount} Kiriman
+                  </span>
+                </div>
+                <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2">
+                  <span className="text-[10px] text-rose-300 block">Tim Terlambat</span>
+                  <span className="text-sm font-black text-rose-400 font-mono">
+                    {report.overall.lateCount} Kiriman
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Fleet Distance Comparison Chart */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
+              <Truck className="w-4 h-4 text-amber-400" />
+              <span>Perbandingan Total Kiriman &amp; KM Awal BBM per Unit Armada</span>
+            </h3>
+            <p className="text-[11px] text-slate-400 mb-4">
+              Terintegrasi dengan Jadwal &amp; Penugasan, Frekuensi Armada pada Kru Pengiriman, dan Inputan BBM
+            </p>
+
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={report.fleetMetrics} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis type="number" stroke="#64748b" fontSize={11} />
+                  <YAxis dataKey="plateNumber" type="category" stroke="#94a3b8" fontSize={11} width={95} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#0f172a',
+                      borderColor: '#334155',
+                      borderRadius: '10px',
+                      fontSize: '12px',
+                      color: '#f8fafc'
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px' }} />
+                  <Bar dataKey="totalTrips" name="Total Kiriman" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+                  <Bar dataKey="avgSpeedKmh" name="Rata2 Kecepatan (KM/H)" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={14} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: FLEET & CREW PERFORMANCE */}
+      {activeTab === 'fleet_crew' && (
+        <div className="space-y-5">
+          {/* Fleet Performance Table */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Truck className="w-4 h-4 text-amber-400" />
-                  <span>Metrik Kinerja Armada Kendaraan Operasional</span>
+                  <span>Tabel Analitik Performa Armada ({report.fleetMetrics.length} Unit)</span>
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Dihitung dari kumulatif titik koordinat GPS pada tabel <code className="text-cyan-300">tracking_logs</code> dan status penugasan <code className="text-cyan-300">schedules</code>.
+                <p className="text-[11px] text-slate-400">
+                  Terintegrasi dengan Jadwal &amp; Penugasan, Frekuensi Armada di Kru Pengiriman, KM Awal BBM, dan Evaluasi Jalur
                 </p>
               </div>
-              <div className="text-xs text-slate-400">
-                Total Armada Terpantau: <strong className="text-white">{fleetMetrics.length} Unit</strong>
-              </div>
+              <button
+                onClick={() => handleExportCSV('fleet')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-semibold border border-slate-700 transition self-start sm:self-auto cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh CSV Armada</span>
+              </button>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-[10px] uppercase font-bold text-slate-400 tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Plat &amp; Inisial</th>
-                    <th className="py-3 px-3">Tipe / Merk</th>
-                    <th className="py-3 px-3 text-right">Total Jarak</th>
-                    <th className="py-3 px-3 text-right">Rata2 Kecepatan</th>
-                    <th className="py-3 px-3 text-right">Kecepatan Max</th>
-                    <th className="py-3 px-3 text-right">% Waktu Idle</th>
-                    <th className="py-3 px-3 text-center">Jadwal Selesai</th>
-                    <th className="py-3 px-3 text-right">On-Time Rate</th>
-                    <th className="py-3 px-3 text-right">Est. Solar (L)</th>
-                    <th className="py-3 px-4 text-center">Aksi</th>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950/70 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    <th className="py-3 px-4">Unit Armada</th>
+                    <th className="py-3 px-4 text-center">Total Kiriman</th>
+                    <th className="py-3 px-4 text-center">Frekuensi Kru</th>
+                    <th className="py-3 px-4 text-right">Total KM Awal (BBM)</th>
+                    <th className="py-3 px-4 text-right">Rata2 Kecepatan</th>
+                    <th className="py-3 px-4 text-center">Ketepatan Tim</th>
+                    <th className="py-3 px-4 text-center">SLA On-Time</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {fleetMetrics.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="py-8 text-center text-slate-500">
-                        Tidak ada data armada yang memenuhi kriteria filter saat ini.
+                <tbody className="divide-y divide-slate-800/70 text-xs">
+                  {report.fleetMetrics.map(f => (
+                    <tr key={f.fleetId} className="hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-white font-mono flex items-center gap-1.5">
+                          <span>{f.plateNumber}</span>
+                          {f.initialCode && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px]">
+                              {f.initialCode}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400">{f.vehicleType}</div>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-emerald-400">
+                        {f.totalTrips} Kiriman
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono text-slate-300">
+                        {f.crewMenuFrequency}x Penugasan
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-cyan-400">
+                        {f.totalDistanceKm.toLocaleString('id-ID')} KM
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono">
+                        <span className="text-amber-400 font-bold">{f.avgSpeedKmh}</span>
+                        <span className="text-slate-500 text-[10px]"> km/h</span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono text-[11px]">
+                        <span className="text-emerald-400 font-bold">{f.onTimeTripsCount} Tepat</span>
+                        <span className="text-slate-600 mx-1">•</span>
+                        <span className="text-rose-400 font-bold">{f.lateTripsCount} Terlambat</span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`font-mono font-bold ${f.onTimeRatePercent >= 90 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {f.onTimeRatePercent}%
+                        </span>
                       </td>
                     </tr>
-                  ) : (
-                    fleetMetrics.map((fm, idx) => (
-                      <tr key={fm.fleetId} className="hover:bg-slate-800/40 transition">
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-2.5">
-                            <span className="w-5 h-5 rounded-md bg-slate-950 border border-slate-800 text-[10px] font-mono font-bold flex items-center justify-center text-slate-400">
-                              {idx + 1}
-                            </span>
-                            <div>
-                              <div className="font-mono font-bold text-white text-xs flex items-center gap-1.5">
-                                <span>{fm.plateNumber}</span>
-                                {fm.initialCode && fm.initialCode !== '-' && (
-                                  <span className="text-[10px] text-amber-400 font-sans">[{fm.initialCode}]</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <div className="text-slate-200 font-medium">{fm.vehicleType}</div>
-                          <div className="text-[10px] text-slate-400">{fm.brand}</div>
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono font-bold text-cyan-300">
-                          {fm.totalDistanceKm.toLocaleString('id-ID')} km
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono text-slate-200">
-                          {fm.avgSpeedKmh} km/h
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono text-slate-400">
-                          {fm.maxSpeedKmh} km/h
-                        </td>
-                        <td className="py-3.5 px-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <span className={`font-mono font-bold ${fm.idlePercentage > 25 ? 'text-rose-400' : fm.idlePercentage > 15 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                              {fm.idlePercentage}%
-                            </span>
-                            <span className="text-[10px] text-slate-500">({fm.idleTimeMinutes}m)</span>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <span className="font-mono font-bold text-white">{fm.completedDeliveries}</span>
-                          <span className="text-slate-500"> / {fm.totalSchedules}</span>
-                        </td>
-                        <td className="py-3.5 px-3 text-right">
-                          <div className="inline-flex items-center gap-1 font-mono font-bold text-emerald-400">
-                            <span>{fm.onTimePercentage}%</span>
-                          </div>
-                          {fm.avgDelayMinutes > 0 && (
-                            <div className="text-[10px] text-rose-400">+{fm.avgDelayMinutes}m telat</div>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono text-slate-300">
-                          {fm.fuelUsedEstimatedLiters} L
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            onClick={() => setSelectedDetailFleet(fm)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-bold border border-slate-700 hover:border-amber-500/50 transition cursor-pointer"
-                          >
-                            Rincian
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: PERFORMA KRU SUPIR & HELPER TABLE                                  */}
-      {/* ========================================================================= */}
-      {activeTab === 'crew' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          {/* Crew Performance Table */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Users className="w-4 h-4 text-cyan-400" />
-                  <span>Metrik Kinerja &amp; Ketepatan Waktu Kru Supir</span>
+                  <Users className="w-4 h-4 text-emerald-400" />
+                  <span>Tabel Produktivitas &amp; Ketepatan Waktu Kru ({report.crewMetrics.length} Personel)</span>
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Evaluasi jarak jelajah, rata-rata kecepatan, persentase idle time, dan skor kepatuhan jadwal kedatangan retail.
+                <p className="text-[11px] text-slate-400">
+                  Evaluasi jam terbang, frekuensi kiriman, kecepatan rata-rata evaluasi jalur, dan ketepatan waktu Gate-Out &amp; Tiba di Argo
                 </p>
               </div>
-              <div className="text-xs text-slate-400">
-                Total Kru Terdaftar: <strong className="text-white">{crewMetrics.length} Personel</strong>
-              </div>
+              <button
+                onClick={() => handleExportCSV('crew')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-semibold border border-slate-700 transition self-start sm:self-auto cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh CSV Kru</span>
+              </button>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-[10px] uppercase font-bold text-slate-400 tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Nama Kru &amp; Kontak</th>
-                    <th className="py-3 px-3">Peran / Jabatan</th>
-                    <th className="py-3 px-3 text-center">Rating</th>
-                    <th className="py-3 px-3 text-right">Total Jarak (KM)</th>
-                    <th className="py-3 px-3 text-right">Rata2 Kecepatan</th>
-                    <th className="py-3 px-3 text-right">% Waktu Idle</th>
-                    <th className="py-3 px-3 text-center">Selesai / Tugas</th>
-                    <th className="py-3 px-3 text-right">Ketepatan (On-Time)</th>
-                    <th className="py-3 px-3 text-center">Skor Disiplin</th>
-                    <th className="py-3 px-3">Rute Dominan</th>
-                    <th className="py-3 px-4 text-center">Aksi</th>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950/70 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    <th className="py-3 px-4">Nama Kru</th>
+                    <th className="py-3 px-4">Posisi</th>
+                    <th className="py-3 px-4 text-center">Total Kiriman</th>
+                    <th className="py-3 px-4 text-right">KM Awal BBM</th>
+                    <th className="py-3 px-4 text-right">Rata2 Kecepatan</th>
+                    <th className="py-3 px-4 text-center">Tepat Waktu / Terlambat</th>
+                    <th className="py-3 px-4">Rute Dominan</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {crewMetrics.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} className="py-8 text-center text-slate-500">
-                        Tidak ada data kru yang memenuhi kriteria filter saat ini.
+                <tbody className="divide-y divide-slate-800/70 text-xs">
+                  {report.crewMetrics.map(c => (
+                    <tr key={c.crewId} className="hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-white">{c.crewName}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                          c.cleanRoleLabel === 'Driver'
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                            : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                        }`}>
+                          {c.cleanRoleLabel}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono">
+                        <span className="font-bold text-white">{c.totalTripsCombined}</span>
+                        <span className="text-[10px] text-slate-400 block">
+                          ({c.totalTripsAsDriver} Supir / {c.totalTripsAsHelper} Helper)
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-cyan-400">
+                        {c.totalDistanceKm.toLocaleString('id-ID')} KM
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono">
+                        <span className="text-amber-400 font-bold">{c.avgSpeedKmh}</span>
+                        <span className="text-slate-500 text-[10px]"> km/h</span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono">
+                        <span className="text-emerald-400 font-bold">{c.onTimeDeliveries} Tepat</span>
+                        <span className="text-slate-600 mx-1">/</span>
+                        <span className="text-rose-400 font-bold">{c.lateDeliveries} Terlambat</span>
+                        <span className="block text-[10px] text-slate-400">SLA: {c.onTimeRatePercent}%</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap gap-1">
+                          {c.PrimaryRoutes.length > 0 ? (
+                            c.PrimaryRoutes.map((r, idx) => (
+                              <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px]">
+                                {r}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-slate-500 text-[10px]">-</span>
+                          )}
+                        </div>
                       </td>
                     </tr>
-                  ) : (
-                    crewMetrics.map((cm, idx) => (
-                      <tr key={cm.crewId} className="hover:bg-slate-800/40 transition">
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-2.5">
-                            <span className="w-5 h-5 rounded-md bg-slate-950 border border-slate-800 text-[10px] font-mono font-bold flex items-center justify-center text-slate-400">
-                              {idx + 1}
-                            </span>
-                            <div>
-                              <div className="font-bold text-white text-xs">{cm.name}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{cm.phone}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <span className={`text-[11px] font-semibold ${
-                            cm.role.includes('Utama') ? 'text-amber-300' : cm.role.includes('Cadangan') ? 'text-blue-300' : 'text-slate-300'
-                          }`}>
-                            {cm.role}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-3 text-center font-bold text-amber-400">
-                          ⭐ {cm.rating.toFixed(1)}
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono font-bold text-cyan-300">
-                          {cm.totalDistanceKm.toLocaleString('id-ID')} km
-                        </td>
-                        <td className="py-3.5 px-3 text-right font-mono text-slate-200">
-                          {cm.avgSpeedKmh} km/h
-                        </td>
-                        <td className="py-3.5 px-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <span className={`font-mono font-bold ${cm.idlePercentage > 25 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                              {cm.idlePercentage}%
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <span className="font-mono font-bold text-white">{cm.completedDeliveries}</span>
-                          <span className="text-slate-500"> / {cm.totalSchedules}</span>
-                        </td>
-                        <td className="py-3.5 px-3 text-right">
-                          <span className="font-mono font-bold text-emerald-400">
-                            {cm.onTimePercentage}%
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <div className="inline-flex items-center justify-center px-2 py-0.5 rounded-md font-mono font-black text-[11px] bg-slate-950 border border-slate-700 text-white">
-                            {cm.punctualityScore}/100
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 text-slate-300 truncate max-w-[140px]" title={cm.topDestinationArea}>
-                          {cm.topDestinationArea}
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            onClick={() => setSelectedDetailCrew(cm)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-bold border border-slate-700 hover:border-cyan-500/50 transition cursor-pointer"
-                          >
-                            Rincian
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -751,562 +1247,205 @@ export const AnalyticsReportingModule: React.FC = () => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 3: VISUAL CHARTS & COMPARATIVE METRICS                                 */}
-      {/* ========================================================================= */}
-      {activeTab === 'visuals' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Chart 1: Perbandingan Jarak Tempuh Armada */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+      {/* TAB 3: ROUTE EVALUATIONS (GATE-OUT & TIBA DI ARGO PUNCTUALITY) */}
+      {activeTab === 'routes' && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-cyan-400" />
-                <span>Peringkat Jarak Tempuh per Armada (KM)</span>
+                <span>Daftar Evaluasi Rute, Gate-Out Gudang &amp; Kepulangan Tiba di Argo ({report.routeEvaluations.length} Rute)</span>
               </h3>
-              <span className="text-xs text-slate-400 font-mono">Top Unit</span>
+              <p className="text-[11px] text-slate-400">
+                Ketepatan waktu terekam otomatis saat Driver/Helper klik Gate-Out keluar gudang dan saat klik Sudah Tiba di Argo
+              </p>
             </div>
-
-            <div className="space-y-3 pt-2">
-              {fleetMetrics.slice(0, 7).map((fm) => {
-                const maxKm = Math.max(...fleetMetrics.map(f => f.totalDistanceKm), 1);
-                const percent = Math.min(100, Math.round((fm.totalDistanceKm / maxKm) * 100));
-
-                return (
-                  <div key={fm.fleetId} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-mono font-bold text-slate-200">
-                        {fm.plateNumber} <span className="text-slate-400 font-sans text-[11px]">({fm.vehicleType})</span>
-                      </span>
-                      <span className="font-mono font-bold text-cyan-300">
-                        {fm.totalDistanceKm} KM
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800">
-                      <div
-                        className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-500"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <button
+              onClick={() => handleExportCSV('routes')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Ekspor Evaluasi Rute (CSV)</span>
+            </button>
           </div>
 
-          {/* Chart 2: Analisis Waktu Idle & Efisiensi Bahan Bakar */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Clock className="w-4 h-4 text-orange-400" />
-                <span>Persentase Idle Time per Armada (%)</span>
-              </h3>
-              <span className="text-xs text-slate-400">Batas Aman &le; 20%</span>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              {fleetMetrics.slice(0, 7).map((fm) => {
-                const isOver = fm.idlePercentage > 20;
-                return (
-                  <div key={fm.fleetId} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-mono font-bold text-slate-200">
-                        {fm.plateNumber}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-950/70 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                  <th className="py-3 px-4">Tanggal &amp; Area Tujuan</th>
+                  <th className="py-3 px-4">Armada &amp; Kru</th>
+                  <th className="py-3 px-4 text-right">KM Awal BBM</th>
+                  <th className="py-3 px-4 text-right">Kecepatan Evaluasi</th>
+                  <th className="py-3 px-4 text-center">Gate-Out (Keluar Gudang)</th>
+                  <th className="py-3 px-4 text-center">Kepulangan (Tiba di Argo)</th>
+                  <th className="py-3 px-4 text-center">Status Ketepatan Tim</th>
+                  <th className="py-3 px-4 text-center">Rincian</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70 text-xs">
+                {report.routeEvaluations.map(ev => (
+                  <tr
+                    key={ev.scheduleId}
+                    onClick={() => setSelectedRouteDetail(ev)}
+                    className="hover:bg-slate-800/50 transition cursor-pointer"
+                  >
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-white">{ev.destinationStore}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {ev.date} • {ev.trackingNumber}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="font-mono font-bold text-amber-400">
+                        {ev.plateNumber}{ev.initialCode ? ` (${ev.initialCode})` : ''}
+                      </div>
+                      <div className="text-[10px] text-slate-300">
+                        Supir: {ev.driverName} {ev.helperName && ev.helperName !== '-' ? `| Helper: ${ev.helperName}` : ''}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono">
+                      <span className="font-bold text-cyan-400">{ev.bbmStartKm.toLocaleString('id-ID')} KM</span>
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono">
+                      <span className="font-bold text-amber-400">{ev.avgSpeedKmh} km/h</span>
+                      <div className="text-[10px] text-slate-500">Maks: {ev.maxSpeedKmh} km/h</div>
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono">
+                      <div className="text-[10px] text-slate-400">Jadwal: {ev.scheduledDepartureTime}</div>
+                      <div className="text-[11px] font-bold text-white">Aktual: {ev.actualGateOutTime}</div>
+                      <span className={`inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-bold border ${
+                        ev.gateOutStatus === 'tepat_waktu'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : ev.gateOutStatus === 'terlambat'
+                          ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}>
+                        {ev.gateOutStatus === 'tepat_waktu'
+                          ? 'Gate-Out Tepat Waktu'
+                          : ev.gateOutStatus === 'terlambat'
+                          ? 'Gate-Out Terlambat'
+                          : 'Menunggu Gate-Out'}
                       </span>
-                      <span className={`font-mono font-bold ${isOver ? 'text-rose-400' : 'text-emerald-400'}`}>
-                        {fm.idlePercentage}% ({fm.idleTimeMinutes} Menit)
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono">
+                      <div className="text-[10px] text-slate-400">Target: {ev.scheduledReturnTime}</div>
+                      <div className="text-[11px] font-bold text-white">Tiba Argo: {ev.actualArgoReturnTime}</div>
+                      <span className={`inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-bold border ${
+                        ev.argoReturnStatus === 'tepat_waktu'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : ev.argoReturnStatus === 'terlambat'
+                          ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}>
+                        {ev.argoReturnStatus === 'tepat_waktu'
+                          ? 'Tiba Tepat Waktu'
+                          : ev.argoReturnStatus === 'terlambat'
+                          ? 'Pulang Terlambat'
+                          : 'Belum Tiba di Argo'}
                       </span>
-                    </div>
-                    <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          isOver ? 'bg-gradient-to-r from-amber-500 to-rose-500' : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                        }`}
-                        style={{ width: `${Math.min(100, fm.idlePercentage * 2.5)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Chart 3: Distribusi Status Ketepatan Waktu Pengiriman */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 lg:col-span-2">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span>Ringkasan SLA &amp; Kepatuhan Jam Pengiriman (On-Time Performance)</span>
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-              <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 text-center">
-                <div className="text-xs text-slate-400 font-bold uppercase mb-1">Pengiriman Tepat Waktu (On-Time)</div>
-                <div className="text-3xl font-black text-emerald-400 font-mono">
-                  {summary.overallOnTimePercentage}%
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">
-                  {summary.totalCompletedDeliveries} kiriman terkonfirmasi sampai sebelum batas SLA
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-amber-500/30 text-center">
-                <div className="text-xs text-slate-400 font-bold uppercase mb-1">Total Kiriman Dalam Perjalanan</div>
-                <div className="text-3xl font-black text-amber-400 font-mono">
-                  {summary.totalScheduledDeliveries - summary.totalCompletedDeliveries}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">
-                  Armada sedang bergerak aktif di jalur distribusi
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-cyan-500/30 text-center">
-                <div className="text-xs text-slate-400 font-bold uppercase mb-1">Rata2 Durasi Pengiriman</div>
-                <div className="text-3xl font-black text-cyan-400 font-mono">
-                  {summary.averageDeliveryDurationHours} Jam
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">
-                  Waktu tempuh dari DC Banyuwangi hingga bongkar muatan
-                </div>
-              </div>
-            </div>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {ev.isOnTime ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          ✓ Tepat Waktu
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                          ! Terlambat ({ev.slaDelayMinutes} mnt)
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <button className="p-1.5 rounded-lg bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 transition cursor-pointer">
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 4: RAW TRACKING_LOGS TELEMETRY EXPLORER                                */}
-      {/* ========================================================================= */}
-      {activeTab === 'raw_logs' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+      {/* Modal Rincian Evaluasi Rute */}
+      {selectedRouteDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Radio className="w-4 h-4 text-rose-400" />
-                  <span>Log Telemetri GPS Langsung (<code className="text-cyan-300">tracking_logs</code>)</span>
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                  Rincian Evaluasi Rute &amp; Ketepatan Waktu
+                </span>
+                <h3 className="text-base font-black text-white mt-1">
+                  {selectedRouteDetail.trackingNumber} — {selectedRouteDetail.destinationStore}
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Menampilkan rekaman log mentah dengan koordinat latitude, longitude, kecepatan, dan status mesin kendaraan.
+                <p className="text-xs text-slate-400">
+                  Tanggal Kirim: {selectedRouteDetail.date}
                 </p>
               </div>
-              <div className="text-xs text-slate-400 font-mono">
-                {rawTrackingLogs.length} Titik GPS Tersimpan
-              </div>
-            </div>
-
-            <div className="overflow-x-auto max-h-[550px]">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/95 sticky top-0 z-10 text-[10px] uppercase font-bold text-slate-400 tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="py-2.5 px-3">Log ID</th>
-                    <th className="py-2.5 px-3">ID Jadwal (Schedule)</th>
-                    <th className="py-2.5 px-3">Waktu (Timestamp)</th>
-                    <th className="py-2.5 px-3">Koordinat (Lat, Lng)</th>
-                    <th className="py-2.5 px-3 text-right">Kecepatan</th>
-                    <th className="py-2.5 px-3 text-center">Status Mesin</th>
-                    <th className="py-2.5 px-4">Nama Lokasi / Waypoint</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70 font-mono">
-                  {rawTrackingLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-500 font-sans">
-                        Tidak ada log telemetri yang tersedia untuk jadwal yang dipilih.
-                      </td>
-                    </tr>
-                  ) : (
-                    rawTrackingLogs.slice(0, 100).map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2 px-3 text-slate-400 text-[11px] truncate max-w-[100px]" title={log.id}>
-                          {log.id}
-                        </td>
-                        <td className="py-2 px-3 text-cyan-400 text-[11px] font-bold">
-                          {log.schedule_id}
-                        </td>
-                        <td className="py-2 px-3 text-slate-300 text-[11px]">
-                          {new Date(log.timestamp).toLocaleString('id-ID', {
-                            dateStyle: 'short',
-                            timeStyle: 'medium'
-                          })}
-                        </td>
-                        <td className="py-2 px-3 text-slate-400 text-[11px]">
-                          {log.latitude.toFixed(5)}, {log.longitude.toFixed(5)}
-                        </td>
-                        <td className="py-2 px-3 text-right text-slate-200 font-bold">
-                          {log.speed} km/h
-                        </td>
-                        <td className="py-2 px-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              log.engine_status === 'RUNNING'
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                : log.engine_status === 'IDLE'
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                : 'bg-slate-800 text-slate-400 border border-slate-700'
-                            }`}
-                          >
-                            {log.engine_status}
-                          </span>
-                        </td>
-                        <td className="py-2 px-4 text-slate-300 font-sans text-[11px] truncate max-w-[200px]" title={log.location_name}>
-                          {log.location_name || '-'}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {rawTrackingLogs.length > 100 && (
-              <div className="p-3 bg-slate-950 border-t border-slate-800 text-center text-xs text-slate-400">
-                Menampilkan 100 log terbaru dari total {rawTrackingLogs.length} titik GPS. Gunakan tombol "Ekspor Data" di atas untuk mengunduh seluruh rekaman ke CSV.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. DRILL-DOWN MODAL: RINCIAN PERFORMA ARMADA                              */}
-      {/* ========================================================================= */}
-      {selectedDetailFleet && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white flex items-center gap-2">
-                    <span>{selectedDetailFleet.plateNumber}</span>
-                    <span className="text-xs text-amber-400 font-sans font-bold">
-                      [{selectedDetailFleet.initialCode}]
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {selectedDetailFleet.vehicleType} &bull; {selectedDetailFleet.brand}
-                  </p>
-                </div>
-              </div>
               <button
-                onClick={() => setSelectedDetailFleet(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                onClick={() => setSelectedRouteDetail(null)}
+                className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                Tutup
               </button>
             </div>
 
-            {/* Modal Body: Metrics Grid */}
-            <div className="p-5 space-y-4 overflow-y-auto">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Jarak</span>
-                  <span className="text-lg font-black text-cyan-300 font-mono">
-                    {selectedDetailFleet.totalDistanceKm} KM
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Rata2 Kecepatan</span>
-                  <span className="text-lg font-black text-white font-mono">
-                    {selectedDetailFleet.avgSpeedKmh} KM/H
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Persentase Idle</span>
-                  <span className="text-lg font-black text-amber-400 font-mono">
-                    {selectedDetailFleet.idlePercentage}%
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Ketepatan On-Time</span>
-                  <span className="text-lg font-black text-emerald-400 font-mono">
-                    {selectedDetailFleet.onTimePercentage}%
-                  </span>
-                </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 block">KM Awal Input BBM</span>
+                <span className="text-base font-black text-cyan-400 font-mono">
+                  {selectedRouteDetail.bbmStartKm.toLocaleString('id-ID')} KM
+                </span>
               </div>
-
-              {/* Schedules Table for this fleet */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Riwayat Jadwal Penugasan Armada ({selectedDetailFleet.totalSchedules} Jadwal):
-                </h4>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {filteredSchedules
-                    .filter(s => s.fleetId === selectedDetailFleet.fleetId)
-                    .map(sch => {
-                      const gps = trackingLogService.calculateScheduleGpsMetrics(sch.id);
-                      return (
-                        <div key={sch.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-                          <div>
-                            <div className="font-mono font-bold text-white flex items-center gap-2">
-                              <span>{sch.trackingNumber}</span>
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                sch.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                              }`}>
-                                {sch.status}
-                              </span>
-                            </div>
-                            <div className="text-slate-400 text-[11px] mt-0.5">
-                              Tujuan: {sch.store?.storeName || sch.areaName} ({sch.store?.city || 'Jawa Timur'})
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-mono font-bold text-cyan-300">
-                              {gps.totalDistanceKm} KM
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              Idle: {gps.idleMinutes}m &bull; Avg: {gps.avgSpeedKmh} km/h
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 block">Rata2 Kecepatan</span>
+                <span className="text-base font-black text-amber-400 font-mono">
+                  {selectedRouteDetail.avgSpeedKmh} KM/H
+                </span>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 block">Gate-Out Gudang</span>
+                <span className="text-sm font-black text-white font-mono">
+                  {selectedRouteDetail.actualGateOutTime}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  Jadwal: {selectedRouteDetail.scheduledDepartureTime}
+                </span>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 block">Tiba di Argo</span>
+                <span className="text-sm font-black text-emerald-400 font-mono">
+                  {selectedRouteDetail.actualArgoReturnTime}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  Target: {selectedRouteDetail.scheduledReturnTime}
+                </span>
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => setSelectedDetailFleet(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
-              >
-                Tutup Pratinjau
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. DRILL-DOWN MODAL: RINCIAN PERFORMA KRU                                 */}
-      {/* ========================================================================= */}
-      {selectedDetailCrew && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white">
-                    {selectedDetailCrew.name}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {selectedDetailCrew.role} &bull; {selectedDetailCrew.phone} &bull; Rating ⭐ {selectedDetailCrew.rating}
-                  </p>
-                </div>
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Armada Pengangkut:</span>
+                <span className="font-bold text-white font-mono">
+                  {selectedRouteDetail.plateNumber} ({selectedRouteDetail.vehicleType})
+                </span>
               </div>
-              <button
-                onClick={() => setSelectedDetailCrew(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-5 space-y-4 overflow-y-auto">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Jarak</span>
-                  <span className="text-lg font-black text-cyan-300 font-mono">
-                    {selectedDetailCrew.totalDistanceKm} KM
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Kecepatan Rata2</span>
-                  <span className="text-lg font-black text-white font-mono">
-                    {selectedDetailCrew.avgSpeedKmh} KM/H
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Skor Disiplin</span>
-                  <span className="text-lg font-black text-amber-400 font-mono">
-                    {selectedDetailCrew.punctualityScore}/100
-                  </span>
-                </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Ketepatan Waktu</span>
-                  <span className="text-lg font-black text-emerald-400 font-mono">
-                    {selectedDetailCrew.onTimePercentage}%
-                  </span>
-                </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Kru Bertugas:</span>
+                <span className="font-bold text-white">
+                  Driver: {selectedRouteDetail.driverName} | Helper: {selectedRouteDetail.helperName || '-'}
+                </span>
               </div>
-
-              {/* Schedules Table for this crew */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Daftar Penugasan Pengiriman ({selectedDetailCrew.totalSchedules} Tugas):
-                </h4>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {filteredSchedules
-                    .filter(s => s.crewId === selectedDetailCrew.crewId || s.crewHelperId === selectedDetailCrew.crewId || s.crewHelper2Id === selectedDetailCrew.crewId)
-                    .map(sch => (
-                      <div key={sch.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-                        <div>
-                          <div className="font-mono font-bold text-white flex items-center gap-2">
-                            <span>{sch.trackingNumber}</span>
-                            <span className="text-slate-400 font-sans">[{sch.fleet?.plateNumber || 'Armada'}]</span>
-                          </div>
-                          <div className="text-slate-400 text-[11px] mt-0.5">
-                            {sch.store?.storeName || sch.areaName} ({sch.cargoWeightTon} Ton)
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            sch.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                          }`}>
-                            {sch.status}
-                          </span>
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            {new Date(sch.departureDate).toLocaleDateString('id-ID')}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => setSelectedDetailCrew(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
-              >
-                Tutup Pratinjau
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 7. PRINTABLE / PDF REPORT MODAL VIEW                                      */}
-      {/* ========================================================================= */}
-      {isPrintModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white text-slate-950 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden print:m-0 print:p-0">
-            {/* Modal Action Bar (Hidden on actual print) */}
-            <div className="p-4 bg-slate-100 border-b border-slate-200 flex items-center justify-between print:hidden">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                <Printer className="w-4 h-4 text-slate-900" />
-                <span>Pratinjau Cetak Dokumen Eksekutif</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 rounded-xl bg-slate-950 text-white text-xs font-bold hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Cetak Sekarang (Print)</span>
-                </button>
-                <button
-                  onClick={() => setIsPrintModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-950 hover:bg-slate-200 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Document Layout */}
-            <div className="p-8 space-y-6 overflow-y-auto font-sans">
-              {/* Document Header Letterhead */}
-              <div className="border-b-2 border-slate-900 pb-4 flex items-center justify-between">
-                <div>
-                  <h1 className="text-xl font-black tracking-tight text-slate-950">
-                    PT ANUGRAH KEMASAN KREATIF
-                  </h1>
-                  <p className="text-xs text-slate-600">
-                    Gudang Pusat Banyuwangi DC: Jl. Argopuro No.60, Sukowidi, Banyuwangi
-                  </p>
-                  <p className="text-xs font-bold text-slate-800 mt-1 uppercase tracking-wider">
-                    LAPORAN ANALITIK KINERJA ARMADA &amp; KRU LOGISTIK
-                  </p>
-                </div>
-                <div className="text-right text-xs text-slate-600">
-                  <div>Tanggal Cetak: <strong>{new Date().toLocaleDateString('id-ID', { dateStyle: 'full' })}</strong></div>
-                  <div>Status Dokumen: <strong className="text-emerald-700">Resmi Operasional</strong></div>
-                </div>
-              </div>
-
-              {/* Summary Stats Table */}
-              <div className="grid grid-cols-5 gap-3 text-center border border-slate-300 rounded-xl p-3 bg-slate-50">
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Total Jarak</div>
-                  <div className="text-base font-black text-slate-950 font-mono">{summary.totalDistanceKm} KM</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Rata2 Kecepatan</div>
-                  <div className="text-base font-black text-slate-950 font-mono">{summary.avgFleetSpeedKmh} KM/H</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Idle Time</div>
-                  <div className="text-base font-black text-slate-950 font-mono">{summary.overallIdlePercentage}%</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Pengiriman Selesai</div>
-                  <div className="text-base font-black text-slate-950 font-mono">{summary.totalCompletedDeliveries} / {summary.totalScheduledDeliveries}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Ketepatan (On-Time)</div>
-                  <div className="text-base font-black text-emerald-700 font-mono">{summary.overallOnTimePercentage}%</div>
-                </div>
-              </div>
-
-              {/* Fleet Table */}
-              <div className="space-y-2">
-                <h3 className="text-xs font-black uppercase text-slate-900 border-b border-slate-300 pb-1">
-                  1. Ringkasan Kinerja Armada Kendaraan
-                </h3>
-                <table className="w-full text-left text-[11px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-400 bg-slate-100 text-slate-700">
-                      <th className="p-1.5">No</th>
-                      <th className="p-1.5">Plat Nomor</th>
-                      <th className="p-1.5">Tipe Armada</th>
-                      <th className="p-1.5 text-right">Total KM</th>
-                      <th className="p-1.5 text-right">Rata2 Kecepatan</th>
-                      <th className="p-1.5 text-right">% Idle</th>
-                      <th className="p-1.5 text-center">Selesai</th>
-                      <th className="p-1.5 text-right">On-Time</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {fleetMetrics.map((fm, i) => (
-                      <tr key={fm.fleetId}>
-                        <td className="p-1.5">{i + 1}</td>
-                        <td className="p-1.5 font-bold font-mono">{fm.plateNumber} [{fm.initialCode}]</td>
-                        <td className="p-1.5">{fm.vehicleType}</td>
-                        <td className="p-1.5 text-right font-mono">{fm.totalDistanceKm} km</td>
-                        <td className="p-1.5 text-right font-mono">{fm.avgSpeedKmh} km/h</td>
-                        <td className="p-1.5 text-right font-mono">{fm.idlePercentage}%</td>
-                        <td className="p-1.5 text-center font-mono">{fm.completedDeliveries}</td>
-                        <td className="p-1.5 text-right font-mono font-bold text-emerald-800">{fm.onTimePercentage}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Signatures */}
-              <div className="grid grid-cols-2 pt-8 text-center text-xs">
-                <div>
-                  <p className="text-slate-500">Dibuat Oleh:</p>
-                  <p className="font-bold text-slate-900 mt-12 underline">SPV Logistik &amp; Distribusi</p>
-                  <p className="text-[10px] text-slate-500">PT Anugrah Kemasan Kreatif</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Mengetahui &amp; Menyetujui:</p>
-                  <p className="font-bold text-slate-900 mt-12 underline">Head of Operations (AKK DC)</p>
-                  <p className="text-[10px] text-slate-500">Bambang Sudiro, S.T.</p>
-                </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-400">Status Ketepatan Tim Pengiriman:</span>
+                <span className={`font-bold ${selectedRouteDetail.isOnTime ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {selectedRouteDetail.isOnTime
+                    ? 'Tepat Waktu (Sesuai Jadwal Gate-Out & Kepulangan Argo)'
+                    : `Terlambat (${selectedRouteDetail.slaDelayMinutes} menit dari jadwal)`}
+                </span>
               </div>
             </div>
           </div>

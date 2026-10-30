@@ -534,6 +534,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     preparedBy?: string;
     gateOutConfirmed?: boolean;
     gateOutBy?: string;
+    gateOutTimestamp?: string;
+    argoArrivalTimestamp?: string;
+    argoArrivalBy?: string;
   }>>(() => {
     try {
       const raw = localStorage.getItem('akk_shared_schedule_flow_v1');
@@ -556,6 +559,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       preparedBy: string;
       gateOutConfirmed: boolean;
       gateOutBy: string;
+      gateOutTimestamp: string;
+      argoArrivalTimestamp: string;
+      argoArrivalBy: string;
     }>
   ) => {
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1004,16 +1010,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
 
     const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
+    const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
     const isPreparedOrInTransit = Boolean(
       primarySharedSchedule &&
-        (keluarArgoMap[primarySharedSchedule.id] ||
-          sharedFlow?.checklistCompleted ||
-          sharedFlow?.preparedForGateOut ||
-          sharedFlow?.gateOutConfirmed ||
+        ((sharedFlow?.checklistCompleted && isSameDayFlow) ||
+          (sharedFlow?.preparedForGateOut && isSameDayFlow) ||
+          (sharedFlow?.gateOutConfirmed && isSameDayFlow) ||
           ['in_transit', 'picked_up'].includes(primarySharedSchedule.status))
     );
 
-    const isDone = Boolean(matchingPreTrip || isChecklistCompletedAfterCheckin || isPreparedOrInTransit);
+    const isDone = Boolean(matchingPreTrip || (isChecklistCompletedAfterCheckin && isSameDayFlow) || isPreparedOrInTransit);
     const completedBy =
       matchingPreTrip?.driverName ||
       sharedFlow?.checklistCompletedBy ||
@@ -1709,40 +1715,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (!activeShift) {
       addNotification(
         'sla_warning',
-        'Check-In Terlebih Dahulu',
-        'Silakan lakukan Check-In terlebih dahulu sebelum melakukan Persiapan Keluar.'
+        'Check-In Shift Terlebih Dahulu',
+        'Silakan lakukan Check-In terlebih dahulu untuk mengaktifkan pengisian checklist & keluar gerbang.'
       );
-      checkinSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      try {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      } catch {}
-      setHighlightCheckin(true);
-      setTimeout(() => setHighlightCheckin(false), 2500);
-      return;
-    }
-
-    if (!isFleetLockedAfterCheckin && !isUserHelperRole) {
-      addNotification(
-        'sla_warning',
-        'Pilih Armada Terlebih Dahulu',
-        'Silakan pilih nomor kendaraan armada dan isi checklist sebelum Persiapan Keluar.'
-      );
-      setIsPostCheckinFleetModalOpen(true);
+      setCheckinModalMode('checkin');
+      setIsCheckinModalOpen(true);
       return;
     }
 
     if (!hasChecklistToday && !isChecklistCompletedAfterCheckin && !isUserHelperRole) {
       addNotification(
-        'sla_warning',
-        'Isi Checklist Armada Terlebih Dahulu',
-        'Silakan lengkapi dan simpan Checklist Armada terlebih dahulu.'
+        'delivery',
+        'Lengkapi Checklist Armada',
+        'Silakan lengkapi dan simpan Checklist Armada (Inspeksi Pra-Jalan) terlebih dahulu.'
       );
+      const targetFleet = assignedFleet || delivery.fleet || fleets[0];
+      if (targetFleet?.id) {
+        setSelectedFleetId(targetFleet.id);
+        setIsFleetLockedAfterCheckin(true);
+        try {
+          localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
+          localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
+        } catch {}
+      }
       const fresh = driverChecklistService.createNewChecklistTemplate(
         selectedDriverId,
         currentDriver?.name || portalDisplayName || 'Driver',
-        assignedFleet?.id || '',
-        assignedFleet?.plateNumber || '-',
-        assignedFleet?.vehicleType || '-'
+        targetFleet?.id || 'fl-01',
+        targetFleet?.plateNumber || 'P 8848 U',
+        targetFleet?.vehicleType || 'Engkel Long Box'
       );
       setActiveChecklistToEdit(fresh);
       setChecklistInspectionType('pre_trip');
@@ -1806,6 +1807,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
     driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
 
+    const gateOutIso = new Date().toISOString();
     updateSharedScheduleFlow([delivery.id], {
       fleetId: preparedSchedule.fleetId,
       plateNumber: preparedSchedule.fleet?.plateNumber || '-',
@@ -1813,7 +1815,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       checklistCompleted: true,
       preparedForGateOut: true,
       gateOutConfirmed: true,
-      gateOutBy: portalDisplayName
+      gateOutBy: portalDisplayName,
+      gateOutTimestamp: gateOutIso
     });
 
     await handleUpdateStatus(
@@ -2015,6 +2018,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
 
     const targetDelivery = podModal.delivery;
+    const argoArrivalIso = podData.podPhotoTimestamp || new Date().toISOString();
+    updateSharedScheduleFlow([targetDelivery.id], {
+      argoArrivalTimestamp: argoArrivalIso,
+      argoArrivalBy: portalDisplayName
+    });
     await handleUpdateStatus(targetDelivery, 'delivered', podNote, podData, choice);
     // Pastikan waybill ter-generate dan berstatus 'delivered' agar muncul di SJ Keluar & Selesai
     driverWaybillService.getWaybillForSchedule({
@@ -3254,12 +3262,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           1. Check-In -> 2. Pemilihan Armada -> 3. Pengisian Checklist -> 4. Persiapan Keluar (Otomatis ke SJ Keluar & Gate-Out) -> Di Jalan -> Konfirmasi Tiba di Gudang */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
                         {delivery.status === 'scheduled' && (() => {
+                          const todayStr = new Date().toISOString().slice(0, 10);
                           const sharedFlow = sharedScheduleFlowMap[delivery.id];
+                          const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
+
+                          // Tombol Gate-Out & Buka SJ Keluar HANYA aktif jika Driver SUDAH CHECK-IN SHIFT (activeShift) & Checklist Armada Hari Ini Sudah Diisi/Selesai
+                          const isChecklistDoneToday = Boolean(
+                            isChecklistCompletedAfterCheckin ||
+                            (sharedFlow?.checklistCompleted && isSameDayFlow) ||
+                            (sharedCrewPreTripState.isDone && latestChecklist?.date === todayStr)
+                          );
+
                           const isReadyForGateOut = Boolean(
-                            keluarArgoMap[delivery.id] ||
-                              sharedFlow?.checklistCompleted ||
-                              sharedFlow?.preparedForGateOut ||
-                              sharedCrewPreTripState.isDone
+                            activeShift &&
+                            isChecklistDoneToday &&
+                            (keluarArgoMap[delivery.id] || (sharedFlow?.preparedForGateOut && isSameDayFlow) || (sharedFlow?.gateOutConfirmed && isSameDayFlow))
                           );
 
                           return (
@@ -3301,8 +3318,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   onClick={() => handlePersiapanKeluar(delivery)}
                                   className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                                 >
-                                  <Truck className="w-4 h-4" />
-                                  <span>Persiapan Keluar</span>
+                                  <ClipboardCheck className="w-4 h-4" />
+                                  <span>
+                                    {!activeShift
+                                      ? 'Check-In Dulu Untuk Isi Checklist'
+                                      : 'Isi Checklist Armada (Pra-Jalan)'}
+                                  </span>
                                 </button>
                               )}
 
@@ -5253,7 +5274,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           setActiveShift(shift);
           const todayStr = new Date().toISOString().slice(0, 10);
           // Jika partner (Driver/Helper dalam 1 jadwal/armada yang sama) SUDAH isi armada & checklist,
-          // langsung sinkronkan ke Jadwal Aktif (Keluar Gerbang / Check-Out) tanpa mengulang pemilihan armada/checklist!
+          // langsung sinkronkan ke Jadwal Aktif (Keluar Gerbang / Check-Out) tanpa mengulang pengisian!
           if (sharedCrewPreTripState.isDone) {
             setIsFleetLockedAfterCheckin(true);
             setIsChecklistCompletedAfterCheckin(true);
@@ -5277,8 +5298,37 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             );
             return;
           }
-          // Jika belum ada yang mengisi armada & checklist pada jadwal ini, buka modal pemilihan armada
-          setIsPostCheckinFleetModalOpen(true);
+
+          // Alur Langsung: Setelah Check-In, SISTEM LANGSUNG MEMBUKA FORM CHECKLIST ARMADA!
+          const targetFleet = assignedFleet || activeDeliveries[0]?.fleet || deliveries[0]?.fleet || fleets[0];
+          if (targetFleet?.id) {
+            setSelectedFleetId(targetFleet.id);
+            setIsFleetLockedAfterCheckin(true);
+            try {
+              localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
+              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
+            } catch {}
+          }
+
+          const fresh = driverChecklistService.createNewChecklistTemplate(
+            selectedDriverId,
+            currentDriver?.name || portalDisplayName || 'Driver',
+            targetFleet?.id || 'fl-01',
+            targetFleet?.plateNumber || 'P 8848 U',
+            targetFleet?.vehicleType || 'Engkel Long Box'
+          );
+          setActiveChecklistToEdit(fresh);
+          setChecklistInspectionType('pre_trip');
+          setIsChecklistModalOpen(true);
+          setIsPostCheckinFleetModalOpen(false);
+          setBottomNav('deliveries');
+          setActiveTab('active');
+
+          addNotification(
+            'delivery',
+            'Check-In Berhasil • Silakan Isi Checklist Armada',
+            `Presensi Check-In tersimpan. Silakan isi & simpan Form Checklist Armada (${targetFleet?.plateNumber || ''}) untuk mengaktifkan Tombol Buka SJ Keluar & Keluar Gerbang.`
+          );
         }}
       />
 

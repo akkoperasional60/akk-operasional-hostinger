@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { logisticsStore } from '../services/store';
 import { 
   Users, Building2, Database, ShoppingBag, TrendingUp, AlertCircle, 
   CheckCircle2, UserCheck, ShieldAlert, Brush, Award, Video, Play,
   Check, Clock, Search, Plus, Calendar, ShieldCheck, FileText, ExternalLink,
-  Truck, ArrowRight, X
+  Truck, ArrowRight, X, Download, DollarSign, MapPin, CreditCard,
+  ChevronLeft, ChevronRight, Trash2
 } from 'lucide-react';
 import { SecurityGateLog } from '../types';
 import { TeamCalendar } from './TeamCalendar';
@@ -944,16 +946,1074 @@ const WarehouseDashboard = () => (
   <WarehouseManagementSystem />
 );
 
-const FinanceDashboard = () => (
-  <div className="space-y-6">
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <MetricCard title="Invoice Pending" value="Rp 450 Jt" subtext="Jatuh tempo minggu depan" icon={Database} color="text-rose-400" />
-      <MetricCard title="Pajak Bulan Ini" value="Rp 85 Jt" subtext="Sudah dilaporkan" icon={CheckCircle2} color="text-emerald-400" />
-      <MetricCard title="Realisasi Budget" value="78%" subtext="Dari alokasi tahunan" icon={TrendingUp} color="text-indigo-400" />
+interface CustomerUnpaidInvoice {
+  id: string;
+  noInvoice: string;
+  noSuratJalan: string;
+  customerName: string;
+  contactPhone: string;
+  region: string;
+  invoiceDate: string;
+  dueDate: string;
+  itemSummary: string;
+  totalTagihan: number;
+  jumlahTerbayar: number;
+  lastPaymentDate?: string;
+  notes: string;
+}
+
+const INITIAL_UNPAID_INVOICES: CustomerUnpaidInvoice[] = [
+  {
+    id: 'INV-001',
+    noInvoice: 'INV/AKK/2026/10/0142',
+    noSuratJalan: 'SJ-AKK-2610-088',
+    customerName: 'TK ANUGRAH SEKAR WANGI',
+    contactPhone: '0812-3456-7811',
+    region: 'Banyuwangi Kota',
+    invoiceDate: '2026-10-05',
+    dueDate: '2026-10-19',
+    itemSummary: 'Karton Box Corrugated B-Flute 60x40x40 cm (3.000 Pcs)',
+    totalTagihan: 20400000,
+    jumlahTerbayar: 5400000,
+    lastPaymentDate: '2026-10-15',
+    notes: 'Baru masuk pembayaran cicilan pertama Rp 5,4 Jt, sisa janji transfer minggu ini'
+  },
+  {
+    id: 'INV-002',
+    noInvoice: 'INV/AKK/2026/09/0319',
+    noSuratJalan: 'SJ-AKK-2609-214',
+    customerName: 'UD SUMBER REJEKI JEMBER',
+    contactPhone: '0811-3490-221',
+    region: 'Jember',
+    invoiceDate: '2026-09-18',
+    dueDate: '2026-10-02',
+    itemSummary: 'Karton Box Double Wall CB-Flute Export (2.500 Pcs) & Lakban OPP (25 Karton)',
+    totalTagihan: 48500000,
+    jumlahTerbayar: 0,
+    notes: 'Sudah lewat jatuh tempo >25 hari, perlu penagihan prioritas tim Finance'
+  },
+  {
+    id: 'INV-003',
+    noInvoice: 'INV/AKK/2026/10/0165',
+    noSuratJalan: 'SJ-AKK-2610-104',
+    customerName: 'TK LIMA SEPULUH',
+    contactPhone: '0813-5521-9088',
+    region: 'Genteng - Banyuwangi',
+    invoiceDate: '2026-10-12',
+    dueDate: '2026-10-26',
+    itemSummary: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm (8.000 Pcs)',
+    totalTagihan: 17600000,
+    jumlahTerbayar: 10000000,
+    lastPaymentDate: '2026-10-22',
+    notes: 'Cicilan ke-1 Rp 10 Jt via BCA, sisa Rp 7,6 Jt menunggu giro cair'
+  },
+  {
+    id: 'INV-004',
+    noInvoice: 'INV/AKK/2026/10/0188',
+    noSuratJalan: 'SJ-AKK-2610-129',
+    customerName: 'TK PRATAMA SRONO',
+    contactPhone: '0852-3310-4412',
+    region: 'Srono - Banyuwangi',
+    invoiceDate: '2026-10-20',
+    dueDate: '2026-11-03',
+    itemSummary: 'Box Die-Cut Pizza Kraft Coklat 25x25x5 cm (4.500 Pcs)',
+    totalTagihan: 14850000,
+    jumlahTerbayar: 0,
+    notes: 'Tempo 14 hari berjalan, jatuh tempo awal November'
+  },
+  {
+    id: 'INV-005',
+    noInvoice: 'INV/AKK/2026/10/0194',
+    noSuratJalan: 'SJ-AKK-2610-137',
+    customerName: 'MITRA COLD STORAGE MUNCAR',
+    contactPhone: '0812-8890-3341',
+    region: 'Muncar - Banyuwangi',
+    invoiceDate: '2026-10-08',
+    dueDate: '2026-10-22',
+    itemSummary: 'Karton Box Ekspor Waxed Tahan Lembab Cold Storage (3.200 Pcs)',
+    totalTagihan: 46400000,
+    jumlahTerbayar: 23200000,
+    lastPaymentDate: '2026-10-10',
+    notes: 'DP 50% lunas saat PO, sisa 50% jatuh tempo minggu lalu'
+  },
+  {
+    id: 'INV-006',
+    noInvoice: 'INV/AKK/2026/10/0205',
+    noSuratJalan: 'SJ-AKK-2610-149',
+    customerName: 'TOKO BERKAH JAYA ROGOJAMPI',
+    contactPhone: '0821-4409-1182',
+    region: 'Rogojampi - Banyuwangi',
+    invoiceDate: '2026-10-24',
+    dueDate: '2026-11-07',
+    itemSummary: 'Plastik Kemasan HD/PE Grosir (120 Ball) & Stretch Film (40 Roll)',
+    totalTagihan: 26800000,
+    jumlahTerbayar: 0,
+    notes: 'Faktur sudah diterima admin toko, belum jatuh tempo'
+  },
+  {
+    id: 'INV-007',
+    noInvoice: 'INV/AKK/2026/09/0290',
+    noSuratJalan: 'SJ-AKK-2609-192',
+    customerName: 'GROSIR KEMASAN DENPASAR',
+    contactPhone: '0819-9901-7721',
+    region: 'Denpasar - Bali',
+    invoiceDate: '2026-09-10',
+    dueDate: '2026-09-25',
+    itemSummary: 'Paper Cup Hot 8 Oz Custom Print + Lid (150 Karton)',
+    totalTagihan: 67500000,
+    jumlahTerbayar: 30000000,
+    lastPaymentDate: '2026-10-05',
+    notes: 'Menunggak >30 hari untuk sisa pelunasan Rp 37,5 Jt'
+  }
+];
+
+const LS_KEY_FINANCE_UNPAID = 'akk_finance_unpaid_invoices_v2';
+
+function computeInvoiceAgingDays(dueDateStr: string): number {
+  // Reference current operational date (or today)
+  const today = new Date('2026-10-29T00:00:00');
+  const due = new Date(`${dueDateStr}T00:00:00`);
+  if (isNaN(due.getTime())) return 0;
+  return Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getInvoiceStatus(inv: CustomerUnpaidInvoice): 'Lunas' | 'Jatuh Tempo (Overdue)' | 'Cicilan / Sebagian' | 'Belum Jatuh Tempo' {
+  const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+  if (sisa <= 0) return 'Lunas';
+  const overdueDays = computeInvoiceAgingDays(inv.dueDate);
+  if (overdueDays > 0) return 'Jatuh Tempo (Overdue)';
+  if (inv.jumlahTerbayar > 0) return 'Cicilan / Sebagian';
+  return 'Belum Jatuh Tempo';
+}
+
+const FinanceDashboard: React.FC = () => {
+  const [invoices, setInvoices] = useState<CustomerUnpaidInvoice[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY_FINANCE_UNPAID);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_UNPAID_INVOICES;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(invoices));
+    } catch {}
+  }, [invoices]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('UNPAID_ONLY');
+  const [agingFilter, setAgingFilter] = useState<string>('ALL');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Modals
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [paymentModalInvoice, setPaymentModalInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [paymentNominal, setPaymentNominal] = useState<number>(0);
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [popupModal, setPopupModal] = useState<{ title: string; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!popupModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        setPopupModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [popupModal]);
+
+  const [newInvForm, setNewInvForm] = useState({
+    noInvoice: `INV/AKK/2026/10/${String(invoices.length + 210).padStart(4, '0')}`,
+    noSuratJalan: `SJ-AKK-2610-${String(invoices.length + 155)}`,
+    customerName: '',
+    contactPhone: '',
+    region: 'Banyuwangi Kota',
+    invoiceDate: '2026-10-29',
+    dueDate: '2026-11-12',
+    itemSummary: '',
+    totalTagihan: 15000000,
+    jumlahTerbayar: 0,
+    notes: ''
+  });
+
+  // Filtered Invoices
+  const filteredInvoices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return invoices.filter(inv => {
+      const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+      const st = getInvoiceStatus(inv);
+      const agingDays = computeInvoiceAgingDays(inv.dueDate);
+
+      const matchSearch =
+        !q ||
+        inv.noInvoice.toLowerCase().includes(q) ||
+        inv.noSuratJalan.toLowerCase().includes(q) ||
+        inv.customerName.toLowerCase().includes(q) ||
+        inv.region.toLowerCase().includes(q) ||
+        inv.itemSummary.toLowerCase().includes(q);
+
+      let matchStatus = true;
+      if (statusFilter === 'UNPAID_ONLY') {
+        matchStatus = sisa > 0;
+      } else if (statusFilter !== 'ALL') {
+        matchStatus = st === statusFilter;
+      }
+
+      let matchAging = true;
+      if (agingFilter === 'NOT_DUE') {
+        matchAging = agingDays <= 0 && sisa > 0;
+      } else if (agingFilter === 'OVERDUE_1_14') {
+        matchAging = agingDays >= 1 && agingDays <= 14 && sisa > 0;
+      } else if (agingFilter === 'OVERDUE_15_30') {
+        matchAging = agingDays >= 15 && agingDays <= 30 && sisa > 0;
+      } else if (agingFilter === 'OVERDUE_30_PLUS') {
+        matchAging = agingDays > 30 && sisa > 0;
+      }
+
+      return matchSearch && matchStatus && matchAging;
+    });
+  }, [invoices, searchQuery, statusFilter, agingFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedInvoices = filteredInvoices.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  // KPI Metrics
+  const unpaidInvoices = invoices.filter(inv => inv.totalTagihan - inv.jumlahTerbayar > 0);
+  const totalUnpaidAmount = unpaidInvoices.reduce(
+    (sum, inv) => sum + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
+    0
+  );
+  const overdueInvoices = unpaidInvoices.filter(inv => computeInvoiceAgingDays(inv.dueDate) > 0);
+  const totalOverdueAmount = overdueInvoices.reduce(
+    (sum, inv) => sum + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
+    0
+  );
+  const partialInvoices = unpaidInvoices.filter(inv => inv.jumlahTerbayar > 0);
+  const totalCollectedFromUnpaid = invoices.reduce((sum, inv) => sum + inv.jumlahTerbayar, 0);
+
+  const handleOpenPaymentModal = (inv: CustomerUnpaidInvoice) => {
+    const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+    setPaymentModalInvoice(inv);
+    setPaymentNominal(sisa);
+    setPaymentNotes(inv.notes || '');
+  };
+
+  const handleSavePayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentModalInvoice) return;
+    const bayar = Math.max(0, Number(paymentNominal) || 0);
+    const updatedTerbayar = Math.min(
+      paymentModalInvoice.totalTagihan,
+      paymentModalInvoice.jumlahTerbayar + bayar
+    );
+    const sisaBaru = Math.max(0, paymentModalInvoice.totalTagihan - updatedTerbayar);
+
+    setInvoices(prev =>
+      prev.map(item =>
+        item.id === paymentModalInvoice.id
+          ? {
+              ...item,
+              jumlahTerbayar: updatedTerbayar,
+              lastPaymentDate: new Date().toISOString().slice(0, 10),
+              notes:
+                paymentNotes.trim() ||
+                (sisaBaru === 0
+                  ? 'Telah dilunasi penuh'
+                  : `Pembayaran cicilan masuk Rp ${bayar.toLocaleString('id-ID')}`)
+            }
+          : item
+      )
+    );
+
+    const custName = paymentModalInvoice.customerName;
+    const invNo = paymentModalInvoice.noInvoice;
+    setPaymentModalInvoice(null);
+    setPopupModal({
+      title: sisaBaru === 0 ? 'Tagihan Pelanggan Lunas' : 'Pembayaran Cicilan Dicatat',
+      message:
+        sisaBaru === 0
+          ? `Tagihan ${invNo} untuk "${custName}" telah dinyatakan LUNAS.`
+          : `Pembayaran Rp ${bayar.toLocaleString('id-ID')} untuk ${invNo} (${custName}) berhasil disimpan. Sisa tagihan: Rp ${sisaBaru.toLocaleString('id-ID')}.`
+    });
+  };
+
+  const handleAddNewInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newInvForm.customerName.trim() || !newInvForm.noInvoice.trim()) return;
+
+    const newItem: CustomerUnpaidInvoice = {
+      id: `INV-${Date.now()}`,
+      noInvoice: newInvForm.noInvoice.trim().toUpperCase(),
+      noSuratJalan: newInvForm.noSuratJalan.trim().toUpperCase() || '-',
+      customerName: newInvForm.customerName.trim().toUpperCase(),
+      contactPhone: newInvForm.contactPhone.trim() || '-',
+      region: newInvForm.region.trim() || 'Banyuwangi',
+      invoiceDate: newInvForm.invoiceDate,
+      dueDate: newInvForm.dueDate,
+      itemSummary: newInvForm.itemSummary.trim() || 'Pesanan Kemasan Karton Box AKK',
+      totalTagihan: Math.max(0, Number(newInvForm.totalTagihan) || 0),
+      jumlahTerbayar: Math.max(0, Number(newInvForm.jumlahTerbayar) || 0),
+      notes: newInvForm.notes.trim() || 'Tagihan pelanggan terdaftar'
+    };
+
+    setInvoices([newItem, ...invoices]);
+    setIsAddModalOpen(false);
+    setNewInvForm({
+      ...newInvForm,
+      noInvoice: `INV/AKK/2026/10/${String(invoices.length + 215).padStart(4, '0')}`,
+      noSuratJalan: `SJ-AKK-2610-${String(invoices.length + 160)}`,
+      customerName: '',
+      contactPhone: '',
+      itemSummary: '',
+      notes: ''
+    });
+    setPopupModal({
+      title: 'Data Tagihan Pelanggan Disimpan',
+      message: `Tagihan ${newItem.noInvoice} atas nama "${newItem.customerName}" berhasil ditambahkan.`
+    });
+  };
+
+  const handleDeleteInvoice = (id: string) => {
+    setInvoices(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleExportUnpaidExcel = () => {
+    const rows = filteredInvoices.map((inv, idx) => {
+      const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+      const aging = computeInvoiceAgingDays(inv.dueDate);
+      return {
+        No: idx + 1,
+        'No. Invoice': inv.noInvoice,
+        'No. Surat Jalan': inv.noSuratJalan,
+        'Nama Pelanggan / Toko': inv.customerName,
+        'Kontak Pelanggan': inv.contactPhone,
+        Wilayah: inv.region,
+        'Tanggal Invoice': inv.invoiceDate,
+        'Tanggal Jatuh Tempo': inv.dueDate,
+        'Keterlambatan (Hari)': aging > 0 ? `${aging} Hari` : 'Belum Jatuh Tempo',
+        'Rincian Barang': inv.itemSummary,
+        'Total Tagihan (Rp)': inv.totalTagihan,
+        'Sudah Dibayar (Rp)': inv.jumlahTerbayar,
+        'Sisa Belum Lunas (Rp)': sisa,
+        'Status Tagihan': getInvoiceStatus(inv),
+        Catatan: inv.notes
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Tagihan_Belum_Lunas');
+    XLSX.writeFile(wb, `Tagihan_Pelanggan_Belum_Lunas_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header Banner Finance & Tax */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 text-[10px] font-black uppercase tracking-wider">
+              Departemen Finance &amp; Tax &bull; Kontrol Piutang
+            </span>
+          </div>
+          <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+            Monitoring Tagihan Pelanggan yang Belum Terlunasi (Accounts Receivable)
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Rekapitulasi faktur tagihan toko/mitra yang belum lunas, pemantauan umur piutang jatuh tempo (overdue), dan pencatatan cicilan/pelunasan.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExportUnpaidExcel}
+            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Ekspor Excel Tagihan</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Tagihan Pelanggan</span>
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Total Tagihan Belum Lunas
+            </span>
+            <DollarSign className="w-4 h-4 text-rose-500" />
+          </div>
+          <div className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
+            Rp {totalUnpaidAmount.toLocaleString('id-ID')}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Dari {unpaidInvoices.length} faktur pelanggan yang belum lunas
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Lewat Jatuh Tempo (Overdue)
+            </span>
+            <AlertCircle className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
+            Rp {totalOverdueAmount.toLocaleString('id-ID')}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            {overdueInvoices.length} faktur melewati tanggal jatuh tempo
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Tagihan Dicicil / Sebagian
+            </span>
+            <CreditCard className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+            {partialInvoices.length} Faktur
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Sudah masuk pembayaran sebagian / DP
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Pembayaran Masuk Terkumpul
+            </span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+            Rp {totalCollectedFromUnpaid.toLocaleString('id-ID')}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Total cicilan &amp; pelunasan yang telah diterima
+          </p>
+        </div>
+      </div>
+
+      {/* Filter & Search Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Cari No. Invoice, Nama Pelanggan / Toko, Wilayah, atau Item Pesanan..."
+            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={e => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+          >
+            <option value="UNPAID_ONLY">Semua Belum Terlunasi ({unpaidInvoices.length})</option>
+            <option value="Jatuh Tempo (Overdue)">Jatuh Tempo / Menunggak ({overdueInvoices.length})</option>
+            <option value="Cicilan / Sebagian">Cicilan / Bayar Sebagian</option>
+            <option value="Belum Jatuh Tempo">Belum Jatuh Tempo</option>
+            <option value="Lunas">Sudah Lunas (Arsip)</option>
+            <option value="ALL">Tampilkan Semua Faktur ({invoices.length})</option>
+          </select>
+
+          <select
+            value={agingFilter}
+            onChange={e => {
+              setAgingFilter(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+          >
+            <option value="ALL">Semua Umur Piutang</option>
+            <option value="NOT_DUE">Belum Jatuh Tempo</option>
+            <option value="OVERDUE_1_14">Terlambat 1 &ndash; 14 Hari</option>
+            <option value="OVERDUE_15_30">Terlambat 15 &ndash; 30 Hari</option>
+            <option value="OVERDUE_30_PLUS">Menunggak &gt; 30 Hari</option>
+          </select>
+
+          <select
+            value={pageSize}
+            onChange={e => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+          >
+            <option value={5}>5 / Hal</option>
+            <option value={10}>10 / Hal</option>
+            <option value={20}>20 / Hal</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Table of Unpaid Customer Invoices */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 dark:text-white">
+              Daftar Tagihan Pelanggan yang Belum Terlunasi
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Klik tombol <strong>Catat Bayar / Cicil</strong> pada baris pelanggan untuk menginput pembayaran masuk atau pelunasan faktur.
+            </p>
+          </div>
+          <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+            Sisa Piutang Terfilter:{' '}
+            <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+              Rp{' '}
+              {filteredInvoices
+                .reduce((acc, inv) => acc + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar), 0)
+                .toLocaleString('id-ID')}
+            </span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className="py-3 px-4">No. Invoice &amp; SJ</th>
+                <th className="py-3 px-4">Nama Pelanggan / Toko</th>
+                <th className="py-3 px-4">Rincian Pesanan</th>
+                <th className="py-3 px-4">Jatuh Tempo &amp; Umur</th>
+                <th className="py-3 px-4 text-right">Total Tagihan</th>
+                <th className="py-3 px-4 text-right">Sudah Dibayar</th>
+                <th className="py-3 px-4 text-right">Sisa Belum Lunas</th>
+                <th className="py-3 px-4">Status Tagihan</th>
+                <th className="py-3 px-4 text-right">Aksi Penagihan</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+              {paginatedInvoices.length > 0 ? (
+                paginatedInvoices.map(inv => {
+                  const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                  const st = getInvoiceStatus(inv);
+                  const agingDays = computeInvoiceAgingDays(inv.dueDate);
+
+                  return (
+                    <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {inv.noInvoice}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          SJ: {inv.noSuratJalan} &bull; Tgl: {inv.invoiceDate}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900 dark:text-white">{inv.customerName}</div>
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span>{inv.region} &bull; {inv.contactPhone}</span>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4 max-w-[230px]">
+                        <div className="font-medium text-slate-800 dark:text-slate-200 leading-snug">
+                          {inv.itemSummary}
+                        </div>
+                        {inv.notes && (
+                          <div className="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title={inv.notes}>
+                            {inv.notes}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-slate-900 dark:text-white">
+                          {inv.dueDate}
+                        </div>
+                        {sisa > 0 ? (
+                          agingDays > 0 ? (
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-mono font-black text-[10px]">
+                              Lewat {agingDays} Hari
+                            </span>
+                          ) : (
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-[10px]">
+                              {Math.abs(agingDays)} Hari Lagi
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-[10px] text-emerald-500 font-bold">Selesai</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                        Rp {inv.totalTagihan.toLocaleString('id-ID')}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        Rp {inv.jumlahTerbayar.toLocaleString('id-ID')}
+                        {inv.lastPaymentDate && (
+                          <div className="text-[9px] text-slate-500 font-normal">
+                            Tgl: {inv.lastPaymentDate}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-mono font-black">
+                        {sisa > 0 ? (
+                          <span className="text-rose-600 dark:text-rose-400 text-xs">
+                            Rp {sisa.toLocaleString('id-ID')}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-600 dark:text-emerald-400">Rp 0</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <span
+                          className={`px-2.5 py-1 rounded-lg font-bold text-[10px] inline-block border ${
+                            st === 'Lunas'
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                              : st === 'Jatuh Tempo (Overdue)'
+                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                              : st === 'Cicilan / Sebagian'
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                              : 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                          }`}
+                        >
+                          {st}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {sisa > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPaymentModal(inv)}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition cursor-pointer shadow-xs whitespace-nowrap"
+                            >
+                              Catat Bayar / Cicil
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteInvoice(inv.id)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                            title="Hapus Data Tagihan"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={9} className="py-8 text-center text-slate-400 text-xs">
+                    Tidak ada data tagihan pelanggan yang sesuai dengan filter pencarian.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="text-slate-500 dark:text-slate-400">
+            Menampilkan{' '}
+            <strong className="text-slate-900 dark:text-white">
+              {filteredInvoices.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
+            </strong>{' '}
+            &ndash;{' '}
+            <strong className="text-slate-900 dark:text-white">
+              {Math.min(currentPage * pageSize, filteredInvoices.length)}
+            </strong>{' '}
+            dari <strong className="text-slate-900 dark:text-white">{filteredInvoices.length}</strong> faktur tagihan
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Sebelumnya</span>
+            </button>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+            >
+              <span>Selanjutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* MODAL: CATAT PEMBAYARAN / CICILAN TAGIHAN                    */}
+      {/* ============================================================ */}
+      {paymentModalInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Catat Pembayaran / Pelunasan Tagihan
+                </h3>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  {paymentModalInvoice.noInvoice} &bull; {paymentModalInvoice.customerName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaymentModalInvoice(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePayment} className="space-y-3.5 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Tagihan Faktur:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">
+                    Rp {paymentModalInvoice.totalTagihan.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Sudah Terbayar Sebelumnya:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    Rp {paymentModalInvoice.jumlahTerbayar.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="flex justify-between pt-1.5 border-t border-slate-200 dark:border-slate-800">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">Sisa Tagihan Saat Ini:</span>
+                  <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                    Rp {Math.max(0, paymentModalInvoice.totalTagihan - paymentModalInvoice.jumlahTerbayar).toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Nominal Pembayaran Masuk (Rp) *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(0, paymentModalInvoice.totalTagihan - paymentModalInvoice.jumlahTerbayar)}
+                  required
+                  value={paymentNominal}
+                  onChange={e => setPaymentNominal(Number(e.target.value))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-sm font-black"
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentNominal(
+                        Math.round(Math.max(0, paymentModalInvoice.totalTagihan - paymentModalInvoice.jumlahTerbayar) / 2)
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold cursor-pointer"
+                  >
+                    Cicil 50%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPaymentNominal(Math.max(0, paymentModalInvoice.totalTagihan - paymentModalInvoice.jumlahTerbayar))
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold cursor-pointer"
+                  >
+                    Lunasi 100%
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Catatan Pembayaran / Referensi Bank
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Contoh: Transfer BCA an. Toko Sekar Wangi..."
+                  value={paymentNotes}
+                  onChange={e => setPaymentNotes(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalInvoice(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                >
+                  Simpan Pembayaran
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: TAMBAH TAGIHAN PELANGGAN BARU                         */}
+      {/* ============================================================ */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                Tambah Tagihan Pelanggan Belum Terlunasi
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddNewInvoice} className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    No. Invoice / Faktur *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newInvForm.noInvoice}
+                    onChange={e => setNewInvForm({ ...newInvForm, noInvoice: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    No. Surat Jalan
+                  </label>
+                  <input
+                    type="text"
+                    value={newInvForm.noSuratJalan}
+                    onChange={e => setNewInvForm({ ...newInvForm, noSuratJalan: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Nama Pelanggan / Toko *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: TK ANUGRAH SEKAR WANGI"
+                    value={newInvForm.customerName}
+                    onChange={e => setNewInvForm({ ...newInvForm, customerName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Wilayah / Kota
+                  </label>
+                  <input
+                    type="text"
+                    value={newInvForm.region}
+                    onChange={e => setNewInvForm({ ...newInvForm, region: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Kontak / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="0812-..."
+                    value={newInvForm.contactPhone}
+                    onChange={e => setNewInvForm({ ...newInvForm, contactPhone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Tanggal Invoice *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newInvForm.invoiceDate}
+                    onChange={e => setNewInvForm({ ...newInvForm, invoiceDate: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Tanggal Jatuh Tempo *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newInvForm.dueDate}
+                    onChange={e => setNewInvForm({ ...newInvForm, dueDate: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Rincian Barang / Pesanan *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Karton Box Corrugated B-Flute 60x40x40 cm (2.000 Pcs)"
+                  value={newInvForm.itemSummary}
+                  onChange={e => setNewInvForm({ ...newInvForm, itemSummary: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Total Nilai Tagihan (Rp) *
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    required
+                    value={newInvForm.totalTagihan}
+                    onChange={e => setNewInvForm({ ...newInvForm, totalTagihan: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    DP / Sudah Dibayar Awal (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newInvForm.jumlahTerbayar}
+                    onChange={e => setNewInvForm({ ...newInvForm, jumlahTerbayar: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Catatan Penagihan
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Jatuh tempo 14 hari setelah barang diterima..."
+                  value={newInvForm.notes}
+                  onChange={e => setNewInvForm({ ...newInvForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer"
+                >
+                  Simpan Tagihan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP NOTIFICATION */}
+      {popupModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h4 className="text-base font-black text-slate-900 dark:text-white">{popupModal.title}</h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{popupModal.message}</p>
+            </div>
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setPopupModal(null)}
+                className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs cursor-pointer transition"
+              >
+                Oke, Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-    <TeamCalendar role="finance_tax_admin" />
-  </div>
-);
+  );
+};
 
 const PurchasingDashboard = () => (
   <div className="space-y-6">
@@ -992,12 +2052,13 @@ export const DepartmentDashboard: React.FC<{
 
   return (
     <div className="space-y-6">
-      {typeToRender !== 'warehouse' && (
+      {typeToRender !== 'warehouse' && typeToRender !== 'finance' && (
         <h2 className="text-lg font-black text-slate-900 dark:text-white">
-          Dashboard {typeToRender === 'hr' ? 'Human Resources (HR, GA & Training)' : typeToRender === 'finance' ? 'Finance' : 'Purchasing'}
+          Dashboard {typeToRender === 'hr' ? 'Human Resources (HR, GA & Training)' : 'Purchasing'}
         </h2>
       )}
       {renderDashboard()}
     </div>
   );
 };
+

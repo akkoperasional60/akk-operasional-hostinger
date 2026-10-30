@@ -60,23 +60,20 @@ class DataBridgeService {
   constructor() {
     this.config = this.loadConfig();
     this.logs = this.loadLogs();
-
-    // Start auto periodic sync if enabled
-    if (this.config.isEnabled) {
-      this.startPeriodicSync(this.config.intervalMinutes);
-    }
+    // Integrasi DataBridge ke Google Sheets telah dinonaktifkan
+    this.config.isEnabled = false;
   }
 
   private loadConfig(): DataBridgeConfig {
     const defaultConfig: DataBridgeConfig = {
-      isEnabled: true,
+      isEnabled: false,
       intervalMinutes: 10,
       sheetTitle: 'ALL',
       spreadsheetId: '',
-      syncStores: true,
-      syncSchedules: true,
-      syncFleets: true,
-      syncCrews: true,
+      syncStores: false,
+      syncSchedules: false,
+      syncFleets: false,
+      syncCrews: false,
       lastSyncTimestamp: null,
       lastSyncStatus: 'idle',
       lastSyncMessage: null

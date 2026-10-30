@@ -272,29 +272,11 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
     deliveryWindow: '08:00 - 16:00',
     storeCategory: 'Toko Kelontong / Minimarket'
   },
-  {
-    id: 'str-fix-16',
-    nomor: 16,
-    storeCode: 'RET-KTP-16',
-    storeName: 'INDOMARKET & ALFAMART KETAPANG',
-    kecamatan: 'Kalipuro',
-    kabupaten: 'Banyuwangi',
-    island: 'Jawa',
-    province: 'Jawa Timur',
-    city: 'Banyuwangi',
-    address: 'Jl. Gatot Subroto Ketapang 1;AH2, Kec. Kalipuro, Kab. Banyuwangi',
-    latitude: -8.143200,
-    longitude: 114.397600,
-    contactPerson: 'Kepala Toko Ketapang',
-    phone: '+62 812-3344-5580',
-    deliveryWindow: '07:00 - 22:00',
-    storeCategory: 'Minimarket Cluster'
-  },
 
   // ================= LUAR KOTA: JEMBER, SITUBONDO, BONDOWOSO (KUNING) =================
   {
     id: 'str-lk-17',
-    nomor: 17,
+    nomor: 16,
     storeCode: 'RET-JBR-17',
     storeName: 'TOKO SUMBER PLASTIK JEMBER',
     kecamatan: 'Sumbersari',
@@ -312,7 +294,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-18',
-    nomor: 18,
+    nomor: 17,
     storeCode: 'RET-JBR-18',
     storeName: 'ROXY SQUARE RETAIL JEMBER',
     kecamatan: 'Kaliwates',
@@ -330,7 +312,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-19',
-    nomor: 19,
+    nomor: 18,
     storeCode: 'RET-JBR-19',
     storeName: 'MITRA KEMASAN AMBULU',
     kecamatan: 'Ambulu',
@@ -348,7 +330,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-20',
-    nomor: 20,
+    nomor: 19,
     storeCode: 'RET-JBR-20',
     storeName: 'TOKO SINAR JAYA KALISAT',
     kecamatan: 'Kalisat',
@@ -366,7 +348,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-21',
-    nomor: 21,
+    nomor: 20,
     storeCode: 'RET-STB-21',
     storeName: 'TOKO MAJU JAYA SITUBONDO',
     kecamatan: 'Panji',
@@ -384,7 +366,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-22',
-    nomor: 22,
+    nomor: 21,
     storeCode: 'RET-STB-22',
     storeName: 'GROSIR KEMASAN ASEMBAGUS',
     kecamatan: 'Asembagus',
@@ -402,7 +384,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-23',
-    nomor: 23,
+    nomor: 22,
     storeCode: 'RET-BDW-23',
     storeName: 'UD KEMASAN MAKMUR BONDOWOSO',
     kecamatan: 'Bondowoso',
@@ -420,7 +402,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lk-24',
-    nomor: 24,
+    nomor: 23,
     storeCode: 'RET-BDW-24',
     storeName: 'TOKO SENTRAL PLASTIK WONOSARI',
     kecamatan: 'Wonosari',
@@ -441,7 +423,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   // Terintegrasi langsung dengan titik pengantaran pada file Excel Tracksolid
   {
     id: 'str-lp-25',
-    nomor: 25,
+    nomor: 24,
     storeCode: 'RET-JMB-25',
     storeName: 'SWT MART GILIMANUK',
     kecamatan: 'Melaya',
@@ -459,7 +441,7 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
   },
   {
     id: 'str-lp-26',
-    nomor: 26,
+    nomor: 25,
     storeCode: 'RET-JMB-26',
     storeName: 'MITRA PLASTIK YEH SUMBUL',
     kecamatan: 'Mendoyo',
@@ -476,26 +458,8 @@ export const VERIFIED_DATA_FIX_STORES: RetailStore[] = [
     storeCategory: 'Mitra Distributor'
   },
   {
-    id: 'str-lp-27',
-    nomor: 27,
-    storeCode: 'RET-BDG-27',
-    storeName: 'INDOMARET FRESH BYPASS NGURAH RAI KUTA',
-    kecamatan: 'Kuta',
-    kabupaten: 'Badung',
-    island: 'Bali & Nusa Tenggara',
-    province: 'Bali',
-    city: 'Badung',
-    address: 'Jalan Bypass Ngurah Rai, Kec. Kuta, Kab. Badung, Bali',
-    latitude: -8.723300,
-    longitude: 115.181200,
-    contactPerson: 'Kepala Toko Indomaret Fresh',
-    phone: '+62 819-9910-0003',
-    deliveryWindow: '06:00 - 22:00',
-    storeCategory: 'Minimarket Cluster'
-  },
-  {
     id: 'str-lp-28',
-    nomor: 28,
+    nomor: 26,
     storeCode: 'RET-BDG-28',
     storeName: 'KOK TONG BALI KUTA',
     kecamatan: 'Kuta',

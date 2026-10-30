@@ -47,7 +47,8 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   ClipboardCheck,
-  Map as MapIcon
+  Map as MapIcon,
+  MessageSquare
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -100,10 +101,13 @@ export type NavTab =
   | 'warehouse_scanner'
   | 'warehouse_slotting'
   | 'warehouse_opname'
+  | 'warehouse_cubication'
+  | 'warehouse_fleet_cubication'
   | 'marketing_online'
   | 'marketing_offline'
   | 'activity_log'
   | 'users'
+  | 'branches'
   | 'architecture'
   | 'e2e_testing';
 
@@ -170,13 +174,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     updateReports();
     window.addEventListener('driver-report-updated', updateReports);
     return () => window.removeEventListener('driver-report-updated', updateReports);
-  }, []);
-
-  useEffect(() => {
-    return logisticsStore.subscribe(() => {
-      setCurrentUser(logisticsStore.getCurrentUser());
-      setPendingUsersCount(logisticsStore.getPendingUsersCount());
-    });
   }, []);
 
   useEffect(() => {
@@ -395,6 +392,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {canLogisticsOps && renderNavItem('analytics_reports', 'Analitik Armada & Kru', <BarChart3 className="w-4 h-4" />)}
                   {canLogisticsSched && renderNavItem('schedules', 'Jadwal & Penugasan', <Calendar className="w-4 h-4" />)}
                   {canLogisticsFleets && renderNavItem('fleets', 'Data Armada Terpadu', <Truck className="w-4 h-4" />)}
+                  {canLogisticsFleets && renderNavItem('warehouse_fleet_cubication', 'Simulasi Kubikasi Armada', <Layers className="w-4 h-4 text-amber-400" />)}
                   {canLogisticsFleets && renderNavItem('crew_history', 'Kru Pengiriman', <Users className="w-4 h-4" />)}
                   {canLogisticsReports && renderNavItem('tracking_eval', 'Evaluasi Jalur (Excel)', <FileSpreadsheet className="w-4 h-4" />)}
                 </div>
@@ -536,6 +534,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                   {canAccess(currentUser, 'warehouse', 'stok_barang') && renderNavItem('warehouse_slotting', 'Denah Rak & Kapasitas', <MapIcon className="w-4 h-4" />)}
                   {canAccess(currentUser, 'warehouse', 'opname_stok') && renderNavItem('warehouse_opname', 'Stok Opname & Kartu Stok', <ClipboardCheck className="w-4 h-4" />)}
+                  {canAccess(currentUser, 'warehouse', 'stok_barang') && renderNavItem('warehouse_cubication', 'Kubikasi & Berat Barang', <Layers className="w-4 h-4 text-emerald-400" />)}
                 </div>
               )}
             </div>
@@ -682,7 +681,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {(!isMinimized ? isFinanceOpen : true) && (
                 <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
-                  {renderNavItem('finance_dashboard', 'Dashboard Finance', <Database className="w-4 h-4" />)}
+                  {renderNavItem('finance_dashboard', 'Tagihan Pelanggan', <FileText className="w-4 h-4" />)}
                 </div>
               )}
             </div>
@@ -786,6 +785,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                 {canSysLog && renderNavItem('activity_log', 'Log Aktivitas Sistem', <History className="w-4 h-4" />)}
+                {canSysUsers && renderNavItem('branches', 'Cabang', <Building2 className="w-4 h-4 text-blue-400" />)}
                 {canSysUsers && renderNavItem(
                   'users',
                   'Manajemen User & Approval',

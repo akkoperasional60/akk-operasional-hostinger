@@ -925,5 +925,25 @@ export interface SecurityGateLog {
   notes?: string;
 }
 
+// ==========================================
+// CHAT & INTERNAL MESSAGING
+// ==========================================
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: string;
+  receiverId: string; // User ID or 'all' or role
+  receiverName: string;
+  receiverRole?: string;
+  content: string;
+  timestamp: string; // ISO string
+  isRead?: boolean;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  cabangId?: string;
+}
+
+
 
 

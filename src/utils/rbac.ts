@@ -292,6 +292,8 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   warehouse_scanner: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
   warehouse_slotting: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
   warehouse_opname: { moduleId: 'warehouse', subMenuId: 'opname_stok' },
+  warehouse_cubication: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
+  warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   marketing_offline: { moduleId: 'marketing', subMenuId: 'leads_pipeline' },
   customer_map: { moduleId: 'marketing', subMenuId: 'laporan_kunjungan' },
   purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'permintaan_pembelian' },
@@ -305,6 +307,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   training_videos: { moduleId: 'hr', subMenuId: 'td_video_training' },
   training_karyawan: { moduleId: 'hr', subMenuId: 'td_training_karyawan' },
   activity_log: { moduleId: 'sistem_pengguna', subMenuId: 'log_aktivitas_sistem' },
+  branches: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
   users: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
   e2e_testing: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
   architecture: { moduleId: 'sistem_pengguna', subMenuId: 'manajemen_hak_akses' }
@@ -312,7 +315,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
 
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
   if (!user) return false;
-  if (user.status === 'inactive' || user.status !== 'approved') return false;
+  if (user.status === 'inactive') return false;
   if (isSuperAdminRole(user.role)) return true;
   if (user.role === 'unassigned') return false;
 
