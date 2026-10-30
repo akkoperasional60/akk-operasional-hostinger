@@ -17,10 +17,11 @@ import {
   ChevronRight,
   Scale,
   Box,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 import { logisticsStore } from '../services/store';
-import type { MasterSkuRecord } from './WarehouseManagementSystem';
+import { inferKategoriBarang, type MasterSkuRecord } from './WarehouseManagementSystem';
 
 export interface SkuCubicationRecord extends MasterSkuRecord {
   panjangCm: number;
@@ -134,7 +135,15 @@ export const WarehouseItemCubicationView: React.FC<{
   // Modal Edit / Tambah Kubikasi & Berat
   const [editingItem, setEditingItem] = useState<SkuCubicationRecord | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [deletingItem, setDeletingItem] = useState<SkuCubicationRecord | null>(null);
   const [popupModal, setPopupModal] = useState<{ title: string; message: string } | null>(null);
+
+  // Dedicated Upload File Page State (matching Upload Master Barang UI)
+  const [isUploadPageOpen, setIsUploadPageOpen] = useState(false);
+  const [uploadTanggal, setUploadTanggal] = useState(() => new Date().toISOString().slice(0, 10));
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [parsedUploadPreview, setParsedUploadPreview] = useState<SkuCubicationRecord[]>([]);
+  const [showUploadPreviewTable, setShowUploadPreviewTable] = useState(false);
 
   useEffect(() => {
     if (!popupModal) return;
@@ -221,7 +230,7 @@ export const WarehouseItemCubicationView: React.FC<{
     setEditingItem(null);
     setFormState({
       kategoriBarang: 'Karton Box Corrugated',
-      noBarang: `AKK-KBX-${String(skuItems.length + 45).padStart(3, '0')}`,
+      noBarang: `AKK-KBX-${String(skuItems.length + 1).padStart(3, '0')}`,
       namaBarang: '',
       satuan: 'Pcs',
       stokTersedia: 1000,
@@ -291,8 +300,8 @@ export const WarehouseItemCubicationView: React.FC<{
   const handleExportExcel = () => {
     const rows = filteredItems.map(item => ({
       'Kategori Barang': item.kategoriBarang,
-      'No Barang': item.noBarang,
-      'Nama Barang': item.namaBarang,
+      'No Barang/Kode Barang': item.noBarang,
+      'Deskripsi/Nama Barang': item.namaBarang,
       Dimensi: `${item.panjangCm} x ${item.lebarCm} x ${item.tinggiCm} cm`,
       Kubikasi: `${item.kubikasiM3.toFixed(4)} m3`,
       Berat: `${item.beratKg} Kg`
@@ -303,70 +312,336 @@ export const WarehouseItemCubicationView: React.FC<{
     XLSX.writeFile(wb, `Data_Kubikasi_dan_Berat_Barang_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  const handleDownloadTemplateKubikasi = () => {
+    const sampleRows = [
+      {
+        'Kategori Barang': 'Karton Box Corrugated',
+        'No Barang/Kode Barang': 'AKK-KBX-006',
+        'Deskripsi/Nama Barang': 'Karton Box Corrugated Sablon Ritel 30x20x20 cm'
+      },
+      {
+        'Kategori Barang': 'Karton Box Double Wall',
+        'No Barang/Kode Barang': 'AKK-KBX-007',
+        'Deskripsi/Nama Barang': 'Karton Box Ekspor Waxed Tahan Lembab Cold Storage 70x50x45 cm'
+      },
+      {
+        'Kategori Barang': 'Box Kemasan Makanan',
+        'No Barang/Kode Barang': 'AKK-KBX-009',
+        'Deskripsi/Nama Barang': 'Box Die-Cut Pizza Kraft Coklat 25x25x5 cm'
+      }
+    ];
+    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template_Kubikasi_Barang');
+    XLSX.writeFile(wb, 'Template_Upload_Kubikasi_Barang_AKK.xlsx');
+  };
+
   const handleUploadExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
 
-      if (jsonRows.length === 0) return;
+      if (jsonRows.length === 0) {
+        setParsedUploadPreview([]);
+        return;
+      }
 
-      const updatedMap = new Map<string, MasterSkuRecord>();
-      skuItems.forEach(s => updatedMap.set(s.noBarang.toUpperCase(), enrichSkuWithCubication(s)));
+      const existingMap = new Map<string, SkuCubicationRecord>();
+      skuItems.forEach(s => existingMap.set(s.noBarang.toUpperCase(), enrichSkuWithCubication(s)));
 
-      let count = 0;
+      const parsedItems: SkuCubicationRecord[] = [];
       jsonRows.forEach((row, idx) => {
-        const noBrg = String(
-          row['No Barang'] || row['Kode Barang'] || row['No. Barang'] || row['SKU'] || ''
-        )
-          .trim()
-          .toUpperCase();
-        const namaBrg = String(row['Nama Barang'] || row['Deskripsi'] || '').trim();
-        if (!noBrg && !namaBrg) return;
+        let rawKategori = '';
+        let rawNoBarang = '';
+        let rawNamaBarang = '';
+        let rawPanjang = 0;
+        let rawLebar = 0;
+        let rawTinggi = 0;
+        let rawBerat = 0;
+        let rawStok = 0;
+        let rawSatuan = '';
 
-        const code = noBrg || `AKK-IMP-${idx + 1}`;
-        const existing = updatedMap.get(code);
-        const p = Number(row['Panjang (cm)'] || row['Panjang'] || existing?.panjangCm || 50);
-        const l = Number(row['Lebar (cm)'] || row['Lebar'] || existing?.lebarCm || 35);
-        const t = Number(row['Tinggi (cm)'] || row['Tinggi'] || existing?.tinggiCm || 30);
-        const berat = Number(row['Berat / Unit (Kg)'] || row['Berat (Kg)'] || row['Berat'] || existing?.beratKg || 0.65);
-        const kubikasiM3 =
-          Number(row['Kubikasi / Unit (m3)'] || row['Kubikasi (m3)']) ||
-          Number(((p * l * t) / 1_000_000).toFixed(4));
+        Object.entries(row).forEach(([key, val]) => {
+          const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (norm.includes('kategori')) {
+            rawKategori = String(val || '').trim();
+          } else if (
+            norm === 'nobarang' ||
+            norm === 'kodebarang' ||
+            norm === 'nobarangkodebarang' ||
+            norm === 'kodebarangnobarang' ||
+            norm === 'sku' ||
+            norm === 'kodesku' ||
+            norm === 'kode'
+          ) {
+            rawNoBarang = String(val || '').trim().toUpperCase();
+          } else if (
+            norm === 'namabarang' ||
+            norm === 'deskripsi' ||
+            norm === 'deskripsinamabarang' ||
+            norm === 'namabarangdeskripsi' ||
+            norm === 'deskripsibarang' ||
+            norm === 'nama'
+          ) {
+            rawNamaBarang = String(val || '').trim();
+          } else if (norm.includes('panjang')) {
+            rawPanjang = Number(val) || 0;
+          } else if (norm.includes('lebar')) {
+            rawLebar = Number(val) || 0;
+          } else if (norm.includes('tinggi')) {
+            rawTinggi = Number(val) || 0;
+          } else if (norm.includes('berat')) {
+            rawBerat = Number(val) || 0;
+          } else if (norm.includes('stok')) {
+            rawStok = Number(val) || 0;
+          } else if (norm.includes('satuan') || norm.includes('unit')) {
+            rawSatuan = String(val || '').trim();
+          }
+        });
 
-        updatedMap.set(code, {
+        if (!rawNoBarang && !rawNamaBarang) return;
+
+        const code = rawNoBarang || `AKK-IMP-${String(idx + 1).padStart(3, '0')}`;
+        const existing = existingMap.get(code);
+        const inferredKat = inferKategoriBarang(code, rawNamaBarang || existing?.namaBarang || '', rawKategori || existing?.kategoriBarang);
+
+        const baseRecord: MasterSkuRecord = {
           id: existing?.id || `sku-imp-${Date.now()}-${idx}`,
-          kategoriBarang: String(row['Kategori Barang'] || existing?.kategoriBarang || 'Karton Box Corrugated'),
+          kategoriBarang: inferredKat,
           noBarang: code,
-          namaBarang: namaBrg || existing?.namaBarang || 'Item Kemasan AKK',
-          stokTersedia: Number(row['Stok Tersedia'] ?? existing?.stokTersedia ?? 0),
-          satuan: String(row['Satuan'] || existing?.satuan || 'Pcs'),
-          panjangCm: p,
-          lebarCm: l,
-          tinggiCm: t,
-          kubikasiM3,
-          beratKg: berat
-        } as SkuCubicationRecord);
-        count++;
+          namaBarang: rawNamaBarang || existing?.namaBarang || 'Item Kemasan AKK',
+          stokTersedia: rawStok > 0 ? rawStok : (existing?.stokTersedia ?? 1000),
+          satuan: rawSatuan || existing?.satuan || 'Pcs',
+          tanggalStok: uploadTanggal,
+          panjangCm: rawPanjang > 0 ? rawPanjang : existing?.panjangCm,
+          lebarCm: rawLebar > 0 ? rawLebar : existing?.lebarCm,
+          tinggiCm: rawTinggi > 0 ? rawTinggi : existing?.tinggiCm,
+          beratKg: rawBerat > 0 ? rawBerat : existing?.beratKg
+        };
+
+        parsedItems.push(enrichSkuWithCubication(baseRecord));
       });
 
-      onUpdateSkuItems(Array.from(updatedMap.values()));
-      setPopupModal({
-        title: 'Import Kubikasi & Berat Berhasil',
-        message: `${count} baris spesifikasi kubikasi (m³) dan berat (Kg) barang berhasil diperbarui dari file Excel.`
-      });
+      setParsedUploadPreview(parsedItems);
+      setShowUploadPreviewTable(true);
     } catch {
       setPopupModal({
         title: 'Gagal Membaca File Excel',
         message: 'Pastikan format file adalah .xlsx, .xls, atau .csv yang valid.'
       });
-    } finally {
-      e.target.value = '';
     }
   };
+
+  const handleConfirmUploadImport = () => {
+    if (parsedUploadPreview.length === 0) return;
+    const updatedMap = new Map<string, MasterSkuRecord>();
+    skuItems.forEach(s => updatedMap.set(s.noBarang.toUpperCase(), enrichSkuWithCubication(s)));
+    parsedUploadPreview.forEach(item => {
+      updatedMap.set(item.noBarang.toUpperCase(), item);
+    });
+
+    const count = parsedUploadPreview.length;
+    onUpdateSkuItems(Array.from(updatedMap.values()));
+    setIsUploadPageOpen(false);
+    setParsedUploadPreview([]);
+    setUploadFileName('');
+    setShowUploadPreviewTable(false);
+    setPopupModal({
+      title: 'Import File Barang Berhasil',
+      message: `${count} data barang (Kategori Barang, No Barang/Kode Barang, Deskripsi/Nama Barang) berhasil disimpan ke database kubikasi.`
+    });
+  };
+
+  if (isUploadPageOpen) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        {/* Top Gradient Banner matching Image 4 */}
+        <div className="rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-800 to-slate-950 p-7 sm:p-8 text-white shadow-md">
+          <div className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-200 mb-1.5">
+            WAREHOUSE MANAGEMENT SYSTEM
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
+            Upload Master &amp; Kubikasi Barang
+          </h2>
+          <p className="text-xs sm:text-sm font-medium text-emerald-50/90 mt-1.5 max-w-2xl">
+            Pilih tanggal stok dan unggah file Excel Master Barang. Data dari file akan dipreview terlebih dahulu sebelum disimpan ke database.
+          </p>
+        </div>
+
+        {/* Form Container */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* TANGGAL STOK */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                TANGGAL STOK
+              </label>
+              <input
+                type="date"
+                value={uploadTanggal}
+                onChange={(e) => setUploadTanggal(e.target.value)}
+                className="w-full px-4 py-3.5 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+
+            {/* MODE IMPORT */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                MODE IMPORT
+              </label>
+              <div className="p-4 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-bold leading-relaxed">
+                Upload tanggal yang sama akan ditimpa. Data H-1 tetap disimpan, dashboard otomatis memakai data terbaru.
+              </div>
+            </div>
+          </div>
+
+          {/* FILE MASTER BARANG */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  FILE MASTER BARANG
+                </label>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplateKubikasi}
+                  className="text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh Template Excel</span>
+                </button>
+              </div>
+              <div className="p-3.5 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950/50">
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleUploadExcel}
+                  className="w-full text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-1.5 file:px-3.5 file:rounded-lg file:border file:border-slate-300 dark:file:border-slate-700 file:bg-white dark:file:bg-slate-900 file:text-xs file:font-bold file:text-slate-900 dark:file:text-white hover:file:bg-slate-100 cursor-pointer"
+                />
+              </div>
+            </div>
+            {uploadFileName && (
+              <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2 pb-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  File dipilih: <strong>{uploadFileName}</strong> ({parsedUploadPreview.length} baris barang terbaca otomatis)
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Automatic Columns Info Banner */}
+          <div className="p-4 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-bold leading-relaxed">
+            Kolom yang dibaca otomatis: Kategori Barang, No Barang/Kode Barang, Deskripsi/Nama Barang. Setelah import final, tabel Kubikasi Barang memakai data terbaru ini.
+          </div>
+
+          {/* Bottom Action Buttons */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setIsUploadPageOpen(false);
+                setShowUploadPreviewTable(false);
+                setParsedUploadPreview([]);
+                setUploadFileName('');
+              }}
+              className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+            >
+              Kembali
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (parsedUploadPreview.length === 0) {
+                  setPopupModal({
+                    title: 'Pilih File Terlebih Dahulu',
+                    message: 'Silakan pilih file Excel (.xlsx/.xls/.csv) pada kolom File Master Barang untuk melihat preview data.'
+                  });
+                  return;
+                }
+                setShowUploadPreviewTable(true);
+              }}
+              className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-sm transition cursor-pointer"
+            >
+              <Eye className="w-4 h-4" />
+              <span>Preview Data</span>
+            </button>
+          </div>
+
+          {/* Preview Data Table before Final Import */}
+          {showUploadPreviewTable && parsedUploadPreview.length > 0 && (
+            <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4 animate-fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                    Preview Data Barang ({parsedUploadPreview.length} Barang Terbaca)
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Tanggal Stok: <strong>{uploadTanggal}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConfirmUploadImport}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-sm transition cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Simpan &amp; Import ke Database Kubikasi ({parsedUploadPreview.length} Barang)</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Kategori Barang</th>
+                      <th className="py-3 px-4">No Barang / Kode Barang</th>
+                      <th className="py-3 px-4">Deskripsi / Nama Barang</th>
+                      <th className="py-3 px-4 text-center">Dimensi</th>
+                      <th className="py-3 px-4 text-right">Kubikasi</th>
+                      <th className="py-3 px-4 text-right">Berat</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                    {parsedUploadPreview.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold text-[10px]">
+                            {item.kategoriBarang}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {item.noBarang}
+                        </td>
+                        <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white">
+                          {item.namaBarang}
+                        </td>
+                        <td className="py-2.5 px-4 text-center font-mono text-slate-700 dark:text-slate-300">
+                          {item.panjangCm} &times; {item.lebarCm} &times; {item.tinggiCm} cm
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {item.kubikasiM3.toFixed(4)} m&sup3;
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-600 dark:text-blue-400">
+                          {item.beratKg} Kg
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -397,11 +672,14 @@ export const WarehouseItemCubicationView: React.FC<{
             <span>Ekspor Excel</span>
           </button>
 
-          <label className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs">
+          <button
+            type="button"
+            onClick={() => setIsUploadPageOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+          >
             <Upload className="w-3.5 h-3.5" />
-            <span>Unggah Excel</span>
-            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleUploadExcel} className="hidden" />
-          </label>
+            <span>Unggah File</span>
+          </button>
 
           <button
             type="button"
@@ -552,6 +830,7 @@ export const WarehouseItemCubicationView: React.FC<{
                 <th className="py-3 px-4 text-center">Dimensi</th>
                 <th className="py-3 px-4 text-right">Kubikasi</th>
                 <th className="py-3 px-4 text-right">Berat</th>
+                <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
@@ -583,11 +862,31 @@ export const WarehouseItemCubicationView: React.FC<{
                     <td className="py-3 px-4 text-right font-mono font-black text-blue-600 dark:text-blue-400">
                       {item.beratKg.toLocaleString('id-ID')} Kg
                     </td>
+                    <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEdit(item)}
+                          title="Ubah spesifikasi barang"
+                          className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 transition cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingItem(item)}
+                          title="Hapus barang"
+                          className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                  <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
                     Tidak ada data barang yang sesuai pencarian.
                   </td>
                 </tr>
@@ -834,6 +1133,48 @@ export const WarehouseItemCubicationView: React.FC<{
                 className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs cursor-pointer transition"
               >
                 Oke, Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingItem && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h4 className="text-base font-black text-slate-900 dark:text-white">Konfirmasi Hapus Barang</h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Apakah Anda yakin ingin menghapus barang <strong className="text-slate-900 dark:text-white">{deletingItem.noBarang} - {deletingItem.namaBarang}</strong> dari database kubikasi?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeletingItem(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = skuItems.filter(s => s.id !== deletingItem.id);
+                  onUpdateSkuItems(updated);
+                  const name = deletingItem.namaBarang;
+                  setDeletingItem(null);
+                  setPopupModal({
+                    title: 'Barang Berhasil Dihapus',
+                    message: `Barang "${name}" berhasil dihapus dari database kubikasi.`
+                  });
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition cursor-pointer shadow-xs"
+              >
+                Ya, Hapus Barang
               </button>
             </div>
           </div>

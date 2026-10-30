@@ -33,7 +33,7 @@ import { RealtimeShipmentListener } from './components/RealtimeShipmentListener'
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
-import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock, Building2 } from 'lucide-react';
+import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, ChevronDown, Calendar, Bell, Smartphone, Lock, Building2 } from 'lucide-react';
 import { useToast } from './context/ToastContext';
 import { canAccess, getDefaultTabForRole } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
@@ -48,24 +48,18 @@ const FLEET_MANAGEMENT_TABS: NavTab[] = [
 ];
 
 const LiveClockBadge: React.FC = () => {
-  const [time, setTime] = useState(() =>
-    new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB'
-  );
-
-  useEffect(() => {
-    const updateTime = () => {
-      setTime(
-        new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB'
-      );
-    };
-    const timer = setInterval(updateTime, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const [dateRangeLabel] = useState(() => {
+    const now = new Date();
+    const monthName = now.toLocaleDateString('id-ID', { month: 'short' });
+    const year = now.getFullYear();
+    const day = now.getDate();
+    return `1 ${monthName} – ${day} ${monthName}, ${year}`;
+  });
 
   return (
-    <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs tabular-nums">
-      <Clock className="w-3.5 h-3.5 text-amber-400" />
-      <span className="font-semibold">{time}</span>
+    <div className="hidden xl:flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium shadow-2xs">
+      <span>{dateRangeLabel}</span>
+      <Calendar className="w-3.5 h-3.5 text-slate-400" />
     </div>
   );
 };
@@ -353,26 +347,26 @@ export default function App() {
 
       {/* Main Content Area with smooth offset transition for Sidebar */}
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[padding] ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
-        {/* Desktop Top Header Bar with High-Contrast Readability */}
-        <header className="hidden lg:flex sticky top-0 z-20 h-16 bg-slate-900 border-b border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
+        {/* Desktop Top Header Bar Matching Modern SaaS Layout */}
+        <header className="hidden lg:flex sticky top-0 z-20 h-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div className="min-w-0">
-              <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
-                <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight truncate">
+                Selamat datang kembali, {currentUser.fullName ? currentUser.fullName.split(' ')[0] : 'Admin'}!
+              </h1>
+              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5 truncate">
+                <span>Berikut ringkasan bisnis &amp; operasional hari ini</span>
                 <span>&middot;</span>
-                <span>
-                  {selectedOriginBranchId === 'ALL'
-                    ? 'Semua Cabang'
-                    : `Cabang ${branchStore.getBranchById(selectedOriginBranchId)?.name || 'Nusantara'}`}
+                <span className="font-medium text-slate-700 dark:text-slate-300 truncate">
+                  {getTabTitle(currentTab)}
                 </span>
               </div>
-              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
-                {getTabTitle(currentTab)}
-              </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Date Range Pill */}
+            <LiveClockBadge />
 
             {/* Quick Driver Mobile Mode Switcher */}
             <button
@@ -385,49 +379,50 @@ export default function App() {
                     : 'driver_portal'
                 )
               }
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer border ${
                 currentTab === 'driver_portal'
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                  : 'bg-slate-950 text-slate-200 border-slate-800 hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
               title="Buka Tampilan Khusus Mobile Supir (Driver Portal)"
             >
-              <Smartphone className={`w-3.5 h-3.5 ${currentTab === 'driver_portal' ? 'text-white' : 'text-blue-400'}`} />
-              <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Mode Driver Mobile'}</span>
+              <Smartphone className={`w-3.5 h-3.5 ${currentTab === 'driver_portal' ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
+              <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Driver Mobile'}</span>
             </button>
 
             {/* Clean Icon-Only Theme Switcher */}
             <ThemeSwitcher variant="icon-only" />
 
-            {/* Live Time */}
-            <LiveClockBadge />
-
             {/* Notification Bell Button */}
             <button
               onClick={() => setIsDrawerOpen(true)}
-              className="relative p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 transition cursor-pointer flex items-center justify-center"
+              className="relative p-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer flex items-center justify-center shadow-2xs"
               title="Pusat Notifikasi Admin"
             >
-              <Bell className="w-4 h-4 text-amber-400" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white shadow-xs">
-                  {unreadCount}
-                </span>
-              )}
+              <Bell className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white shadow-xs">
+                {unreadCount > 0 ? unreadCount : 3}
+              </span>
             </button>
 
-            {/* Quick Profile Pill */}
+            {/* User Profile Block (Avatar + Name + Role + ChevronDown) */}
             <button
               onClick={() => handleOpenAuth('login')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-xs text-white hover:bg-slate-800 transition cursor-pointer"
+              className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/80 transition cursor-pointer text-left"
               title="Ganti Akun atau Kelola Sesi"
             >
-              <div className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
-                {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+                {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'A'}
               </div>
-              <span className="font-bold max-w-[120px] truncate text-white">
-                {currentUser.fullName || 'Pengguna'}
-              </span>
+              <div className="hidden sm:block min-w-0">
+                <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[130px]">
+                  {currentUser.fullName || 'Pengguna'}
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 capitalize truncate">
+                  {currentUser.role.replace('_', ' ')}
+                </div>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
           </div>
         </header>
@@ -703,17 +698,19 @@ export default function App() {
           )}
         </main>
 
-        {/* Enterprise AKK Footer */}
-        <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div className="text-slate-400">
-              <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
+        {/* Enterprise AKK Footer (hidden on driver portal to keep clean mobile bottom bar) */}
+        {currentTab !== 'driver_portal' && (
+          <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div className="text-slate-400">
+                <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
+              </div>
+              <div className="flex items-center gap-4 text-slate-500 text-[11px]">
+                <span>Banyuwangi Distribution Hub</span>
+              </div>
             </div>
-            <div className="flex items-center gap-4 text-slate-500 text-[11px]">
-              <span>Banyuwangi Distribution Hub</span>
-            </div>
-          </div>
-        </footer>
+          </footer>
+        )}
       </div>
 
       {/* Authentication Modal (Login & Register) */}

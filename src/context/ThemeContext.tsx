@@ -8,7 +8,7 @@ interface ThemeContextType {
   toggleTheme: () => void;
 }
 
-const THEME_STORAGE_KEY = 'akk_theme_preference';
+const THEME_STORAGE_KEY = 'akk_theme_preference_v3';
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
@@ -22,7 +22,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       // ignore
     }
-    return 'dark'; // default theme
+    return 'light'; // default clean modern SaaS light theme
   });
 
   const setTheme = (newTheme: ThemeMode) => {

@@ -4205,50 +4205,91 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         )}
       </main>
 
-      {/* Floating Action Button (+) di Pojok Kanan Bawah for Lapor Kendala & Absen Kiriman Pelanggan */}
-      <div className="fixed bottom-20 right-4 sm:right-6 z-40">
-        <button
-          type="button"
-          onClick={() => setIsGmapsShareModalOpen(true)}
-          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black shadow-lg flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 border-2 border-slate-950 cursor-pointer group"
-          title="Lapor Kendala & Absen Kiriman Pelanggan (+)"
-          aria-label="Lapor Kendala & Absen Kiriman Pelanggan"
-        >
-          <Plus className="w-7 h-7 stroke-[2.5] transition-transform duration-200 group-hover:rotate-90 text-white" />
-        </button>
-      </div>
+      {/* Floating Bottom Navigation Bar with Centered Elevated (+) Button matching reference design */}
+      <nav className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-auto sm:w-[420px] max-w-md mx-auto z-40">
+        <div className="relative bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-[28px] border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.45)] px-3 py-2">
+          <div className="grid grid-cols-5 items-center">
+            {/* 1. Jadwal */}
+            <button
+              type="button"
+              onClick={() => setBottomNav('deliveries')}
+              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                bottomNav === 'deliveries'
+                  ? 'text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <div className={`p-1 rounded-xl transition ${bottomNav === 'deliveries' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <Calendar className="w-5 h-5" />
+              </div>
+              <span className="text-[11px] leading-tight mt-0.5">Jadwal</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'deliveries' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+            </button>
 
-      {/* Sticky Bottom Navigation Bar for Driver Mobile View */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-2 py-2 max-w-md mx-auto">
-        <div className="grid grid-cols-4 gap-1">
-          <button
-            onClick={() => setBottomNav('deliveries')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'deliveries' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            <Calendar className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Jadwal</span>
-          </button>
-          <button
-            onClick={() => setBottomNav('checklist')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'checklist' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            <ShieldCheck className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Checklist</span>
-          </button>
-          <button
-            onClick={() => setBottomNav('surat_jalan')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'surat_jalan' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            <FileText className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">SJ Keluar</span>
-          </button>
-          <button
-            onClick={() => setBottomNav('profile')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'profile' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            <User className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Profil</span>
-          </button>
+            {/* 2. Checklist */}
+            <button
+              type="button"
+              onClick={() => setBottomNav('checklist')}
+              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                bottomNav === 'checklist'
+                  ? 'text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <div className={`p-1 rounded-xl transition ${bottomNav === 'checklist' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <span className="text-[11px] leading-tight mt-0.5">Checklist</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'checklist' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+            </button>
+
+            {/* 3. CENTER: Elevated Action Button (+) */}
+            <div className="flex flex-col items-center justify-center -mt-7">
+              <button
+                type="button"
+                onClick={() => setIsGmapsShareModalOpen(true)}
+                className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/35 ring-4 ring-white dark:ring-slate-900 transition-all duration-200 active:scale-95 hover:scale-105 cursor-pointer group"
+                title="Lapor Kendala & Absen Kiriman Pelanggan (+)"
+                aria-label="Lapor Kendala & Absen Kiriman Pelanggan"
+              >
+                <Plus className="w-7 h-7 stroke-[2.5] transition-transform duration-200 group-hover:rotate-90 text-white" />
+              </button>
+            </div>
+
+            {/* 4. SJ Keluar */}
+            <button
+              type="button"
+              onClick={() => setBottomNav('surat_jalan')}
+              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                bottomNav === 'surat_jalan'
+                  ? 'text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <FileText className="w-5 h-5" />
+              </div>
+              <span className="text-[11px] leading-tight mt-0.5">SJ Keluar</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+            </button>
+
+            {/* 5. Profil */}
+            <button
+              type="button"
+              onClick={() => setBottomNav('profile')}
+              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                bottomNav === 'profile'
+                  ? 'text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <div className={`p-1 rounded-xl transition ${bottomNav === 'profile' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <User className="w-5 h-5" />
+              </div>
+              <span className="text-[11px] leading-tight mt-0.5">Profil</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'profile' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+            </button>
+          </div>
         </div>
       </nav>
 

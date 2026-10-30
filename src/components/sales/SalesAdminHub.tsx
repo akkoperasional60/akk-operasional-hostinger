@@ -76,7 +76,7 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
   return (
     <div className="space-y-4">
       {/* Sub-Navigation Tabs Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-1.5 shadow-sm">
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-1.5 shadow-sm">
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
           {tabs.map(tab => {
             const Icon = tab.icon;
@@ -85,13 +85,13 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
               <button
                 key={tab.id}
                 onClick={() => onSelectSubTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 shrink-0 ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-blue-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'bg-blue-600 dark:bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
+                <Icon className={`w-4 h-4 ${isActive ? 'text-amber-300' : 'text-slate-400'}`} />
                 <span>{tab.label}</span>
               </button>
             );

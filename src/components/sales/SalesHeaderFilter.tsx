@@ -78,19 +78,19 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
       {/* Top Header & Navigation Tabs */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
-          <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{title}</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{subtitle}</p>
         </div>
 
         {/* Top Right Navigation Pills matching Screenshots 2, 3, 4, 5 */}
-        <div className="flex items-center gap-1.5 p-1 bg-white border border-slate-200 rounded-xl shadow-xs overflow-x-auto">
+        <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-x-auto">
           <button
             type="button"
             onClick={() => onTabChange('checklist')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
               activeTab === 'checklist'
                 ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
@@ -103,7 +103,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
               activeTab === 'durasi_muat'
                 ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
@@ -116,7 +116,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
               activeTab === 'jadwal_admin'
                 ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Calendar className="w-3.5 h-3.5" />
@@ -129,7 +129,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
               activeTab === 'aktivitas_view'
                 ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
@@ -139,21 +139,21 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
       </div>
 
       {/* Unified Filter Bar matching Screenshots */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-center">
           {/* Admin Selector */}
           <div className="md:col-span-4">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
               FILTER ADMIN PENGGUNA:
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                <User className="w-4 h-4 text-blue-600" />
+                <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               </div>
               <select
                 value={selectedAdmin}
                 onChange={e => onAdminChange(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100/80 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-800 dark:text-white transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
               >
                 {optionsToRender.map(admin => (
                   <option key={admin} value={admin}>
@@ -167,15 +167,15 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
 
           {/* Month & Year Selectors */}
           <div className="md:col-span-4">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              PERIODE BULAN & TAHUN:
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+              PERIODE BULAN &amp; TAHUN:
             </label>
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
                 <select
                   value={selectedMonth}
                   onChange={e => onMonthChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100/80 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-medium text-slate-800 dark:text-white transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
                 >
                   {MONTH_OPTIONS.map(m => (
                     <option key={m} value={m}>
@@ -189,7 +189,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                 <select
                   value={selectedYear}
                   onChange={e => onYearChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100/80 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-medium text-slate-800 dark:text-white transition focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
                 >
                   {YEAR_OPTIONS.map(y => (
                     <option key={y} value={y}>
@@ -204,29 +204,29 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
 
           {/* KPI Mini Cards Right Side */}
           <div className="md:col-span-4 grid grid-cols-3 gap-2">
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center">
-              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 rounded-xl p-2.5 text-center">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 JADWAL INPUT
               </span>
-              <span className="block text-sm font-extrabold text-slate-900 mt-0.5">
+              <span className="block text-sm font-extrabold text-slate-900 dark:text-white mt-0.5">
                 {jadwalInputCount}
               </span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center">
-              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 rounded-xl p-2.5 text-center">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 PENCAPAIAN
               </span>
-              <span className={`block text-sm font-extrabold mt-0.5 ${pencapaianPercent > 0 ? 'text-blue-600' : 'text-blue-700'}`}>
+              <span className="block text-sm font-extrabold mt-0.5 text-blue-600 dark:text-blue-400">
                 {pencapaianPercent}%
               </span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center">
-              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 rounded-xl p-2.5 text-center">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 PERIODE
               </span>
-              <span className="block text-xs font-extrabold text-slate-800 mt-1">
+              <span className="block text-xs font-extrabold text-slate-800 dark:text-white mt-1">
                 {displayPeriod}
               </span>
             </div>

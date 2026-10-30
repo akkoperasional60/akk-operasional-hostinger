@@ -426,6 +426,7 @@ const FleetCustomSelectDropdown: React.FC<{
 }> = ({ label, value, fleets, dateIso, onChange, accentColor = 'blue' }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -461,23 +462,33 @@ const FleetCustomSelectDropdown: React.FC<{
     );
   }, [fleets, search]);
 
-  const handleSelectFirstValid = () => {
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [search, isOpen]);
+
+  const handleSelectHighlightedOrFirstValid = () => {
     if (filteredFleets.length === 0) return;
+    const target = filteredFleets[highlightedIndex] || filteredFleets[0];
+    if (target) {
+      const code = target.initialCode || target.plateNumber;
+      const isCurrentValue = code === value || target.plateNumber === value;
+      const live = logisticsStore.getFleetLiveOperationalInfo(target, dateIso);
+      if (live.canBeScheduled || isCurrentValue) {
+        onChange(code);
+        setIsOpen(false);
+        return;
+      }
+    }
     const firstValid = filteredFleets.find(f => {
       const code = f.initialCode || f.plateNumber;
       const isCurrentValue = code === value || f.plateNumber === value;
       const live = logisticsStore.getFleetLiveOperationalInfo(f, dateIso);
       return live.canBeScheduled || isCurrentValue;
-    }) || filteredFleets[0];
-
+    });
     if (firstValid) {
       const code = firstValid.initialCode || firstValid.plateNumber;
-      const isCurrentValue = code === value || firstValid.plateNumber === value;
-      const live = logisticsStore.getFleetLiveOperationalInfo(firstValid, dateIso);
-      if (live.canBeScheduled || isCurrentValue) {
-        onChange(code);
-        setIsOpen(false);
-      }
+      onChange(code);
+      setIsOpen(false);
     }
   };
 
@@ -485,21 +496,17 @@ const FleetCustomSelectDropdown: React.FC<{
     ? logisticsStore.getFleetLiveOperationalInfo(selectedFleet, dateIso)
     : null;
 
+  const formattedFleetTitle = selectedFleet
+    ? `[${selectedFleet.initialCode || selectedFleet.plateNumber}] ${selectedFleet.plateNumber} — ${liveInfo?.statusLabel || 'Ready'}`
+    : 'Pilih Armada Truk...';
+
   return (
     <div ref={containerRef} className="relative">
-      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
-        <span className="flex items-center gap-1.5">
-          <Truck className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+      <div className="h-[24px] flex items-center justify-between mb-1.5">
+        <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
           <span>{label}</span>
-        </span>
-        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-          accentColor === 'blue'
-            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
-            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-        }`}>
-          {fleets.length} Unit Terdaftar
-        </span>
-      </label>
+        </label>
+      </div>
 
       <button
         type="button"
@@ -507,49 +514,65 @@ const FleetCustomSelectDropdown: React.FC<{
           setIsOpen(prev => !prev);
           setSearch('');
         }}
-        className={`w-full flex items-center justify-between gap-2.5 bg-slate-50 dark:bg-slate-950 border rounded-xl p-2.5 text-left transition cursor-pointer ${
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            if (!isOpen) {
+              setIsOpen(true);
+            } else if (filteredFleets.length > 0) {
+              const dir = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1;
+              setHighlightedIndex(prev => (prev + dir + filteredFleets.length) % filteredFleets.length);
+            }
+          } else if (e.key === 'Enter' && isOpen) {
+            e.preventDefault();
+            handleSelectHighlightedOrFirstValid();
+          }
+        }}
+        className={`h-[44px] w-full flex items-center justify-between gap-2.5 bg-white dark:bg-slate-950 border rounded-2xl px-4 py-2.5 text-left transition cursor-pointer ${
           isOpen
-            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
-            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+            ? 'border-blue-500 ring-2 ring-blue-500/20'
+            : 'border-slate-300 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600'
         }`}
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border shadow-2xs ${
-            accentColor === 'blue'
-              ? 'bg-blue-600 text-white border-blue-500'
-              : 'bg-emerald-600 text-white border-emerald-500'
-          }`}>
-            {selectedFleet?.initialCode ? selectedFleet.initialCode : <Truck className="w-4 h-4" />}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-slate-900 dark:text-white truncate">
-                {selectedFleet ? selectedFleet.plateNumber : 'Pilih Armada Truk...'}
-              </span>
-              {selectedFleet?.initialCode && (
-                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                  {selectedFleet.initialCode}
-                </span>
-              )}
-            </div>
-            {selectedFleet && liveInfo ? (
-              <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
-                <span className="font-bold text-slate-700 dark:text-slate-300">
-                  {liveInfo.statusLabel}
-                </span>
-                {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName && (
-                  <span className="text-slate-500 dark:text-slate-400 truncate">• {liveInfo.areaName}</span>
-                )}
-              </div>
-            ) : (
-              <span className="text-[10px] text-slate-400 italic">Klik untuk membuka daftar armada</span>
-            )}
-          </div>
-        </div>
+        <span className={`text-xs font-extrabold truncate ${
+          selectedFleet ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500 italic'
+        }`}>
+          {formattedFleetTitle}
+        </span>
 
-        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-slate-700 dark:text-slate-300 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`} />
       </button>
+
+      {/* Separate Status Box Below Dropdown (Matching Image 5) */}
+      <div className="mt-2 h-[32px] w-full px-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between text-[11px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+            !selectedFleet || !liveInfo
+              ? 'bg-slate-200 dark:bg-slate-800'
+              : liveInfo.effectiveStatus === 'maintenance'
+              ? 'bg-rose-500/20'
+              : liveInfo.effectiveStatus === 'on-duty'
+              ? 'bg-amber-500/20'
+              : 'bg-emerald-500/20'
+          }`}>
+            <span className={`w-2.5 h-2.5 rounded-full ${
+              selectedFleet && liveInfo ? liveInfo.dotColorClass : 'bg-slate-400'
+            }`} />
+          </span>
+          <span className="font-extrabold text-slate-900 dark:text-white truncate">
+            {selectedFleet && liveInfo ? liveInfo.statusLabel : 'Belum Dipilih'}
+          </span>
+        </div>
+        <span className="text-slate-500 dark:text-slate-400 font-medium truncate ml-2">
+          {!selectedFleet
+            ? 'Pilih armada pengiriman'
+            : liveInfo?.effectiveStatus === 'maintenance'
+            ? 'Sedang Proses Servis'
+            : liveInfo?.effectiveStatus === 'on-duty'
+            ? `Terjadwal: ${liveInfo.areaName || 'Kirim'}`
+            : 'Siap Digunakan Kirim'}
+        </span>
+      </div>
 
       {isOpen && (
         <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -561,12 +584,22 @@ const FleetCustomSelectDropdown: React.FC<{
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
                     e.preventDefault();
-                    handleSelectFirstValid();
+                    if (filteredFleets.length > 0) {
+                      setHighlightedIndex(prev => (prev + 1) % filteredFleets.length);
+                    }
+                  } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (filteredFleets.length > 0) {
+                      setHighlightedIndex(prev => (prev - 1 + filteredFleets.length) % filteredFleets.length);
+                    }
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSelectHighlightedOrFirstValid();
                   }
                 }}
-                placeholder="Cari plat nomor, inisial (misal: N5), atau tipe... (Tekan Enter untuk memilih)"
+                placeholder="Cari plat nomor, inisial (misal: N5), atau tipe... (Enter / Panah)"
                 autoFocus
                 className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
               />
@@ -582,74 +615,48 @@ const FleetCustomSelectDropdown: React.FC<{
             </div>
           </div>
 
-          <div className="max-h-60 overflow-y-auto p-1.5 space-y-1">
+          <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
             {filteredFleets.length === 0 ? (
               <div className="py-5 text-center text-[11px] text-slate-400">
                 Tidak ada armada truk yang cocok dengan pencarian "{search}".
               </div>
             ) : (
-              filteredFleets.map((fleet) => {
+              filteredFleets.map((fleet, idx) => {
                 const fleetCode = fleet.initialCode || fleet.plateNumber;
                 const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
+                const isHighlighted = idx === highlightedIndex;
                 const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso);
                 const isUnselectable = !live.canBeScheduled && !isSelected;
                 const isMaintenance = live.effectiveStatus === 'maintenance';
+                const optionLabel = `[${fleet.initialCode || fleet.plateNumber}] ${fleet.plateNumber} — ${
+                  isMaintenance
+                    ? 'Sedang Servis'
+                    : live.effectiveStatus === 'on-duty' && !isSelected
+                    ? `Terjadwal (${live.areaName || 'Kirim'})`
+                    : live.statusLabel
+                }`;
 
                 return (
                   <button
                     key={fleet.id}
                     type="button"
                     disabled={isUnselectable}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
                     onClick={() => {
                       if (isUnselectable) return;
                       onChange(fleetCode);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-left transition cursor-pointer ${
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left text-xs transition cursor-pointer ${
                       isUnselectable
-                        ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
-                        : isSelected
-                        ? accentColor === 'blue'
-                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
-                          : 'bg-emerald-600 text-white shadow-2xs font-bold'
-                        : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-800 dark:text-slate-200'
+                        ? 'opacity-45 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
+                        : isSelected || isHighlighted
+                        ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                        : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-800 dark:text-slate-200 font-medium'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-[11px] shrink-0 border ${
-                        isSelected
-                          ? 'bg-white/20 text-white border-white/30'
-                          : isUnselectable
-                          ? isMaintenance ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                          : accentColor === 'blue'
-                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                      }`}>
-                        {fleet.initialCode || <Truck className="w-4 h-4" />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`font-extrabold text-xs truncate ${isUnselectable ? 'text-slate-400 dark:text-slate-500' : ''}`}>
-                            {fleet.plateNumber}
-                          </span>
-                          {fleet.initialCode && (
-                            <span className={`text-[9px] font-bold px-1 py-0.1 rounded ${
-                              isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                            }`}>
-                              [{fleet.initialCode}]
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-white' : live.dotColorClass}`} />
-                          <span className={isSelected ? 'text-white/90 font-medium' : isUnselectable ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-500 dark:text-slate-400'}>
-                            {isMaintenance ? '⚠️ Sedang Perbaikan / Servis' : live.effectiveStatus === 'on-duty' && !isSelected ? `⚠️ Sudah Terjadwal: ${live.areaName || 'Kirim'}` : live.statusLabel}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                    <span className="truncate">{optionLabel}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
                     {isUnselectable && (
                       <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border shrink-0 ${
                         isMaintenance ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
@@ -675,7 +682,8 @@ const ModernDatePicker: React.FC<{
   accentColor?: 'blue' | 'emerald';
   badgeText?: string;
   placeholder?: string;
-}> = ({ label, value, onChange, accentColor = 'emerald', badgeText, placeholder = 'Pilih Tanggal...' }) => {
+  showQuickPills?: boolean;
+}> = ({ label, value, onChange, accentColor = 'emerald', badgeText, placeholder = 'Pilih Tanggal...', showQuickPills = true }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -726,9 +734,10 @@ const ModernDatePicker: React.FC<{
     if (!value) return placeholder;
     try {
       const d = parsedDate;
-      const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-      return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
     } catch {
       return value;
     }
@@ -771,6 +780,25 @@ const ModernDatePicker: React.FC<{
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   }, []);
 
+  const tomorrowIso = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const lusaIso = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const shiftSelectedDateByDays = (offset: number) => {
+    const d = new Date(parsedDate);
+    d.setDate(d.getDate() + offset);
+    const nextIso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    onChange(nextIso);
+  };
+
   const handlePrevMonth = () => {
     if (viewMonth === 0) {
       setViewMonth(11);
@@ -792,16 +820,16 @@ const ModernDatePicker: React.FC<{
   return (
     <div ref={containerRef} className="relative">
       {label && (
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <Calendar className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+        <div className="h-[24px] flex items-center justify-between mb-1.5">
+          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+            <Calendar className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-600 dark:text-emerald-400'}`} />
             <span>{label}</span>
           </label>
           {badgeText && (
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
               accentColor === 'blue'
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
-                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/20'
+                : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20'
             }`}>
               {badgeText}
             </span>
@@ -812,24 +840,74 @@ const ModernDatePicker: React.FC<{
       <button
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
-        className={`w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950 border rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            shiftSelectedDateByDays(1);
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            shiftSelectedDateByDays(-1);
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            shiftSelectedDateByDays(7);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            shiftSelectedDateByDays(-7);
+          } else if (e.key === 'Enter' && isOpen) {
+            e.preventDefault();
+            setIsOpen(false);
+          }
+        }}
+        className={`h-[44px] w-full flex items-center justify-between gap-2 bg-white dark:bg-slate-950 border rounded-2xl px-4 py-2.5 text-left transition cursor-pointer ${
           isOpen
             ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
             : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
         }`}
       >
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-            accentColor === 'blue' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-          }`}>
-            <Calendar className="w-4 h-4" />
-          </div>
-          <span className="text-xs font-black text-slate-900 dark:text-white truncate">
-            {formattedDisplay}
-          </span>
-        </div>
-        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+          {formattedDisplay}
+        </span>
+        <Calendar className="w-4 h-4 text-slate-700 dark:text-slate-300 shrink-0" />
       </button>
+
+      {/* Quick Date Pills Below Input (Matching Image 5) */}
+      {showQuickPills && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onChange(todayIso)}
+            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+              value === todayIso
+                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            Hari Ini
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(tomorrowIso)}
+            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+              value === tomorrowIso
+                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            Besok (+1)
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(lusaIso)}
+            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+              value === lusaIso
+                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            Lusa (+2)
+          </button>
+        </div>
+      )}
 
       {isOpen && (
         <div className="absolute left-0 z-50 mt-1.5 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
@@ -919,10 +997,7 @@ const ModernDatePicker: React.FC<{
               <button
                 type="button"
                 onClick={() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() + 1);
-                  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                  onChange(iso);
+                  onChange(tomorrowIso);
                   setIsOpen(false);
                 }}
                 className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold transition cursor-pointer"

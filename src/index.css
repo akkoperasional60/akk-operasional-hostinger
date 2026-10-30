@@ -70,19 +70,19 @@ body {
 
 html.light {
   color-scheme: light;
-  background-color: #f8fafc;
+  background-color: #f4f7fb;
   color: #0f172a;
 
-  /* Modern Clean Light Tokens */
-  --neu-bg: #f8fafc;
+  /* Modern Clean Light Tokens (Airy SaaS Canvas) */
+  --neu-bg: #f4f7fb;
   --neu-surface: #ffffff;
-  --neu-surface-hover: #f1f5f9;
+  --neu-surface-hover: #f8fafc;
   --neu-surface-raised: #ffffff;
-  --neu-shadow-dark: rgba(0, 0, 0, 0.04);
+  --neu-shadow-dark: rgba(15, 23, 42, 0.04);
   --neu-shadow-light: transparent;
-  --neu-inset-dark: rgba(0, 0, 0, 0.03);
+  --neu-inset-dark: rgba(15, 23, 42, 0.02);
   --neu-inset-light: transparent;
-  --neu-border: #e2e8f0;
+  --neu-border: #eef2f6;
 
   /* Soft Functional Accents */
   --neon-cyan: #0284c7;
@@ -107,7 +107,7 @@ html.light {
 }
 
 html.light body {
-  background-color: #f8fafc !important;
+  background-color: #f4f7fb !important;
   color: #0f172a !important;
 }
 
@@ -311,7 +311,7 @@ html.dark .neu-button:hover {
 }
 
 /* =========================================================================
-   GLOBAL SURFACE ADAPTATION (MINIMALIST CLEAN SAAS)
+   GLOBAL SURFACE ADAPTATION (MINIMALIST CLEAN SAAS - DARK & LIGHT HARMONY)
    ========================================================================= */
 
 html.dark .bg-slate-950 {
@@ -347,6 +347,193 @@ html.dark .bg-slate-800\/40 {
   border-color: #334155 !important;
 }
 
+/* Dark Theme Adaptation for Light-Default Components (Sales Hub, Purchasing, etc.) */
+html.dark .bg-white {
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+  color: #f1f5f9;
+}
+
+html.dark .bg-white\/95,
+html.dark .bg-white\/90,
+html.dark .bg-white\/80 {
+  background-color: rgba(15, 23, 42, 0.92) !important;
+  border-color: #1e293b !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/60,
+html.dark .bg-slate-50\/50,
+html.dark .bg-gray-50 {
+  background-color: #090d16 !important;
+  border-color: #1e293b !important;
+}
+
+html.dark .bg-slate-100,
+html.dark .bg-slate-100\/80,
+html.dark .bg-gray-100 {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+html.dark .bg-slate-200,
+html.dark .bg-slate-200\/70 {
+  background-color: #334155 !important;
+}
+
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/90,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/60,
+html.dark .border-gray-100,
+html.dark .border-gray-200 {
+  border-color: #1e293b !important;
+}
+
+html.dark .border-slate-300,
+html.dark .border-gray-300 {
+  border-color: #334155 !important;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+/* Dark Theme High-Contrast Text Adaptation */
+html.dark .text-slate-900,
+html.dark .text-gray-900 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-gray-800 {
+  color: #f1f5f9 !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-gray-700 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-600,
+html.dark .text-gray-600 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-gray-500 {
+  color: #94a3b8 !important;
+}
+
+/* Dark Theme Soft Pastel Surfaces & Accent Text Adaptation */
+html.dark .bg-blue-50,
+html.dark .bg-blue-50\/80,
+html.dark .bg-blue-50\/50,
+html.dark .bg-blue-100 {
+  background-color: rgba(37, 99, 235, 0.14) !important;
+  border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/80,
+html.dark .bg-emerald-50\/50,
+html.dark .bg-emerald-100,
+html.dark .bg-green-50,
+html.dark .bg-green-100 {
+  background-color: rgba(16, 185, 129, 0.14) !important;
+  border-color: rgba(16, 185, 129, 0.28) !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/80,
+html.dark .bg-amber-50\/50,
+html.dark .bg-amber-100,
+html.dark .bg-yellow-50,
+html.dark .bg-orange-50 {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+  border-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-50\/80,
+html.dark .bg-rose-100,
+html.dark .bg-red-50,
+html.dark .bg-red-100 {
+  background-color: rgba(244, 63, 94, 0.14) !important;
+  border-color: rgba(244, 63, 94, 0.28) !important;
+}
+
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/80,
+html.dark .bg-indigo-100 {
+  background-color: rgba(99, 102, 241, 0.14) !important;
+  border-color: rgba(99, 102, 241, 0.28) !important;
+}
+
+html.dark .bg-purple-50,
+html.dark .bg-purple-100,
+html.dark .bg-violet-50 {
+  background-color: rgba(139, 92, 246, 0.14) !important;
+  border-color: rgba(139, 92, 246, 0.28) !important;
+}
+
+html.dark .text-blue-700,
+html.dark .text-blue-800,
+html.dark .text-blue-900 {
+  color: #60a5fa !important;
+}
+
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900,
+html.dark .text-green-700,
+html.dark .text-green-800 {
+  color: #34d399 !important;
+}
+
+html.dark .text-amber-700,
+html.dark .text-amber-800,
+html.dark .text-amber-900,
+html.dark .text-orange-700 {
+  color: #fbbf24 !important;
+}
+
+html.dark .text-rose-700,
+html.dark .text-rose-800,
+html.dark .text-red-700,
+html.dark .text-red-800 {
+  color: #fb7185 !important;
+}
+
+html.dark .text-indigo-700,
+html.dark .text-indigo-800,
+html.dark .text-indigo-900 {
+  color: #818cf8 !important;
+}
+
+html.dark .text-purple-700,
+html.dark .text-purple-800 {
+  color: #c084fc !important;
+}
+
+/* Dark Theme Inputs & Selects */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+html.dark select,
+html.dark textarea {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+  border-color: #1e293b !important;
+}
+
+html.dark input:not([type="checkbox"]):not([type="radio"]):focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #3b82f6 !important;
+}
+
 /* Calm Slate Blue adjustments for legacy cyan classes (Non-Neon) */
 html.dark .text-cyan-400 {
   color: #60a5fa !important;
@@ -376,12 +563,12 @@ html.dark .bg-cyan-950\/50 {
 }
 
 /* =========================================================================
-   LIGHT THEME: CRISP WHITE SURFACES & HIGH-CONTRAST READABILITY
+   LIGHT THEME: CRISP WHITE SURFACES & SOFT MODERN SAAS ELEVATION
    ========================================================================= */
 
 html.light .bg-slate-950 {
-  background-color: #f8fafc !important;
-  border-color: #e2e8f0 !important;
+  background-color: #f4f7fb !important;
+  border-color: #e5eaf2 !important;
 }
 
 html.light .bg-slate-950\/90,
@@ -390,14 +577,14 @@ html.light .bg-slate-950\/80,
 html.light .bg-slate-950\/70,
 html.light .bg-slate-950\/60,
 html.light .bg-slate-950\/40 {
-  background-color: #f1f5f9 !important;
-  border-color: #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  border-color: #e5eaf2 !important;
 }
 
 html.light .bg-slate-900 {
   background-color: #ffffff !important;
-  border-color: #e2e8f0 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04) !important;
+  border-color: #eef2f6 !important;
+  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.02) !important;
 }
 
 html.light .bg-slate-900\/95,
@@ -406,22 +593,22 @@ html.light .bg-slate-900\/80,
 html.light .bg-slate-900\/70,
 html.light .bg-slate-900\/60,
 html.light .bg-slate-900\/50 {
-  background-color: rgba(255, 255, 255, 0.95) !important;
+  background-color: rgba(255, 255, 255, 0.96) !important;
   backdrop-filter: blur(8px);
-  border-color: #e2e8f0 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+  border-color: #eef2f6 !important;
+  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.03) !important;
 }
 
 html.light .bg-slate-800 {
   background-color: #f8fafc !important;
-  border-color: #e2e8f0 !important;
+  border-color: #e5eaf2 !important;
 }
 
 html.light .bg-slate-800\/80,
 html.light .bg-slate-800\/60,
 html.light .bg-slate-800\/40 {
-  background-color: #f1f5f9 !important;
-  border-color: #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  border-color: #eef2f6 !important;
 }
 
 html.light .bg-slate-50 {
@@ -438,7 +625,7 @@ html.light .bg-slate-200 {
 
 html.light .bg-white {
   background-color: #ffffff !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.02) !important;
 }
 
 /* Light Mode Borders */
@@ -447,18 +634,21 @@ html.light .border-slate-800,
 html.light .border-slate-800\/90,
 html.light .border-slate-800\/80,
 html.light .border-slate-800\/70,
-html.light .border-slate-800\/60,
+html.light .border-slate-800\/60 {
+  border-color: #eef2f6 !important;
+}
+
 html.light .border-slate-700 {
-  border-color: #cbd5e1 !important;
+  border-color: #e2e8f0 !important;
 }
 
 html.light .border-slate-200,
 html.light .border-slate-200\/90 {
-  border-color: #cbd5e1 !important;
+  border-color: #e2e8f0 !important;
 }
 
 html.light .border-slate-100 {
-  border-color: #e2e8f0 !important;
+  border-color: #eef2f6 !important;
 }
 
 /* Light Mode Text Contrast Rules */
@@ -557,7 +747,7 @@ html.light .text-cyan-400 {
   color: #0e7490 !important;
 }
 
-/* Solid Action Buttons with White Text (excluding translucent /10, /15, /20 backgrounds) */
+/* Solid Action Buttons & Gradient Banners with White Text */
 html.light .bg-blue-600,
 html.light .bg-blue-700,
 html.light .bg-blue-800,
@@ -575,6 +765,9 @@ html.light .bg-purple-700,
 html.light .bg-indigo-600,
 html.light .bg-indigo-700,
 html.light .bg-red-600,
+html.light .from-emerald-600,
+html.light .from-blue-600,
+html.light .from-indigo-600,
 html.light [class*="bg-[#064e3b]"] {
   color: #ffffff !important;
 }
@@ -589,8 +782,49 @@ html.light .bg-emerald-800 *,
 html.light .bg-rose-600 *,
 html.light .bg-amber-600 *,
 html.light .bg-purple-600 *,
-html.light .bg-indigo-600 * {
+html.light .bg-indigo-600 *,
+html.light .from-emerald-600 *,
+html.light .from-blue-600 *,
+html.light .from-indigo-600 * {
   color: #ffffff !important;
+}
+
+html.light .bg-emerald-950\/30,
+html.light .bg-emerald-950\/40,
+html.light .bg-emerald-950\/50 {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+
+html.light .bg-blue-950\/30,
+html.light .bg-blue-950\/40,
+html.light .bg-blue-950\/50 {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+
+html.light .bg-amber-950\/30,
+html.light .bg-amber-950\/40 {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+
+html.light .bg-rose-950\/30,
+html.light .bg-rose-950\/40 {
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+}
+
+html.light .bg-indigo-950\/30,
+html.light .bg-indigo-950\/40 {
+  background-color: #eef2ff !important;
+  border-color: #c7d2fe !important;
+}
+
+html.light .bg-slate-950\/50,
+html.light .bg-slate-950\/30 {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
 }
 
 /* Light Theme Inputs in Clean Modern style */
