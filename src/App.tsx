@@ -257,8 +257,9 @@ export default function App() {
     try {
       const currentPath = normalizePathname(window.location.pathname);
 
+      document.title = 'AKK Operasional - PT Anugrah Kemasan Kreatif';
+
       if (!isAuthenticated) {
-        document.title = 'Login Portal | AKK Operasional - PT Anugrah Kemasan Kreatif';
         const resolved = resolveTabFromUrl(window.location);
         if (resolved.tab) {
           initialRequestedTabRef.current = resolved.tab;
@@ -268,9 +269,6 @@ export default function App() {
         }
         return;
       }
-
-      const activeTitle = getTabTitle(currentTab);
-      document.title = `${activeTitle} | AKK Operasional - PT Anugrah Kemasan Kreatif`;
 
       const targetPath = getTabPath(currentTab);
       if (currentPath !== targetPath) {
