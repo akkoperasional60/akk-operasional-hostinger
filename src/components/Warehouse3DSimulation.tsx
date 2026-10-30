@@ -18,6 +18,8 @@ import {
   Camera,
   MapPin,
   Building2,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { MasterSkuRecord } from './WarehouseManagementSystem';
 
@@ -534,14 +536,67 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
   const sceneRef = useRef<THREE.Scene | null>(null);
   const isVisibleRef = useRef<boolean>(isVisible);
 
+  const fullscreenWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  const toggleFullscreen = () => {
+    if (!fullscreenWrapperRef.current) return;
+
+    if (!document.fullscreenElement && !isFullscreen) {
+      if (fullscreenWrapperRef.current.requestFullscreen) {
+        fullscreenWrapperRef.current.requestFullscreen().catch(() => {
+          setIsFullscreen(true);
+        });
+      } else {
+        setIsFullscreen(true);
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [isFullscreen]);
+
   useEffect(() => {
     isVisibleRef.current = isVisible;
     if (isVisible && rendererRef.current && cameraRef.current && mountRef.current) {
       const container = mountRef.current;
       const w = container.clientWidth || 920;
-      cameraRef.current.aspect = w / 560;
+      const h = container.clientHeight || 560;
+      cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(w, 560);
+      rendererRef.current.setSize(w, h);
       if (sceneRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
@@ -1346,9 +1401,10 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
     const handleResize = () => {
       if (!container) return;
       const newW = container.clientWidth || 920;
-      camera.aspect = newW / height;
+      const newH = container.clientHeight || 560;
+      camera.aspect = newW / newH;
       camera.updateProjectionMatrix();
-      renderer.setSize(newW, height);
+      renderer.setSize(newW, newH);
     };
     window.addEventListener('resize', handleResize);
 
@@ -1774,7 +1830,14 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Left Column: 3D Viewport */}
         <div className="xl:col-span-8 flex flex-col gap-3">
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <div
+            ref={fullscreenWrapperRef}
+            className={
+              isFullscreen
+                ? 'fixed inset-0 z-[99999] bg-slate-900 flex flex-col w-screen h-screen p-3 overflow-hidden'
+                : 'bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs'
+            }
+          >
             {/* 3D Viewport Header Bar */}
             <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 flex-wrap">
@@ -1856,12 +1919,49 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
                   <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
                   <span>Reset Kamera</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                  title={isFullscreen ? 'Keluar Layar Penuh' : 'Tampilkan Layar Penuh'}
+                >
+                  {isFullscreen ? (
+                    <>
+                      <Minimize2 className="w-3.5 h-3.5" />
+                      <span>Keluar Fullscreen</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span>Layar Penuh (Fullscreen)</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
             {/* Three.js Canvas Mount */}
-            <div className="relative">
-              <div ref={mountRef} className="w-full h-[560px] bg-slate-100" />
+            <div className={isFullscreen ? 'relative flex-1 w-full min-h-0 bg-slate-950 rounded-xl overflow-hidden' : 'relative'}>
+              <div ref={mountRef} className={isFullscreen ? 'w-full h-full' : 'w-full h-[560px] bg-slate-100'} />
+
+              {/* Floating Fullscreen Toggle Button on Canvas */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-slate-900/85 hover:bg-slate-900 text-white border border-slate-700 backdrop-blur-md text-xs font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer z-10"
+              >
+                {isFullscreen ? (
+                  <>
+                    <Minimize2 className="w-4 h-4 text-amber-400" />
+                    <span>Keluar Fullscreen</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-4 h-4 text-blue-400" />
+                    <span>Layar Penuh</span>
+                  </>
+                )}
+              </button>
 
               {/* Floating Active Task Progress */}
               {activeTask && (
