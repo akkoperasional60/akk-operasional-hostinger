@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Info,
   MapPin,
   Ship,
@@ -127,6 +128,38 @@ const MONTH_NAMES = [
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ];
 
+function getScheduledCrewForDate(targetDateIso: string, excludeScheduleId?: string): Map<string, { role: string; area: string }> {
+  const map = new Map<string, { role: string; area: string }>();
+  if (!targetDateIso) return map;
+
+  const schedules = logisticsStore.getSchedules() as any[];
+  schedules.forEach(s => {
+    if (excludeScheduleId && (s.id === excludeScheduleId || s.tempId === excludeScheduleId)) return;
+    const sDate = s.dateIso || s.departureDateIso || s.departureDate || s.dateStr;
+    const isSameDate = (sDate && sDate === targetDateIso) ||
+                       (s.departureDateIso && s.departureDateIso === targetDateIso) ||
+                       (s.returnDateIso && s.returnDateIso === targetDateIso);
+    if (!isSameDate) return;
+
+    const areaName = s.area || s.areaName || 'Jadwal';
+    const driverName = s.driver || (s.crew?.name);
+    const helperName = s.helper || (s.crewHelper?.name);
+    const helper2Name = s.helper2 || (s.crewHelper2?.name);
+
+    if (driverName && driverName !== '-' && String(driverName).trim() !== '') {
+      map.set(String(driverName).trim().toLowerCase(), { role: 'Driver', area: areaName });
+    }
+    if (helperName && helperName !== '-' && String(helperName).trim() !== '') {
+      map.set(String(helperName).trim().toLowerCase(), { role: 'Helper', area: areaName });
+    }
+    if (helper2Name && helper2Name !== '-' && String(helper2Name).trim() !== '') {
+      map.set(String(helper2Name).trim().toLowerCase(), { role: 'Helper 2', area: areaName });
+    }
+  });
+
+  return map;
+}
+
 interface CrewOptionItem {
   id: string;
   name: string;
@@ -142,6 +175,7 @@ const CrewCustomSelectDropdown: React.FC<{
   emptyValue?: string;
   roleBadgeText: string;
   accentColor?: 'blue' | 'emerald';
+  scheduledCrewMap?: Map<string, { role: string; area: string }>;
 }> = ({
   label,
   value,
@@ -150,7 +184,8 @@ const CrewCustomSelectDropdown: React.FC<{
   emptyLabel,
   emptyValue = '',
   roleBadgeText,
-  accentColor = 'emerald'
+  accentColor = 'emerald',
+  scheduledCrewMap
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -184,6 +219,33 @@ const CrewCustomSelectDropdown: React.FC<{
 
   const isNoneSelected = !value || value === '-' || value === emptyValue;
   const displayValue = isNoneSelected ? (emptyLabel || 'Pilih Kru...') : value;
+
+  const unscheduledCount = useMemo(() => {
+    if (!scheduledCrewMap || scheduledCrewMap.size === 0) return options.length;
+    return options.filter(o => {
+      const key = o.name.trim().toLowerCase();
+      if (!isNoneSelected && key === value.trim().toLowerCase()) return true;
+      return !scheduledCrewMap.has(key);
+    }).length;
+  }, [options, scheduledCrewMap, value, isNoneSelected]);
+
+  const handleSelectFirstValid = () => {
+    if (filteredOptions.length === 0) return;
+    const firstValid = filteredOptions.find(o => {
+      const key = o.name.trim().toLowerCase();
+      if (!isNoneSelected && key === value.trim().toLowerCase()) return true;
+      return !scheduledCrewMap?.has(key);
+    }) || filteredOptions[0];
+
+    if (firstValid) {
+      const key = firstValid.name.trim().toLowerCase();
+      const isAlreadyScheduled = scheduledCrewMap?.has(key) && (isNoneSelected || key !== value.trim().toLowerCase());
+      if (!isAlreadyScheduled) {
+        onChange(firstValid.name);
+        setIsOpen(false);
+      }
+    }
+  };
 
   return (
     <div ref={containerRef} className="relative">
@@ -243,7 +305,13 @@ const CrewCustomSelectDropdown: React.FC<{
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={`Cari nama ${roleBadgeText.toLowerCase()}...`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSelectFirstValid();
+                  }
+                }}
+                placeholder={`Cari nama ${roleBadgeText.toLowerCase()}... (Tekan Enter untuk memilih)`}
                 autoFocus
                 className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
               />
@@ -275,17 +343,25 @@ const CrewCustomSelectDropdown: React.FC<{
               </div>
             ) : (
               filteredOptions.map((item) => {
-                const isSelected = !isNoneSelected && value.trim().toLowerCase() === item.name.trim().toLowerCase();
+                const itemKey = item.name.trim().toLowerCase();
+                const isSelected = !isNoneSelected && value.trim().toLowerCase() === itemKey;
+                const scheduledInfo = scheduledCrewMap?.get(itemKey);
+                const isAlreadyScheduled = Boolean(scheduledInfo) && !isSelected;
+
                 return (
                   <button
                     key={item.id}
                     type="button"
+                    disabled={isAlreadyScheduled}
                     onClick={() => {
+                      if (isAlreadyScheduled) return;
                       onChange(item.name);
                       setIsOpen(false);
                     }}
                     className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
-                      isSelected
+                      isAlreadyScheduled
+                        ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
+                        : isSelected
                         ? accentColor === 'blue'
                           ? 'bg-blue-600 text-white shadow-2xs'
                           : 'bg-emerald-600 text-white shadow-2xs'
@@ -296,6 +372,8 @@ const CrewCustomSelectDropdown: React.FC<{
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-[10px] shrink-0 border ${
                         isSelected
                           ? 'bg-white/20 text-white border-white/30'
+                          : isAlreadyScheduled
+                          ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                           : accentColor === 'blue'
                           ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
                           : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
@@ -303,23 +381,747 @@ const CrewCustomSelectDropdown: React.FC<{
                         {getDriverInitials(item.name)}
                       </div>
                       <div className="min-w-0">
-                        <div className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                        <div className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : isAlreadyScheduled ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-white'}`}>
                           {item.name}
                         </div>
                         <div className={`text-[10px] flex items-center gap-1.5 ${isSelected ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'}`}>
                           <span>{roleBadgeText}</span>
                           <span>•</span>
-                          <span className={isSelected ? 'text-white font-semibold' : 'text-emerald-600 dark:text-emerald-400 font-semibold'}>
-                            ● Aktif
-                          </span>
+                          {isAlreadyScheduled ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-bold">
+                              ⚠️ Sudah Terjadwal ({scheduledInfo?.area})
+                            </span>
+                          ) : (
+                            <span className={isSelected ? 'text-white font-semibold' : 'text-emerald-600 dark:text-emerald-400 font-semibold'}>
+                              ● Siap Tugas
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
                     {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                    {isAlreadyScheduled && (
+                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shrink-0">
+                        Terjadwal
+                      </span>
+                    )}
                   </button>
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FleetCustomSelectDropdown: React.FC<{
+  label: string;
+  value: string;
+  fleets: Fleet[];
+  dateIso?: string;
+  onChange: (newValue: string) => void;
+  accentColor?: 'blue' | 'emerald';
+}> = ({ label, value, fleets, dateIso, onChange, accentColor = 'blue' }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const selectedFleet = useMemo(() => {
+    if (!value) return null;
+    return fleets.find(f => (f.initialCode || f.plateNumber) === value || f.plateNumber === value);
+  }, [fleets, value]);
+
+  const filteredFleets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return fleets;
+    return fleets.filter(f =>
+      f.plateNumber.toLowerCase().includes(q) ||
+      (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
+      (f.vehicleType && f.vehicleType.toLowerCase().includes(q))
+    );
+  }, [fleets, search]);
+
+  const handleSelectFirstValid = () => {
+    if (filteredFleets.length === 0) return;
+    const firstValid = filteredFleets.find(f => {
+      const code = f.initialCode || f.plateNumber;
+      const isCurrentValue = code === value || f.plateNumber === value;
+      const live = logisticsStore.getFleetLiveOperationalInfo(f, dateIso);
+      return live.canBeScheduled || isCurrentValue;
+    }) || filteredFleets[0];
+
+    if (firstValid) {
+      const code = firstValid.initialCode || firstValid.plateNumber;
+      const isCurrentValue = code === value || firstValid.plateNumber === value;
+      const live = logisticsStore.getFleetLiveOperationalInfo(firstValid, dateIso);
+      if (live.canBeScheduled || isCurrentValue) {
+        onChange(code);
+        setIsOpen(false);
+      }
+    }
+  };
+
+  const liveInfo = selectedFleet
+    ? logisticsStore.getFleetLiveOperationalInfo(selectedFleet, dateIso)
+    : null;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+        <span className="flex items-center gap-1.5">
+          <Truck className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+          <span>{label}</span>
+        </span>
+        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+          accentColor === 'blue'
+            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+        }`}>
+          {fleets.length} Unit Terdaftar
+        </span>
+      </label>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(prev => !prev);
+          setSearch('');
+        }}
+        className={`w-full flex items-center justify-between gap-2.5 bg-slate-50 dark:bg-slate-950 border rounded-xl p-2.5 text-left transition cursor-pointer ${
+          isOpen
+            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
+            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border shadow-2xs ${
+            accentColor === 'blue'
+              ? 'bg-blue-600 text-white border-blue-500'
+              : 'bg-emerald-600 text-white border-emerald-500'
+          }`}>
+            {selectedFleet?.initialCode ? selectedFleet.initialCode : <Truck className="w-4 h-4" />}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                {selectedFleet ? selectedFleet.plateNumber : 'Pilih Armada Truk...'}
+              </span>
+              {selectedFleet?.initialCode && (
+                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  {selectedFleet.initialCode}
+                </span>
+              )}
+            </div>
+            {selectedFleet && liveInfo ? (
+              <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                <span className="font-bold text-slate-700 dark:text-slate-300">
+                  {liveInfo.statusLabel}
+                </span>
+                {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName && (
+                  <span className="text-slate-500 dark:text-slate-400 truncate">• {liveInfo.areaName}</span>
+                )}
+              </div>
+            ) : (
+              <span className="text-[10px] text-slate-400 italic">Klik untuk membuka daftar armada</span>
+            )}
+          </div>
+        </div>
+
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSelectFirstValid();
+                  }
+                }}
+                placeholder="Cari plat nomor, inisial (misal: N5), atau tipe... (Tekan Enter untuk memilih)"
+                autoFocus
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-h-60 overflow-y-auto p-1.5 space-y-1">
+            {filteredFleets.length === 0 ? (
+              <div className="py-5 text-center text-[11px] text-slate-400">
+                Tidak ada armada truk yang cocok dengan pencarian "{search}".
+              </div>
+            ) : (
+              filteredFleets.map((fleet) => {
+                const fleetCode = fleet.initialCode || fleet.plateNumber;
+                const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
+                const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso);
+                const isUnselectable = !live.canBeScheduled && !isSelected;
+                const isMaintenance = live.effectiveStatus === 'maintenance';
+
+                return (
+                  <button
+                    key={fleet.id}
+                    type="button"
+                    disabled={isUnselectable}
+                    onClick={() => {
+                      if (isUnselectable) return;
+                      onChange(fleetCode);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-left transition cursor-pointer ${
+                      isUnselectable
+                        ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
+                        : isSelected
+                        ? accentColor === 'blue'
+                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                          : 'bg-emerald-600 text-white shadow-2xs font-bold'
+                        : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-800 dark:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-[11px] shrink-0 border ${
+                        isSelected
+                          ? 'bg-white/20 text-white border-white/30'
+                          : isUnselectable
+                          ? isMaintenance ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                          : accentColor === 'blue'
+                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                      }`}>
+                        {fleet.initialCode || <Truck className="w-4 h-4" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-extrabold text-xs truncate ${isUnselectable ? 'text-slate-400 dark:text-slate-500' : ''}`}>
+                            {fleet.plateNumber}
+                          </span>
+                          {fleet.initialCode && (
+                            <span className={`text-[9px] font-bold px-1 py-0.1 rounded ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                              [{fleet.initialCode}]
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-white' : live.dotColorClass}`} />
+                          <span className={isSelected ? 'text-white/90 font-medium' : isUnselectable ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-500 dark:text-slate-400'}>
+                            {isMaintenance ? '⚠️ Sedang Perbaikan / Servis' : live.effectiveStatus === 'on-duty' && !isSelected ? `⚠️ Sudah Terjadwal: ${live.areaName || 'Kirim'}` : live.statusLabel}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                    {isUnselectable && (
+                      <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border shrink-0 ${
+                        isMaintenance ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                      }`}>
+                        {isMaintenance ? 'Servis' : 'Terjadwal'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ModernDatePicker: React.FC<{
+  label?: string;
+  value: string; // ISO YYYY-MM-DD
+  onChange: (newIsoDate: string) => void;
+  accentColor?: 'blue' | 'emerald';
+  badgeText?: string;
+  placeholder?: string;
+}> = ({ label, value, onChange, accentColor = 'emerald', badgeText, placeholder = 'Pilih Tanggal...' }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const parsedDate = useMemo(() => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return new Date();
+    }
+    const [y, m, d] = value.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }, [value]);
+
+  const [viewYear, setViewYear] = useState<number>(() => parsedDate.getFullYear());
+  const [viewMonth, setViewMonth] = useState<number>(() => parsedDate.getMonth());
+
+  useEffect(() => {
+    if (isOpen) {
+      setViewYear(parsedDate.getFullYear());
+      setViewMonth(parsedDate.getMonth());
+    }
+  }, [isOpen, parsedDate]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const monthNames = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
+  const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+  const formattedDisplay = useMemo(() => {
+    if (!value) return placeholder;
+    try {
+      const d = parsedDate;
+      const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+      return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    } catch {
+      return value;
+    }
+  }, [value, parsedDate, placeholder]);
+
+  const calendarDays = useMemo(() => {
+    const firstDayOfMonth = new Date(viewYear, viewMonth, 1);
+    const lastDayOfMonth = new Date(viewYear, viewMonth + 1, 0);
+
+    const startingDayOfWeek = firstDayOfMonth.getDay();
+    const totalDaysInMonth = lastDayOfMonth.getDate();
+
+    const days: Array<{ day: number; monthOffset: -1 | 0 | 1; iso: string }> = [];
+
+    const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
+    for (let i = startingDayOfWeek - 1; i >= 0; i--) {
+      const pDay = prevMonthLastDay - i;
+      const prevDate = new Date(viewYear, viewMonth - 1, pDay);
+      const iso = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(pDay).padStart(2, '0')}`;
+      days.push({ day: pDay, monthOffset: -1, iso });
+    }
+
+    for (let d = 1; d <= totalDaysInMonth; d++) {
+      const iso = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({ day: d, monthOffset: 0, iso });
+    }
+
+    const remainingSlots = 35 - days.length > 0 ? 35 - days.length : 42 - days.length;
+    for (let n = 1; n <= remainingSlots; n++) {
+      const nextDate = new Date(viewYear, viewMonth + 1, n);
+      const iso = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(n).padStart(2, '0')}`;
+      days.push({ day: n, monthOffset: 1, iso });
+    }
+
+    return days;
+  }, [viewYear, viewMonth]);
+
+  const todayIso = useMemo(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear(y => y - 1);
+    } else {
+      setViewMonth(m => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear(y => y + 1);
+    } else {
+      setViewMonth(m => m + 1);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      {label && (
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+            <Calendar className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+            <span>{label}</span>
+          </label>
+          {badgeText && (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+              accentColor === 'blue'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+            }`}>
+              {badgeText}
+            </span>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950 border rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+          isOpen
+            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
+            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+            accentColor === 'blue' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+          }`}>
+            <Calendar className="w-4 h-4" />
+          </div>
+          <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+            {formattedDisplay}
+          </span>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 z-50 mt-1.5 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1">
+              <span>{monthNames[viewMonth]}</span>
+              <span className="text-slate-400 font-mono">{viewYear}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center">
+            {dayNames.map((day, idx) => (
+              <span
+                key={day}
+                className={`text-[10px] font-black uppercase ${
+                  idx === 0 ? 'text-rose-500' : 'text-slate-400 dark:text-slate-500'
+                }`}
+              >
+                {day}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {calendarDays.map((item, idx) => {
+              const isSelected = item.iso === value;
+              const isToday = item.iso === todayIso;
+              const isCurrentMonth = item.monthOffset === 0;
+
+              return (
+                <button
+                  key={`${item.iso}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    onChange(item.iso);
+                    setIsOpen(false);
+                  }}
+                  className={`h-8 rounded-xl font-mono text-xs font-bold transition flex items-center justify-center relative cursor-pointer ${
+                    isSelected
+                      ? accentColor === 'blue'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+                        : 'bg-emerald-600 text-white shadow-md shadow-emerald-500/30'
+                      : !isCurrentMonth
+                      ? 'text-slate-300 dark:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800/40'
+                      : isToday
+                      ? 'bg-slate-100 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 font-black border border-emerald-500/40'
+                      : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {item.day}
+                  {isToday && !isSelected && (
+                    <span className="w-1 h-1 rounded-full bg-emerald-500 absolute bottom-1" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px]">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(todayIso);
+                  setIsOpen(false);
+                }}
+                className="px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold transition cursor-pointer"
+              >
+                Hari Ini
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() + 1);
+                  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                  onChange(iso);
+                  setIsOpen(false);
+                }}
+                className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold transition cursor-pointer"
+              >
+                Besok (+1)
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ModernTimePicker: React.FC<{
+  label?: string;
+  value: string; // 'HH:MM' e.g. '07:30'
+  onChange: (newTime: string) => void;
+  accentColor?: 'blue' | 'emerald';
+}> = ({ label, value, onChange, accentColor = 'blue' }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [selectedHour, setSelectedHour] = useState<string>(() => {
+    if (value && value.includes(':')) return value.split(':')[0].padStart(2, '0');
+    return '07';
+  });
+
+  const [selectedMinute, setSelectedMinute] = useState<string>(() => {
+    if (value && value.includes(':')) return value.split(':')[1].padStart(2, '0');
+    return '00';
+  });
+
+  useEffect(() => {
+    if (value && value.includes(':')) {
+      const [h, m] = value.split(':');
+      setSelectedHour(h.padStart(2, '0'));
+      setSelectedMinute(m.padStart(2, '0'));
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const presetTimes = [
+    '06:00', '07:00', '07:30', '08:00', '09:00',
+    '12:00', '13:00', '15:00', '16:00', '17:00', '18:00', '20:00'
+  ];
+
+  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+  const minutes = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
+
+  const handleSelectHour = (h: string) => {
+    setSelectedHour(h);
+    onChange(`${h}:${selectedMinute}`);
+  };
+
+  const handleSelectMinute = (m: string) => {
+    setSelectedMinute(m);
+    onChange(`${selectedHour}:${m}`);
+  };
+
+  const displayTime = value || `${selectedHour}:${selectedMinute}`;
+
+  return (
+    <div ref={containerRef} className="relative">
+      {label && (
+        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+          <Clock className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+          <span>{label}</span>
+        </label>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950 border rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+          isOpen
+            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
+            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+            accentColor === 'blue' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+          }`}>
+            <Clock className="w-4 h-4" />
+          </div>
+          <span className="text-xs font-mono font-black text-slate-900 dark:text-white tracking-wider">
+            {displayTime} WIB
+          </span>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 z-50 mt-1.5 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-3 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+          <div>
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+              Pilihan Jam Cepat:
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {presetTimes.map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    onChange(t);
+                    setIsOpen(false);
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition cursor-pointer border ${
+                    value === t
+                      ? accentColor === 'blue' ? 'bg-blue-600 text-white border-blue-500 shadow-2xs' : 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 block mb-1">Jam</span>
+              <div className="h-36 overflow-y-auto pr-1 space-y-1">
+                {hours.map(h => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => handleSelectHour(h)}
+                    className={`w-full py-1 text-center font-mono text-xs font-bold rounded-lg transition cursor-pointer ${
+                      selectedHour === h
+                        ? accentColor === 'blue' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 block mb-1">Menit</span>
+              <div className="h-36 overflow-y-auto pr-1 space-y-1">
+                {minutes.map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleSelectMinute(m)}
+                    className={`w-full py-1 text-center font-mono text-xs font-bold rounded-lg transition cursor-pointer ${
+                      selectedMinute === m
+                        ? accentColor === 'blue' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-[10px] font-mono text-slate-500 font-semibold">
+              Terpilih: <strong className={`font-black ${accentColor === 'blue' ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{displayTime} WIB</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className={`px-3 py-1 rounded-lg text-white text-[10px] font-bold cursor-pointer transition shadow-2xs ${
+                accentColor === 'blue' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+            >
+              Simpan
+            </button>
           </div>
         </div>
       )}
@@ -481,17 +1283,21 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       dateIso: today,
       departureDateIso: today,
       returnDateIso: today,
-      driver: initDrivers[0]?.fullName || 'Budiono',
-      helper: initHelpers[0]?.fullName || 'Saifur Rizal',
+      driver: '',
+      helper: '',
       helper2: '',
-      area: 'Denpasar 1',
-      armada: 'DS3',
+      area: '',
+      armada: '',
       target: '',
       departureTime: '07:30',
-      targetReturnTime: '17:00',
+      targetReturnTime: '16:00',
       branchId: initBranch
     };
   });
+
+  const manualScheduledCrewMap = useMemo(() => {
+    return getScheduledCrewForDate(manualScheduleForm.dateIso);
+  }, [manualScheduleForm.dateIso]);
   const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
   const [areaCategoryFilter, setAreaCategoryFilter] = useState<'all' | 'bali' | 'banyuwangi' | 'jember' | 'pantura'>('all');
   const [isAreaPickerExpanded, setIsAreaPickerExpanded] = useState<boolean>(false);
@@ -584,6 +1390,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     isNew?: boolean;
   } | null>(null);
 
+  const editingScheduledCrewMap = useMemo(() => {
+    if (!editingTripModal) return new Map<string, { role: string; area: string }>();
+    const targetIso = editingTripModal.departureDateIso || editingTripModal.dateString;
+    return getScheduledCrewForDate(targetIso, editingTripModal.scheduleId);
+  }, [editingTripModal]);
+
   // Track expanded state for day dropdown accordions
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
 
@@ -618,7 +1430,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       departureDateIso: p.departureDateIso || defaultDayIso,
       returnDateIso: p.returnDateIso || defaultDayIso,
       departureTime: p.departureTime || '07:30',
-      targetReturnTime: p.targetReturnTime || '17:00',
+      targetReturnTime: p.targetReturnTime || '16:00',
       branchId: tripBranch,
       isNew: false
     });
@@ -2610,7 +3422,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   ...prev,
                   dateIso: today,
                   departureDateIso: today,
-                  returnDateIso: today
+                  returnDateIso: today,
+                  area: ''
                 }));
                 setIsUploadConfigModalOpen(true);
               }}
@@ -3684,6 +4497,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 onChange={(val) => setEditingTripModal({ ...editingTripModal, driver: val })}
                 roleBadgeText="Kru Supir"
                 accentColor="blue"
+                scheduledCrewMap={editingScheduledCrewMap}
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3696,6 +4510,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   emptyValue=""
                   roleBadgeText="Kru Helper"
                   accentColor="emerald"
+                  scheduledCrewMap={editingScheduledCrewMap}
                 />
 
                 <CrewCustomSelectDropdown
@@ -3707,6 +4522,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   emptyValue=""
                   roleBadgeText="Kru Helper"
                   accentColor="emerald"
+                  scheduledCrewMap={editingScheduledCrewMap}
                 />
               </div>
 
@@ -3752,56 +4568,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </select>
               </div>
 
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Armada Truk (Inisial &amp; Plat Nomor)
-                </label>
-                <select
-                  value={editingTripModal.armada}
-                  onChange={(e) => setEditingTripModal({ ...editingTripModal, armada: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-emerald-500"
-                >
-                  {logisticsStore.getFleets().map(f => {
-                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
-                    const isServis = !liveInfo.canBeScheduled;
-                    return (
-                      <option
-                        key={f.id}
-                        value={f.initialCode || f.plateNumber}
-                        disabled={isServis}
-                      >
-                        {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} — {liveInfo.statusLabel}
-                        {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
-                        {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-                {(() => {
-                  const selFleet = logisticsStore.getFleets().find(
-                    f => (f.initialCode || f.plateNumber) === editingTripModal.armada || f.plateNumber === editingTripModal.armada
-                  );
-                  if (!selFleet) return null;
-                  const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet);
-                  return (
-                    <div className="mt-1.5 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
-                        <span className="font-black text-slate-800 dark:text-slate-200">
-                          Status Armada: {liveInfo.statusLabel}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 truncate">
-                        {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
-                          ? `Sedang Kirim: ${liveInfo.areaName}`
-                          : liveInfo.effectiveStatus === 'maintenance'
-                          ? 'Sedang Perbaikan (Tidak Bisa Kirim)'
-                          : 'Siap Digunakan Jadwal Kirim'}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
+              <FleetCustomSelectDropdown
+                label="Armada Truk (Inisial & Plat Nomor) *"
+                value={editingTripModal.armada}
+                fleets={logisticsStore.getFleets()}
+                dateIso={editingTripModal.departureDateIso}
+                onChange={(val) => setEditingTripModal({ ...editingTripModal, armada: val })}
+                accentColor="blue"
+              />
 
               {isLuarKotaArea(editingTripModal.area) ? (
                 <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/25 space-y-3">
@@ -3813,62 +4587,40 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                          Tanggal Keberangkatan *
-                        </label>
-                        <input
-                          type="date"
-                          value={editingTripModal.departureDateIso}
-                          onChange={(e) => {
-                            const nextDep = e.target.value;
-                            const nextRet = editingTripModal.returnDateIso < nextDep ? nextDep : editingTripModal.returnDateIso;
-                            setEditingTripModal({ ...editingTripModal, departureDateIso: nextDep, returnDateIso: nextRet });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                          Jam Keberangkatan *
-                        </label>
-                        <input
-                          type="time"
-                          value={editingTripModal.departureTime}
-                          onChange={(e) => {
-                            const nextTime = e.target.value;
-                            const autoNextDay = nextTime > editingTripModal.targetReturnTime && editingTripModal.returnDateIso === editingTripModal.departureDateIso
-                              ? addDaysToIso(editingTripModal.departureDateIso, 1)
-                              : editingTripModal.returnDateIso;
-                            setEditingTripModal({ ...editingTripModal, departureTime: nextTime, returnDateIso: autoNextDay });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
+                      <ModernDatePicker
+                        label="Tanggal Keberangkatan *"
+                        value={editingTripModal.departureDateIso}
+                        onChange={(nextDep) => {
+                          const nextRet = editingTripModal.returnDateIso < nextDep ? nextDep : editingTripModal.returnDateIso;
+                          setEditingTripModal({ ...editingTripModal, departureDateIso: nextDep, returnDateIso: nextRet });
+                        }}
+                        accentColor="blue"
+                      />
+                      <ModernTimePicker
+                        label="Jam Keberangkatan *"
+                        value={editingTripModal.departureTime}
+                        onChange={(nextTime) => {
+                          const autoNextDay = nextTime > editingTripModal.targetReturnTime && editingTripModal.returnDateIso === editingTripModal.departureDateIso
+                            ? addDaysToIso(editingTripModal.departureDateIso, 1)
+                            : editingTripModal.returnDateIso;
+                          setEditingTripModal({ ...editingTripModal, departureTime: nextTime, returnDateIso: autoNextDay });
+                        }}
+                        accentColor="blue"
+                      />
                     </div>
                     <div className="space-y-2">
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                          Tanggal Kepulangan *
-                        </label>
-                        <input
-                          type="date"
-                          value={editingTripModal.returnDateIso}
-                          onChange={(e) => setEditingTripModal({ ...editingTripModal, returnDateIso: e.target.value })}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                          Target Jam Kepulangan *
-                        </label>
-                        <input
-                          type="time"
-                          value={editingTripModal.targetReturnTime}
-                          onChange={(e) => setEditingTripModal({ ...editingTripModal, targetReturnTime: e.target.value })}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
+                      <ModernDatePicker
+                        label="Tanggal Kepulangan *"
+                        value={editingTripModal.returnDateIso}
+                        onChange={(nextRet) => setEditingTripModal({ ...editingTripModal, returnDateIso: nextRet })}
+                        accentColor="blue"
+                      />
+                      <ModernTimePicker
+                        label="Target Jam Kepulangan *"
+                        value={editingTripModal.targetReturnTime}
+                        onChange={(nextRetTime) => setEditingTripModal({ ...editingTripModal, targetReturnTime: nextRetTime })}
+                        accentColor="blue"
+                      />
                     </div>
                   </div>
                   {editingTripModal.returnDateIso !== editingTripModal.departureDateIso && (
@@ -3879,28 +4631,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                      Jam Keberangkatan *
-                    </label>
-                    <input
-                      type="time"
-                      value={editingTripModal.departureTime}
-                      onChange={(e) => setEditingTripModal({ ...editingTripModal, departureTime: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                      Target Jam Kepulangan *
-                    </label>
-                    <input
-                      type="time"
-                      value={editingTripModal.targetReturnTime}
-                      onChange={(e) => setEditingTripModal({ ...editingTripModal, targetReturnTime: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
-                    />
-                  </div>
+                  <ModernTimePicker
+                    label="Jam Keberangkatan *"
+                    value={editingTripModal.departureTime}
+                    onChange={(nextTime) => setEditingTripModal({ ...editingTripModal, departureTime: nextTime })}
+                    accentColor="blue"
+                  />
+                  <ModernTimePicker
+                    label="Target Jam Kepulangan *"
+                    value={editingTripModal.targetReturnTime}
+                    onChange={(nextRetTime) => setEditingTripModal({ ...editingTripModal, targetReturnTime: nextRetTime })}
+                    accentColor="blue"
+                  />
                 </div>
               )}
 
@@ -3982,21 +4724,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     ))}
                   </select>
                 </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Tanggal Kirim *</span>
-                    </label>
-                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      Otomatis Hari Ini
-                    </span>
-                  </div>
-                  <input
-                    type="date"
+                <div className="w-full">
+                  <ModernDatePicker
+                    label="Tanggal Kirim *"
+                    badgeText="Otomatis Hari Ini"
                     value={isLuarKotaArea(manualScheduleForm.area) ? (manualScheduleForm.returnDateIso || manualScheduleForm.dateIso) : manualScheduleForm.dateIso}
-                    onChange={(e) => {
-                      const nextIso = e.target.value;
+                    onChange={(nextIso) => {
                       const isNightOrCrossDay = isLuarKotaArea(manualScheduleForm.area) && (
                         manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ||
                         manualScheduleForm.returnDateIso > manualScheduleForm.departureDateIso
@@ -4009,121 +4742,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         departureDateIso: nextDep
                       });
                     }}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    accentColor="emerald"
                   />
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const iso = getTodayIso();
-                        const isNightOrCrossDay = isLuarKotaArea(manualScheduleForm.area) && (
-                          manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ||
-                          manualScheduleForm.returnDateIso > manualScheduleForm.departureDateIso
-                        );
-                        setManualScheduleForm({
-                          ...manualScheduleForm,
-                          dateIso: iso,
-                          returnDateIso: iso,
-                          departureDateIso: isNightOrCrossDay ? addDaysToIso(iso, -1) : iso
-                        });
-                      }}
-                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition cursor-pointer"
-                    >
-                      Hari Ini
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const d = new Date();
-                        d.setDate(d.getDate() + 1);
-                        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                        const isNightOrCrossDay = isLuarKotaArea(manualScheduleForm.area) && (
-                          manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ||
-                          manualScheduleForm.returnDateIso > manualScheduleForm.departureDateIso
-                        );
-                        setManualScheduleForm({
-                          ...manualScheduleForm,
-                          dateIso: iso,
-                          returnDateIso: iso,
-                          departureDateIso: isNightOrCrossDay ? addDaysToIso(iso, -1) : iso
-                        });
-                      }}
-                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-                    >
-                      Besok (+1)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const d = new Date();
-                        d.setDate(d.getDate() + 2);
-                        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                        const isNightOrCrossDay = isLuarKotaArea(manualScheduleForm.area) && (
-                          manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ||
-                          manualScheduleForm.returnDateIso > manualScheduleForm.departureDateIso
-                        );
-                        setManualScheduleForm({
-                          ...manualScheduleForm,
-                          dateIso: iso,
-                          returnDateIso: iso,
-                          departureDateIso: isNightOrCrossDay ? addDaysToIso(iso, -1) : iso
-                        });
-                      }}
-                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-                    >
-                      Lusa (+2)
-                    </button>
-                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                    Armada Truk *
-                  </label>
-                  <select
+                <div className="w-full">
+                  <FleetCustomSelectDropdown
+                    label="Armada Truk *"
                     value={manualScheduleForm.armada}
-                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, armada: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-blue-600 cursor-pointer"
-                  >
-                    {logisticsStore.getFleets().map(f => {
-                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f, manualScheduleForm.dateIso);
-                      const isServis = !liveInfo.canBeScheduled;
-                      return (
-                        <option
-                          key={f.id}
-                          value={f.initialCode || f.plateNumber}
-                          disabled={isServis}
-                        >
-                          {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} — {liveInfo.statusLabel}
-                          {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
-                          {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  {(() => {
-                    const selFleet = logisticsStore.getFleets().find(
-                      f => (f.initialCode || f.plateNumber) === manualScheduleForm.armada || f.plateNumber === manualScheduleForm.armada
-                    );
-                    if (!selFleet) return null;
-                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet, manualScheduleForm.dateIso);
-                    return (
-                      <div className="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
-                          <span className="font-black text-slate-800 dark:text-slate-200">
-                            {liveInfo.statusLabel}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 truncate">
-                          {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
-                            ? `Area Hari Ini: ${liveInfo.areaName}`
-                            : liveInfo.effectiveStatus === 'maintenance'
-                            ? 'Dalam Perbaikan (Servis)'
-                            : 'Siap Digunakan Kirim'}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                    fleets={logisticsStore.getFleets()}
+                    dateIso={manualScheduleForm.dateIso}
+                    onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, armada: val })}
+                    accentColor="emerald"
+                  />
                 </div>
               </div>
 
@@ -4132,169 +4762,137 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div className="space-y-2.5">
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>Tanggal Keberangkatan *</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={manualScheduleForm.departureDateIso}
-                          onChange={(e) => {
-                            const nextDep = e.target.value;
-                            const isNight = manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime;
-                            const nextRet = isNight
-                              ? addDaysToIso(nextDep, 1)
-                              : (manualScheduleForm.returnDateIso < nextDep ? nextDep : manualScheduleForm.returnDateIso);
-                            setManualScheduleForm({
-                              ...manualScheduleForm,
-                              dateIso: nextRet,
-                              departureDateIso: nextDep,
-                              returnDateIso: nextRet
-                            });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                          <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>Jam Keberangkatan *</span>
-                        </label>
-                        <input
-                          type="time"
-                          value={manualScheduleForm.departureTime}
-                          onChange={(e) => {
-                            const nextTime = e.target.value;
-                            const nextRet = nextTime > manualScheduleForm.targetReturnTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
-                              ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
-                              : manualScheduleForm.returnDateIso;
-                            setManualScheduleForm({
-                              ...manualScheduleForm,
-                              departureTime: nextTime,
-                              returnDateIso: nextRet,
-                              dateIso: nextRet
-                            });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                        />
-                      </div>
+                      <ModernDatePicker
+                        label="Tanggal Keberangkatan *"
+                        value={manualScheduleForm.departureDateIso}
+                        onChange={(nextDep) => {
+                          const isNight = manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime;
+                          const nextRet = isNight
+                            ? addDaysToIso(nextDep, 1)
+                            : (manualScheduleForm.returnDateIso < nextDep ? nextDep : manualScheduleForm.returnDateIso);
+                          setManualScheduleForm({
+                            ...manualScheduleForm,
+                            dateIso: nextRet,
+                            departureDateIso: nextDep,
+                            returnDateIso: nextRet
+                          });
+                        }}
+                        accentColor="emerald"
+                      />
+                      <ModernTimePicker
+                        label="Jam Keberangkatan *"
+                        value={manualScheduleForm.departureTime}
+                        onChange={(nextTime) => {
+                          const nextRet = nextTime > manualScheduleForm.targetReturnTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
+                            ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
+                            : manualScheduleForm.returnDateIso;
+                          setManualScheduleForm({
+                            ...manualScheduleForm,
+                            departureTime: nextTime,
+                            returnDateIso: nextRet,
+                            dateIso: nextRet
+                          });
+                        }}
+                        accentColor="emerald"
+                      />
                     </div>
 
                     <div className="space-y-2.5">
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>Tanggal Kepulangan *</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={manualScheduleForm.returnDateIso}
-                          onChange={(e) => {
-                            const nextRet = e.target.value;
-                            const nextDep = manualScheduleForm.departureDateIso > nextRet ? nextRet : manualScheduleForm.departureDateIso;
-                            setManualScheduleForm({
-                              ...manualScheduleForm,
-                              returnDateIso: nextRet,
-                              dateIso: nextRet,
-                              departureDateIso: nextDep
-                            });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                          <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>Target Jam Kepulangan *</span>
-                        </label>
-                        <input
-                          type="time"
-                          value={manualScheduleForm.targetReturnTime}
-                          onChange={(e) => {
-                            const nextRetTime = e.target.value;
-                            const nextRet = manualScheduleForm.departureTime > nextRetTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
-                              ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
-                              : manualScheduleForm.returnDateIso;
-                            setManualScheduleForm({
-                              ...manualScheduleForm,
-                              targetReturnTime: nextRetTime,
-                              returnDateIso: nextRet,
-                              dateIso: nextRet
-                            });
-                          }}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                        />
-                      </div>
+                      <ModernDatePicker
+                        label="Tanggal Kepulangan *"
+                        value={manualScheduleForm.returnDateIso}
+                        onChange={(nextRet) => {
+                          const nextDep = manualScheduleForm.departureDateIso > nextRet ? nextRet : manualScheduleForm.departureDateIso;
+                          setManualScheduleForm({
+                            ...manualScheduleForm,
+                            returnDateIso: nextRet,
+                            dateIso: nextRet,
+                            departureDateIso: nextDep
+                          });
+                        }}
+                        accentColor="emerald"
+                      />
+                      <ModernTimePicker
+                        label="Target Jam Kepulangan *"
+                        value={manualScheduleForm.targetReturnTime}
+                        onChange={(nextRetTime) => {
+                          const nextRet = manualScheduleForm.departureTime > nextRetTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
+                            ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
+                            : manualScheduleForm.returnDateIso;
+                          setManualScheduleForm({
+                            ...manualScheduleForm,
+                            targetReturnTime: nextRetTime,
+                            returnDateIso: nextRet,
+                            dateIso: nextRet
+                          });
+                        }}
+                        accentColor="emerald"
+                      />
                     </div>
                   </div>
                   {manualScheduleForm.returnDateIso !== manualScheduleForm.departureDateIso && (
-                    <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20">
+                    <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
                       📌 Keberangkatan malam ({manualScheduleForm.departureDateIso}) &amp; kepulangan besok ({manualScheduleForm.returnDateIso}): Tanggal Kirim otomatis mengikuti Tanggal Kepulangan ({manualScheduleForm.returnDateIso}).
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                      <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Jam Keberangkatan *</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={manualScheduleForm.departureTime}
-                      onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, departureTime: e.target.value })}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                      <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Target Jam Kepulangan *</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={manualScheduleForm.targetReturnTime}
-                      onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, targetReturnTime: e.target.value })}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
-                    />
-                  </div>
+                  <ModernTimePicker
+                    label="Jam Keberangkatan *"
+                    value={manualScheduleForm.departureTime}
+                    onChange={(nextTime) => setManualScheduleForm({ ...manualScheduleForm, departureTime: nextTime })}
+                    accentColor="emerald"
+                  />
+                  <ModernTimePicker
+                    label="Target Jam Kepulangan *"
+                    value={manualScheduleForm.targetReturnTime}
+                    onChange={(nextRetTime) => setManualScheduleForm({ ...manualScheduleForm, targetReturnTime: nextRetTime })}
+                    accentColor="emerald"
+                  />
                 </div>
               )}
 
               <div className="space-y-3">
                 <CrewCustomSelectDropdown
-                  label="Driver / Supir *"
+                  label="Pilih Driver / Supir *"
                   value={manualScheduleForm.driver}
                   options={getIntegratedDrivers()}
                   onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, driver: val })}
+                  emptyLabel="Pilih Driver..."
                   roleBadgeText="Kru Supir"
                   accentColor="blue"
+                  scheduledCrewMap={manualScheduledCrewMap}
                 />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <CrewCustomSelectDropdown
-                    label="Helper 1 *"
-                    value={manualScheduleForm.helper}
-                    options={getIntegratedHelpers()}
-                    onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, helper: val })}
-                    emptyLabel="- Tanpa Helper 1 -"
-                    emptyValue="-"
-                    roleBadgeText="Kru Helper"
-                    accentColor="emerald"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                  <div className="w-full">
+                    <CrewCustomSelectDropdown
+                      label="Pilih Helper 1 *"
+                      value={manualScheduleForm.helper}
+                      options={getIntegratedHelpers()}
+                      onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, helper: val })}
+                      emptyLabel="Pilih Helper 1..."
+                      emptyValue="-"
+                      roleBadgeText="Kru Helper"
+                      accentColor="emerald"
+                      scheduledCrewMap={manualScheduledCrewMap}
+                    />
+                  </div>
 
-                  <CrewCustomSelectDropdown
-                    label="Helper 2 (Opsional)"
-                    value={manualScheduleForm.helper2}
-                    options={getIntegratedHelpers()}
-                    onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, helper2: val })}
-                    emptyLabel="- Tanpa Helper 2 -"
-                    emptyValue=""
-                    roleBadgeText="Kru Helper"
-                    accentColor="emerald"
-                  />
+                  <div className="w-full">
+                    <CrewCustomSelectDropdown
+                      label="Pilih Helper 2 (Opsional)"
+                      value={manualScheduleForm.helper2}
+                      options={getIntegratedHelpers()}
+                      onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, helper2: val })}
+                      emptyLabel="- Tanpa Helper 2 -"
+                      emptyValue=""
+                      roleBadgeText="Kru Helper"
+                      accentColor="emerald"
+                      scheduledCrewMap={manualScheduledCrewMap}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -4305,9 +4903,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <MapPin className="w-3.5 h-3.5 text-emerald-500" />
                     <span>Area Kirim Tujuan *</span>
                   </label>
-                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                    {OFFICIAL_DESTINATION_AREAS.length} Area Terdaftar
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuickCreateAreaTarget('AREA BARU')}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition cursor-pointer shadow-2xs"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Tambah Area</span>
+                    </button>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      {OFFICIAL_DESTINATION_AREAS.length} Area Terdaftar
+                    </span>
+                  </div>
                 </div>
 
                 {/* Selected Area Card with Expandable Searchable Picker */}
@@ -4329,7 +4937,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             {getAreaRegionCategory(manualScheduleForm.area).label}
                           </span>
                         ) : (
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 italic">
                             Pilih dari {OFFICIAL_DESTINATION_AREAS.length} area pengiriman resmi
                           </span>
                         )}
@@ -4359,7 +4967,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           type="text"
                           value={areaSearchFilter}
                           onChange={(e) => setAreaSearchFilter(e.target.value)}
-                          placeholder="Cari area (misal: Denpasar, Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota)..."
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (filteredOfficialAreas.length > 0) {
+                                const topArea = filteredOfficialAreas[0];
+                                const isLuar = isLuarKotaArea(topArea);
+                                const depIso = manualScheduleForm.departureDateIso || manualScheduleForm.dateIso;
+                                const retIso = isLuar
+                                  ? (manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ? addDaysToIso(depIso, 1) : (manualScheduleForm.returnDateIso || depIso))
+                                  : depIso;
+                                setManualScheduleForm({
+                                  ...manualScheduleForm,
+                                  area: topArea,
+                                  dateIso: retIso,
+                                  departureDateIso: depIso,
+                                  returnDateIso: retIso
+                                });
+                                setIsAreaPickerExpanded(false);
+                              }
+                            }
+                          }}
+                          placeholder="Cari area (misal: Denpasar, Toko DR. Soetomo)... (Tekan Enter untuk memilih)"
                           className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-emerald-500"
                           autoFocus
                         />
@@ -4468,7 +5097,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => {
-                  if (!manualScheduleForm.driver.trim() || !manualScheduleForm.area.trim()) {
+                  if (!manualScheduleForm.driver.trim()) {
+                    alert('Mohon pilih Driver / Supir terlebih dahulu.');
+                    return;
+                  }
+                  if (!manualScheduleForm.area.trim()) {
+                    alert('Mohon pilih Area Kirim Tujuan terlebih dahulu.');
                     return;
                   }
                   const stdArea = standardizeAreaName(manualScheduleForm.area.trim());
@@ -4511,7 +5145,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     driver: initDrivers[0]?.name || 'Budiono',
                     helper: initHelpers[0]?.name || 'Saifur Rizal',
                     helper2: '',
-                    area: 'Denpasar 1',
+                    area: '',
                     armada: 'DS3',
                     target: '',
                     departureTime: '07:30',
