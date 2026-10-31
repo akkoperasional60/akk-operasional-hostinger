@@ -298,6 +298,42 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [fleetToDelete, setFleetToDelete] = useState<Fleet | null>(null);
   const [selectedKirDocFleet, setSelectedKirDocFleet] = useState<Fleet | null>(null);
 
+  // Keyboard listener (Enter / Escape) for fleetToDelete
+  useEffect(() => {
+    if (!fleetToDelete) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
+        e.preventDefault();
+        handleConfirmDeleteFleet();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setFleetToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fleetToDelete]);
+
+  // Keyboard listener (Enter / Escape) for crewToDelete
+  useEffect(() => {
+    if (!crewToDelete) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
+        e.preventDefault();
+        handleConfirmDeleteCrew();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setCrewToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [crewToDelete]);
+
   // Helper for formatting date in Indonesian
   const formatIndoDate = (dateStr?: string) => {
     if (!dateStr) return '-';
@@ -3384,12 +3420,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 onClick={() => setCrewToDelete(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold transition cursor-pointer"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleConfirmDeleteCrew}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Ya, Hapus Kru</span>
@@ -3474,12 +3511,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 onClick={() => setFleetToDelete(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold transition cursor-pointer"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleConfirmDeleteFleet}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Ya, Hapus Armada</span>

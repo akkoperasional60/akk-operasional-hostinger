@@ -1255,6 +1255,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [isUploadConfigModalOpen, setIsUploadConfigModalOpen] = useState<boolean>(false);
   const [activeSubPage, setActiveSubPage] = useState<'schedule' | 'upload_excel' | 'upload_process'>('schedule');
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ p: DeliveryAssignment; dayNumber: number; tripIndex: number; dateString: string } | null>(null);
+
+  useEffect(() => {
+    if (!deleteConfirmModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
+        e.preventDefault();
+        handleDeleteTrip(
+          deleteConfirmModal.p,
+          deleteConfirmModal.dayNumber,
+          deleteConfirmModal.tripIndex
+        );
+        setDeleteConfirmModal(null);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setDeleteConfirmModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteConfirmModal]);
   const [importMonth, setImportMonth] = useState<string>('Januari');
   const [importYear, setImportYear] = useState<string>('2026');
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
@@ -6776,6 +6798,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={() => {
                   handleDeleteTrip(
                     deleteConfirmModal.p,
@@ -6784,7 +6807,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   );
                   setDeleteConfirmModal(null);
                 }}
-                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 cursor-pointer"
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 Ya, Hapus Jadwal
               </button>

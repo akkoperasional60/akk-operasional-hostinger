@@ -876,6 +876,54 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   });
 
   const [checklistInspectionType, setChecklistInspectionType] = useState<'pre_trip' | 'post_trip'>('pre_trip');
+
+  // Helper format tanggal Bahasa Indonesia yang rapi (2026-10-07 -> 07 Oktober 2026)
+  const formatIsoToIndonesianDate = (rawStr: string | undefined): string => {
+    if (!rawStr) return '-';
+    const cleanIso = rawStr.includes('T') ? rawStr.split('T')[0] : rawStr;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanIso)) {
+      const [y, m, d] = cleanIso.split('-').map(Number);
+      const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      return `${d < 10 ? '0' + d : d} ${MONTHS[m - 1] || ''} ${y}`;
+    }
+    return rawStr;
+  };
+
+  // Keyboard shortcut (Enter / Escape) untuk modal Hapus Jadwal
+  useEffect(() => {
+    if (!deleteConfirmModal.isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
+        e.preventDefault();
+        handleDeleteCompletedSchedule();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setDeleteConfirmModal({ isOpen: false, delivery: null });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteConfirmModal.isOpen, deleteConfirmModal.delivery]);
+
+  // Keyboard shortcut (Enter / Escape) untuk modal Tembus Jadwal
+  useEffect(() => {
+    if (!bypassChecklistModal.isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
+        e.preventDefault();
+        handleConfirmBypassChecklist();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setBypassChecklistModal({ isOpen: false, delivery: null, customNote: '', postTripFleetStatus: 'available' });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bypassChecklistModal.isOpen, bypassChecklistModal.delivery, bypassChecklistModal.customNote, bypassChecklistModal.postTripFleetStatus]);
   const [dateFilterStart, setDateFilterStart] = useState<string>('');
   const [dateFilterEnd, setDateFilterEnd] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -1889,7 +1937,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         if ((p.helper || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
         if ((p.helper2 || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
         return false;
+      }) || deliveries.some(d => {
+        if (d.crew && matchSamePerson(d.crew.name, member.name)) return true;
+        if (d.crewHelper && matchSamePerson(d.crewHelper.name, member.name)) return true;
+        if (d.crewHelper2 && matchSamePerson(d.crewHelper2.name, member.name)) return true;
+        return false;
+      }) || daySchedules.some(s => {
+        if (s.crew && matchSamePerson(s.crew.name, member.name)) return true;
+        if (s.crewHelper && matchSamePerson(s.crewHelper.name, member.name)) return true;
+        if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, member.name)) return true;
+        return false;
       });
+
       if (isScheduled) {
         scheduledNames.push(member.name);
       } else {
@@ -1902,8 +1961,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         ? spvCrewFilter
         : portalDisplayName || currentDriver?.name || '';
 
+    const hasAssignedSchedule = deliveries.length > 0 || daySchedules.some(s => {
+      if (!activeCrewFilterName) return false;
+      if (s.crew && matchSamePerson(s.crew.name, activeCrewFilterName)) return true;
+      if (s.crewHelper && matchSamePerson(s.crewHelper.name, activeCrewFilterName)) return true;
+      if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, activeCrewFilterName)) return true;
+      return false;
+    });
+
     const isCurrentPortalUserFreeStandby = Boolean(
-      activeCrewFilterName && freeStandbyCrews.some(fc => matchSamePerson(fc.name, activeCrewFilterName))
+      !hasAssignedSchedule &&
+      activeCrewFilterName &&
+      freeStandbyCrews.some(fc => matchSamePerson(fc.name, activeCrewFilterName))
     );
 
     const activeBackupSchedule = daySchedules.find(s =>
@@ -3600,9 +3669,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
-            {/* PANEL JADWAL FREE • STAND BY GUDANG (Masuk di dalam Jadwal Aktif & Desain Simpel: Hanya Posisi Kru yang Digantikan & Pilih Rute Area Kirim) */}
+            {/* PANEL JADWAL FREE • STAND BY GUDANG (Hanya tampil jika Kru BELUM memiliki jadwal rute kiriman aktif) */}
             {activeTab === 'active' &&
-              (standbyPortalInfo.isCurrentPortalUserFreeStandby || filteredDeliveries.length === 0) &&
+              filteredDeliveries.length === 0 &&
+              deliveries.length === 0 &&
+              standbyPortalInfo.isCurrentPortalUserFreeStandby &&
               (!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
                 <div className="bg-white dark:bg-slate-900 border border-amber-500/50 rounded-2xl p-3.5 shadow-sm space-y-3">
                   <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
@@ -5348,122 +5419,136 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 1D: Konfirmasi Hapus Riwayat Selesai (Khusus Super Admin) */}
-      {deleteConfirmModal.isOpen && (
+      {/* MODAL 1D: Konfirmasi Hapus Riwayat Selesai (Khusus Super Admin & SPV Logistik) */}
+      {deleteConfirmModal.isOpen && deleteConfirmModal.delivery && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-slate-900 border border-rose-500/40 rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                <Trash2 className="w-5 h-5" />
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-rose-500/40 rounded-3xl p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shrink-0">
+                <AlertTriangle className="w-6 h-6 text-rose-500" />
               </div>
-              <div>
-                <h3 className="text-sm font-black text-white">Hapus Jadwal Pengiriman</h3>
-                <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider">
-                  Akses SPV Logistik &amp; Super Admin
+              <div className="space-y-1">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                  Konfirmasi Hapus Jadwal
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus ritase pengiriman ini dari jadwal operasional? Data yang dihapus akan tersinkronisasi ke riwayat kru dan dashboard.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Tanggal Kirim:</span>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {formatIsoToIndonesianDate(deleteConfirmModal.delivery.departureDate || deleteConfirmModal.delivery.deliveryDate)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Driver:</span>
+                <span className="font-bold text-slate-900 dark:text-amber-300">
+                  {deleteConfirmModal.delivery.crew?.name || '-'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Area Tujuan:</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                  {deleteConfirmModal.delivery.areaName || deleteConfirmModal.delivery.store?.storeName || 'Banyuwangi'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Armada:</span>
+                <span className="font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+                  {deleteConfirmModal.delivery.fleet?.plateNumber || deleteConfirmModal.delivery.fleetId || '-'}
                 </span>
               </div>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1.5">
-              <div className="text-slate-400">
-                Toko / Tujuan: <strong className="text-white">{deleteConfirmModal.delivery?.store?.storeName || deleteConfirmModal.delivery?.areaName}</strong>
-              </div>
-              <div className="text-slate-400">
-                Kru Bertugas: <span className="text-amber-300 font-semibold">{deleteConfirmModal.delivery?.crew?.name || '-'}</span>
-              </div>
-              <div className="text-slate-400">
-                Area: <span className="text-emerald-400 font-semibold">{deleteConfirmModal.delivery?.areaName || 'Banyuwangi'}</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Apakah Anda yakin ingin menghapus jadwal pengiriman ini? Data jadwal akan dihapus secara permanen dari portal dan daftar penugasan.
-            </p>
-
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmModal({ isOpen: false, delivery: null })}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleDeleteCompletedSchedule}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95"
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Ya, Hapus Permanen</span>
+                <span>Ya, Hapus Jadwal</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 1E: Tembus Jadwal Tanpa Isi Checklist (Khusus Super Admin untuk Rekam Riwayat Masa Lalu) */}
+      {/* MODAL 1E: Tembus Jadwal Tanpa Isi Checklist (Khusus Super Admin) */}
       {bypassChecklistModal.isOpen && bypassChecklistModal.delivery && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-2xl p-5 space-y-4 shadow-2xl">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-amber-500/40 rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 shrink-0 shadow-xs">
                 <Zap className="w-5 h-5 text-amber-400 fill-current" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white">Tembus Jadwal Pengiriman</h3>
-                <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                  <span>⚡ Otorisasi Super Admin</span>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">Tembus Jadwal Pengiriman</h3>
+                <span className="text-[10px] text-amber-500 dark:text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <span>⚡ OTORISASI SUPER ADMIN</span>
                   <span>&bull;</span>
-                  <span>Bypass Checklist</span>
+                  <span>BYPASS CHECKLIST</span>
                 </span>
               </div>
             </div>
 
-            <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 space-y-1 leading-relaxed">
-              <div className="font-bold flex items-center gap-1.5 text-amber-200">
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <div className="bg-amber-500/10 dark:bg-amber-950/30 border border-amber-500/30 rounded-2xl p-3.5 text-xs text-amber-800 dark:text-amber-200 space-y-1.5 leading-relaxed">
+              <div className="font-bold flex items-center gap-1.5 text-amber-900 dark:text-amber-100">
+                <ShieldCheck className="w-4 h-4 text-amber-500 shrink-0" />
                 <span>Simpan Langsung ke Riwayat Pengiriman (Selesai)</span>
               </div>
-              <p className="text-[11px] text-amber-300/90">
+              <p className="text-[11px] opacity-90">
                 Fitur ini melewati seluruh prosedur checklist armada dan langsung menandai jadwal sebagai <strong>Terkirim / Selesai</strong> agar riwayat pengiriman masa lalu langsung tercatat di histori dan performa kru.
               </p>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-2">
+            <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs space-y-2">
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Tujuan / Rute</span>
-                  <strong className="text-white truncate block">
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] font-semibold">Tujuan / Rute</span>
+                  <strong className="text-slate-900 dark:text-white truncate block">
                     {bypassChecklistModal.delivery.areaName || bypassChecklistModal.delivery.store?.storeName || 'Rute'}
                   </strong>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Armada Truk</span>
-                  <span className="text-cyan-400 font-mono font-bold block">
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] font-semibold">Armada Truk</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold block">
                     {bypassChecklistModal.delivery.fleet?.plateNumber || bypassChecklistModal.delivery.fleetId || '-'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Driver Utama</span>
-                  <span className="text-amber-300 font-semibold block">
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] font-semibold">Driver Utama</span>
+                  <span className="text-amber-700 dark:text-amber-300 font-semibold block">
                     {bypassChecklistModal.delivery.crew?.name || '-'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Helper / Kernet</span>
-                  <span className="text-slate-300 block">
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] font-semibold">Helper / Kernet</span>
+                  <span className="text-slate-700 dark:text-slate-300 block">
                     {bypassChecklistModal.delivery.crewHelper?.name || '-'}
                   </span>
                 </div>
-                <div className="col-span-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>Tanggal: <strong className="text-white">{bypassChecklistModal.delivery.departureDate || bypassChecklistModal.delivery.deliveryDate || '-'}</strong></span>
-                  <span>Jam: <strong className="text-white">{bypassChecklistModal.delivery.departureTime || '07:30'} – {bypassChecklistModal.delivery.targetReturnTime || '16:00'} WIB</strong></span>
+                <div className="col-span-2 pt-2 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                  <span>Tanggal: <strong className="text-slate-900 dark:text-white">{formatIsoToIndonesianDate(bypassChecklistModal.delivery.departureDate || bypassChecklistModal.delivery.deliveryDate)}</strong></span>
+                  <span>Jam: <strong className="text-slate-900 dark:text-white">{bypassChecklistModal.delivery.departureTime || '07:30'} – {bypassChecklistModal.delivery.targetReturnTime || '16:00'} WIB</strong></span>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-300 block">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
                 Catatan Histori Pengiriman (Opsional):
               </label>
               <input
@@ -5471,12 +5556,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 value={bypassChecklistModal.customNote}
                 onChange={(e) => setBypassChecklistModal({ ...bypassChecklistModal, customNote: e.target.value })}
                 placeholder="Misal: Input histori pengiriman tanggal lampau"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 dark:focus:border-amber-400"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-300 block">
+              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
                 Kondisi Armada Setelah Selesai:
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -5485,8 +5570,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   onClick={() => setBypassChecklistModal({ ...bypassChecklistModal, postTripFleetStatus: 'available' })}
                   className={`py-2 px-3 rounded-xl border font-bold text-center cursor-pointer transition ${
                     bypassChecklistModal.postTripFleetStatus === 'available'
-                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   ✓ Ready / Siap Jalan
@@ -5496,8 +5581,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   onClick={() => setBypassChecklistModal({ ...bypassChecklistModal, postTripFleetStatus: 'maintenance' })}
                   className={`py-2 px-3 rounded-xl border font-bold text-center cursor-pointer transition ${
                     bypassChecklistModal.postTripFleetStatus === 'maintenance'
-                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-800 dark:text-amber-300'
+                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   Perlu Servis
@@ -5505,21 +5590,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setBypassChecklistModal({ isOpen: false, delivery: null, customNote: '', postTripFleetStatus: 'available' })}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition"
+                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs cursor-pointer transition"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleConfirmBypassChecklist}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 transition"
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-emerald-500 to-teal-500 hover:from-amber-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition ring-2 ring-amber-400/50"
               >
                 <Zap className="w-4 h-4 text-slate-950 fill-current" />
-                <span>Tembus &amp; Simpan Selesai</span>
+                <span>Ya, Tembus &amp; Simpan Selesai</span>
               </button>
             </div>
           </div>
