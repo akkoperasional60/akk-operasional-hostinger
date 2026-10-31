@@ -270,23 +270,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl relative">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 dark:bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl relative">
+        {/* Top Brand Accent Bar */}
+        <div className="h-1.5 w-full bg-gradient-to-r from-[#1E8AD5] via-blue-600 to-[#CB4E2A]" />
+
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+          className="absolute top-4 right-4 z-10 text-slate-400 hover:text-slate-700 dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Modal Brand Header */}
-        <div className="p-6 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 border-b border-slate-800 text-center">
+        <div className="p-6 bg-gradient-to-b from-slate-50/90 via-white to-slate-50/60 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 border-b border-slate-200/80 dark:border-slate-800 text-center">
           <div className="flex justify-center mb-3">
             <AkkLogo size="lg" />
           </div>
-          <p className="text-slate-400 text-xs mt-2 max-w-md mx-auto">
-            Portal Akses Logistik Terintegrasi & Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
+          <p className="text-slate-600 dark:text-slate-400 text-xs mt-2 max-w-md mx-auto font-medium">
+            Portal Akses Logistik Terintegrasi &amp; Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
           </p>
 
           {/* Tab Switcher */}
@@ -295,24 +298,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
-                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer group"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white font-semibold transition-colors cursor-pointer group"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 <span>Kembali ke Masuk (Login)</span>
               </button>
-              <div className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+              <div className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5" />
                 <span>Pemulihan Kata Sandi</span>
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-2 mt-5 bg-slate-950 p-1 rounded-xl border border-slate-800 max-w-xs mx-auto">
+            <div className="flex items-center justify-center gap-1.5 mt-5 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 max-w-xs mx-auto">
               <button
                 onClick={() => { setTab('login'); setErrorMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                   tab === 'login'
-                    ? 'bg-amber-600 text-slate-950 shadow'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -320,10 +323,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
               <button
                 onClick={() => { setTab('register'); setErrorMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                   tab === 'register'
-                    ? 'bg-amber-600 text-slate-950 shadow'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -486,10 +489,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <button
                   type="submit"
                   disabled={isLocked}
-                  className={`w-full py-3 rounded-lg font-bold text-xs shadow-lg transition flex items-center justify-center gap-2 ${
+                  className={`w-full py-3 rounded-xl font-bold text-xs shadow-lg transition flex items-center justify-center gap-2 ${
                     isLocked
                       ? 'bg-rose-950 text-rose-300 border border-rose-500/40 cursor-not-allowed opacity-80'
-                      : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 cursor-pointer active:scale-95'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20 cursor-pointer active:scale-95'
                   }`}
                 >
                   {isLocked ? (
@@ -509,7 +512,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ) : tab === 'register' ? (
             <form onSubmit={handleRegister} className="space-y-3.5 text-xs">
               <div>
-                <label className="text-slate-300 font-semibold block mb-1">Nama Lengkap</label>
+                <label className="text-slate-700 dark:text-slate-300 font-semibold block mb-1">Nama Lengkap</label>
                 <div className="relative">
                   <User className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                   <input
@@ -518,59 +521,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     placeholder="Contoh: Bayu Dimas Permana"
                     value={registerData.fullName}
                     onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">Email</label>
+                  <label className="text-slate-700 dark:text-slate-300 font-semibold block mb-1">Email</label>
                   <input
                     type="email"
                     required
                     placeholder="nama@gmail.com"
                     value={registerData.email}
                     onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">No. WhatsApp</label>
+                  <label className="text-slate-700 dark:text-slate-300 font-semibold block mb-1">No. WhatsApp</label>
                   <input
                     type="text"
                     placeholder="+62 812-..."
                     value={registerData.phone}
                     onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="relative">
-                  <label className="text-slate-300 font-semibold block mb-1">Password</label>
+                  <label className="text-slate-700 dark:text-slate-300 font-semibold block mb-1">Password</label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     placeholder="Minimal 6 karakter"
                     value={registerData.password}
                     onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
                 <div className="relative">
-                  <label className="text-slate-300 font-semibold block mb-1">Konfirmasi Password</label>
+                  <label className="text-slate-700 dark:text-slate-300 font-semibold block mb-1">Konfirmasi Password</label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     placeholder="Ulangi password"
                     value={registerData.confirmPassword}
                     onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-8 text-slate-400 hover:text-white cursor-pointer"
+                    className="absolute right-3 top-8 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
                   >
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
@@ -578,17 +581,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* Approval Notice */}
-              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-start gap-2">
-                <Clock className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+              <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/50 text-slate-700 dark:text-slate-300 text-[11px] flex items-start gap-2">
+                <Clock className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
                 <div>
-                  <strong className="block text-amber-300 font-bold">Prosedur Verifikasi Akun AKK:</strong>
+                  <strong className="block text-blue-900 dark:text-blue-300 font-bold">Prosedur Verifikasi Akun AKK:</strong>
                   Pendaftaran akun baru wajib disetujui (di-approve) oleh Super Admin PT Anugrah Kemasan Kreatif sebelum mendapatkan otorisasi akses menu.
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer"
+                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-lg shadow-blue-600/20 transition cursor-pointer"
               >
                 Kirim Pendaftaran Akun
               </button>

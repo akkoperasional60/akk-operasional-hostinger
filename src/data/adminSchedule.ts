@@ -9,6 +9,10 @@ export interface DeliveryAssignment {
   area: string;
   armada: string;
   backup?: string;
+  backupCrewId?: string;
+  backupCrewName?: string;
+  backupPosition?: 'driver' | 'helper' | 'helper2';
+  backupTargetName?: string;
   target?: string;
   departureTime?: string;
   targetReturnTime?: string;
@@ -493,12 +497,41 @@ export function convertSchedulesToAdminWeeks(
     }
 
     const dayObj = dayMap.get(dayNum)!;
-    const driverName = sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : (sch.crewId ? 'Driver ' + sch.crewId.replace('crw-', '') : 'Driver'));
-    const helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
-    const helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id ? (!sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : '-') : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
+    let driverName = sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : (sch.crewId ? 'Driver ' + sch.crewId.replace('crw-', '') : 'Driver'));
+    let helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
+    let helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id ? (!sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : '-') : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
     const areaName = sch.areaName || sch.store?.storeName || 'Area Kirim';
     const armadaName = sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId || 'DS3';
     const targetDesc = sch.notes || sch.cargoDescription || 'Gudang Pusat AKK Banyuwangi DC';
+
+    let backupCrewName: string | undefined = sch.backupCrewName;
+    let backupPosition: 'driver' | 'helper' | 'helper2' | undefined = sch.backupPosition;
+    let backupTargetName: string | undefined = sch.backupTargetName;
+
+    // Self-heal legacy replacement note if original driver was previously overwritten
+    if (!backupCrewName && typeof sch.notes === 'string') {
+      const legacyMatch = sch.notes.match(/\[(?:PORTAL DRIVER )?HARI H:\s*([^(]+?)\s*\([^)]+\)\s*menggantikan\s+(.+?)\s+yang berhalangan hadir/i);
+      if (legacyMatch) {
+        const parsedStandby = legacyMatch[1].trim();
+        const parsedOriginal = legacyMatch[2].trim();
+        if (parsedStandby && parsedOriginal && parsedOriginal !== '-') {
+          backupCrewName = parsedStandby;
+          if (driverName.toLowerCase() === parsedStandby.toLowerCase()) {
+            driverName = parsedOriginal;
+            backupPosition = 'driver';
+            backupTargetName = parsedOriginal;
+          } else if (helperName.toLowerCase() === parsedStandby.toLowerCase()) {
+            helperName = parsedOriginal;
+            backupPosition = 'helper';
+            backupTargetName = parsedOriginal;
+          } else if (helper2Name.toLowerCase() === parsedStandby.toLowerCase()) {
+            helper2Name = parsedOriginal;
+            backupPosition = 'helper2';
+            backupTargetName = parsedOriginal;
+          }
+        }
+      }
+    }
 
     const depIsoDate = !isNaN(depObj.getTime())
       ? `${depObj.getFullYear()}-${String(depObj.getMonth() + 1).padStart(2, '0')}-${String(depObj.getDate()).padStart(2, '0')}`
@@ -521,6 +554,11 @@ export function convertSchedulesToAdminWeeks(
         helper2: helper2Name || '-',
         area: areaName,
         armada: armadaName,
+        backup: sch.backup || (backupCrewName ? `${backupCrewName} (Menggantikan ${backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} ${backupTargetName || ''})` : undefined),
+        backupCrewId: sch.backupCrewId,
+        backupCrewName,
+        backupPosition,
+        backupTargetName,
         target: targetDesc,
         departureTime: depTimeStr,
         targetReturnTime: retTimeStr,

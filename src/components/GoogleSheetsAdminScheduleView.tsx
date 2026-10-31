@@ -1471,6 +1471,366 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return getScheduledCrewForDate(targetIso, editingTripModal.scheduleId);
   }, [editingTripModal]);
 
+  // Modal state for assigning a Free / Stand By Gudang crew member to replace an absent crew on Hari H
+  const [replaceAbsentModal, setReplaceAbsentModal] = useState<{
+    isOpen: boolean;
+    standbyCrewName: string;
+    standbyCrewRole: 'Driver' | 'Helper';
+    dayNumber: number;
+    dateString: string;
+    selectedTripIndex: number;
+    replacePosition: 'driver' | 'helper' | 'helper2';
+    absentReason: string;
+  } | null>(null);
+
+  // Helper to check if two crew names refer to the same person (handles e.g. "Saiful Rizal" vs "Saifur Rizal" or "Budiono" vs "Budi")
+  const isSameCrewPerson = (nameA: string, nameB: string): boolean => {
+    const cleanA = (nameA || '').trim().toLowerCase();
+    const cleanB = (nameB || '').trim().toLowerCase();
+    if (!cleanA || !cleanB || cleanA === '-' || cleanB === '-') return false;
+    if (cleanA === cleanB) return true;
+    if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
+    // Handle Saiful Rizal / Saifur Rizal
+    if ((cleanA.includes('saiful') || cleanA.includes('saifur')) && (cleanB.includes('saiful') || cleanB.includes('saifur')) && cleanA.includes('rizal') && cleanB.includes('rizal')) {
+      return true;
+    }
+    const tokensA = cleanA.split(/\s+/).filter(t => t.length >= 4);
+    const tokensB = cleanB.split(/\s+/).filter(t => t.length >= 4);
+    if (tokensA.length > 0 && tokensB.length > 0 && tokensA[0] === tokensB[0]) {
+      return true;
+    }
+    return false;
+  };
+
+  // Build unified crew pool & compute Scheduled vs Free/Standby di Gudang for a given day
+  const computeDayCrewStandbyBreakdown = (dayObj: AdminScheduleDay | undefined) => {
+    const pool: Array<{
+      id: string;
+      name: string;
+      role: 'Driver' | 'Helper';
+      phone: string;
+      licenseType: string;
+      hasPortalAccount: boolean;
+    }> = [];
+
+    const addCandidateToPool = (
+      id: string,
+      rawName: string,
+      role: 'Driver' | 'Helper',
+      phone: string = '-',
+      licenseType: string = 'SIM A / B1',
+      hasPortalAccount: boolean = false
+    ) => {
+      const clean = (rawName || '').trim();
+      if (!clean || clean === '-' || clean === '0' || clean.toLowerCase() === 'tanpa helper') return;
+      const existing = pool.find(item => isSameCrewPerson(item.name, clean));
+      if (existing) {
+        if (hasPortalAccount) existing.hasPortalAccount = true;
+        if (existing.phone === '-' && phone && phone !== '-') existing.phone = phone;
+        return;
+      }
+      pool.push({
+        id,
+        name: clean,
+        role,
+        phone: phone || '-',
+        licenseType: licenseType || (role === 'Driver' ? 'SIM B1/B2 Umum' : 'SIM A'),
+        hasPortalAccount
+      });
+    };
+
+    // 1. Approved Driver & Helper accounts in Portal
+    const allUsers = logisticsStore.getUsers();
+    allUsers
+      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+      .forEach(u => {
+        addCandidateToPool(
+          u.id,
+          u.fullName,
+          u.role === 'driver' ? 'Driver' : 'Helper',
+          u.phone || '-',
+          u.role === 'driver' ? 'SIM B2 Umum' : 'SIM A',
+          true
+        );
+      });
+
+    // 2. Active Crews from Master Crew Database
+    const allCrews = logisticsStore.getCrews();
+    allCrews
+      .filter(c => c.status !== 'off')
+      .forEach(c => {
+        const isHelper = (c.role || '').toLowerCase().includes('helper') || (c.role || '').toLowerCase().includes('kernet');
+        addCandidateToPool(
+          c.id,
+          c.name,
+          isHelper ? 'Helper' : 'Driver',
+          c.phone || '-',
+          c.licenseType || (isHelper ? 'SIM A' : 'SIM B2 Umum'),
+          true
+        );
+      });
+
+    // 3. Also ensure any crew name present in dayObj.pengiriman is part of the total pool
+    const rawPengirimanList = dayObj?.pengiriman || [];
+    const storeSchedulesForDay = logisticsStore.getSchedules();
+
+    // Normalize trips so legacy overwritten drivers (e.g. Zainal replacing Budiono) restore original driver to driver column and keep Zainal in backupCrewName
+    const pengirimanList = rawPengirimanList.map(p => {
+      const matchedSch = storeSchedulesForDay.find(s => {
+        if (p.id && s.id === p.id) return true;
+        return s.fleet?.initialCode === p.armada && s.areaName === standardizeAreaName(p.area);
+      });
+      let effectiveDriver = p.driver;
+      let effectiveHelper = p.helper;
+      let effectiveHelper2 = p.helper2;
+      let backupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
+      let backupPosition = p.backupPosition || matchedSch?.backupPosition;
+      let backupTargetName = p.backupTargetName || matchedSch?.backupTargetName;
+
+      if (!backupCrewName && p.backup) {
+        const m = p.backup.match(/Digantikan Kru Stand By Gudang \(([^)]+)\) karena ([^\s(]+(?:\s+[^\s(]+)*?) berhalangan hadir/i);
+        if (m) {
+          backupCrewName = m[1].trim();
+          const orig = m[2].trim();
+          if (isSameCrewPerson(effectiveDriver, backupCrewName)) {
+            effectiveDriver = orig;
+            backupPosition = 'driver';
+            backupTargetName = orig;
+          }
+        }
+      }
+
+      if (backupCrewName && backupTargetName) {
+        const pos = backupPosition || 'driver';
+        if (pos === 'driver' && isSameCrewPerson(effectiveDriver, backupCrewName)) {
+          effectiveDriver = backupTargetName;
+        } else if (pos === 'helper' && isSameCrewPerson(effectiveHelper || '', backupCrewName)) {
+          effectiveHelper = backupTargetName;
+        } else if (pos === 'helper2' && isSameCrewPerson(effectiveHelper2 || '', backupCrewName)) {
+          effectiveHelper2 = backupTargetName;
+        }
+      }
+
+      return {
+        ...p,
+        driver: effectiveDriver,
+        helper: effectiveHelper,
+        helper2: effectiveHelper2,
+        backupCrewName,
+        backupPosition,
+        backupTargetName
+      };
+    });
+
+    pengirimanList.forEach((p, idx) => {
+      if (p.driver && p.driver !== '-') {
+        addCandidateToPool(`sched-drv-${idx}`, p.driver, 'Driver', '-', 'SIM B1/B2 Umum', true);
+      }
+      if (p.helper && p.helper !== '-') {
+        p.helper.split(/[,&/]+/).forEach((h, hIdx) => {
+          addCandidateToPool(`sched-hlp1-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+        });
+      }
+      if (p.helper2 && p.helper2 !== '-') {
+        p.helper2.split(/[,&/]+/).forEach((h, hIdx) => {
+          addCandidateToPool(`sched-hlp2-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+        });
+      }
+    });
+
+    // Track scheduled crews on this day (based on original scheduled driver/helper, NOT backupCrewName)
+    const scheduledCrews: Array<{
+      id: string;
+      name: string;
+      role: 'Driver' | 'Helper';
+      assignedRoleLabel: string;
+      assignedAreas: string[];
+      assignedArmadas: string[];
+    }> = [];
+
+    const freeStandbyCrews: Array<{
+      id: string;
+      name: string;
+      role: 'Driver' | 'Helper';
+      phone: string;
+      licenseType: string;
+      hasPortalAccount: boolean;
+      warehouseDutyNote: string;
+      isReplacing?: boolean;
+      replacedCrewName?: string;
+      replacedPositionLabel?: string;
+      replacedAreaName?: string;
+    }> = [];
+
+    pool.forEach(member => {
+      const memberTripsAsDriver = pengirimanList.filter(p => isSameCrewPerson(p.driver, member.name));
+      const memberTripsAsHelper1 = pengirimanList.filter(p =>
+        (p.helper || '').split(/[,&/]+/).some(h => isSameCrewPerson(h.trim(), member.name))
+      );
+      const memberTripsAsHelper2 = pengirimanList.filter(p =>
+        (p.helper2 || '').split(/[,&/]+/).some(h => isSameCrewPerson(h.trim(), member.name))
+      );
+
+      const allMemberTrips = [...memberTripsAsDriver, ...memberTripsAsHelper1, ...memberTripsAsHelper2];
+
+      if (allMemberTrips.length > 0) {
+        const areas = Array.from(new Set(allMemberTrips.map(t => standardizeAreaName(t.area))));
+        const armadas = Array.from(new Set(allMemberTrips.map(t => t.armada)));
+        const roleLabels: string[] = [];
+        if (memberTripsAsDriver.length > 0) roleLabels.push('Driver');
+        if (memberTripsAsHelper1.length > 0) roleLabels.push('Helper 1');
+        if (memberTripsAsHelper2.length > 0) roleLabels.push('Helper 2');
+
+        scheduledCrews.push({
+          id: member.id,
+          name: member.name,
+          role: member.role,
+          assignedRoleLabel: roleLabels.join(' & ') || member.role,
+          assignedAreas: areas,
+          assignedArmadas: armadas
+        });
+      } else {
+        // Check if this Free crew member is currently assigned as Back Up / Menggantikan on any trip today
+        const backupTrip = pengirimanList.find(p => p.backupCrewName && isSameCrewPerson(p.backupCrewName, member.name));
+        if (backupTrip) {
+          const pos = backupTrip.backupPosition || 'driver';
+          const posLabel = pos === 'helper' ? 'Helper 1' : pos === 'helper2' ? 'Helper 2' : 'Driver';
+          const targetOriginalName =
+            backupTrip.backupTargetName ||
+            (pos === 'helper' ? backupTrip.helper : pos === 'helper2' ? backupTrip.helper2 : backupTrip.driver) ||
+            '-';
+          const areaClean = standardizeAreaName(backupTrip.area);
+          freeStandbyCrews.push({
+            ...member,
+            isReplacing: true,
+            replacedCrewName: targetOriginalName,
+            replacedPositionLabel: posLabel,
+            replacedAreaName: areaClean,
+            warehouseDutyNote: `Menggantikan ${posLabel} ${targetOriginalName} untuk mengirim ke area ${areaClean}`
+          });
+        } else {
+          freeStandbyCrews.push({
+            ...member,
+            isReplacing: false,
+            warehouseDutyNote: 'Stand By Gudang DC • Siap Gantikan Kru Kiriman Berhalangan'
+          });
+        }
+      }
+    });
+
+    return {
+      totalCrewCount: scheduledCrews.length + freeStandbyCrews.length,
+      scheduledCrewCount: scheduledCrews.length,
+      freeStandbyCount: freeStandbyCrews.length,
+      scheduledCrews,
+      freeStandbyCrews
+    };
+  };
+
+  const handleConfirmReplaceAbsentCrew = () => {
+    if (!replaceAbsentModal) return;
+    const { standbyCrewName, dayNumber, dateString, selectedTripIndex, replacePosition } = replaceAbsentModal;
+
+    const allDaysFlat = weeks.flatMap(w => w.days);
+    const targetDay = allDaysFlat.find(d => d.dateString === dateString || d.dayNumber === dayNumber);
+    if (!targetDay || !targetDay.pengiriman[selectedTripIndex]) {
+      setReplaceAbsentModal(null);
+      return;
+    }
+
+    const targetTrip = targetDay.pengiriman[selectedTripIndex];
+    const previousCrewName =
+      replacePosition === 'driver'
+        ? targetTrip.driver
+        : replacePosition === 'helper'
+        ? (targetTrip.helper || '-')
+        : (targetTrip.helper2 || '-');
+
+    const posLabel = replacePosition === 'helper' ? 'Helper 1' : replacePosition === 'helper2' ? 'Helper 2' : 'Driver';
+
+    // Update Schedule in logisticsStore so Driver Portal immediately updates (keep original crew intact, store replacement in backup fields)
+    const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
+    const storeSchedules = logisticsStore.getSchedules();
+    const allCrews = logisticsStore.getCrews();
+    const matchedStandbyCrewObj = allCrews.find(c => isSameCrewPerson(c.name, standbyCrewName)) || {
+      id: `crw-standby-${Date.now()}`,
+      name: standbyCrewName,
+      phone: '-',
+      role: replacePosition === 'driver' ? 'Driver Utama' : 'Kernet / Helper',
+      licenseNumber: '-',
+      licenseType: replacePosition === 'driver' ? 'SIM B1/B2 Umum' : 'SIM A',
+      status: 'on-duty' as const,
+      tripsCompleted: 50,
+      rating: 4.8
+    };
+
+    const updatedTrip: DeliveryAssignment = {
+      ...targetTrip,
+      backupCrewId: matchedStandbyCrewObj.id,
+      backupCrewName: standbyCrewName,
+      backupPosition: replacePosition,
+      backupTargetName: previousCrewName,
+      backup: `${standbyCrewName} (Menggantikan ${posLabel} ${previousCrewName})`,
+      isManuallyEdited: true
+    };
+
+    const matchedStoreSch = storeSchedules.find(s => {
+      if (targetTrip.id && s.id === targetTrip.id) return true;
+      if (!s.departureDate) return false;
+      const d = new Date(s.departureDate);
+      const isSameDay = d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === targetDay.dayNumber;
+      if (!isSameDay) return false;
+      return s.fleet?.initialCode === targetTrip.armada || s.areaName === standardizeAreaName(targetTrip.area);
+    });
+
+    if (matchedStoreSch) {
+      const patch: Partial<Schedule> = {
+        backupCrewId: matchedStandbyCrewObj.id,
+        backupCrewName: standbyCrewName,
+        backupPosition: replacePosition,
+        backupTargetName: previousCrewName,
+        isManuallyEdited: true
+      };
+      logisticsStore.updateSchedule(matchedStoreSch.id, patch);
+    }
+
+    // Update weeks state while keeping original crew in driver/helper columns
+    const newWeeks = weeks.map(w => ({
+      ...w,
+      days: w.days.map(d => {
+        if (d.dayNumber === targetDay.dayNumber && d.dateString === targetDay.dateString) {
+          const nextPengiriman = [...d.pengiriman];
+          nextPengiriman[selectedTripIndex] = updatedTrip;
+          return {
+            ...d,
+            pengiriman: nextPengiriman
+          };
+        }
+        return d;
+      })
+    }));
+
+    updateWeeks(newWeeks);
+    logisticsStore.syncSchedulesToCrewHistory();
+    logisticsStore.addScheduleChangeLog({
+      fileName: `Penggantian Kru Hari H (${dateString})`,
+      actionType: 'manual_edit',
+      summary: `Kru Free/Stand By Gudang (${standbyCrewName}) menggantikan ${posLabel} ${previousCrewName} untuk mengirim ke area ${standardizeAreaName(targetTrip.area)} (${targetTrip.armada})`,
+      rowCount: 1,
+      changes: [
+        `Tanggal Hari H: ${dateString} | Rute Area: ${standardizeAreaName(targetTrip.area)} (${targetTrip.armada})`,
+        `Posisi Digantikan: ${posLabel} (${previousCrewName})`,
+        `Back Up / Yang Menggantikan: ${standbyCrewName} → Tersinkron ke Portal Driver`
+      ]
+    });
+    setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+    setReplaceAbsentModal(null);
+    setSyncSuccessMessage(
+      `✅ Kru Free (${standbyCrewName}) berhasil ditugaskan menggantikan ${posLabel} ${previousCrewName} untuk mengirim ke area ${standardizeAreaName(targetTrip.area)}!`
+    );
+    setTimeout(() => setSyncSuccessMessage(null), 6500);
+  };
+
   // Track expanded state for day dropdown accordions
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
 
@@ -1683,8 +2043,35 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const weeksRef = React.useRef(weeks);
   weeksRef.current = weeks;
 
-  // On initial mount, load persisted schedules from server database if available
+  // On initial mount, load persisted schedules from server database if available & auto-repair legacy overwritten standby schedules
   useEffect(() => {
+    const allSchedules = logisticsStore.getSchedules();
+    const allCrews = logisticsStore.getCrews();
+    allSchedules.forEach(s => {
+      if (!s.backupCrewName && typeof s.notes === 'string') {
+        const m = s.notes.match(/\[(?:PORTAL DRIVER )?HARI H:\s*([^(]+?)\s*\([^)]+\)\s*menggantikan\s+(.+?)\s+yang berhalangan hadir/i);
+        if (m) {
+          const standbyName = m[1].trim();
+          const origName = m[2].trim();
+          if (standbyName && origName && origName !== '-') {
+            const origCrewObj = allCrews.find(c => isSameCrewPerson(c.name, origName));
+            const stbCrewObj = allCrews.find(c => isSameCrewPerson(c.name, standbyName));
+            const patch: Partial<Schedule> = {
+              backupCrewId: stbCrewObj?.id,
+              backupCrewName: standbyName,
+              backupPosition: 'driver',
+              backupTargetName: origName
+            };
+            if (s.crew && isSameCrewPerson(s.crew.name, standbyName) && origCrewObj) {
+              patch.crewId = origCrewObj.id;
+              patch.crew = origCrewObj;
+            }
+            logisticsStore.updateSchedule(s.id, patch);
+          }
+        }
+      }
+    });
+
     fetchPersistedSchedulesFromServer().then(res => {
       if (res.exists && res.schedules.length > 0) {
         console.info(`[Database Persistence] Loaded ${res.count} persisted schedules from server.`);
@@ -2553,6 +2940,33 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     }
     return result;
   }, [weeks, selectedWeekNum, selectedBranchId]);
+
+  // Persist snapshot of Kru Free / Stand By Gudang for the selected calendar date to localStorage
+  useEffect(() => {
+    const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
+    const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate) || allDaysFlat[0];
+    if (!activeDayObj) return;
+    const standbyData = computeDayCrewStandbyBreakdown(activeDayObj);
+    try {
+      localStorage.setItem(
+        'akk_standby_crew_snapshot',
+        JSON.stringify({
+          dateString: activeDayObj.dateString,
+          dayName: activeDayObj.dayName,
+          dayNumber: activeDayObj.dayNumber,
+          year: selectedYear,
+          month: selectedMonth === -1 ? 0 : selectedMonth,
+          totalCrewCount: standbyData.totalCrewCount,
+          scheduledCrewCount: standbyData.scheduledCrewCount,
+          freeStandbyCount: standbyData.freeStandbyCount,
+          freeStandbyCrews: standbyData.freeStandbyCrews,
+          scheduledCrews: standbyData.scheduledCrews,
+          pengiriman: activeDayObj.pengiriman,
+          updatedAt: new Date().toISOString()
+        })
+      );
+    } catch {}
+  }, [filteredWeeks, selectedCalendarDate, selectedYear, selectedMonth]);
 
   // List of unique active days across filtered weeks
   const availableDaysList = useMemo(() => {
@@ -3987,13 +4401,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                   {/* Shipment Details Table - Compact & Rapat */}
                   <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                    <table className="w-full text-xs text-left border-collapse min-w-[780px]">
+                    <table className="w-full text-xs text-left border-collapse min-w-[880px]">
                       <thead>
                         <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
                           <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
                           <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">DRIVER</th>
                           <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-32">HELPER 1</th>
-                          <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-32">HELPER 2</th>
+                          <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">HELPER 2</th>
+                          <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-48">BACK UP / MENGGANTIKAN</th>
                           <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
                           <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">ARMADA</th>
                           <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-32">STATUS</th>
@@ -4003,7 +4418,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
                         {filteredPengiriman.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="p-6 text-center bg-slate-50 dark:bg-slate-900/50">
+                            <td colSpan={9} className="p-6 text-center bg-slate-50 dark:bg-slate-900/50">
                               <div className="max-w-md mx-auto space-y-1.5">
                                 <Search className="w-5 h-5 text-slate-400 mx-auto" />
                                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -4031,18 +4446,32 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             const upperArea = standardArea.toUpperCase();
                             const isKanvasLkt = upperArea.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS');
                             const isLuarPulau = upperArea.includes('DENPASAR') || upperArea.includes('SINGARAJA') || upperArea.includes('NEGARA') || upperArea.includes('GIANYAR') || upperArea.includes('TABANAN') || upperArea.includes('KUTA') || upperArea.includes('BALI');
-                            const driverInitials = getDriverInitials(p.driver);
-                            const avatarStyle = DRIVER_AVATAR_COLORS[p.driver] || { 
+
+                            const matchedSch = storeSchedules.find(s => {
+                              if (p.id && s.id === p.id) return true;
+                              if (s.fleet?.initialCode === p.armada && s.areaName === standardArea) return true;
+                              if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
+                              return false;
+                            });
+
+                            const backupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
+                            const backupPosition = p.backupPosition || matchedSch?.backupPosition || 'driver';
+                            const backupTargetName =
+                              p.backupTargetName ||
+                              matchedSch?.backupTargetName ||
+                              (backupPosition === 'helper' ? p.helper : backupPosition === 'helper2' ? p.helper2 : p.driver);
+
+                            const displayDriver =
+                              backupCrewName && backupTargetName && backupPosition === 'driver' && isSameCrewPerson(p.driver, backupCrewName)
+                                ? backupTargetName
+                                : p.driver;
+
+                            const driverInitials = getDriverInitials(displayDriver);
+                            const avatarStyle = DRIVER_AVATAR_COLORS[displayDriver] || { 
                               bg: 'bg-slate-100 dark:bg-slate-800', 
                               text: 'text-slate-700 dark:text-slate-300', 
                               ring: 'border-slate-300 dark:border-slate-700' 
                             };
-
-                            const matchedSch = storeSchedules.find(s => {
-                              if (p.id && s.id === p.id) return true;
-                              if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
-                              return false;
-                            });
 
                             const currentStatus: ShipmentStatus = matchedSch?.status || 'scheduled';
 
@@ -4058,7 +4487,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                             return (
                               <tr
-                                key={`cal-detail-${pIdx}-${p.driver}-${p.armada}`}
+                                key={`cal-detail-${pIdx}-${displayDriver}-${p.armada}`}
                                 className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
                                   isKanvasLkt
                                     ? 'bg-purple-50/30 dark:bg-purple-950/15'
@@ -4078,7 +4507,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       {driverInitials}
                                     </div>
                                     <span className="font-extrabold text-slate-900 dark:text-white text-xs">
-                                      {p.driver}
+                                      {displayDriver}
                                     </span>
                                   </div>
                                 </td>
@@ -4094,6 +4523,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   <span className={`font-semibold text-xs ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
                                     {p.helper2 || '-'}
                                   </span>
+                                </td>
+
+                                {/* Back Up / Menggantikan */}
+                                <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                  {backupCrewName ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <div className="inline-flex items-center gap-1.5">
+                                        <span className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-[8px] shrink-0">
+                                          {getDriverInitials(backupCrewName)}
+                                        </span>
+                                        <span className="font-extrabold text-amber-700 dark:text-amber-300 text-xs">
+                                          {backupCrewName}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                        Menggantikan {backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} {backupTargetName}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 text-xs font-semibold">-</span>
+                                  )}
                                 </td>
 
                                 {/* Kirim Area */}
@@ -4172,6 +4622,242 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       </tbody>
                     </table>
                   </div>
+
+                  {/* TABEL BARU DI BAWAH RINCIAN PENGIRIMAN: KRU YANG FREE / STAND BY DI GUDANG */}
+                  {(() => {
+                    const standbyData = computeDayCrewStandbyBreakdown(activeDayObj);
+
+                    return (
+                      <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                        {/* Compact Header Bar: Kru Free / Stand By di Gudang (Tanpa Keterangan Total, Kirim, Free) */}
+                        <div className="bg-slate-100 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
+                              <Warehouse className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-wider leading-tight">
+                                  KRU FREE / STAND BY GUDANG DC
+                                </span>
+                                <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold bg-emerald-600 text-white">
+                                  Sinkron Portal
+                                </span>
+                              </div>
+                              <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-tight">
+                                {activeDayObj.dayName}, {activeDayObj.dateString}{' '}
+                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                  • Cadangan Kru Berhalangan (Hari H)
+                                </span>
+                              </h4>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Tabel Rincian Kru Free / Stand By - Compact & Rapat (Tanpa SIM) */}
+                        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                          <table className="w-full text-xs text-left border-collapse min-w-[680px]">
+                            <thead>
+                              <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
+                                <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
+                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-44">KRU FREE</th>
+                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">POSISI</th>
+                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">PENUGASAN STAND BY</th>
+                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
+                                <th className="py-1.5 px-2 text-center w-28">AKSI HARI H</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
+                              {standbyData.freeStandbyCrews.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="py-3 px-4 text-center bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
+                                    Seluruh kru aktif telah terjadwal kirim pada tanggal ini.
+                                  </td>
+                                </tr>
+                              ) : (
+                                standbyData.freeStandbyCrews.map((crew, idx) => {
+                                  const initials = getDriverInitials(crew.name);
+                                  return (
+                                    <tr
+                                      key={`free-crew-${crew.id}-${idx}`}
+                                      className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition bg-white dark:bg-slate-900"
+                                    >
+                                      <td className="py-1.5 px-2 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800 text-[11px]">
+                                        {idx + 1}
+                                      </td>
+
+                                      {/* Nama Kru Free */}
+                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                        <div className="flex items-center gap-1.5">
+                                          <div className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 flex items-center justify-center font-black text-[9px] shrink-0">
+                                            {initials}
+                                          </div>
+                                          <span className="font-extrabold text-slate-900 dark:text-white text-xs truncate">
+                                            {crew.name}
+                                          </span>
+                                        </div>
+                                      </td>
+
+                                      {/* Posisi (Tanpa SIM) */}
+                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                          crew.role === 'Driver'
+                                            ? 'bg-blue-50 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                            : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                        }`}>
+                                          {crew.role}
+                                        </span>
+                                      </td>
+
+                                      {/* Penugasan Stand By */}
+                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                        <span className={`text-[11px] font-bold ${
+                                          crew.isReplacing
+                                            ? 'text-emerald-700 dark:text-emerald-300'
+                                            : 'text-slate-700 dark:text-slate-300 font-semibold'
+                                        }`}>
+                                          {crew.warehouseDutyNote}
+                                        </span>
+                                      </td>
+
+                                      {/* Status */}
+                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                        {crew.isReplacing ? (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                            <span>Menggantikan</span>
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                            <span>Stand By</span>
+                                          </span>
+                                        )}
+                                      </td>
+
+                                      {/* Aksi Penggantian Hari H */}
+                                      <td className="py-1.5 px-2 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setReplaceAbsentModal({
+                                              isOpen: true,
+                                              standbyCrewName: crew.name,
+                                              standbyCrewRole: crew.role,
+                                              dayNumber: activeDayObj.dayNumber,
+                                              dateString: activeDayObj.dateString,
+                                              selectedTripIndex: 0,
+                                              replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
+                                              absentReason: ''
+                                            })
+                                          }
+                                          className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                          title="Gantikan kru kiriman area lain yang berhalangan hadir pada Hari H"
+                                        >
+                                          <RefreshCw className="w-2.5 h-2.5" />
+                                          <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* MODAL PENGGANTIAN KRU (SIMPLE: HANYA POSISI KRU YANG DIGANTIKAN & PILIH RUTE AREA KIRIM) */}
+                  {replaceAbsentModal && replaceAbsentModal.isOpen && (
+                    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-4 shadow-2xl space-y-3.5">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shrink-0">
+                              <Warehouse className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                                JADWAL FREE • STAND BY GUDANG
+                              </span>
+                              <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                                Kru Free: {replaceAbsentModal.standbyCrewName}
+                              </h3>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReplaceAbsentModal(null)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="space-y-3 text-xs">
+                          <div>
+                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Posisi Kru yang Digantikan
+                            </label>
+                            <select
+                              value={replaceAbsentModal.replacePosition}
+                              onChange={(e) =>
+                                setReplaceAbsentModal(prev =>
+                                  prev ? { ...prev, replacePosition: e.target.value as 'driver' | 'helper' | 'helper2' } : null
+                                )
+                              }
+                              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="driver">Driver Utama</option>
+                              <option value="helper">Helper 1</option>
+                              <option value="helper2">Helper 2</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Pilih Rute Area Kirim
+                            </label>
+                            <select
+                              value={replaceAbsentModal.selectedTripIndex}
+                              onChange={(e) =>
+                                setReplaceAbsentModal(prev =>
+                                  prev ? { ...prev, selectedTripIndex: Number(e.target.value) } : null
+                                )
+                              }
+                              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                            >
+                              {activeDayObj.pengiriman.map((trip, idx) => (
+                                <option key={`rep-trip-${idx}`} value={idx}>
+                                  #{idx + 1} {standardizeAreaName(trip.area)} ({trip.armada}) — Driver: {trip.driver}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setReplaceAbsentModal(null)}
+                            className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                          >
+                            Batal
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleConfirmReplaceAbsentCrew}
+                            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition cursor-pointer shadow-sm flex items-center gap-1.5"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Konfirmasi Gantikan</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}

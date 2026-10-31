@@ -12,6 +12,7 @@ export interface DriverHelperReport {
   deliveryId?: string;
   notes: string;
   photoUrl?: string | null;
+  photoUrls?: string[];
   latitude?: number;
   longitude?: number;
   gmapsUrl?: string;
@@ -66,69 +67,278 @@ export const getLocalDateStr = (input?: string | Date): string => {
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
   private seqCounter = 0;
+  private channel: BroadcastChannel | null = null;
+  private eventSource: EventSource | null = null;
+  private reconnectTimer: number | null = null;
 
-  private getInitialReports(): DriverHelperReport[] {
-    return [];
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        if ('BroadcastChannel' in window) {
+          this.channel = new BroadcastChannel('akk_driver_reports_realtime');
+          this.channel.onmessage = (evt) => {
+            const msg = evt.data;
+            if (!msg) return;
+            if (Array.isArray(msg.reports)) {
+              this.mergeIncomingReports(msg.reports, false);
+            } else if (msg.report && msg.report.id) {
+              this.mergeIncomingReports([msg.report], false);
+            }
+          };
+        }
+      } catch {}
+
+      window.addEventListener('storage', (evt) => {
+        if (evt.key === STORAGE_KEY && evt.newValue) {
+          try {
+            const parsed = JSON.parse(evt.newValue);
+            if (Array.isArray(parsed)) {
+              this.mergeIncomingReports(parsed, false);
+            }
+          } catch {}
+        }
+      });
+    }
+  }
+
+  private ensureServerRealtimeSync() {
+    if (typeof window === 'undefined' || !('EventSource' in window)) return;
+    if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) return;
+
+    try {
+      const es = new EventSource('/api/driver-reports/stream');
+      this.eventSource = es;
+
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (
+            data.type === 'report_upserted' ||
+            data.type === 'solution_updated' ||
+            data.type === 'solution_acknowledged'
+          ) {
+            if (data.payload && data.payload.id) {
+              this.mergeIncomingReports([data.payload], false);
+            }
+          } else if (data.type === 'reports_synced') {
+            this.syncWithServer().catch(() => {});
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        try {
+          es.close();
+        } catch {}
+        if (this.eventSource === es) this.eventSource = null;
+
+        // Re-check the authenticated API first. If the session has expired,
+        // syncWithServer() returns without reopening SSE, avoiding a reconnect loop on the login page.
+        if (this.reconnectTimer !== null) {
+          window.clearTimeout(this.reconnectTimer);
+        }
+        this.reconnectTimer = window.setTimeout(() => {
+          this.reconnectTimer = null;
+          this.syncWithServer().catch(() => {});
+        }, 4000);
+      };
+    } catch {}
+  }
+
+  public async syncWithServer(): Promise<void> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    try {
+      const res = await fetch('/api/driver-reports', { credentials: 'include' });
+      if (!res.ok) return;
+      this.ensureServerRealtimeSync();
+      const json = await res.json();
+      if (Array.isArray(json.reports) && json.reports.length > 0) {
+        this.mergeIncomingReports(json.reports, false);
+      }
+      const localList = this.getReports();
+      if (localList.length > 0 && (!Array.isArray(json.reports) || json.reports.length < localList.length)) {
+        await fetch('/api/driver-reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ reports: localList.slice(0, 60) })
+        });
+      }
+    } catch {}
+  }
+
+  private pushReportToServer(report: DriverHelperReport) {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    fetch('/api/driver-reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ report })
+    }).catch(() => {});
+  }
+
+  private normalizeList(parsed: DriverHelperReport[]): DriverHelperReport[] {
+    const seenIds = new Set<string>();
+    return parsed.map((r, index) => {
+      let uniqueId = r.id || `REP-2026-${1000 + index}`;
+      if (seenIds.has(uniqueId)) {
+        uniqueId = `${uniqueId}-${index + 1}`;
+      }
+      seenIds.add(uniqueId);
+      const hasSol = Boolean(r.solution && r.solution.trim());
+      const isConstraintCategory = r.category === 'kendala_jalan' || r.category === 'mode_offline';
+      const resolvedStatus =
+        hasSol && r.status === 'pending'
+          ? 'resolved'
+          : !isConstraintCategory && r.status === 'pending'
+          ? 'verified'
+          : r.status;
+      const photoUrls = Array.isArray(r.photoUrls) && r.photoUrls.length > 0
+        ? r.photoUrls
+        : r.photoUrl
+        ? [r.photoUrl]
+        : [];
+      return {
+        ...r,
+        id: uniqueId,
+        photoUrl: r.photoUrl || photoUrls[0] || null,
+        photoUrls,
+        status: resolvedStatus,
+        date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
+      };
+    });
+  }
+
+  private mergeIncomingReports(incoming: DriverHelperReport[], broadcastToPeers: boolean = false) {
+    const current = this.getStoredReports();
+    const map = new Map<string, DriverHelperReport>();
+    for (const r of current) {
+      map.set(r.id, r);
+    }
+    let changedReport: DriverHelperReport | null = null;
+    for (const inc of incoming) {
+      if (!inc || !inc.id) continue;
+      const existing = map.get(inc.id);
+      if (!existing) {
+        map.set(inc.id, inc);
+        changedReport = inc;
+      } else {
+        const incHasSol = Boolean(inc.solution && inc.solution.trim());
+        const exHasSol = Boolean(existing.solution && existing.solution.trim());
+        const merged: DriverHelperReport = {
+          ...existing,
+          ...inc,
+          solution: incHasSol ? inc.solution : existing.solution,
+          solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
+          solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
+          status: incHasSol ? (inc.status === 'pending' ? 'resolved' : inc.status) : (exHasSol ? existing.status : inc.status),
+          photoUrl: inc.photoUrl || existing.photoUrl,
+          photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
+        };
+        map.set(inc.id, merged);
+        changedReport = merged;
+      }
+    }
+    const mergedList = this.normalizeList(
+      Array.from(map.values()).sort(
+        (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+      )
+    );
+    this.persistListInternal(mergedList, broadcastToPeers);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: changedReport || mergedList[0] }));
+    }
   }
 
   private getStoredReports(): DriverHelperReport[] {
+    let storedList: DriverHelperReport[] = [];
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       try {
         const data = localStorage.getItem(STORAGE_KEY);
         if (data) {
           const parsed: DriverHelperReport[] = JSON.parse(data);
-          if (!Array.isArray(parsed)) return [];
-          const seenIds = new Set<string>();
-          let hadDuplicates = false;
-          const normalized = parsed.map((r, index) => {
-            let uniqueId = r.id || `REP-2026-${1000 + index}`;
-            if (seenIds.has(uniqueId)) {
-              hadDuplicates = true;
-              uniqueId = `${uniqueId}-${index + 1}`;
-            }
-            seenIds.add(uniqueId);
-            const hasSol = Boolean(r.solution && r.solution.trim());
-            const isConstraintCategory = r.category === 'kendala_jalan' || r.category === 'mode_offline';
-            const resolvedStatus =
-              hasSol && r.status === 'pending'
-                ? 'resolved'
-                : !isConstraintCategory && r.status === 'pending'
-                ? 'verified'
-                : r.status;
-            return {
-              ...r,
-              id: uniqueId,
-              status: resolvedStatus,
-              date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
-            };
-          });
-          if (hadDuplicates) {
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-            } catch {}
+          if (Array.isArray(parsed)) {
+            storedList = this.normalizeList(parsed);
           }
-          return normalized;
         }
-        return [];
       } catch (e) {
         console.warn('Failed to read from localStorage:', e);
       }
     }
-    if (!this.memoryReports) {
-      this.memoryReports = [];
+
+    if (this.memoryReports && this.memoryReports.length > 0) {
+      if (storedList.length === 0) return this.memoryReports;
+      // Merge memoryReports and storedList so neither in-memory nor localStorage changes are ever lost
+      const map = new Map<string, DriverHelperReport>();
+      for (const r of storedList) map.set(r.id, r);
+      for (const m of this.memoryReports) {
+        const ex = map.get(m.id);
+        if (!ex) {
+          map.set(m.id, m);
+        } else {
+          const mHasSol = Boolean(m.solution && m.solution.trim());
+          const exHasSol = Boolean(ex.solution && ex.solution.trim());
+          map.set(m.id, {
+            ...ex,
+            ...m,
+            solution: mHasSol ? m.solution : ex.solution,
+            solutionBy: mHasSol ? m.solutionBy : ex.solutionBy,
+            solutionAt: mHasSol ? m.solutionAt : ex.solutionAt,
+            status: mHasSol ? m.status : (exHasSol ? ex.status : m.status)
+          });
+        }
+      }
+      this.memoryReports = this.normalizeList(
+        Array.from(map.values()).sort(
+          (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+        )
+      );
+      return this.memoryReports;
     }
+
+    this.memoryReports = storedList;
     return this.memoryReports;
   }
 
-  private saveReports(list: DriverHelperReport[]): void {
-    this.memoryReports = list;
+  private persistListInternal(list: DriverHelperReport[], broadcastToPeers: boolean = true): void {
+    const normalized = this.normalizeList(list);
+    this.memoryReports = normalized;
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.warn('Failed to save to localStorage:', e);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+      } catch {
+        // QuotaExceededError fallback: keep photos on the 15 most recent reports and strip oversized base64 from older reports
+        try {
+          const compact = normalized.map((r, idx) => {
+            if (idx < 15) {
+              // Keep up to 3 photos on recent reports
+              const trimmedPhotos = Array.isArray(r.photoUrls) ? r.photoUrls.slice(0, 3) : undefined;
+              return { ...r, photoUrls: trimmedPhotos };
+            }
+            return { ...r, photoUrl: null, photoUrls: [] };
+          });
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+        } catch {
+          // Final fallback: keep latest 30 reports metadata + latest 3 photos
+          try {
+            const ultraCompact = normalized.slice(0, 30).map((r, idx) =>
+              idx < 3 ? r : { ...r, photoUrl: null, photoUrls: [] }
+            );
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(ultraCompact));
+          } catch {}
+        }
       }
     }
+
+    if (broadcastToPeers && this.channel) {
+      try {
+        this.channel.postMessage({ reports: normalized.slice(0, 30) });
+      } catch {}
+    }
+  }
+
+  private saveReports(list: DriverHelperReport[]): void {
+    this.persistListInternal(list, true);
   }
 
   public getReports(): DriverHelperReport[] {
@@ -138,7 +348,7 @@ class DriverReportService {
   public addReport(
     report: Omit<DriverHelperReport, 'id' | 'timestamp' | 'status'> & { status?: 'pending' | 'verified' | 'follow_up' | 'resolved' }
   ): DriverHelperReport {
-    const list = this.getReports();
+    const list = [...this.getReports()];
     const now = new Date();
     this.seqCounter += 1;
     let uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
@@ -147,15 +357,23 @@ class DriverReportService {
     }
     const isConstraintCategory = report.category === 'kendala_jalan' || report.category === 'mode_offline';
     const defaultStatus = isConstraintCategory ? 'pending' : 'verified';
+    const photoUrls = Array.isArray(report.photoUrls) && report.photoUrls.length > 0
+      ? report.photoUrls
+      : report.photoUrl
+      ? [report.photoUrl]
+      : [];
     const newReport: DriverHelperReport = {
       ...report,
       id: uniqueId,
+      photoUrl: report.photoUrl || photoUrls[0] || null,
+      photoUrls,
       timestamp: now.toISOString(),
       date: getLocalDateStr(now),
       status: report.status || defaultStatus
     };
     list.unshift(newReport);
     this.saveReports(list);
+    this.pushReportToServer(newReport);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: newReport }));
@@ -282,15 +500,32 @@ class DriverReportService {
     solutionBy: string = 'SPV Logistik DC',
     newStatus: 'verified' | 'follow_up' | 'pending' | 'resolved' = 'resolved'
   ): boolean {
-    const list = this.getReports();
+    const list = [...this.getReports()];
     const idx = list.findIndex(r => r.id === id);
     if (idx >= 0) {
-      list[idx].solution = solution;
-      list[idx].solutionBy = solutionBy;
-      list[idx].solutionAt = new Date().toISOString();
-      list[idx].status = newStatus === 'pending' ? 'resolved' : newStatus;
-      list[idx].driverAcknowledged = false;
+      list[idx] = {
+        ...list[idx],
+        solution,
+        solutionBy,
+        solutionAt: new Date().toISOString(),
+        status: newStatus === 'pending' ? 'resolved' : newStatus,
+        driverAcknowledged: false
+      };
       this.saveReports(list);
+
+      if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+        fetch(`/api/driver-reports/${encodeURIComponent(id)}/solution`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            solution,
+            solutionBy,
+            status: list[idx].status,
+            reportSnapshot: list[idx]
+          })
+        }).catch(() => {});
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
@@ -301,12 +536,23 @@ class DriverReportService {
   }
 
   public acknowledgeReportSolution(id: string): boolean {
-    const list = this.getReports();
+    const list = [...this.getReports()];
     const idx = list.findIndex(r => r.id === id);
     if (idx >= 0) {
-      list[idx].driverAcknowledged = true;
-      list[idx].driverAcknowledgedAt = new Date().toISOString();
+      list[idx] = {
+        ...list[idx],
+        driverAcknowledged: true,
+        driverAcknowledgedAt: new Date().toISOString()
+      };
       this.saveReports(list);
+
+      if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+        fetch(`/api/driver-reports/${encodeURIComponent(id)}/acknowledge`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include'
+        }).catch(() => {});
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
@@ -321,13 +567,17 @@ class DriverReportService {
     status: 'verified' | 'follow_up' | 'pending' | 'resolved',
     verifiedBy: string = 'SPV Logistik'
   ): boolean {
-    const list = this.getReports();
+    const list = [...this.getReports()];
     const idx = list.findIndex(r => r.id === id);
     if (idx >= 0) {
-      list[idx].status = status;
-      list[idx].verifiedBy = verifiedBy;
-      list[idx].verifiedAt = new Date().toISOString();
+      list[idx] = {
+        ...list[idx],
+        status,
+        verifiedBy,
+        verifiedAt: new Date().toISOString()
+      };
       this.saveReports(list);
+      this.pushReportToServer(list[idx]);
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));

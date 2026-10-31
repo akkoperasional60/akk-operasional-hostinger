@@ -166,8 +166,24 @@ export const DriverReportsManagement: React.FC = () => {
     }
   });
 
-  const loadReports = () => {
-    setReports(driverReportService.getReports());
+  const loadReports = (incomingOrEvent?: any) => {
+    const all = driverReportService.getReports();
+    setReports(all);
+    const incomingReport: DriverHelperReport | undefined =
+      incomingOrEvent && typeof incomingOrEvent === 'object' && 'category' in incomingOrEvent
+        ? (incomingOrEvent as DriverHelperReport)
+        : undefined;
+    if (incomingReport && incomingReport.category === 'kendala_jalan') {
+      const repDate = incomingReport.date || (incomingReport.timestamp ? getLocalDateStr(new Date(incomingReport.timestamp)) : getLocalDateStr());
+      if (repDate) {
+        setSelectedCalendarDate(repDate);
+        const dObj = new Date(repDate);
+        if (!isNaN(dObj.getTime())) {
+          setCalendarMonth(dObj.getMonth());
+          setCalendarYear(dObj.getFullYear());
+        }
+      }
+    }
     try {
       const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
       setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
@@ -176,9 +192,11 @@ export const DriverReportsManagement: React.FC = () => {
 
   useEffect(() => {
     loadReports();
+    driverReportService.syncWithServer().then(() => loadReports()).catch(() => {});
 
-    const handleReportUpdate = () => {
-      loadReports();
+    const handleReportUpdate = (evt: Event) => {
+      const customEvt = evt as CustomEvent<DriverHelperReport | undefined>;
+      loadReports(customEvt?.detail);
     };
 
     const handleScheduleRealtime = () => {
@@ -188,9 +206,16 @@ export const DriverReportsManagement: React.FC = () => {
       } catch {}
     };
 
+    const pollInterval = setInterval(() => {
+      driverReportService.syncWithServer().then(() => {
+        setReports(driverReportService.getReports());
+      }).catch(() => {});
+    }, 2000);
+
     window.addEventListener('driver-report-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('driver-report-updated', handleReportUpdate);
       window.removeEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     };
@@ -200,6 +225,22 @@ export const DriverReportsManagement: React.FC = () => {
   const kendalaOnlyReports = useMemo(() => {
     return reports.filter(r => r.category === 'kendala_jalan');
   }, [reports]);
+
+  // Jika tanggal terpilih tidak memiliki laporan kendala padahal ada laporan kendala terbaru, arahkan ke tanggal laporan kendala terbaru
+  useEffect(() => {
+    if (dateFilterMode === 'single_date' && kendalaOnlyReports.length > 0) {
+      const hasOnSelected = kendalaOnlyReports.some(r => {
+        const d = r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : '');
+        return d === selectedCalendarDate;
+      });
+      if (!hasOnSelected) {
+        const latestDate = kendalaOnlyReports[0].date || (kendalaOnlyReports[0].timestamp ? getLocalDateStr(new Date(kendalaOnlyReports[0].timestamp)) : '');
+        if (latestDate) {
+          setSelectedCalendarDate(latestDate);
+        }
+      }
+    }
+  }, [kendalaOnlyReports.length, dateFilterMode, selectedCalendarDate]);
 
   // Map of reports count & solution status per calendar date (Khusus Kendala)
   const reportsByDateMap = useMemo(() => {
@@ -2356,8 +2397,30 @@ export const DriverReportsManagement: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-4 flex-1 overflow-y-auto flex flex-col items-center justify-center bg-black/40">
-              {selectedPhotoModal.photoUrl ? (
+            <div className="p-4 flex-1 overflow-y-auto flex flex-col items-center justify-center bg-black/40 space-y-3">
+              {selectedPhotoModal.photoUrls && selectedPhotoModal.photoUrls.length > 1 ? (
+                <div className="w-full space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-black text-amber-400">
+                      Total {selectedPhotoModal.photoUrls.length} Foto Bukti Dilampirkan Kru:
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {selectedPhotoModal.photoUrls.map((url, idx) => (
+                      <div key={`modal-photo-${idx}`} className="relative rounded-xl overflow-hidden border border-slate-700 bg-black">
+                        <img
+                          src={url}
+                          alt={`Bukti Laporan #${idx + 1}`}
+                          className="max-h-72 w-full object-contain"
+                        />
+                        <span className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-blue-600 text-white text-[10px] font-black shadow">
+                          Foto #{idx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : selectedPhotoModal.photoUrl ? (
                 <img
                   src={selectedPhotoModal.photoUrl}
                   alt="Bukti Laporan Penuh"

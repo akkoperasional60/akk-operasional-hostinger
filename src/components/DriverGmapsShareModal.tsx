@@ -10,15 +10,14 @@ import {
   Truck,
   RefreshCw,
   CameraOff,
-  Coffee,
   FileText,
   Maximize2,
-  Clock,
-  LogOut,
-  Play,
   Store,
   Fuel,
-  Upload
+  Upload,
+  Plus,
+  Trash2,
+  Images
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
@@ -40,6 +39,7 @@ interface DriverGmapsShareModalProps {
     delivery: Schedule | null;
     notes: string;
     photoUrl: string | null;
+    photoUrls?: string[];
     distanceMeters: number | null;
     isWithinRadius: boolean;
     driverLat: number;
@@ -62,9 +62,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [category, setCategory] = useState<GmapsReportCategory>('isi_bbm');
   const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [photoList, setPhotoList] = useState<string[]>([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number>(0);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [isFullPhotoPreviewOpen, setIsFullPhotoPreviewOpen] = useState<boolean>(false);
+
+  const photoDataUrl = photoList[activePhotoIndex] || photoList[0] || null;
 
   // State Fitur Antri di Customer & Absen Setiap Kiriman ke Pelanggan
   const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
@@ -81,6 +84,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraCaptureFlash, setCameraCaptureFlash] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -92,7 +96,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const matchedFleet = fleets.find(f =>
     f.plateNumber.replace(/\s+/g, '').toUpperCase() === (autoPlateNumber || '').replace(/\s+/g, '').toUpperCase()
   );
-  const fleetInitial = matchedFleet?.initialCode || (autoPlateNumber.includes('8848') ? 'ES-03' : autoPlateNumber.includes('8125') ? 'N1 / NP1' : autoPlateNumber.includes('8509') ? 'A3 / NP3' : undefined);
+  const fleetInitial = matchedFleet?.initialCode || (autoPlateNumber.includes('8848') ? 'N3 / NS1' : autoPlateNumber.includes('8125') ? 'N1 / NP1' : autoPlateNumber.includes('8509') ? 'A3 / NP3' : undefined);
 
   // GPS Coordinates (Direkam otomatis di background untuk sistem)
   const [driverLat, setDriverLat] = useState<number>(-8.2190);
@@ -101,10 +105,28 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const addPhotoToList = (stampedUrl: string) => {
+    setPhotoList(prev => {
+      const next = [...prev, stampedUrl];
+      setActivePhotoIndex(next.length - 1);
+      return next;
+    });
+    setValidationError(null);
+  };
+
+  const removePhotoAtIndex = (idx: number) => {
+    setPhotoList(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      setActivePhotoIndex(curr => Math.max(0, Math.min(curr, next.length - 1)));
+      return next;
+    });
+  };
+
   // Reset seluruh field input agar data yang sudah terkirim tidak pernah nyantol
   const resetFormFields = () => {
     setNotes('');
-    setPhotoDataUrl(null);
+    setPhotoList([]);
+    setActivePhotoIndex(0);
     setCustomerOutletInput('');
     setCustomerNameInput('');
     setFuelLiters('');
@@ -115,7 +137,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini (tanpa scrolldown manual)
+  // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDelivery: Schedule | null = React.useMemo(() => {
     if (!deliveries || deliveries.length === 0) return null;
@@ -225,67 +247,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     return () => clearInterval(interval);
   }, [activeQueueReport]);
 
-  const totalQueueMinutesDisplay = Math.max(1, Math.floor(elapsedQueueSeconds / 60) + simulatedExtraMin);
-
-  // Mulai Mengantri di Customer
-  const handleStartQueueAtCustomer = () => {
-    const outletName = customerOutletInput.trim() || currentAreaName;
-    const created = driverReportService.startCustomerQueueReport({
-      driverId: driverId || 'crew-driver',
-      driverName,
-      plateNumber: autoPlateNumber,
-      areaName: currentAreaName,
-      customerOutletName: outletName,
-      deliveryId: activeDelivery?.id,
-      notes: notes.trim() || `Sedang mengantri bongkar muatan di customer (${outletName})`,
-      photoUrl: photoDataUrl,
-      latitude: driverLat,
-      longitude: driverLng,
-      gmapsUrl: gmapsLink
-    });
-    setActiveQueueReport(created);
-    setNotes('');
-    setPhotoDataUrl(null);
-    setSimulatedExtraMin(0);
-    setQueueCompletedToast(null);
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // Selesai Mengantri & Keluar dari Customer (Selang Beberapa Menit)
-  const handleExitCustomerQueue = () => {
-    if (!activeQueueReport) return;
-    const completed = driverReportService.completeCustomerQueueExit({
-      reportId: activeQueueReport.id,
-      driverId: driverId || 'crew-driver',
-      driverName,
-      simulatedExtraMinutes: simulatedExtraMin,
-      exitNotes: notes.trim()
-    });
-
-    if (completed) {
-      const finalPhoto = completed.photoUrl || photoDataUrl;
-      setActiveQueueReport(null);
-      resetFormFields();
-      setQueueCompletedToast(
-        `Tercatat! Kru keluar dari customer pukul ${completed.customerQueueExitFormatted} (Selang antri: ${completed.customerQueueDurationMinutes} menit).`
-      );
-      onReportSubmitted({
-        category: 'kendala_jalan',
-        delivery: activeDelivery,
-        notes: completed.notes,
-        photoUrl: finalPhoto,
-        distanceMeters: null,
-        isWithinRadius: true,
-        driverLat,
-        driverLng,
-        gmapsUrl: gmapsLink,
-        plateNumber: autoPlateNumber,
-        areaName: currentAreaName
-      });
-    }
-  };
-
   // Automatically attach stream to video element when camera is active
   useEffect(() => {
     if (isCameraActive && videoRef.current && streamRef.current) {
@@ -387,13 +348,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   };
 
   // Watermark stamper helper
-  const applyWatermarkToCanvas = (canvas: HTMLCanvasElement) => {
+  const applyWatermarkToCanvas = (canvas: HTMLCanvasElement): string => {
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return canvas.toDataURL('image/jpeg', 0.72);
     const w = canvas.width;
     const h = canvas.height;
 
-    const bannerHeight = Math.max(90, Math.floor(h * 0.17));
+    const bannerHeight = Math.max(85, Math.floor(h * 0.17));
     const bannerY = h - bannerHeight;
 
     const grad = ctx.createLinearGradient(0, bannerY, 0, h);
@@ -438,60 +399,90 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     ctx.font = `bold ${fontSize - 2}px monospace`;
     ctx.fillText(`🕒 ${nowStr} | 📍 GPS: ${driverLat.toFixed(5)}, ${driverLng.toFixed(5)}`, 16, bannerY + 14 + (fontSize * 2));
 
-    const stampedUrl = canvas.toDataURL('image/jpeg', 0.85);
-    setPhotoDataUrl(stampedUrl);
-    setValidationError(null);
+    const stampedUrl = canvas.toDataURL('image/jpeg', 0.72);
+    addPhotoToList(stampedUrl);
+    return stampedUrl;
   };
 
-  const captureLivePhoto = () => {
+  // Potret foto dari kamera aktif (Tetap di kamera atau bisa ambil lebih dari 1 foto)
+  const captureLivePhoto = (closeAfterCapture: boolean = false) => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+    const rawW = video.videoWidth || 1280;
+    const rawH = video.videoHeight || 720;
+    const maxDim = 960;
+    let w = rawW;
+    let h = rawH;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    stopLiveCamera();
+    ctx.drawImage(video, 0, 0, w, h);
+    setCameraCaptureFlash(true);
+    setTimeout(() => setCameraCaptureFlash(false), 180);
+
     applyWatermarkToCanvas(canvas);
+    if (closeAfterCapture) {
+      stopLiveCamera();
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setIsCapturing(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1280;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
+    const fileArray = Array.from(files);
+    let processedCount = 0;
 
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, w, h);
-          applyWatermarkToCanvas(canvas);
-        }
-        setIsCapturing(false);
+    fileArray.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 960;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            applyWatermarkToCanvas(canvas);
+          }
+          processedCount += 1;
+          if (processedCount >= fileArray.length) {
+            setIsCapturing(false);
+          }
+        };
+        img.src = reader.result as string;
       };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
+
+    e.target.value = '';
   };
 
   const gmapsLink = `https://www.google.com/maps?q=${driverLat},${driverLng}`;
@@ -522,6 +513,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
       customerLine +
       `*No. Surat Jalan:* ${currentWaybillNo}\n` +
+      `*Jumlah Foto Bukti:* ${photoList.length} Foto\n` +
       (category !== 'isi_bbm' ? `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` : '') +
       `*Titik Google Maps:* ${gmapsLink}\n` +
       `*Waktu:* ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
@@ -530,7 +522,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const handleShareWhatsApp = () => {
     const waUrl = `https://wa.me/?text=${getWhatsAppShareText()}`;
-    window.open(waUrl, '_blank');
+    const a = document.createElement('a');
+    a.href = waUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const handleSubmit = () => {
@@ -541,15 +539,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         setValidationError('Harap isi Nama Pelanggan / Toko terlebih dahulu untuk Absen Kiriman.');
         return;
       }
-      if (!photoDataUrl) {
-        setValidationError('Harap ambil Foto Bukti Kiriman ke Pelanggan terlebih dahulu.');
+      if (photoList.length === 0) {
+        setValidationError('Harap ambil minimal 1 Foto Bukti Kiriman ke Pelanggan terlebih dahulu.');
         return;
       }
     }
 
     if (category === 'isi_bbm') {
-      if (!photoDataUrl) {
-        setValidationError('Harap ambil atau unggah Foto Bukti Pengisian BBM (Solar) terlebih dahulu.');
+      if (photoList.length === 0) {
+        setValidationError('Harap ambil atau unggah minimal 1 Foto Bukti Pengisian BBM (Solar) terlebih dahulu.');
         return;
       }
     }
@@ -558,10 +556,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       category === 'istirahat'
         ? `[ABSEN KIRIMAN PELANGGAN: ${customerNameInput.trim()}] ${notes.trim() || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}`
         : category === 'isi_bbm'
-        ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}`
+        ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}${photoList.length > 1 ? ` (${photoList.length} Foto Bukti)` : ''}`
         : notes.trim() || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Laporan kendala pengiriman di jalan');
 
-    const submittedPhoto = photoDataUrl;
+    const submittedPhoto = photoList[0] || null;
+    const submittedPhotos = [...photoList];
     const submittedCustomer = category === 'istirahat' ? customerNameInput.trim() : undefined;
 
     driverReportService.addReport({
@@ -575,12 +574,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       deliveryId: activeDelivery?.id,
       notes: submittedNotes,
       photoUrl: submittedPhoto,
+      photoUrls: submittedPhotos,
       latitude: driverLat,
       longitude: driverLng,
       gmapsUrl: gmapsLink
     });
 
-    // Reset semua isian segera setelah terkirim agar tidak nyantol saat dibuka lagi
     resetFormFields();
 
     onReportSubmitted({
@@ -588,6 +587,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       delivery: activeDelivery,
       notes: submittedNotes,
       photoUrl: submittedPhoto,
+      photoUrls: submittedPhotos,
       distanceMeters: null,
       isWithinRadius: true,
       driverLat,
@@ -602,37 +602,59 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   if (!isOpen) return null;
 
+  const cameraCategoryTitle =
+    category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+      ? 'ANTRI CUSTOMER'
+      : category === 'kendala_jalan'
+      ? 'KENDALA DI JALAN'
+      : category === 'isi_bbm'
+      ? `ISI BBM (${fuelLocation.toUpperCase()})`
+      : category === 'akhir_kiriman'
+      ? 'AKHIR KIRIMAN'
+      : 'ABSEN PELANGGAN';
+
   return (
     <>
-      {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO */}
+      {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO (High-Contrast Header & Bottom Bar + Multi-Photo Support) */}
       {isCameraActive && (
-        <div className="fixed inset-0 z-[80] w-screen h-screen bg-black flex flex-col justify-between p-0 animate-in fade-in duration-150">
-          {/* Top Camera Bar */}
-          <div className="p-4 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between z-20">
-            <div className="flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-blue-500 animate-ping" />
-              <div>
-                <div className="text-xs font-black text-white">
-                  KAMERA • {category === 'kendala_jalan' && reportSubMode === 'antri_customer' ? 'ANTRI CUSTOMER' : category === 'kendala_jalan' ? 'KENDALA JALAN' : category === 'akhir_kiriman' ? 'AKHIR KIRIMAN' : 'ABSEN PELANGGAN'}
+        <div className="fixed inset-0 z-[80] w-screen h-screen bg-slate-950 flex flex-col justify-between p-0 animate-in fade-in duration-150">
+          {/* Top Camera Bar - High Contrast & Clear Text */}
+          <div className="px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-md flex items-center justify-between gap-2 z-20">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Camera className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black text-slate-900 dark:text-white tracking-wide">
+                    KAMERA • {cameraCategoryTitle}
+                  </span>
+                  {photoList.length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black">
+                      {photoList.length} Foto Tersimpan
+                    </span>
+                  )}
                 </div>
-                <div className="text-[10px] text-slate-300 font-mono">
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold truncate">
                   Area: {currentAreaName} ({autoPlateNumber})
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={handleFlipCamera}
-                className="p-2.5 rounded-full bg-slate-800/90 text-white hover:bg-slate-700 cursor-pointer"
+                className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-700 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer"
                 title="Balik Kamera"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span className="hidden sm:inline">Balik</span>
               </button>
               <button
                 type="button"
                 onClick={stopLiveCamera}
-                className="p-2.5 rounded-full bg-slate-800/90 text-white hover:bg-slate-700 cursor-pointer"
+                className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800 cursor-pointer"
                 title="Tutup Kamera"
               >
                 <X className="w-4 h-4" />
@@ -649,7 +671,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               muted
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-6 pointer-events-none border border-white/25 rounded-2xl flex flex-col justify-between p-3">
+            {cameraCaptureFlash && (
+              <div className="absolute inset-0 bg-white/80 pointer-events-none z-30 transition-opacity duration-150" />
+            )}
+            <div className="absolute inset-5 pointer-events-none border border-white/40 rounded-2xl flex flex-col justify-between p-3">
               <div className="flex justify-between">
                 <div className="w-6 h-6 border-t-2 border-l-2 border-blue-400" />
                 <div className="w-6 h-6 border-t-2 border-r-2 border-blue-400" />
@@ -659,45 +684,121 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 <div className="w-6 h-6 border-b-2 border-r-2 border-blue-400" />
               </div>
             </div>
+
+            {/* Thumbnail Strip of Captured Photos Inside Camera View (When > 0 photos) */}
+            {photoList.length > 0 && (
+              <div className="absolute bottom-3 left-3 right-3 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-2xl p-2.5 shadow-xl">
+                <div className="flex items-center justify-between mb-1.5 px-1">
+                  <span className="text-[11px] font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Images className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Daftar Foto Siap Dikirim ({photoList.length} Foto)</span>
+                  </span>
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    Bisa potret lagi untuk tambah foto
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {photoList.map((imgUrl, idx) => (
+                    <div
+                      key={`cam-thumb-${idx}`}
+                      className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-blue-500 shrink-0 bg-black"
+                    >
+                      <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                      <span className="absolute bottom-0.5 left-1 px-1 rounded bg-blue-600 text-white text-[8px] font-black">
+                        #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePhotoAtIndex(idx)}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
+                        title="Hapus Foto Ini"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Bottom Shutter Bar */}
-          <div className="p-6 bg-gradient-to-t from-black via-black/90 to-transparent flex items-center justify-center gap-8 px-8 z-20">
+          {/* Bottom Shutter Bar: Kiri Bawah = Tambah Foto | Tengah = Tombol Kamera | Kanan = Lanjut Kirim / Batal */}
+          <div className="px-4 py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-2xl flex items-center justify-between gap-3 z-20">
+            {/* Sebelah Kiri Bawah: Fitur Tambah Foto */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (photoList.length === 0) {
+                    captureLivePhoto(false);
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className="px-3 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-extrabold text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
+                title="Tambah Foto"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>Tambah Foto</span>
+                {photoList.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-black">
+                    {photoList.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Tengah: Tombol Potret Kamera */}
             <button
               type="button"
-              onClick={captureLivePhoto}
-              className="w-20 h-20 rounded-full border-4 border-white p-1.5 flex items-center justify-center shadow-2xl active:scale-90 transition cursor-pointer"
+              onClick={() => captureLivePhoto(false)}
+              className="w-16 h-16 sm:w-18 sm:h-18 rounded-full border-4 border-blue-600 dark:border-blue-400 p-1 flex items-center justify-center shadow-lg active:scale-90 transition cursor-pointer shrink-0 bg-white dark:bg-slate-900"
+              title="Potret Foto"
             >
               <div className="w-full h-full rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white">
-                <Camera className="w-8 h-8" />
+                <Camera className="w-7 h-7" />
               </div>
             </button>
 
-            <button
-              type="button"
-              onClick={stopLiveCamera}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer"
-            >
-              Batal
-            </button>
+            {/* Sebelah Kanan Bawah: Tombol Kirim / Gunakan (jika sudah ada foto) atau Batal */}
+            <div className="flex items-center gap-2">
+              {photoList.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Gunakan ({photoList.length} Foto)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-extrabold border border-slate-300 dark:border-slate-700 cursor-pointer"
+                >
+                  Batal
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* PHOTO PREVIEW MODAL */}
+      {/* PHOTO PREVIEW MODAL (Mendukung Multi-Foto) */}
       {isFullPhotoPreviewOpen && photoDataUrl && (
         <div
           className="fixed inset-0 z-[85] w-screen h-screen bg-black/95 flex flex-col justify-between p-4 animate-in fade-in duration-150"
           onClick={() => setIsFullPhotoPreviewOpen(false)}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-white bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-700">
-              Pratinjau Foto Bukti
+          <div className="flex items-center justify-between" onClick={e => e.stopPropagation()}>
+            <span className="text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700">
+              Pratinjau Foto Bukti ({activePhotoIndex + 1} / {photoList.length})
             </span>
             <button
               type="button"
               onClick={() => setIsFullPhotoPreviewOpen(false)}
-              className="p-2.5 rounded-full bg-slate-800 text-white font-bold cursor-pointer"
+              className="p-2.5 rounded-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -709,9 +810,22 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               className="w-full h-full object-contain"
             />
           </div>
-          <div className="text-center text-xs text-slate-300 pb-2">
-            Ketuk di mana saja untuk menutup tampilan
-          </div>
+          {photoList.length > 1 && (
+            <div className="flex items-center justify-center gap-2 pb-2" onClick={e => e.stopPropagation()}>
+              {photoList.map((u, idx) => (
+                <button
+                  key={`full-prev-${idx}`}
+                  type="button"
+                  onClick={() => setActivePhotoIndex(idx)}
+                  className={`w-12 h-12 rounded-xl overflow-hidden border-2 cursor-pointer ${
+                    idx === activePhotoIndex ? 'border-blue-500 scale-105' : 'border-white/30 opacity-70'
+                  }`}
+                >
+                  <img src={u} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -865,7 +979,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             )}
 
-            {/* 📦 FITUR ABSEN SETIAP KIRIMAN KE PELANGGAN (PENGGANTI ISTIRAHAT) */}
+            {/* 📦 FITUR ABSEN SETIAP KIRIMAN KE PELANGGAN */}
             {category === 'istirahat' && (
               <div className="p-3.5 rounded-2xl border bg-slate-950 border-slate-800 space-y-2.5">
                 <div className="flex items-center gap-2">
@@ -900,7 +1014,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             )}
 
-            {/* Nomor Kendaraan Armada (Otomatis Terkunci Sesuai Pilihan Armada Setelah Check-In) */}
+            {/* Nomor Kendaraan Armada */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                 <span>Nomor Kendaraan Armada:</span>
@@ -922,7 +1036,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             </div>
 
-            {/* NAMA AREA KIRIM (OTOMATIS SESUAI SURAT JALAN KELUAR) */}
+            {/* NAMA AREA KIRIM */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                 <span>Nama Area Kirim:</span>
@@ -947,23 +1061,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             </div>
 
-            {/* Photo Capture & Upload Section */}
+            {/* Photo Capture & Multi-Photo Upload Section */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  {category === 'istirahat' ? 'Foto Bukti Kiriman ke Pelanggan (Kamera) *:' : 'Unggah Foto Bukti (Kamera):'}
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <span>{category === 'istirahat' ? 'Foto Bukti Kiriman ke Pelanggan (Kamera) *:' : 'Unggah Foto Bukti (Kamera):'}</span>
+                  {photoList.length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-black">
+                      {photoList.length} Foto Siap Kirim
+                    </span>
+                  )}
                 </label>
-                {photoDataUrl && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => startLiveCamera()}
-                      className="text-[10px] text-blue-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      <Camera className="w-3 h-3" />
-                      <span>Foto Ulang</span>
-                    </button>
-                  </div>
+                {photoList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoList([]);
+                      setActivePhotoIndex(0);
+                    }}
+                    className="text-[10px] text-rose-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Hapus Semua ({photoList.length})</span>
+                  </button>
                 )}
               </div>
 
@@ -977,11 +1097,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 className="hidden"
               />
 
-              {/* Hidden Gallery / File Picker */}
+              {/* Hidden Gallery / File Picker (Multiple Supported) */}
               <input
                 type="file"
                 ref={fileInputRef}
                 accept="image/*"
+                multiple
                 onChange={handlePhotoUpload}
                 className="hidden"
               />
@@ -1009,49 +1130,110 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 </div>
               )}
 
-              {photoDataUrl ? (
-                <div className="relative rounded-2xl overflow-hidden border border-slate-700 bg-black shadow-sm group">
-                  <img
-                    src={photoDataUrl}
-                    alt="Foto Bukti"
-                    onClick={() => setIsFullPhotoPreviewOpen(true)}
-                    className="w-full max-h-64 object-contain bg-black cursor-pointer"
-                  />
-                  <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-lg text-[10px] text-emerald-400 font-bold flex items-center gap-1 border border-emerald-500/30">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Foto Berstempel Siap Kirim</span>
+              {photoList.length > 0 ? (
+                <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 shadow-sm space-y-2.5 p-2.5">
+                  {/* Pratinjau Foto Utama */}
+                  <div className="relative rounded-xl overflow-hidden bg-black border border-slate-800">
+                    <img
+                      src={photoDataUrl || photoList[0]}
+                      alt={`Foto Bukti ${activePhotoIndex + 1}`}
+                      onClick={() => setIsFullPhotoPreviewOpen(true)}
+                      className="w-full max-h-60 object-contain bg-black cursor-pointer"
+                    />
+                    <div className="absolute top-2 left-2 bg-white/95 dark:bg-slate-900/95 px-2.5 py-1 rounded-lg text-[10px] text-emerald-700 dark:text-emerald-400 font-black flex items-center gap-1 border border-emerald-500/40 shadow-sm">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>
+                        Foto #{activePhotoIndex + 1} dari {photoList.length} • Siap Kirim
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsFullPhotoPreviewOpen(true)}
+                      className="absolute top-2 right-2 bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 dark:border-slate-700 cursor-pointer shadow-sm"
+                    >
+                      <Maximize2 className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                      <span>Perbesar</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsFullPhotoPreviewOpen(true)}
-                    className="absolute top-2 right-2 bg-black/80 hover:bg-black text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-white/20 cursor-pointer"
-                  >
-                    <Maximize2 className="w-3 h-3 text-blue-400" />
-                    <span>Perbesar</span>
-                  </button>
-                  <div className="p-2 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-slate-400">Ketuk gambar untuk memperbesar</span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPhotoDataUrl(null);
-                          if (cameraInputRef.current) cameraInputRef.current.value = '';
-                          if (fileInputRef.current) fileInputRef.current.value = '';
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-rose-400 font-bold text-[10px] border border-slate-700 cursor-pointer"
-                      >
-                        Hapus Foto
-                      </button>
+
+                  {/* Galeri Thumbnail Semua Foto (Menampilkan 1 atau Lebih dari 1 Foto) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 px-0.5">
+                      <span className="font-bold">
+                        Daftar Foto Lampiran ({photoList.length} Foto):
+                      </span>
+                      <span>Ketuk foto untuk memilih / perbesar</span>
+                    </div>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {photoList.map((imgUrl, idx) => (
+                        <div
+                          key={`preview-thumb-${idx}`}
+                          onClick={() => setActivePhotoIndex(idx)}
+                          className={`relative w-16 h-16 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer transition ${
+                            idx === activePhotoIndex
+                              ? 'border-blue-500 ring-2 ring-blue-500/30'
+                              : 'border-slate-700 opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={imgUrl} alt={`Lampiran ${idx + 1}`} className="w-full h-full object-cover" />
+                          <span className="absolute bottom-0.5 left-1 px-1 rounded bg-blue-600 text-white text-[8px] font-black">
+                            #{idx + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePhotoAtIndex(idx);
+                            }}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer shadow"
+                            title="Hapus Foto Ini"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Tombol Cepat + Tambah Foto di dalam Galeri */}
                       <button
                         type="button"
                         onClick={() => startLiveCamera()}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-blue-400 font-bold text-[10px] border border-slate-700 cursor-pointer flex items-center gap-1"
+                        className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-500/50 hover:border-blue-500 bg-blue-500/10 text-blue-500 flex flex-col items-center justify-center gap-0.5 shrink-0 cursor-pointer transition"
+                        title="Tambah Foto Kamera"
                       >
-                        <Camera className="w-3 h-3" />
-                        <span>Buka Kamera</span>
+                        <Plus className="w-4 h-4" />
+                        <span className="text-[9px] font-black">Kamera</span>
                       </button>
                     </div>
+                  </div>
+
+                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Kamera / Galeri) */}
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => startLiveCamera()}
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Foto Kamera</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Tambah dari Galeri</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removePhotoAtIndex(activePhotoIndex)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-400 font-bold text-[10px] border border-slate-700 cursor-pointer"
+                    >
+                      Hapus Foto #{activePhotoIndex + 1}
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -1071,10 +1253,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       </div>
                       <div className="text-[11px] text-slate-400 font-medium mt-0.5">
                         {category === 'istirahat'
-                          ? 'Foto penyerahan kiriman'
+                          ? 'Foto penyerahan kiriman (bisa >1 foto)'
                           : category === 'isi_bbm'
                           ? `Foto isi BBM (${fuelLocation})`
-                          : 'Ambil foto bukti kamera'}
+                          : 'Ambil foto bukti kamera (bisa >1 foto)'}
                       </div>
                     </div>
                   </button>
@@ -1093,7 +1275,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         Upload Foto
                       </div>
                       <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        Pilih foto dari galeri HP
+                        Pilih 1 atau beberapa foto galeri
                       </div>
                     </div>
                   </button>
@@ -1148,10 +1330,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               <Send className="w-4 h-4" />
               <span>
                 {category === 'istirahat'
-                  ? 'Simpan Absen Pelanggan'
+                  ? `Simpan Absen${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
                   : category === 'isi_bbm'
-                  ? 'Simpan Laporan BBM'
-                  : 'Simpan Laporan'}
+                  ? `Simpan Laporan BBM${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : `Simpan Laporan${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`}
               </span>
             </button>
           </div>
@@ -1161,4 +1343,3 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     </>
   );
 };
-

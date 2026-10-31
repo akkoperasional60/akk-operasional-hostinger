@@ -231,49 +231,47 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
 
   return (
-    <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center p-4 selection:bg-amber-500 selection:text-slate-950 font-sans antialiased">
-      {/* Centered Modal Card matching Gambar 1 & Gambar 2 */}
-      <div className="w-full max-w-[460px] rounded-2xl overflow-hidden shadow-2xl border border-slate-200/80 bg-white transition-all">
-        {/* Top Dark Header (Identik Gambar 1 & Gambar 2) */}
-        <div className="bg-[#0b1325] px-6 pt-7 pb-6 text-center border-b border-slate-800 relative">
-          {/* Top-right X icon (Identik Gambar 1 & Gambar 2) */}
-          <div className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition-colors p-1 cursor-default">
-            <X className="w-4 h-4" />
-          </div>
+    <div className="min-h-screen bg-[#f4f7fb] dark:bg-slate-950 flex items-center justify-center p-4 selection:bg-blue-600 selection:text-white font-sans antialiased">
+      {/* Centered Modal Card with Clean Modern Slate-Blue Tone */}
+      <div className="w-full max-w-[460px] rounded-2xl overflow-hidden shadow-xl shadow-slate-900/5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all">
+        {/* Top Brand Accent Bar */}
+        <div className="h-1.5 w-full bg-gradient-to-r from-[#1E8AD5] via-blue-600 to-[#CB4E2A]" />
 
+        {/* Top Header */}
+        <div className="bg-gradient-to-b from-slate-50/90 via-white to-slate-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 px-6 pt-6 pb-6 text-center border-b border-slate-200/80 dark:border-slate-800 relative">
           {/* Logo & Brand Monogram */}
           <div className="flex items-center justify-center gap-2 mb-2">
             <AkkLogo size="md" showText={true} showSubtitle={false} />
           </div>
 
-          <p className="text-slate-400 text-[11px] leading-relaxed max-w-sm mx-auto mt-2">
+          <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed max-w-sm mx-auto mt-2 font-medium">
             Portal Akses Logistik Terintegrasi &amp; Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
           </p>
 
-          {/* Segmented Tab Switcher (Identik Gambar 1 & Gambar 2) */}
+          {/* Segmented Tab Switcher */}
           {tab === 'forgot' ? (
             <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1">
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
-                className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-white transition-colors cursor-pointer group"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white font-semibold transition-colors cursor-pointer group"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 <span>Kembali ke Masuk</span>
               </button>
-              <span className="text-xs font-semibold text-amber-400">
+              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
                 Lupa Password
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-1 mt-5 bg-white p-1 rounded-2xl shadow-md border border-slate-200/40 max-w-[320px] mx-auto">
+            <div className="flex items-center justify-center gap-1.5 mt-5 bg-slate-100 dark:bg-slate-800/90 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 max-w-[330px] mx-auto">
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   tab === 'login'
-                    ? 'bg-[#e67e00] text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-950'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -285,8 +283,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 onClick={() => { setTab('register'); setErrorMsg(''); setSuccessMsg(''); }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   tab === 'register'
-                    ? 'bg-[#e67e00] text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-950'
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -321,16 +319,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           </div>
         )}
 
-        {/* White Card Body */}
-        <div className="p-6 sm:p-7 bg-white">
+        {/* Card Body */}
+        <div className="p-6 sm:p-7 bg-white dark:bg-slate-900">
           {tab === 'login' ? (
             /* ======================================================== */
-            /* TAB 1: MASUK (LOGIN) - PERSIS GAMBAR 1                    */
+            /* TAB 1: MASUK (LOGIN)                                      */
             /* ======================================================== */
             <form onSubmit={handleLogin} className="space-y-4">
               {/* Field Email / Username */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Email / Username
                 </label>
                 <div className="relative">
@@ -345,7 +343,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       setLoginEmail(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -353,11 +351,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               {/* Field Password */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Password</label>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Password</label>
                   <button
                     type="button"
                     onClick={() => { setTab('forgot'); setErrorMsg(''); setSuccessMsg(''); }}
-                    className="text-xs text-[#e67e00] hover:text-[#c46a00] font-semibold transition cursor-pointer"
+                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-semibold transition cursor-pointer"
                   >
                     Lupa Password?
                   </button>
@@ -374,7 +372,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       setLoginPassword(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -387,15 +385,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
-              {/* Tombol Submit Masuk ke Portal AKK (Persis Gambar 1) */}
+              {/* Tombol Submit Masuk ke Portal AKK */}
               <button
                 type="submit"
                 disabled={isLocked || isLoading}
-                className="w-full mt-2 py-3 rounded-xl bg-[#e67e00] hover:bg-[#cf7000] text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>Memproses Masuk...</span>
                   </>
                 ) : (
@@ -408,12 +406,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             </form>
           ) : tab === 'register' ? (
             /* ======================================================== */
-            /* TAB 2: DAFTAR AKUN - PERSIS GAMBAR 2                      */
+            /* TAB 2: DAFTAR AKUN                                        */
             /* ======================================================== */
             <form onSubmit={handleRegister} className="space-y-3.5">
               {/* Nama Lengkap */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Nama Lengkap
                 </label>
                 <div className="relative">
@@ -424,7 +422,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     placeholder="Contoh: Bayu Dimas Permana"
                     value={registerData.fullName}
                     onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
                   />
                 </div>
               </div>
@@ -432,24 +430,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               {/* Email & No. WhatsApp (2 Kolom) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Email</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Email</label>
                   <input
                     type="email"
                     required
                     placeholder="nama@gmail.com"
                     value={registerData.email}
                     onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">No. WhatsApp</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">No. WhatsApp</label>
                   <input
                     type="text"
                     placeholder="+62 812-..."
                     value={registerData.phone}
                     onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
                   />
                 </div>
               </div>
@@ -457,18 +455,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               {/* Password & Konfirmasi Password (2 Kolom) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Password</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Password</label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     placeholder="Minimal 6 karakter"
                     value={registerData.password}
                     onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Konfirmasi Password</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Konfirmasi Password</label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -476,7 +474,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       placeholder="Ulangi password"
                       value={registerData.confirmPassword}
                       onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                      className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                      className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
                     />
                     <button
                       type="button"
@@ -489,20 +487,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
-              {/* Prosedur Verifikasi Akun AKK Box (Persis Gambar 2) */}
-              <div className="p-3 rounded-xl bg-[#fff8eb] border border-[#fde4ba] text-[#92540c] text-[11px] leading-relaxed flex items-start gap-2.5">
-                <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              {/* Prosedur Verifikasi Akun AKK Box */}
+              <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block text-[#7a4205] font-bold">Prosedur Verifikasi Akun AKK:</strong>
+                  <strong className="block text-blue-900 dark:text-blue-300 font-bold">Prosedur Verifikasi Akun AKK:</strong>
                   Pendaftaran akun baru wajib disetujui (di-approve) oleh Super Admin PT Anugrah Kemasan Kreatif sebelum mendapatkan otorisasi akses menu.
                 </div>
               </div>
 
-              {/* Tombol Kirim Pendaftaran Akun (Persis Gambar 2) */}
+              {/* Tombol Kirim Pendaftaran Akun */}
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 rounded-xl bg-[#e67e00] hover:bg-[#cf7000] text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
               >
                 {isLoading ? (
                   <span>Mengirimkan Pendaftaran...</span>
@@ -518,12 +516,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <div className="space-y-4">
               {recoveryStep === 'request' ? (
                 <form onSubmit={handleRequestRecovery} className="space-y-4">
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs leading-relaxed">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
                     Masukkan <strong>Email</strong> atau <strong>Username</strong> akun terdaftar. Sistem akan mengirimkan kode verifikasi pemulihan kata sandi.
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       Email / Username Akun
                     </label>
                     <input
@@ -532,13 +530,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       placeholder="Masukkan email atau nama akun Anda"
                       value={recoveryInput}
                       onChange={(e) => setRecoveryInput(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-xl bg-[#e67e00] hover:bg-[#cf7000] text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition cursor-pointer"
+                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
                     <span>Kirim Kode Verifikasi</span>
@@ -547,7 +545,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               ) : (
                 <form onSubmit={handleVerifyRecovery} className="space-y-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       Kode Verifikasi 6-Digit
                     </label>
                     <input
@@ -556,13 +554,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       placeholder="123456"
                       value={recoveryCode}
                       onChange={(e) => setRecoveryCode(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs font-mono font-bold tracking-widest text-center focus:outline-none focus:border-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs font-mono font-bold tracking-widest text-center focus:outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                         Password Baru
                       </label>
                       <input
@@ -571,11 +569,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         placeholder="Minimal 4 karakter"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-blue-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                         Ulangi Password
                       </label>
                       <input
@@ -584,14 +582,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         placeholder="Konfirmasi password"
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-blue-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
                       />
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-xl bg-[#e67e00] hover:bg-[#cf7000] text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition cursor-pointer"
+                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer"
                   >
                     <span>Simpan Kata Sandi Baru</span>
                   </button>

@@ -152,6 +152,10 @@ export interface Schedule {
   podPhotoTimestamp?: string;
   podReceiverName?: string;
   podConditionNote?: string;
+  backupCrewId?: string;
+  backupCrewName?: string;
+  backupPosition?: 'driver' | 'helper' | 'helper2';
+  backupTargetName?: string;
   transferRequest?: {
     status: 'pending' | 'approved' | 'rejected';
     requestedAt: string;
