@@ -347,19 +347,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         selectedUser.role === 'pengiriman' ||
         selectedUser.role === 'dispatcher';
 
+      const isCrewRole = selectedUser.role === 'driver' || selectedUser.role === 'crew_helper';
+
       MODULE_DEFINITIONS.forEach(mod => {
         const userMod = selectedUser.permissions?.modules?.[mod.id];
         const defaultMod = roleDefaults[mod.id];
         const subMenuPerms: Record<string, 'read_only' | 'full_access' | 'none'> = {};
 
-        const savedSubValues = Object.values(userMod?.subMenus || {});
-        const savedActiveCount = savedSubValues.filter(v => v === 'full_access' || v === 'read_only').length;
+        const savedSubEntries = Object.entries(userMod?.subMenus || {});
+        const savedActiveKeys = savedSubEntries
+          .filter(([, v]) => v === 'full_access' || v === 'read_only')
+          .map(([k]) => k);
+        const savedActiveCount = savedActiveKeys.length;
         const shouldUseRoleDefaultForLogistics =
           mod.id === 'logistics' && isLogisticsLead && savedActiveCount <= 1;
+        const isLegacyCrewDefault =
+          mod.id === 'logistics' &&
+          isCrewRole &&
+          savedActiveCount === 2 &&
+          savedActiveKeys.includes('portal_driver') &&
+          savedActiveKeys.includes('monitoring_sla');
 
         mod.subMenus.forEach(sub => {
           if (shouldUseRoleDefaultForLogistics) {
             subMenuPerms[sub.id] = defaultMod?.subMenus?.[sub.id] || 'full_access';
+          } else if (isLegacyCrewDefault) {
+            subMenuPerms[sub.id] = sub.id === 'portal_driver' ? 'full_access' : 'none';
           } else {
             const savedVal = userMod?.subMenus?.[sub.id];
             subMenuPerms[sub.id] = savedVal !== undefined ? savedVal : (defaultMod?.subMenus?.[sub.id] || 'none');
@@ -442,7 +455,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           modules: nextModules
         }
       };
-      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      const merged = computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned');
+      setEditingPermissions(merged);
+      if (selectedUser) {
+        branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
+        logisticsStore.updateUserProfile(selectedUser.id, {
+          permissions: { modules: merged }
+        });
+      }
       return nextMap;
     });
 
@@ -481,7 +501,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           modules: nextModules
         }
       };
-      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      const merged = computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned');
+      setEditingPermissions(merged);
+      if (selectedUser) {
+        branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
+        logisticsStore.updateUserProfile(selectedUser.id, {
+          permissions: { modules: merged }
+        });
+      }
       return nextMap;
     });
 
@@ -501,17 +528,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (!branchEntry) return prev;
       const existingSubMenus = { ...(branchEntry.modules[modId]?.subMenus || {}) };
       if (modDef) {
-        const hasAnyActive = modDef.subMenus.some(
-          sub => existingSubMenus[sub.id] === 'full_access' || existingSubMenus[sub.id] === 'read_only'
-        );
         modDef.subMenus.forEach(sub => {
-          if (enabled) {
-            if (!hasAnyActive || existingSubMenus[sub.id] === 'none' || !existingSubMenus[sub.id]) {
-              existingSubMenus[sub.id] = 'full_access';
-            }
-          } else {
-            existingSubMenus[sub.id] = 'none';
-          }
+          existingSubMenus[sub.id] = enabled ? 'full_access' : 'none';
         });
       }
       const nextModules = {
@@ -531,7 +549,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           modules: nextModules
         }
       };
-      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      const merged = computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned');
+      setEditingPermissions(merged);
+      if (selectedUser) {
+        branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
+        logisticsStore.updateUserProfile(selectedUser.id, {
+          permissions: { modules: merged }
+        });
+      }
       return nextMap;
     });
 
@@ -576,7 +601,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           modules: nextModules
         }
       };
-      setEditingPermissions(computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned'));
+      const merged = computeMergedModulesFromBranches(nextMap, selectedUser?.role || 'unassigned');
+      setEditingPermissions(merged);
+      if (selectedUser) {
+        branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
+        logisticsStore.updateUserProfile(selectedUser.id, {
+          permissions: { modules: merged }
+        });
+      }
       return nextMap;
     });
   };
@@ -1182,9 +1214,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     {selectedUser.status === 'approved' && (
                       <button
                         onClick={() => {
-                          if (isSuperAdmin && Object.keys(editingPermissions).length > 0) {
+                          if (isSuperAdmin) {
+                            const merged = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
+                            branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
                             logisticsStore.updateUserProfile(selectedUser.id, {
-                              permissions: { modules: editingPermissions }
+                              permissions: { modules: merged }
                             });
                           }
                           logisticsStore.switchCurrentUser(selectedUser.id);
@@ -1576,7 +1610,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                                             <label className="inline-flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
                                               <input
                                                 type="checkbox"
-                                                checked={modState.enabled && activeSubCount > 0}
+                                                checked={modState.enabled && mod.subMenus.length > 0 && activeSubCount === mod.subMenus.length}
                                                 onChange={e =>
                                                   handleToggleBranchModuleEnabled(
                                                     branch.id,

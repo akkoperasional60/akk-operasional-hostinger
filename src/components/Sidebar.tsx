@@ -178,10 +178,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   useEffect(() => {
-    return logisticsStore.subscribe(() => {
-      setCurrentUser(logisticsStore.getCurrentUser());
+    const syncUser = () => {
+      setCurrentUser({ ...logisticsStore.getCurrentUser() });
       setPendingUsersCount(logisticsStore.getPendingUsersCount());
-    });
+    };
+    const unsub = logisticsStore.subscribe(syncUser);
+    window.addEventListener('akk-branch-updated', syncUser);
+    return () => {
+      unsub();
+      window.removeEventListener('akk-branch-updated', syncUser);
+    };
   }, []);
 
   // Close dropdown when clicking outside
@@ -830,8 +836,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  // Filter categories based on RBAC
-  const visibleCategories = categories.filter(cat => cat.checkAccess(currentUser));
+  // Filter categories AND their sub-menu items based on granular RBAC permissions
+  const visibleCategories: NavCategory[] = categories
+    .filter(cat => cat.checkAccess(currentUser))
+    .map(cat => {
+      const filteredGroups = cat.groups
+        .map(group => ({
+          ...group,
+          items: group.items.filter(item => canAccess(currentUser, item.tab))
+        }))
+        .filter(group => group.items.length > 0);
+
+      // Hide pendingReportsCount badge on Logistik category if user does not have access to driver_reports
+      const canSeeDriverReports = filteredGroups.some(g =>
+        g.items.some(i => i.tab === 'driver_reports')
+      );
+
+      return {
+        ...cat,
+        badge: cat.id === 'logistik' && !canSeeDriverReports ? undefined : cat.badge,
+        groups: filteredGroups
+      };
+    })
+    .filter(cat => cat.groups.length > 0);
 
   // Determine if a category contains the currently active tab
   const isCategoryActive = (cat: NavCategory): boolean => {
