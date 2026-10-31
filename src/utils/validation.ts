@@ -93,17 +93,34 @@ export function validateFleet(
     }
   }
 
+function parseFlexibleDate(val: string): Date | null {
+  if (!val || typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('/').map(Number);
+    const date = new Date(y, m - 1, d);
+    return isNaN(date.getTime()) ? null : date;
+  }
+  if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return isNaN(date.getTime()) ? null : date;
+  }
+  const d = new Date(trimmed);
+  return isNaN(d.getTime()) ? null : d;
+}
+
   // 8. Tanggal Pajak & STNK
   if (fleet.taxDueDate) {
-    const d = new Date(fleet.taxDueDate);
-    if (isNaN(d.getTime())) {
+    const d = parseFlexibleDate(fleet.taxDueDate);
+    if (!d) {
       errors.taxDueDate = 'Format tanggal jatuh tempo pajak tidak valid.';
     }
   }
 
   if (fleet.stnkExpiryDate) {
-    const d = new Date(fleet.stnkExpiryDate);
-    if (isNaN(d.getTime())) {
+    const d = parseFlexibleDate(fleet.stnkExpiryDate);
+    if (!d) {
       errors.stnkExpiryDate = 'Format tanggal masa berlaku STNK tidak valid.';
     }
   }

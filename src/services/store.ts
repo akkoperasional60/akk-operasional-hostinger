@@ -859,123 +859,123 @@ class LogisticsStore {
     this.fleets = this.fleets.map((f, idx) => {
       let changed = false;
 
-      // Migrate specific vehicle P 8125 VC (Mitsubishi L300)
-      if (f.id === 'flt-01' || f.plateNumber === 'B 9421 UXT') {
+      // Migrate legacy Jakarta plate B 9421 UXT to P 8125 VC (Mitsubishi L300)
+      if (f.plateNumber === 'B 9421 UXT') {
         return {
           ...f,
           id: 'flt-01',
           plateNumber: 'P 8125 VC',
-          vehicleType: 'Pick Up Box',
-          initialCode: 'N1 / NP1',
-          brand: 'Mitsubishi L300',
-          engineCc: '2477 CC',
-          boxCapacityM3: 5.5,
-          boxDimensions: '2.4 x 1.6 x 1.4 m',
-          year: 2004,
-          gpsImei: '',
-          lastMaintenance: '2026-12-23',
-          taxDueDate: '2027-06-25',
-          stnkExpiryDate: '2029-06-25'
+          vehicleType: f.vehicleType || 'Pick Up Box',
+          initialCode: f.initialCode || 'N1 / NP1',
+          brand: f.brand || 'Mitsubishi L300',
+          engineCc: f.engineCc || '2477 CC',
+          boxCapacityM3: f.boxCapacityM3 || 5.5,
+          boxDimensions: f.boxDimensions || '2.4 x 1.6 x 1.4 m',
+          year: f.year || 2004,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2026-12-23',
+          taxDueDate: f.taxDueDate || '2027-06-25',
+          stnkExpiryDate: f.stnkExpiryDate || '2029-06-25'
         };
       }
 
-      // Migrate specific vehicle P 8509 VQ (Traga Pick Up Box)
-      if (f.id === 'flt-02' || f.plateNumber === 'B 9128 UYX') {
+      // Migrate legacy Jakarta plate B 9128 UYX to P 8509 VQ (Traga Pick Up Box)
+      if (f.plateNumber === 'B 9128 UYX') {
         return {
           ...f,
           id: 'flt-02',
           plateNumber: 'P 8509 VQ',
-          vehicleType: 'Pick Up Box',
-          initialCode: 'A3 / NP3',
-          brand: 'Traga',
-          engineCc: '2499 CC',
-          boxCapacityM3: 6.2,
-          boxDimensions: '2.8 x 1.6 x 1.4 m',
-          year: 2021,
-          gpsImei: '',
-          lastMaintenance: '2027-02-05',
-          taxDueDate: '2027-08-03',
-          stnkExpiryDate: '2031-08-03'
+          vehicleType: f.vehicleType || 'Pick Up Box',
+          initialCode: f.initialCode || 'A3 / NP3',
+          brand: f.brand || 'Traga',
+          engineCc: f.engineCc || '2499 CC',
+          boxCapacityM3: f.boxCapacityM3 || 6.2,
+          boxDimensions: f.boxDimensions || '2.8 x 1.6 x 1.4 m',
+          year: f.year || 2021,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2027-02-05',
+          taxDueDate: f.taxDueDate || '2027-08-03',
+          stnkExpiryDate: f.stnkExpiryDate || '2031-08-03'
         };
       }
 
-      // Migrate specific vehicle P 8848 U (Mitsubishi Canter Engkel STD)
-      if (f.id === 'flt-03' || f.plateNumber === 'B 9802 KLS') {
+      // Migrate legacy Jakarta plate B 9802 KLS to P 8848 U (Mitsubishi Canter Engkel STD)
+      if (f.plateNumber === 'B 9802 KLS') {
         return {
           ...f,
           id: 'flt-03',
           plateNumber: 'P 8848 U',
-          vehicleType: 'Engkel STD',
-          initialCode: 'N3 / NS1',
-          brand: 'Mitsubishi Canter',
-          engineCc: '3908 CC',
-          boxCapacityM3: 9.0,
-          boxDimensions: '3.1 x 1.7 x 1.7 m',
-          year: 2008,
-          gpsImei: '',
-          lastMaintenance: '2027-01-29',
-          taxDueDate: '2027-08-03',
-          stnkExpiryDate: '2027-08-03'
+          vehicleType: f.vehicleType || 'Engkel STD',
+          initialCode: f.initialCode || 'N3 / NS1',
+          brand: f.brand || 'Mitsubishi Canter',
+          engineCc: f.engineCc || '3908 CC',
+          boxCapacityM3: f.boxCapacityM3 || 9.0,
+          boxDimensions: f.boxDimensions || '3.1 x 1.7 x 1.7 m',
+          year: f.year || 2008,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2027-01-29',
+          taxDueDate: f.taxDueDate || '2027-08-03',
+          stnkExpiryDate: f.stnkExpiryDate || '2027-08-03'
         };
       }
 
-      // Migrate specific vehicle P 9677 VB (Mitsubishi Canter Engkel STD)
-      if (f.id === 'flt-04' || f.plateNumber === 'B 9301 TXR') {
+      // Migrate legacy Jakarta plate B 9301 TXR to P 9677 VB (Mitsubishi Canter Engkel STD)
+      if (f.plateNumber === 'B 9301 TXR') {
         return {
           ...f,
           id: 'flt-04',
           plateNumber: 'P 9677 VB',
-          vehicleType: 'Engkel STD',
-          initialCode: 'N4 / NS2',
-          brand: 'Mitsubishi Canter',
-          engineCc: '3298 CC',
-          boxCapacityM3: 9.0,
-          boxDimensions: '3.1 x 1.7 x 1.7 m',
-          year: 2005,
-          gpsImei: '',
-          lastMaintenance: '2026-11-27',
-          taxDueDate: '2027-05-17',
-          stnkExpiryDate: '2029-05-27'
+          vehicleType: f.vehicleType || 'Engkel STD',
+          initialCode: f.initialCode || 'N4 / NS2',
+          brand: f.brand || 'Mitsubishi Canter',
+          engineCc: f.engineCc || '3298 CC',
+          boxCapacityM3: f.boxCapacityM3 || 9.0,
+          boxDimensions: f.boxDimensions || '3.1 x 1.7 x 1.7 m',
+          year: f.year || 2005,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2026-11-27',
+          taxDueDate: f.taxDueDate || '2027-05-17',
+          stnkExpiryDate: f.stnkExpiryDate || '2029-05-27'
         };
       }
 
-      // Migrate specific vehicle P 8801 UV (Mitsubishi Canter Engkel STD)
-      if (f.id === 'flt-05' || f.plateNumber === 'B 9655 PQZ') {
+      // Migrate legacy Jakarta plate B 9655 PQZ to P 8801 UV (Mitsubishi Canter Engkel STD)
+      if (f.plateNumber === 'B 9655 PQZ') {
         return {
           ...f,
           id: 'flt-05',
           plateNumber: 'P 8801 UV',
-          vehicleType: 'Engkel STD',
-          initialCode: 'N5 / NS3',
-          brand: 'Mitsubishi Canter',
-          engineCc: '3908 CC',
-          boxCapacityM3: 9.0,
-          boxDimensions: '3.1 x 1.7 x 1.7 m',
-          year: 2008,
-          gpsImei: '',
-          lastMaintenance: '2026-08-11',
-          taxDueDate: '2026-10-07',
-          stnkExpiryDate: '2026-10-07'
+          vehicleType: f.vehicleType || 'Engkel STD',
+          initialCode: f.initialCode || 'N5 / NS3',
+          brand: f.brand || 'Mitsubishi Canter',
+          engineCc: f.engineCc || '3908 CC',
+          boxCapacityM3: f.boxCapacityM3 || 9.0,
+          boxDimensions: f.boxDimensions || '3.1 x 1.7 x 1.7 m',
+          year: f.year || 2008,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2026-08-11',
+          taxDueDate: f.taxDueDate || '2026-10-07',
+          stnkExpiryDate: f.stnkExpiryDate || '2026-10-07'
         };
       }
 
-      // Migrate specific vehicle P 8381 VE (Hino Engkel Long)
-      if (f.id === 'flt-06' || f.plateNumber === 'B 9044 MLK') {
+      // Migrate legacy Jakarta plate B 9044 MLK to P 8381 VE (Hino Engkel Long)
+      if (f.plateNumber === 'B 9044 MLK') {
         return {
           ...f,
           id: 'flt-06',
           plateNumber: 'P 8381 VE',
-          vehicleType: 'Engkel Long',
-          initialCode: 'N20 / NL1',
-          brand: 'Hino',
-          engineCc: '4009 CC',
-          boxCapacityM3: 14.0,
-          boxDimensions: '4.2 x 1.8 x 1.8 m',
-          year: 2013,
-          gpsImei: '',
-          lastMaintenance: '2026-12-01',
-          taxDueDate: '2027-01-16',
-          stnkExpiryDate: '2030-01-16'
+          vehicleType: f.vehicleType || 'Engkel Long',
+          initialCode: f.initialCode || 'N20 / NL1',
+          brand: f.brand || 'Hino',
+          engineCc: f.engineCc || '4009 CC',
+          boxCapacityM3: f.boxCapacityM3 || 14.0,
+          boxDimensions: f.boxDimensions || '4.2 x 1.8 x 1.8 m',
+          year: f.year || 2013,
+          gpsImei: f.gpsImei || '',
+          lastMaintenance: f.lastMaintenance || '2026-12-01',
+          taxDueDate: f.taxDueDate || '2027-01-16',
+          stnkExpiryDate: f.stnkExpiryDate || '2030-01-16'
         };
       }
 

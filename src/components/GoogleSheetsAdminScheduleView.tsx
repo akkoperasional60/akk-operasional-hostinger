@@ -2508,17 +2508,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const fallbackIso = `${selectedYear}-${defaultMonthPadded}-${defaultDayPadded}`;
 
     const stdArea = standardizeAreaName(area);
-    const isLuarKota = isLuarKotaArea(stdArea);
     const depTime = (departureTime || '07:30').trim();
     const retTime = (targetReturnTime || '17:00').trim();
 
-    const depIsoDate = departureDateIso || fallbackIso;
-    const retIsoDate = isLuarKota
-      ? (returnDateIso || (depTime > retTime ? addDaysToIso(depIsoDate, 1) : depIsoDate))
-      : depIsoDate;
+    const retIsoDate = returnDateIso || fallbackIso;
+    const depIsoDate = departureDateIso || retIsoDate;
 
-    // Jika rute luar kota / kepulangan besok, tanggal di kalender mengikuti Tanggal Kepulangan (retIsoDate)
-    const effectiveCalendarIso = (isLuarKota || retIsoDate > depIsoDate) ? retIsoDate : depIsoDate;
+    if (depIsoDate > retIsoDate || (depIsoDate === retIsoDate && depTime > retTime)) {
+      alert('Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.');
+      return;
+    }
+
+    // Penempatan jadwal di kalender selalu mengikuti Tanggal Kepulangan (sesuai Tanggal Kirim)
+    const effectiveCalendarIso = retIsoDate;
     const calParts = effectiveCalendarIso.split('-').map(Number);
     const targetYr = calParts[0] || selectedYear;
     const targetMo = (calParts[1] ? calParts[1] - 1 : effectiveMonth);
@@ -5338,74 +5340,78 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 accentColor="blue"
               />
 
-              {isLuarKotaArea(editingTripModal.area) ? (
-                <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/25 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>Jadwal Luar Kota (Tanggal &amp; Jam Keberangkatan / Kepulangan)</span>
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <ModernDatePicker
-                        label="Tanggal Keberangkatan *"
-                        value={editingTripModal.departureDateIso}
-                        onChange={(nextDep) => {
-                          const nextRet = editingTripModal.returnDateIso < nextDep ? nextDep : editingTripModal.returnDateIso;
-                          setEditingTripModal({ ...editingTripModal, departureDateIso: nextDep, returnDateIso: nextRet });
-                        }}
-                        accentColor="blue"
-                      />
-                      <ModernTimePicker
-                        label="Jam Keberangkatan *"
-                        value={editingTripModal.departureTime}
-                        onChange={(nextTime) => {
-                          const autoNextDay = nextTime > editingTripModal.targetReturnTime && editingTripModal.returnDateIso === editingTripModal.departureDateIso
-                            ? addDaysToIso(editingTripModal.departureDateIso, 1)
-                            : editingTripModal.returnDateIso;
-                          setEditingTripModal({ ...editingTripModal, departureTime: nextTime, returnDateIso: autoNextDay });
-                        }}
-                        accentColor="blue"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <ModernDatePicker
-                        label="Tanggal Kepulangan *"
-                        value={editingTripModal.returnDateIso}
-                        onChange={(nextRet) => setEditingTripModal({ ...editingTripModal, returnDateIso: nextRet })}
-                        accentColor="blue"
-                      />
-                      <ModernTimePicker
-                        label="Target Jam Kepulangan *"
-                        value={editingTripModal.targetReturnTime}
-                        onChange={(nextRetTime) => setEditingTripModal({ ...editingTripModal, targetReturnTime: nextRetTime })}
-                        accentColor="blue"
-                      />
-                    </div>
-                  </div>
-                  {editingTripModal.returnDateIso !== editingTripModal.departureDateIso && (
-                    <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-300 bg-blue-500/10 px-2.5 py-1.5 rounded-lg border border-blue-500/20">
-                      📌 Keberangkatan malam / lintas hari: jadwal kalender mengikuti Tanggal Kepulangan ({editingTripModal.returnDateIso}).
-                    </div>
-                  )}
+              {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan (Kepulangan Sesuai Tanggal Kirim) */}
+              <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/25 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                    Kepulangan = Sesuai Tanggal Kirim
+                  </span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <ModernTimePicker
-                    label="Jam Keberangkatan *"
-                    value={editingTripModal.departureTime}
-                    onChange={(nextTime) => setEditingTripModal({ ...editingTripModal, departureTime: nextTime })}
-                    accentColor="blue"
-                  />
-                  <ModernTimePicker
-                    label="Target Jam Kepulangan *"
-                    value={editingTripModal.targetReturnTime}
-                    onChange={(nextRetTime) => setEditingTripModal({ ...editingTripModal, targetReturnTime: nextRetTime })}
-                    accentColor="blue"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Keberangkatan */}
+                  <div className="space-y-2.5">
+                    <ModernDatePicker
+                      label="Tanggal Keberangkatan *"
+                      value={editingTripModal.departureDateIso || editingTripModal.returnDateIso}
+                      onChange={(nextDep) => {
+                        setEditingTripModal({
+                          ...editingTripModal,
+                          departureDateIso: nextDep
+                        });
+                      }}
+                      accentColor="blue"
+                    />
+                    <ModernTimePicker
+                      label="Jam Keberangkatan *"
+                      value={editingTripModal.departureTime}
+                      onChange={(nextTime) => {
+                        setEditingTripModal({
+                          ...editingTripModal,
+                          departureTime: nextTime
+                        });
+                      }}
+                      accentColor="blue"
+                    />
+                  </div>
+
+                  {/* Kepulangan (Sesuai Tanggal Kirim) */}
+                  <div className="space-y-2.5">
+                    <ModernDatePicker
+                      label="Tanggal Kepulangan *"
+                      badgeText="Sesuai Tanggal Kirim"
+                      value={editingTripModal.returnDateIso}
+                      onChange={(nextRet) => {
+                        setEditingTripModal({
+                          ...editingTripModal,
+                          returnDateIso: nextRet
+                        });
+                      }}
+                      accentColor="blue"
+                    />
+                    <ModernTimePicker
+                      label="Target Jam Kepulangan *"
+                      value={editingTripModal.targetReturnTime}
+                      onChange={(nextRetTime) => {
+                        setEditingTripModal({
+                          ...editingTripModal,
+                          targetReturnTime: nextRetTime
+                        });
+                      }}
+                      accentColor="blue"
+                    />
+                  </div>
                 </div>
-              )}
+
+                {editingTripModal.departureDateIso && editingTripModal.returnDateIso && editingTripModal.departureDateIso !== editingTripModal.returnDateIso && (
+                  <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-300 bg-blue-500/10 px-2.5 py-1.5 rounded-lg border border-blue-500/20">
+                    📌 Berangkat: {editingTripModal.departureDateIso} ({editingTripModal.departureTime} WIB) • Pulang: {editingTripModal.returnDateIso} ({editingTripModal.targetReturnTime} WIB). Jadwal penugasan kalender mengikuti Tanggal Kirim / Kepulangan.
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
@@ -5489,18 +5495,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <ModernDatePicker
                     label="Tanggal Kirim *"
                     badgeText="Otomatis Hari Ini"
-                    value={isLuarKotaArea(manualScheduleForm.area) ? (manualScheduleForm.returnDateIso || manualScheduleForm.dateIso) : manualScheduleForm.dateIso}
+                    value={manualScheduleForm.dateIso}
                     onChange={(nextIso) => {
-                      const isNightOrCrossDay = isLuarKotaArea(manualScheduleForm.area) && (
-                        manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ||
-                        manualScheduleForm.returnDateIso > manualScheduleForm.departureDateIso
-                      );
-                      const nextDep = isNightOrCrossDay ? addDaysToIso(nextIso, -1) : nextIso;
                       setManualScheduleForm({
                         ...manualScheduleForm,
                         dateIso: nextIso,
                         returnDateIso: nextIso,
-                        departureDateIso: nextDep
+                        departureDateIso: (!manualScheduleForm.departureDateIso || manualScheduleForm.departureDateIso === manualScheduleForm.dateIso)
+                          ? nextIso
+                          : manualScheduleForm.departureDateIso
                       });
                     }}
                     accentColor="emerald"
@@ -5518,101 +5521,79 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
               </div>
 
-              {/* Jam Keberangkatan & Target Jam Kepulangan (Khusus Luar Kota ditambah Tanggal Keberangkatan & Tanggal Kepulangan) */}
-              {isLuarKotaArea(manualScheduleForm.area) ? (
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <div className="space-y-2.5">
-                      <ModernDatePicker
-                        label="Tanggal Keberangkatan *"
-                        value={manualScheduleForm.departureDateIso}
-                        onChange={(nextDep) => {
-                          const isNight = manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime;
-                          const nextRet = isNight
-                            ? addDaysToIso(nextDep, 1)
-                            : (manualScheduleForm.returnDateIso < nextDep ? nextDep : manualScheduleForm.returnDateIso);
-                          setManualScheduleForm({
-                            ...manualScheduleForm,
-                            dateIso: nextRet,
-                            departureDateIso: nextDep,
-                            returnDateIso: nextRet
-                          });
-                        }}
-                        accentColor="emerald"
-                      />
-                      <ModernTimePicker
-                        label="Jam Keberangkatan *"
-                        value={manualScheduleForm.departureTime}
-                        onChange={(nextTime) => {
-                          const nextRet = nextTime > manualScheduleForm.targetReturnTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
-                            ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
-                            : manualScheduleForm.returnDateIso;
-                          setManualScheduleForm({
-                            ...manualScheduleForm,
-                            departureTime: nextTime,
-                            returnDateIso: nextRet,
-                            dateIso: nextRet
-                          });
-                        }}
-                        accentColor="emerald"
-                      />
-                    </div>
-
-                    <div className="space-y-2.5">
-                      <ModernDatePicker
-                        label="Tanggal Kepulangan *"
-                        value={manualScheduleForm.returnDateIso}
-                        onChange={(nextRet) => {
-                          const nextDep = manualScheduleForm.departureDateIso > nextRet ? nextRet : manualScheduleForm.departureDateIso;
-                          setManualScheduleForm({
-                            ...manualScheduleForm,
-                            returnDateIso: nextRet,
-                            dateIso: nextRet,
-                            departureDateIso: nextDep
-                          });
-                        }}
-                        accentColor="emerald"
-                      />
-                      <ModernTimePicker
-                        label="Target Jam Kepulangan *"
-                        value={manualScheduleForm.targetReturnTime}
-                        onChange={(nextRetTime) => {
-                          const nextRet = manualScheduleForm.departureTime > nextRetTime && manualScheduleForm.returnDateIso === manualScheduleForm.departureDateIso
-                            ? addDaysToIso(manualScheduleForm.departureDateIso, 1)
-                            : manualScheduleForm.returnDateIso;
-                          setManualScheduleForm({
-                            ...manualScheduleForm,
-                            targetReturnTime: nextRetTime,
-                            returnDateIso: nextRet,
-                            dateIso: nextRet
-                          });
-                        }}
-                        accentColor="emerald"
-                      />
-                    </div>
+              {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan (Kepulangan Sesuai Tanggal Kirim) */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                    Kepulangan = Sesuai Tanggal Kirim
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Keberangkatan */}
+                  <div className="space-y-2.5">
+                    <ModernDatePicker
+                      label="Tanggal Keberangkatan *"
+                      value={manualScheduleForm.departureDateIso || manualScheduleForm.dateIso}
+                      onChange={(nextDep) => {
+                        setManualScheduleForm({
+                          ...manualScheduleForm,
+                          departureDateIso: nextDep
+                        });
+                      }}
+                      accentColor="emerald"
+                    />
+                    <ModernTimePicker
+                      label="Jam Keberangkatan *"
+                      value={manualScheduleForm.departureTime}
+                      onChange={(nextTime) => {
+                        setManualScheduleForm({
+                          ...manualScheduleForm,
+                          departureTime: nextTime
+                        });
+                      }}
+                      accentColor="emerald"
+                    />
                   </div>
-                  {manualScheduleForm.returnDateIso !== manualScheduleForm.departureDateIso && (
-                    <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-                      📌 Keberangkatan malam ({manualScheduleForm.departureDateIso}) &amp; kepulangan besok ({manualScheduleForm.returnDateIso}): Tanggal Kirim otomatis mengikuti Tanggal Kepulangan ({manualScheduleForm.returnDateIso}).
-                    </div>
-                  )}
+
+                  {/* Kepulangan (Sesuai Tanggal Kirim) */}
+                  <div className="space-y-2.5">
+                    <ModernDatePicker
+                      label="Tanggal Kepulangan *"
+                      badgeText="Sesuai Tanggal Kirim"
+                      value={manualScheduleForm.returnDateIso || manualScheduleForm.dateIso}
+                      onChange={(nextRet) => {
+                        setManualScheduleForm({
+                          ...manualScheduleForm,
+                          returnDateIso: nextRet,
+                          dateIso: nextRet
+                        });
+                      }}
+                      accentColor="emerald"
+                    />
+                    <ModernTimePicker
+                      label="Target Jam Kepulangan *"
+                      value={manualScheduleForm.targetReturnTime}
+                      onChange={(nextRetTime) => {
+                        setManualScheduleForm({
+                          ...manualScheduleForm,
+                          targetReturnTime: nextRetTime
+                        });
+                      }}
+                      accentColor="emerald"
+                    />
+                  </div>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <ModernTimePicker
-                    label="Jam Keberangkatan *"
-                    value={manualScheduleForm.departureTime}
-                    onChange={(nextTime) => setManualScheduleForm({ ...manualScheduleForm, departureTime: nextTime })}
-                    accentColor="emerald"
-                  />
-                  <ModernTimePicker
-                    label="Target Jam Kepulangan *"
-                    value={manualScheduleForm.targetReturnTime}
-                    onChange={(nextRetTime) => setManualScheduleForm({ ...manualScheduleForm, targetReturnTime: nextRetTime })}
-                    accentColor="emerald"
-                  />
-                </div>
-              )}
+
+                {manualScheduleForm.departureDateIso && manualScheduleForm.returnDateIso && manualScheduleForm.departureDateIso !== manualScheduleForm.returnDateIso && (
+                  <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+                    📌 Berangkat: {manualScheduleForm.departureDateIso} ({manualScheduleForm.departureTime} WIB) • Pulang: {manualScheduleForm.returnDateIso} ({manualScheduleForm.targetReturnTime} WIB). Jadwal penugasan kalender mengikuti Tanggal Kirim / Kepulangan.
+                  </div>
+                )}
+              </div>
 
               <div className="space-y-3">
                 <CrewCustomSelectDropdown
@@ -5867,12 +5848,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     return;
                   }
                   const stdArea = standardizeAreaName(manualScheduleForm.area.trim());
-                  const isLuar = isLuarKotaArea(stdArea);
-                  const depIso = isLuar ? (manualScheduleForm.departureDateIso || manualScheduleForm.dateIso) : manualScheduleForm.dateIso;
-                  const retIso = isLuar
-                    ? (manualScheduleForm.returnDateIso || (manualScheduleForm.departureTime > manualScheduleForm.targetReturnTime ? addDaysToIso(depIso, 1) : depIso))
-                    : depIso;
-                  const effectiveDateStr = isLuar ? retIso : depIso;
+                  const retIso = manualScheduleForm.returnDateIso || manualScheduleForm.dateIso;
+                  const depIso = manualScheduleForm.departureDateIso || retIso;
+                  const depTime = manualScheduleForm.departureTime || '07:30';
+                  const retTime = manualScheduleForm.targetReturnTime || '17:00';
+                  if (depIso > retIso || (depIso === retIso && depTime > retTime)) {
+                    alert('Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.');
+                    return;
+                  }
+                  const effectiveDateStr = retIso;
 
                   const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string } = {
                     tempId: `man-direct-${Date.now()}`,

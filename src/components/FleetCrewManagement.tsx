@@ -50,6 +50,15 @@ import { FuelEfficiencyManagement } from './FuelEfficiencyManagement';
 import { SparePartManagement } from './SparePartManagement';
 import { FleetFormCenter } from './FleetFormCenter';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import {
+  updateFleetInSupabase,
+  updateCrewInSupabase,
+  createFleetInSupabase,
+  createCrewInSupabase,
+  deleteFleetInSupabase,
+  deleteCrewInSupabase,
+  syncFleetsAndCrewsWithSupabase
+} from '../services/supabaseService';
 
 // Helper for default box cubic capacity (m3 / CBM) and dimensions
 export const getDefaultBoxCapacityM3 = (vehicleType: VehicleType | string, brand?: string): number => {
@@ -248,7 +257,18 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
   // Supabase sync feedback & loading state
   const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
+  const [isSavingFleet, setIsSavingFleet] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const reloadFleetCrewFromMySql = async () => {
+    try {
+      await syncFleetsAndCrewsWithSupabase();
+      setFleets(logisticsStore.getFleets());
+      setCrews(logisticsStore.getCrews());
+    } catch (err) {
+      console.warn('[Hostinger MySQL Fleet/Crew Reload]', err);
+    }
+  };
 
   // Form Validation Error States
   const [fleetFormErrors, setFleetFormErrors] = useState<Record<string, string>>({});
@@ -393,11 +413,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
   };
 
-  const handleCreateFleet = (e: React.FormEvent) => {
+  const handleCreateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
     const validation = validateFleet(newFleet, fleets, false);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang masih salah.';
+      setSyncFeedback({
+        type: 'error',
+        message: firstError
+      });
       return;
     }
     setFleetFormErrors({});
@@ -408,6 +433,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     });
     if (created) {
       branchStore.setFleetBranchId(created.id, newFleetBranchId);
+      const remoteFleetCreate = await createFleetInSupabase(created);
+      if (!remoteFleetCreate.success) {
+        await reloadFleetCrewFromMySql();
+        setSyncFeedback({
+          type: 'error',
+          message: `Armada ${created.plateNumber} belum tersimpan ke Hostinger MySQL: ${remoteFleetCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+        });
+        setTimeout(() => setSyncFeedback(null), 7000);
+        return;
+      }
     }
     if (newFleetAssignedCrewId && created) {
       logisticsStore.updateCrew(newFleetAssignedCrewId, { currentFleetId: created.id });
@@ -433,16 +468,21 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data armada ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil disimpan.`
+      message: `Armada baru ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
     });
-    setTimeout(() => setSyncFeedback(null), 4000);
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
-  const handleCreateCrew = (e: React.FormEvent) => {
+  const handleCreateCrew = async (e: React.FormEvent) => {
     e.preventDefault();
     const validation = validateCrew(newCrew, crews, false);
     if (!validation.isValid) {
       setCrewFormErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data kru yang masih salah.';
+      setSyncFeedback({
+        type: 'error',
+        message: firstError
+      });
       return;
     }
     setCrewFormErrors({});
@@ -455,6 +495,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     });
     if (created) {
       branchStore.setCrewBranchId(created.id, newCrewBranchId);
+      const remoteCrewCreate = await createCrewInSupabase(created);
+      if (!remoteCrewCreate.success) {
+        await reloadFleetCrewFromMySql();
+        setSyncFeedback({
+          type: 'error',
+          message: `Kru ${created.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+        });
+        setTimeout(() => setSyncFeedback(null), 7000);
+        return;
+      }
     }
     setIsAddCrewOpen(false);
     setNewCrew({
@@ -468,9 +518,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${created.name} (${created.role}) berhasil disimpan.`
+      message: `Data kru ${created.name} (${created.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
     });
-    setTimeout(() => setSyncFeedback(null), 4000);
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
   // Fleet Edit & Delete Handlers
@@ -496,13 +546,18 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setIsEditFleetOpen(true);
   };
 
-  const handleUpdateFleet = (e: React.FormEvent) => {
+  const handleUpdateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingFleet) return;
 
     const validation = validateFleet(editingFleet, fleets, true, editingFleet.id);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang belum lengkap.';
+      setSyncFeedback({
+        type: 'error',
+        message: firstError
+      });
       return;
     }
     setFleetFormErrors({});
@@ -511,36 +566,55 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const grossM3 = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
-    // 1. Update fleet record including driverId and inner box dimensions
-    const updatedFleetData: Fleet = {
-      ...editingFleet,
-      boxInnerMultiplierPercent: multiplier,
-      boxInnerCapacityM3: innerM3,
-      driverId: editingAssignedCrewId || undefined
-    };
-    logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
-    branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
+    setIsSavingFleet(true);
+    try {
+      // 1. Update fleet record including driverId and inner box dimensions
+      const updatedFleetData: Fleet = {
+        ...editingFleet,
+        boxInnerMultiplierPercent: multiplier,
+        boxInnerCapacityM3: innerM3,
+        driverId: editingAssignedCrewId || undefined
+      };
+      logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
+      branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
 
-    // 2. Synchronize crew currentFleetId
-    const allCrews = logisticsStore.getCrews();
-    allCrews.forEach(c => {
-      if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
-        logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
-      } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
-        logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
+      // 2. Synchronize crew currentFleetId
+      const allCrews = logisticsStore.getCrews();
+      allCrews.forEach(c => {
+        if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
+        } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
+        }
+      });
+
+      // 3. Persist directly to Hostinger MySQL backend (/api/fleets/:id)
+      const remoteFleetUpdate = await updateFleetInSupabase(editingFleet.id, updatedFleetData);
+      if (!remoteFleetUpdate.success) {
+        throw new Error(remoteFleetUpdate.error || 'Gagal menyimpan perubahan armada ke Hostinger MySQL');
       }
-    });
 
-    setFleets(logisticsStore.getFleets());
-    setCrews(logisticsStore.getCrews());
-    setIsEditFleetOpen(false);
-    setEditingFleet(null);
-    setEditingAssignedCrewId('');
-    setSyncFeedback({
-      type: 'success',
-      message: `Data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan.`
-    });
-    setTimeout(() => setSyncFeedback(null), 4000);
+      setFleets(logisticsStore.getFleets());
+      setCrews(logisticsStore.getCrews());
+      setIsEditFleetOpen(false);
+      setEditingFleet(null);
+      setEditingAssignedCrewId('');
+      setSyncFeedback({
+        type: 'success',
+        message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      });
+      setTimeout(() => setSyncFeedback(null), 6000);
+    } catch (err: any) {
+      console.warn('[Hostinger MySQL Fleet Sync]', err);
+      await reloadFleetCrewFromMySql();
+      setSyncFeedback({
+        type: 'error',
+        message: `Perubahan armada belum tersimpan ke Hostinger MySQL: ${err?.message || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+    } finally {
+      setIsSavingFleet(false);
+    }
   };
 
   const handleDeleteFleetClick = (fleet: Fleet) => {
@@ -555,62 +629,105 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setIsEditCrewOpen(true);
   };
 
-  const handleUpdateCrew = (e: React.FormEvent) => {
+  const handleUpdateCrew = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCrew) return;
 
     const validation = validateCrew(editingCrew, crews, true, editingCrew.id);
     if (!validation.isValid) {
       setCrewFormErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data kru yang belum lengkap.';
+      setSyncFeedback({
+        type: 'error',
+        message: firstError
+      });
       return;
     }
     setCrewFormErrors({});
 
-    logisticsStore.updateCrew(editingCrew.id, {
+    const updatedCrewData: Partial<Crew> = {
       ...editingCrew,
       phone: '-',
       licenseNumber: '-',
       licenseType: '-'
-    });
+    };
+
+    logisticsStore.updateCrew(editingCrew.id, updatedCrewData);
     branchStore.setCrewBranchId(editingCrew.id, editingCrewBranchId);
+
+    const remoteCrewUpdate = await updateCrewInSupabase(editingCrew.id, updatedCrewData);
+    if (!remoteCrewUpdate.success) {
+      await reloadFleetCrewFromMySql();
+      setSyncFeedback({
+        type: 'error',
+        message: `Perubahan kru ${editingCrew.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewUpdate.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
+    }
+
     setIsEditCrewOpen(false);
     setEditingCrew(null);
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${editingCrew.name} berhasil disimpan.`
+      message: `Data kru ${editingCrew.name} (${editingCrew.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
     });
-    setTimeout(() => setSyncFeedback(null), 4000);
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
   const handleDeleteCrewClick = (crew: Crew) => {
     setCrewToDelete(crew);
   };
 
-  const handleConfirmDeleteCrew = () => {
+  const handleConfirmDeleteCrew = async () => {
     if (!crewToDelete) return;
     const name = crewToDelete.name;
-    logisticsStore.deleteCrew(crewToDelete.id);
+    const id = crewToDelete.id;
+    logisticsStore.deleteCrew(id);
+    const remoteCrewDelete = await deleteCrewInSupabase(id);
+    if (!remoteCrewDelete.success) {
+      await reloadFleetCrewFromMySql();
+      setCrewToDelete(null);
+      setSyncFeedback({
+        type: 'error',
+        message: `Kru ${name} belum terhapus dari Hostinger MySQL: ${remoteCrewDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
+    }
     setCrews(logisticsStore.getCrews());
     setCrewToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${name} berhasil dihapus.`
+      message: `Data kru ${name} berhasil dihapus dari database Hostinger MySQL.`
     });
-    setTimeout(() => setSyncFeedback(null), 4000);
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
-  const handleConfirmDeleteFleet = () => {
+  const handleConfirmDeleteFleet = async () => {
     if (!fleetToDelete) return;
     const plate = fleetToDelete.plateNumber;
-    logisticsStore.deleteFleet(fleetToDelete.id);
+    const id = fleetToDelete.id;
+    logisticsStore.deleteFleet(id);
+    const remoteFleetDelete = await deleteFleetInSupabase(id, plate);
+    if (!remoteFleetDelete.success) {
+      await reloadFleetCrewFromMySql();
+      setFleetToDelete(null);
+      setSyncFeedback({
+        type: 'error',
+        message: `Armada ${plate} belum terhapus dari Hostinger MySQL: ${remoteFleetDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
+    }
     setFleets(logisticsStore.getFleets());
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data armada ${plate} berhasil dihapus.`
+      message: `Data armada ${plate} berhasil dihapus dari database Hostinger MySQL.`
     });
-    setTimeout(() => setSyncFeedback(null), 4000);
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
@@ -1077,43 +1194,52 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )}
       </div>
 
-      {/* Pop-Up Modal Notifikasi "Data Berhasil Disimpan" */}
+      {/* Pop-Up Modal Notifikasi "Data Berhasil Disimpan ke Hostinger MySQL" */}
       {syncFeedback && (
         <div
-          className="fixed inset-0 z-[70] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
           onClick={() => setSyncFeedback(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3 animate-in zoom-in-95 duration-150"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3.5 animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             <div
-              className={`w-12 h-12 rounded-2xl mx-auto flex items-center justify-center border ${
+              className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center border shadow-xs ${
                 syncFeedback.type === 'success'
                   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
                   : 'bg-rose-500/15 border-rose-500/30 text-rose-500'
               }`}
             >
               {syncFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-6 h-6" />
+                <CheckCircle2 className="w-7 h-7" />
               ) : (
-                <AlertCircle className="w-6 h-6" />
+                <AlertCircle className="w-7 h-7" />
               )}
             </div>
+
+            {syncFeedback.type === 'success' && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                <span>✓ Tersimpan di Hostinger MySQL</span>
+              </div>
+            )}
+
             <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                {syncFeedback.type === 'success' ? 'Data Berhasil Disimpan' : 'Pemberitahuan Sistem'}
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                {syncFeedback.type === 'success' ? 'Data Berhasil Disimpan ke Hostinger MySQL' : 'Pemberitahuan Sistem'}
               </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+              <div className="bg-slate-100 dark:bg-slate-800/80 rounded-xl p-3 border border-slate-200 dark:border-slate-700/60 text-xs text-slate-700 dark:text-slate-200 mt-2 leading-relaxed text-left">
                 {syncFeedback.message}
-              </p>
+              </div>
             </div>
+
             <div className="pt-1">
               <button
                 type="button"
                 autoFocus
                 onClick={() => setSyncFeedback(null)}
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs transition cursor-pointer shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-400 active:scale-98"
               >
                 Oke, Mengerti
               </button>
@@ -3008,27 +3134,40 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
               {/* Sticky Footer Simpan Perubahan */}
               <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-between gap-3 shadow-lg z-10">
-                <div className="text-[11px] text-slate-400 flex items-center gap-1.5 hidden sm:flex">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Perubahan dimensi &amp; KIR langsung tersimpan</span>
+                <div className="text-[11px] text-slate-300 flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px]">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    Tersinkron Permanen ke Hostinger MySQL
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 ml-auto">
                   <button
                     type="button"
+                    disabled={isSavingFleet}
                     onClick={() => {
                       setIsEditFleetOpen(false);
                       setEditingFleet(null);
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs cursor-pointer transition"
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs cursor-pointer transition disabled:opacity-50"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer active:scale-95 transition"
+                    disabled={isSavingFleet}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-blue-500 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer active:scale-95 transition disabled:opacity-50"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>Simpan Perubahan Armada</span>
+                    {isSavingFleet ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                        <span>Menyimpan ke Hostinger...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Perubahan Armada</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
