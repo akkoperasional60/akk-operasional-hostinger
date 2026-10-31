@@ -136,6 +136,11 @@ export interface Schedule {
   departureDate: string;
   estimatedArrival: string;
   actualArrival?: string;
+  actualDeparture?: string;
+  deliveryDate?: string;
+  departureTime?: string;
+  returnDate?: string;
+  targetReturnTime?: string;
   cargoDescription: string;
   cargoWeightTon: number;
   isInterIsland: boolean;
@@ -175,6 +180,9 @@ export interface Schedule {
     leaveType: string;
     notes?: string;
   };
+  isChecklistBypassed?: boolean;
+  checklistBypassedBy?: string;
+  checklistBypassedAt?: string;
 }
 
 export interface CrewDeliveryHistory {

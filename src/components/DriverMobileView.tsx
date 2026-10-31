@@ -59,7 +59,8 @@ import {
   Mail,
   EyeOff,
   Moon,
-  Bell
+  Bell,
+  Zap
 } from 'lucide-react';
 import {
   Schedule,
@@ -861,6 +862,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     delivery: null
   });
 
+  // ⚡ Tembus Jadwal untuk Disimpan Tanpa Isi Checklist (Khusus Super Admin untuk Rekam Riwayat)
+  const [bypassChecklistModal, setBypassChecklistModal] = useState<{
+    isOpen: boolean;
+    delivery: Schedule | null;
+    customNote: string;
+    postTripFleetStatus: 'available' | 'maintenance';
+  }>({
+    isOpen: false,
+    delivery: null,
+    customNote: 'Jadwal masa lalu tersimpan ke histori (Bypass Checklist Super Admin)',
+    postTripFleetStatus: 'available'
+  });
+
   const [checklistInspectionType, setChecklistInspectionType] = useState<'pre_trip' | 'post_trip'>('pre_trip');
   const [dateFilterStart, setDateFilterStart] = useState<string>('');
   const [dateFilterEnd, setDateFilterEnd] = useState<string>('');
@@ -1182,6 +1196,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       ['super_admin', 'spv_logistik', 'admin'].includes(r1) ||
       ['super_admin', 'spv_logistik', 'admin'].includes(r2)
     );
+  }, [currentUser?.role, syncedUserRoleInfo.rawRole]);
+
+  // Cek apakah akun saat ini murni Super Admin (khusus hak akses menembus jadwal tanpa isi checklist)
+  const isSuperAdminUser = useMemo(() => {
+    const r1 = String(currentUser?.role || '').toLowerCase();
+    const r2 = String(syncedUserRoleInfo.rawRole || '').toLowerCase();
+    const r3 = String(logisticsStore.getCurrentUser()?.role || '').toLowerCase();
+    return r1 === 'super_admin' || r2 === 'super_admin' || r3 === 'super_admin';
   }, [currentUser?.role, syncedUserRoleInfo.rawRole]);
 
   // Helper pencocokan nama kru secara akurat berdasarkan token kata (mencegah 'Budi' tercampur dengan 'Budiono', namun 'Rizal' cocok dengan 'Saifur Rizal')
@@ -2169,6 +2191,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Persiapan Keluar: Hanya aktif setelah Check-In -> Pemilihan Armada -> Pengisian Checklist, lalu otomatis mengarah ke SJ Keluar & Gate-Out
   const handlePersiapanKeluar = (delivery: Schedule) => {
     if (!activeShift) {
+      if (isSuperAdminUser) {
+        handleOpenBypassChecklistModal(delivery);
+        return;
+      }
       addNotification(
         'sla_warning',
         'Check-In Shift Terlebih Dahulu',
@@ -2403,6 +2429,124 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
     setDeleteConfirmModal({ isOpen: false, delivery: null });
     await loadDeliveries(true);
+  };
+
+  // ⚡ Tembus Jadwal Pengiriman (Simpan ke Riwayat Selesai Tanpa Checklist) - Khusus Super Admin
+  const handleOpenBypassChecklistModal = (delivery: Schedule) => {
+    if (!isSuperAdminUser) {
+      addNotification('delivery', 'Akses Ditolak', 'Hanya akun Super Admin yang memiliki hak otorisasi menembus jadwal tanpa checklist.');
+      return;
+    }
+    const areaName = delivery.areaName || delivery.store?.storeName || 'Rute Kiriman';
+    setBypassChecklistModal({
+      isOpen: true,
+      delivery,
+      customNote: `Jadwal ${areaName} tersimpan langsung ke riwayat selesai via Otorisasi Super Admin`,
+      postTripFleetStatus: 'available'
+    });
+  };
+
+  const handleConfirmBypassChecklist = async () => {
+    if (!bypassChecklistModal.delivery) return;
+    if (!isSuperAdminUser) {
+      addNotification('delivery', 'Akses Ditolak', 'Hanya akun Super Admin yang memiliki hak otorisasi menembus jadwal tanpa checklist.');
+      return;
+    }
+
+    const targetDelivery = bypassChecklistModal.delivery;
+    const customNote = bypassChecklistModal.customNote.trim() || 'Arsip Riwayat Pengiriman Selesai';
+    const fleetStatusChoice = bypassChecklistModal.postTripFleetStatus || 'available';
+
+    try {
+      const response = await fetch(`/api/schedules/${encodeURIComponent(targetDelivery.id)}/bypass-checklist`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          note: customNote,
+          postTripFleetStatus: fleetStatusChoice
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `HTTP ${response.status}`);
+      }
+
+      const updatedSchedule: Schedule = payload.schedule || {
+        ...targetDelivery,
+        status: 'delivered',
+        isChecklistBypassed: true
+      };
+      const adminName = updatedSchedule.checklistBypassedBy || currentUser?.fullName || 'Super Admin';
+      const targetFleet = assignedFleet || targetDelivery.fleet || fleets.find(f => f.id === targetDelivery.fleetId);
+      const depIso = updatedSchedule.actualDeparture || updatedSchedule.departureDate || new Date().toISOString();
+      const arrIso = updatedSchedule.actualArrival || updatedSchedule.estimatedArrival || new Date().toISOString();
+
+      // Refresh source-of-truth data first; fleet/crew counters and schedule status
+      // are written atomically by the authenticated Hostinger endpoint.
+      await logisticsStore.hydrateOperationalDataFromHostinger();
+
+      updateSharedScheduleFlow([targetDelivery.id], {
+        fleetId: targetFleet?.id || targetDelivery.fleetId,
+        plateNumber: targetFleet?.plateNumber || targetDelivery.fleet?.plateNumber || '-',
+        vehicleType: targetFleet?.vehicleType || targetDelivery.fleet?.vehicleType || '-',
+        checklistCompleted: true,
+        checklistCompletedBy: `Super Admin (${adminName})`,
+        preparedForGateOut: true,
+        gateOutConfirmed: true,
+        gateOutTimestamp: depIso,
+        gateOutBy: adminName,
+        argoArrivalTimestamp: arrIso,
+        argoArrivalBy: adminName
+      });
+
+      const wb = driverWaybillService.getWaybillForSchedule({
+        ...updatedSchedule,
+        fleet: targetFleet || updatedSchedule.fleet,
+        fleetId: targetFleet?.id || updatedSchedule.fleetId
+      });
+      driverWaybillService.updateWaybillStatus(wb.id, 'delivered', customNote);
+
+      logisticsStore.addScheduleChangeLog({
+        actionType: 'manual_edit',
+        fileName: `Bypass Checklist (${targetDelivery.areaName || targetDelivery.store?.storeName || 'Rute'})`,
+        userName: adminName,
+        userRole: 'Super Admin',
+        summary: `Tembus jadwal ${targetDelivery.areaName || 'Rute'} tanpa checklist`,
+        changes: [
+          `Jadwal ${targetDelivery.areaName || 'Rute'} berhasil ditembus dan disimpan ke riwayat pengiriman (Selesai) tanpa checklist oleh Super Admin.`
+        ]
+      });
+
+      driverReportService.addReport({
+        driverId: targetDelivery.crewId || selectedDriverId,
+        driverName: targetDelivery.crew?.name || portalDisplayName,
+        userRole: 'Super Admin',
+        helperName: targetDelivery.crewHelper?.name,
+        plateNumber: targetFleet?.plateNumber || '-',
+        category: 'akhir_kiriman',
+        areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Selesai',
+        deliveryId: targetDelivery.id,
+        notes: `[Bypass Checklist Super Admin] ${customNote}`,
+      });
+
+      setBypassChecklistModal({ isOpen: false, delivery: null, customNote: '', postTripFleetStatus: 'available' });
+      setWaybillRefreshTick(t => t + 1);
+      await loadDeliveries(true);
+
+      addNotification(
+        'delivery',
+        'Jadwal Berhasil Ditembus & Disimpan',
+        `Jadwal ${targetDelivery.areaName || targetDelivery.store?.storeName || 'Pengiriman'} berhasil disimpan langsung ke riwayat (Selesai) tanpa checklist.`
+      );
+    } catch (err: any) {
+      console.warn('[Bypass Checklist Hostinger]', err);
+      addNotification(
+        'delivery',
+        'Gagal Menembus Jadwal',
+        err?.message || 'Perubahan belum tersimpan ke Hostinger MySQL.'
+      );
+    }
   };
 
   // Photo captured callback from DriverPodCameraModal
@@ -3957,18 +4101,32 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   </div>
                                 </>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handlePersiapanKeluar(delivery)}
-                                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-                                >
-                                  <ClipboardCheck className="w-4 h-4" />
-                                  <span>
-                                    {!activeShift
-                                      ? 'Check-In Dulu Untuk Isi Checklist'
-                                      : 'Isi Checklist Armada (Pra-Jalan)'}
-                                  </span>
-                                </button>
+                                <div className="space-y-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePersiapanKeluar(delivery)}
+                                    className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                  >
+                                    <ClipboardCheck className="w-4 h-4" />
+                                    <span>
+                                      {!activeShift
+                                        ? (isSuperAdminUser ? 'Tembus / Isi Checklist (Super Admin)' : 'Check-In Dulu Untuk Isi Checklist')
+                                        : 'Isi Checklist Armada (Pra-Jalan)'}
+                                    </span>
+                                  </button>
+
+                                  {isSuperAdminUser && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenBypassChecklistModal(delivery)}
+                                      className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 border border-amber-500/40 text-amber-300 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
+                                      title="Khusus Akun Super Admin: Simpan langsung ke riwayat selesai tanpa harus isi checklist"
+                                    >
+                                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>⚡ Tembus Jadwal ke Selesai (Tanpa Checklist)</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
 
                               {activeTab !== 'active' && (
@@ -4090,6 +4248,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                     <span>Foto</span>
                                   </button>
                                 )}
+                                {delivery.isChecklistBypassed && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                    <Zap className="w-2.5 h-2.5 text-amber-400" />
+                                    Bypass Super Admin
+                                  </span>
+                                )}
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 border border-emerald-500/30">
                                   POD OK
                                 </span>
@@ -4098,21 +4262,34 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           </div>
                         )}
 
-                        {/* Fitur Hapus Jadwal (Tampil untuk Role SPV Logistik & Super Admin pada Semua Status Jadwal) */}
+                        {/* Fitur Otorisasi Jadwal (Tampil untuk Role SPV Logistik & Super Admin pada Semua Status Jadwal) */}
                         {canManageAllPortalSchedules && (
-                          <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-800/80 px-1">
+                          <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-800/80 px-1 gap-2 flex-wrap">
                             <span className="text-[10px] text-slate-400 font-semibold">
                               Otorisasi {syncedUserRoleInfo.roleLabel}:
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteConfirmModal({ isOpen: true, delivery })}
-                              className="text-[11px] font-bold text-rose-400 hover:text-white bg-rose-500/15 hover:bg-rose-600 border border-rose-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
-                              title="Hapus jadwal pengiriman ini (SPV Logistik & Super Admin)"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Hapus Jadwal</span>
-                            </button>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {isSuperAdminUser && delivery.status !== 'delivered' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenBypassChecklistModal(delivery)}
+                                  className="text-[11px] font-bold text-amber-300 hover:text-white bg-amber-500/20 hover:bg-amber-600 border border-amber-500/40 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
+                                  title="Tembus jadwal ini langsung berstatus Selesai (Disimpan ke Riwayat) tanpa perlu checklist armada (Khusus Super Admin)"
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Tembus Simpan (Tanpa Checklist)</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmModal({ isOpen: true, delivery })}
+                                className="text-[11px] font-bold text-rose-400 hover:text-white bg-rose-500/15 hover:bg-rose-600 border border-rose-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                                title="Hapus jadwal pengiriman ini (SPV Logistik & Super Admin)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Hapus Jadwal</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -5218,6 +5395,131 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Ya, Hapus Permanen</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1E: Tembus Jadwal Tanpa Isi Checklist (Khusus Super Admin untuk Rekam Riwayat Masa Lalu) */}
+      {bypassChecklistModal.isOpen && bypassChecklistModal.delivery && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <Zap className="w-5 h-5 text-amber-400 fill-current" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">Tembus Jadwal Pengiriman</h3>
+                <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <span>⚡ Otorisasi Super Admin</span>
+                  <span>&bull;</span>
+                  <span>Bypass Checklist</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 space-y-1 leading-relaxed">
+              <div className="font-bold flex items-center gap-1.5 text-amber-200">
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>Simpan Langsung ke Riwayat Pengiriman (Selesai)</span>
+              </div>
+              <p className="text-[11px] text-amber-300/90">
+                Fitur ini melewati seluruh prosedur checklist armada dan langsung menandai jadwal sebagai <strong>Terkirim / Selesai</strong> agar riwayat pengiriman masa lalu langsung tercatat di histori dan performa kru.
+              </p>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-2">
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Tujuan / Rute</span>
+                  <strong className="text-white truncate block">
+                    {bypassChecklistModal.delivery.areaName || bypassChecklistModal.delivery.store?.storeName || 'Rute'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Armada Truk</span>
+                  <span className="text-cyan-400 font-mono font-bold block">
+                    {bypassChecklistModal.delivery.fleet?.plateNumber || bypassChecklistModal.delivery.fleetId || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Driver Utama</span>
+                  <span className="text-amber-300 font-semibold block">
+                    {bypassChecklistModal.delivery.crew?.name || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Helper / Kernet</span>
+                  <span className="text-slate-300 block">
+                    {bypassChecklistModal.delivery.crewHelper?.name || '-'}
+                  </span>
+                </div>
+                <div className="col-span-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>Tanggal: <strong className="text-white">{bypassChecklistModal.delivery.departureDate || bypassChecklistModal.delivery.deliveryDate || '-'}</strong></span>
+                  <span>Jam: <strong className="text-white">{bypassChecklistModal.delivery.departureTime || '07:30'} – {bypassChecklistModal.delivery.targetReturnTime || '16:00'} WIB</strong></span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-slate-300 block">
+                Catatan Histori Pengiriman (Opsional):
+              </label>
+              <input
+                type="text"
+                value={bypassChecklistModal.customNote}
+                onChange={(e) => setBypassChecklistModal({ ...bypassChecklistModal, customNote: e.target.value })}
+                placeholder="Misal: Input histori pengiriman tanggal lampau"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-300 block">
+                Kondisi Armada Setelah Selesai:
+              </label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBypassChecklistModal({ ...bypassChecklistModal, postTripFleetStatus: 'available' })}
+                  className={`py-2 px-3 rounded-xl border font-bold text-center cursor-pointer transition ${
+                    bypassChecklistModal.postTripFleetStatus === 'available'
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  ✓ Ready / Siap Jalan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBypassChecklistModal({ ...bypassChecklistModal, postTripFleetStatus: 'maintenance' })}
+                  className={`py-2 px-3 rounded-xl border font-bold text-center cursor-pointer transition ${
+                    bypassChecklistModal.postTripFleetStatus === 'maintenance'
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Perlu Servis
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setBypassChecklistModal({ isOpen: false, delivery: null, customNote: '', postTripFleetStatus: 'available' })}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBypassChecklist}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 transition"
+              >
+                <Zap className="w-4 h-4 text-slate-950 fill-current" />
+                <span>Tembus &amp; Simpan Selesai</span>
               </button>
             </div>
           </div>

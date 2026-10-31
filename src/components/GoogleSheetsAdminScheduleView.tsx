@@ -57,6 +57,7 @@ import {
 import { logisticsStore, ScheduleChangeLogEntry } from '../services/store';
 import { Schedule, ShipmentStatus, RetailStore, Fleet, Crew } from '../types';
 import { GoogleSheetsApiSyncModal } from './GoogleSheetsApiSyncModal';
+import { driverWaybillService } from '../services/driverWaybillService';
 import { 
   scheduleImportValidator, 
   ValidationSummaryReport, 
@@ -1347,6 +1348,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     departureTime: string;
     targetReturnTime: string;
     branchId: string;
+    bypassChecklistDirectComplete: boolean;
   }>(() => {
     const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status === 'approved');
     const initHelpers = logisticsStore.getUsers().filter(u => (u.role === 'crew_helper' || u.role === 'driver') && u.status === 'approved');
@@ -1366,7 +1368,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       target: '',
       departureTime: '07:30',
       targetReturnTime: '16:00',
-      branchId: initBranch
+      branchId: initBranch,
+      bypassChecklistDirectComplete: false
     };
   });
 
@@ -2276,7 +2279,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   // Merge new parsed trips (from Excel upload and/or manual schedule creation) into existing weeks & store
   const mergeAndSaveCombinedTrips = (
-    incomingTrips: Array<ParsedSheetTrip & { source?: 'excel' | 'manual' }>,
+    incomingTrips: Array<ParsedSheetTrip & { source?: 'excel' | 'manual'; bypassChecklistDirectComplete?: boolean }>,
     mode: 'tambahkan' | 'ganti' = 'tambahkan',
     sourceLabel: string = 'Kombinasi Tambah & Unggah Jadwal'
   ) => {
@@ -2405,20 +2408,44 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         crewHelper: matchedHelper,
         crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
         crewHelper2: matchedHelper2,
-        status: 'scheduled',
+        status: t.bypassChecklistDirectComplete ? 'delivered' : 'scheduled',
         departureDate: departureIso,
         estimatedArrival: estArrivalIso,
+        actualDeparture: t.bypassChecklistDirectComplete ? departureIso : undefined,
+        actualArrival: t.bypassChecklistDirectComplete ? estArrivalIso : undefined,
+        isChecklistBypassed: t.bypassChecklistDirectComplete || undefined,
+        checklistBypassedBy: t.bypassChecklistDirectComplete ? (logisticsStore.getCurrentUser()?.fullName || 'Super Admin') : undefined,
+        checklistBypassedAt: t.bypassChecklistDirectComplete ? new Date().toISOString() : undefined,
         cargoDescription: `Karton Box & Sheet Kemasan - Area ${stdArea}`,
         cargoWeightTon: isBali ? 4.5 : 2.5,
         isInterIsland: isBali,
         ferryBookingCode: isBali ? `ASDP-KTP-GLM-${Math.floor(Math.random() * 9000 + 1000)}` : undefined,
         transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-        notes: t.target || `Rute ${stdArea} (Berangkat ${depDateIso} ${depTime} • Pulang ${retDateIso} ${retTime})`,
+        notes: t.bypassChecklistDirectComplete
+          ? `${t.target || `Rute ${stdArea}`} • [Bypass Checklist Super Admin]`
+          : (t.target || `Rute ${stdArea} (Berangkat ${depDateIso} ${depTime} • Pulang ${retDateIso} ${retTime})`),
         createdAt: new Date().toISOString(),
         isManuallyEdited: t.source === 'manual'
       };
 
       logisticsStore.addSchedule(newSch);
+
+      if (t.bypassChecklistDirectComplete) {
+        driverWaybillService.getWaybillForSchedule(newSch);
+        driverWaybillService.updateWaybillStatus(`WB-${newSchId}`, 'delivered', 'Bypass Checklist Super Admin (Arsip Riwayat)');
+        if (matchedDriver?.id) {
+          logisticsStore.updateCrew(matchedDriver.id, {
+            tripsCompleted: (matchedDriver.tripsCompleted || 0) + 1,
+            status: 'available'
+          });
+        }
+        if (matchedHelper?.id) {
+          logisticsStore.updateCrew(matchedHelper.id, {
+            tripsCompleted: (matchedHelper.tripsCompleted || 0) + 1,
+            status: 'available'
+          });
+        }
+      }
 
       if (!dayMap.has(dayNum)) {
         dayMap.set(dayNum, {
@@ -2508,6 +2535,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const fallbackIso = `${selectedYear}-${defaultMonthPadded}-${defaultDayPadded}`;
 
     const stdArea = standardizeAreaName(area);
+    const isLuarKota = isLuarKotaArea(stdArea);
     const depTime = (departureTime || '07:30').trim();
     const retTime = (targetReturnTime || '17:00').trim();
 
@@ -4599,6 +4627,56 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                  {/* Aksi */}
                                 <td className="py-1.5 px-2 text-center">
                                   <div className="flex items-center justify-center gap-1">
+                                    {logisticsStore.getCurrentUser()?.role === 'super_admin' && currentStatus !== 'delivered' && (
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const schId = matchedSch?.id || p.id;
+                                          if (!schId) return;
+                                          if (!confirm(`Tembus jadwal ${p.area} (${p.driver}) langsung ke status Selesai tanpa checklist? (Khusus Super Admin)`)) return;
+                                          try {
+                                            const response = await fetch(`/api/schedules/${encodeURIComponent(schId)}/bypass-checklist`, {
+                                              method: 'POST',
+                                              credentials: 'same-origin',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({
+                                                note: `Input histori jadwal ${p.area}`,
+                                                postTripFleetStatus: 'available'
+                                              })
+                                            });
+                                            const payload = await response.json().catch(() => ({}));
+                                            if (!response.ok || !payload?.success) {
+                                              throw new Error(payload?.error || `HTTP ${response.status}`);
+                                            }
+
+                                            const adminName = payload?.schedule?.checklistBypassedBy || logisticsStore.getCurrentUser()?.fullName || 'Super Admin';
+                                            await logisticsStore.hydrateOperationalDataFromHostinger();
+
+                                            if (matchedSch) {
+                                              const deliveredSchedule = { ...matchedSch, ...(payload?.schedule || {}), status: 'delivered' as const };
+                                              const wb = driverWaybillService.getWaybillForSchedule(deliveredSchedule);
+                                              driverWaybillService.updateWaybillStatus(wb.id, 'delivered', 'Bypass Checklist Super Admin');
+                                            }
+                                            logisticsStore.addScheduleChangeLog({
+                                              actionType: 'manual_edit',
+                                              fileName: `Bypass Checklist Admin (${p.area})`,
+                                              userName: adminName,
+                                              userRole: 'Super Admin',
+                                              summary: `Tembus jadwal ${p.area} tanpa checklist`,
+                                              changes: [
+                                                `Jadwal ${p.area} berhasil ditembus dan disimpan ke status Selesai tanpa checklist oleh Super Admin.`
+                                              ]
+                                            });
+                                          } catch (err: any) {
+                                            alert(`Gagal menembus jadwal: ${err?.message || 'perubahan belum tersimpan ke Hostinger MySQL'}`);
+                                          }
+                                        }}
+                                        className="p-1 rounded-md bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 dark:text-amber-400 border border-amber-500/40 transition cursor-pointer"
+                                        title="Tembus & Simpan Selesai Tanpa Checklist (Super Admin)"
+                                      >
+                                        <Zap className="w-3 h-3 text-amber-500 fill-current" />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
@@ -5825,6 +5903,29 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   )}
                 </div>
               </div>
+
+              {/* Opsi Tembus Jadwal Langsung Selesai (Khusus Akun Super Admin) */}
+              {logisticsStore.getCurrentUser()?.role === 'super_admin' && (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
+                  <Zap className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={manualScheduleForm.bypassChecklistDirectComplete}
+                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, bypassChecklistDirectComplete: e.target.checked })}
+                        className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-xs font-black text-amber-500 dark:text-amber-300">
+                        ⚡ Tembus &amp; Simpan Langsung ke Riwayat Selesai (Bypass Checklist)
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-slate-600 dark:text-amber-200/80 mt-1 leading-relaxed">
+                      Khusus Super Admin: Centang opsi ini jika Anda menginput jadwal pengiriman masa lalu/lampau agar langsung berstatus Selesai (Terkirim) dan tercatat di histori tanpa harus mengisi checklist di portal supir.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal Footer */}
@@ -5850,15 +5951,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   const stdArea = standardizeAreaName(manualScheduleForm.area.trim());
                   const retIso = manualScheduleForm.returnDateIso || manualScheduleForm.dateIso;
                   const depIso = manualScheduleForm.departureDateIso || retIso;
-                  const depTime = manualScheduleForm.departureTime || '07:30';
-                  const retTime = manualScheduleForm.targetReturnTime || '17:00';
-                  if (depIso > retIso || (depIso === retIso && depTime > retTime)) {
-                    alert('Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.');
-                    return;
-                  }
                   const effectiveDateStr = retIso;
 
-                  const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string } = {
+                  const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string; bypassChecklistDirectComplete?: boolean } = {
                     tempId: `man-direct-${Date.now()}`,
                     source: 'manual',
                     dateStr: effectiveDateStr,
@@ -5871,7 +5966,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     armada: manualScheduleForm.armada.trim() || 'DS3',
                     target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC',
                     departureTime: manualScheduleForm.departureTime || '07:30',
-                    targetReturnTime: manualScheduleForm.targetReturnTime || '17:00'
+                    targetReturnTime: manualScheduleForm.targetReturnTime || '17:00',
+                    bypassChecklistDirectComplete: manualScheduleForm.bypassChecklistDirectComplete
                   };
                   branchStore.setScheduleBranchId(manualEntry.tempId, manualScheduleForm.branchId);
                   mergeAndSaveCombinedTrips(
@@ -5895,7 +5991,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     target: '',
                     departureTime: '07:30',
                     targetReturnTime: '17:00',
-                    branchId: manualScheduleForm.branchId
+                    branchId: manualScheduleForm.branchId,
+                    bypassChecklistDirectComplete: false
                   });
                   setAreaSearchFilter('');
                   setIsAreaPickerExpanded(false);

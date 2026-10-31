@@ -1300,7 +1300,52 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.post("/api/schedules/persist", requireScheduleWrite, express.json({ limit: '50mb' }), async (req, res) => {
     try {
       const { schedules, weeks, month, year, source } = req.body || {};
-      const count = Array.isArray(schedules) ? schedules.length : 0;
+      const incomingSchedules = Array.isArray(schedules) ? schedules : [];
+      const authRole = String((req as any).authUser?.role || '');
+      const authName = String((req as any).authUser?.full_name || 'Super Admin');
+
+      // Bypass checklist is a privileged historical-correction action. Existing
+      // bypassed rows may be re-persisted by other authorized roles, but only a
+      // Super Admin may introduce a NEW bypass flag.
+      if (authRole !== 'super_admin' && incomingSchedules.some((s: any) => Boolean(s?.isChecklistBypassed))) {
+        const existingRows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+          ['schedules_payload']
+        );
+        const existingRaw = Array.isArray(existingRows) && existingRows[0]?.state_json
+          ? existingRows[0].state_json
+          : null;
+        const existingPayload = existingRaw
+          ? (typeof existingRaw === 'string' ? JSON.parse(existingRaw) : existingRaw)
+          : null;
+        const existingBypassIds = new Set(
+          (Array.isArray(existingPayload?.schedules) ? existingPayload.schedules : [])
+            .filter((s: any) => Boolean(s?.isChecklistBypassed))
+            .map((s: any) => String(s?.id || ''))
+            .filter(Boolean)
+        );
+        const introducesBypass = incomingSchedules.some(
+          (s: any) => Boolean(s?.isChecklistBypassed) && !existingBypassIds.has(String(s?.id || ''))
+        );
+        if (introducesBypass) {
+          return res.status(403).json({
+            success: false,
+            error: 'Bypass checklist hanya dapat dibuat oleh Super Admin'
+          });
+        }
+      }
+
+      const safeSchedules = incomingSchedules.map((schedule: any) => {
+        if (!schedule?.isChecklistBypassed || authRole !== 'super_admin') return schedule;
+        return {
+          ...schedule,
+          status: 'delivered',
+          checklistBypassedBy: authName,
+          checklistBypassedAt: schedule.checklistBypassedAt || new Date().toISOString()
+        };
+      });
+
+      const count = safeSchedules.length;
       const weeksCount = Array.isArray(weeks) ? weeks.length : 0;
       const payload = {
         updatedAt: new Date().toISOString(),
@@ -1308,7 +1353,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         month: month || 'Januari',
         year: year || 2026,
         count,
-        schedules: Array.isArray(schedules) ? schedules : [],
+        schedules: safeSchedules,
         weeks: Array.isArray(weeks) ? weeks : []
       };
 
@@ -1319,10 +1364,8 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       );
 
       // Keep a normalized schedule table in sync for reporting/search while preserving the complete object in payload_json/app_state.
-      if (Array.isArray(schedules)) {
-        for (const schedule of schedules) {
-          await upsertScheduleRow(schedule);
-        }
+      for (const schedule of safeSchedules) {
+        await upsertScheduleRow(schedule);
       }
 
       return res.json({
@@ -1600,6 +1643,106 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       return res.json({ success: true, report: updated });
     }
     return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
+  });
+
+  app.post("/api/schedules/:id/bypass-checklist", requireSuperAdmin, express.json(), async (req: any, res) => {
+    try {
+      const scheduleId = String(req.params.id || '').trim();
+      const customNote = String(req.body?.note || '').trim().slice(0, 500);
+      const requestedFleetStatus = String(req.body?.postTripFleetStatus || 'available');
+      const postTripFleetStatus = requestedFleetStatus === 'maintenance' ? 'maintenance' : 'available';
+
+      if (!scheduleId) {
+        return res.status(400).json({ success: false, error: 'ID jadwal wajib diisi' });
+      }
+
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['schedules_payload']
+      );
+      if (!Array.isArray(rows) || rows.length === 0 || !rows[0]?.state_json) {
+        return res.status(404).json({ success: false, error: 'Snapshot jadwal belum tersedia' });
+      }
+
+      const raw = rows[0].state_json;
+      const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+      const targetIndex = schedules.findIndex((sch: any) => String(sch?.id || '') === scheduleId);
+      if (targetIndex < 0) {
+        return res.status(404).json({ success: false, error: 'Jadwal tidak ditemukan' });
+      }
+
+      const existing = schedules[targetIndex] || {};
+      if (existing.isChecklistBypassed) {
+        return res.json({
+          success: true,
+          source: 'hostinger_mysql',
+          alreadyBypassed: true,
+          schedule: existing
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const adminName = String(req.authUser?.full_name || req.authUser?.email || 'Super Admin');
+      const departureDate = existing.departureDate || nowIso;
+      const actualArrival = existing.estimatedArrival || existing.actualArrival || nowIso;
+      const baseNotes = String(existing.notes || '').trim();
+      const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
+      const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+
+      const updatedSchedule = {
+        ...existing,
+        status: 'delivered',
+        actualDeparture: existing.actualDeparture || departureDate,
+        actualArrival,
+        isChecklistBypassed: true,
+        checklistBypassedBy: adminName,
+        checklistBypassedAt: nowIso,
+        notes
+      };
+
+      schedules[targetIndex] = updatedSchedule;
+      payload.schedules = schedules;
+      payload.updatedAt = nowIso;
+      payload.count = schedules.length;
+
+      await mysqlQuery(
+        "UPDATE app_state SET state_json = ?, updated_at = NOW() WHERE state_key = ?",
+        [JSON.stringify(payload), 'schedules_payload']
+      );
+      await upsertScheduleRow(updatedSchedule);
+
+      if (updatedSchedule.fleetId) {
+        await mysqlQuery(
+          "UPDATE fleets SET status = ?, updated_at = NOW() WHERE id = ?",
+          [postTripFleetStatus, String(updatedSchedule.fleetId)]
+        );
+      }
+
+      const crewIds = [updatedSchedule.crewId, updatedSchedule.crewHelperId]
+        .map((value: any) => String(value || '').trim())
+        .filter(Boolean);
+      for (const crewId of [...new Set(crewIds)]) {
+        await mysqlQuery(
+          "UPDATE crews SET trips_completed = trips_completed + 1, status = 'available', updated_at = NOW() WHERE id = ?",
+          [crewId]
+        );
+      }
+
+      return res.json({
+        success: true,
+        source: 'hostinger_mysql',
+        timestamp: nowIso,
+        schedule: updatedSchedule,
+        postTripFleetStatus
+      });
+    } catch (err: any) {
+      console.warn('[Schedule Bypass Checklist Warning]', err?.message || err);
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'Gagal menembus checklist jadwal'
+      });
+    }
   });
 
   app.patch("/api/schedules/:id/status", requireScheduleStatusWrite, express.json(), async (req, res) => {

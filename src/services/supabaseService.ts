@@ -79,11 +79,32 @@ export async function fetchPersistedSchedulesFromServer(): Promise<{ exists: boo
 }
 
 export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
+  const numberOrFallback = (value: any, fallbackValue?: number): number | undefined => {
+    if (value === null || value === undefined || value === '') return fallbackValue;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallbackValue;
+  };
+
   return {
     ...(fallback || {} as Fleet),
     id: row.id || fallback?.id || `flt-${Date.now()}`,
     plateNumber: row.plateNumber || row.plate_number || fallback?.plateNumber || '',
     vehicleType: (row.vehicleType || row.vehicle_type || fallback?.vehicleType || 'Engkel STD') as VehicleType,
+    initialCode: row.initialCode ?? row.initial_code ?? fallback?.initialCode,
+    brand: row.brand ?? row.brand_name ?? fallback?.brand,
+    engineCc: row.engineCc ?? row.engine_cc ?? fallback?.engineCc,
+    boxCapacityM3: numberOrFallback(row.boxCapacityM3 ?? row.box_capacity_m3, fallback?.boxCapacityM3),
+    boxDimensions: row.boxDimensions ?? row.box_dimensions ?? fallback?.boxDimensions,
+    boxInnerMultiplierPercent: numberOrFallback(
+      row.boxInnerMultiplierPercent ?? row.box_inner_multiplier_percent,
+      fallback?.boxInnerMultiplierPercent
+    ),
+    boxInnerCapacityM3: numberOrFallback(
+      row.boxInnerCapacityM3 ?? row.box_inner_capacity_m3,
+      fallback?.boxInnerCapacityM3
+    ),
+    boxInnerDimensions: row.boxInnerDimensions ?? row.box_inner_dimensions ?? fallback?.boxInnerDimensions,
+    driverId: row.driverId ?? row.driver_id ?? fallback?.driverId,
     tonnageCapacity: Number(row.tonnageCapacity ?? row.tonnage_capacity ?? fallback?.tonnageCapacity ?? 0),
     currentTonnage: Number(row.currentTonnage ?? row.current_tonnage ?? fallback?.currentTonnage ?? 0),
     status: (row.status || fallback?.status || 'available') as FleetStatus,
@@ -91,7 +112,13 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     fuelLevelPercent: Number(row.fuelLevelPercent ?? row.fuel_level_percent ?? fallback?.fuelLevelPercent ?? 100),
     odometerKm: Number(row.odometerKm ?? row.odometer_km ?? fallback?.odometerKm ?? 0),
     year: Number(row.year ?? fallback?.year ?? new Date().getFullYear()),
-    lastMaintenance: row.lastMaintenance ?? row.last_maintenance ?? fallback?.lastMaintenance
+    lastMaintenance: row.lastMaintenance ?? row.last_maintenance ?? fallback?.lastMaintenance,
+    kirDocUrl: row.kirDocUrl ?? row.kir_doc_url ?? fallback?.kirDocUrl,
+    kirDocFileName: row.kirDocFileName ?? row.kir_doc_file_name ?? fallback?.kirDocFileName,
+    kirDocUploadedAt: row.kirDocUploadedAt ?? row.kir_doc_uploaded_at ?? fallback?.kirDocUploadedAt,
+    taxDueDate: row.taxDueDate ?? row.tax_due_date ?? fallback?.taxDueDate,
+    stnkExpiryDate: row.stnkExpiryDate ?? row.stnk_expiry_date ?? fallback?.stnkExpiryDate,
+    kirExpiryDate: row.kirExpiryDate ?? row.kir_expiry_date ?? fallback?.kirExpiryDate
   } as Fleet;
 }
 
