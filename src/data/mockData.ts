@@ -188,7 +188,7 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   }
 ];
 
-export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : [
+const CANONICAL_FLEETS: Fleet[] = [
   {
     id: 'flt-01',
     plateNumber: 'P 8125 VC',
@@ -469,6 +469,37 @@ export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : [
     kirExpiryDate: '2026-10-08'
   }
 ];
+
+
+export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : CANONICAL_FLEETS.map(f => ({ ...f }));
+
+export function resolveCanonicalFleetMeta(
+  fleetOrPlate?: Partial<Fleet> | string | null
+): Fleet | undefined {
+  if (!fleetOrPlate) return undefined;
+  const rawId = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.id || '');
+  const rawPlate = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.plateNumber || '');
+  const rawInit = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.initialCode || '');
+
+  const cleanPlate = rawPlate.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+  const cleanId = rawId.trim().toLowerCase();
+  const cleanInit = rawInit.trim().toUpperCase();
+
+  const matched = CANONICAL_FLEETS.find(f => {
+    if (cleanId && f.id.toLowerCase() === cleanId) return true;
+    const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+    if (cleanPlate && fPlate === cleanPlate) return true;
+    if (cleanInit && f.initialCode) {
+      const fInit = f.initialCode.trim().toUpperCase();
+      if (fInit === cleanInit) return true;
+      const parts = fInit.split('/').map(part => part.trim());
+      if (parts.includes(cleanInit)) return true;
+    }
+    return false;
+  });
+
+  return matched ? { ...matched } : undefined;
+}
 
 export const INITIAL_CREWS: Crew[] = IS_PROD_BUILD ? [] : [
   {

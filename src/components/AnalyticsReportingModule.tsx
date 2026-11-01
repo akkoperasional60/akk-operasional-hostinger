@@ -470,13 +470,13 @@ export const AnalyticsReportingModule: React.FC = () => {
         </div>
 
         {/* Navigation Tabs (3 Tab Utama Tanpa Telemetri tracking_logs) */}
-        <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-3.5 border-t border-slate-800/80">
+        <div className="flex flex-wrap items-center gap-2 mt-4 pt-3.5 border-t border-slate-200 dark:border-slate-800/80">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${
               activeTab === 'overview'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md shadow-amber-500/25'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-slate-700 hover:text-amber-700 dark:hover:text-white hover:border-amber-400 dark:hover:border-slate-600 shadow-2xs'
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
@@ -485,10 +485,10 @@ export const AnalyticsReportingModule: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('fleet_crew')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${
               activeTab === 'fleet_crew'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md shadow-amber-500/25'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-slate-700 hover:text-amber-700 dark:hover:text-white hover:border-amber-400 dark:hover:border-slate-600 shadow-2xs'
             }`}
           >
             <Award className="w-3.5 h-3.5" />
@@ -497,10 +497,10 @@ export const AnalyticsReportingModule: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('routes')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${
               activeTab === 'routes'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md shadow-amber-500/25'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-slate-700 hover:text-amber-700 dark:hover:text-white hover:border-amber-400 dark:hover:border-slate-600 shadow-2xs'
             }`}
           >
             <Navigation className="w-3.5 h-3.5" />

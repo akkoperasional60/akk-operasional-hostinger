@@ -599,18 +599,18 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] w-screen h-screen bg-black flex flex-col justify-between p-0 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[70] w-screen h-screen bg-slate-950 flex flex-col justify-between p-0 animate-in fade-in duration-200">
       {/* Top Header Controls */}
-      <div className="p-3.5 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between z-20">
+      <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
             <Camera className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <h3 className="text-xs font-black text-white flex items-center gap-1.5">
               <span>Kamera Full Screen • Bukti Foto (POD &amp; GPS)</span>
             </h3>
-            <p className="text-[10px] text-slate-300 truncate max-w-[240px]">
+            <p className="text-[10px] text-slate-300 font-semibold truncate max-w-[240px]">
               {delivery?.areaName || delivery?.store?.storeName || 'Area Tujuan'}
             </p>
           </div>
@@ -620,7 +620,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && hasTorch && (
             <button
               onClick={toggleTorch}
-              className={`p-2.5 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800/80 text-white'}`}
+              className={`p-2.5 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800 text-white border border-slate-700'}`}
               title="Flash / Torch"
             >
               {isTorchOn ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
@@ -630,7 +630,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && !cameraError && (
             <button
               onClick={handleFlipCamera}
-              className="p-2.5 rounded-full bg-slate-800/80 text-white hover:bg-slate-700 cursor-pointer transition"
+              className="p-2.5 rounded-full bg-slate-800 text-white border border-slate-700 hover:bg-slate-700 cursor-pointer transition"
               title="Balik Kamera (Depan/Belakang)"
             >
               <RefreshCw className="w-4 h-4" />
@@ -639,7 +639,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
           <button
             onClick={handleClose}
-            className="p-2.5 rounded-full bg-slate-800/80 text-white hover:bg-rose-600 cursor-pointer transition"
+            className="p-2.5 rounded-full bg-slate-800 text-white border border-slate-700 hover:bg-rose-600 hover:text-white cursor-pointer transition"
           >
             <X className="w-4 h-4" />
           </button>
@@ -647,7 +647,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
       </div>
 
       {/* Main Viewport Body - Full Screen */}
-      <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden select-none w-full h-full">
+      <div className="flex-1 relative flex items-center justify-center bg-slate-950 overflow-y-auto select-none w-full h-full">
         {/* White Snap Flash effect */}
         {isFlashActive && (
           <div className="absolute inset-0 bg-white z-40 transition-opacity duration-150" />
@@ -655,18 +655,18 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
         {/* REVIEW MODE: Captured Photo Preview Full Screen Uncropped */}
         {capturedImage ? (
-          <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
+          <div className="relative w-full h-full flex flex-col items-center justify-center bg-slate-950 p-2">
             <img
               src={capturedImage}
               alt="Bukti Foto POD Full Screen"
-              className="w-full h-full object-contain"
+              className="w-full h-full object-contain rounded-xl"
             />
-            <div className="absolute top-3 left-4 right-4 bg-black/75 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/40 flex items-center justify-between text-xs">
+            <div className="absolute top-3 left-4 right-4 bg-slate-900/95 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/50 flex items-center justify-between text-xs shadow-lg">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Check className="w-4 h-4 shrink-0" />
                 <span className="font-bold text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel GPS Aktif</span>
               </div>
-              <span className="text-[10px] font-mono text-emerald-300">
+              <span className="text-[10px] font-mono font-bold text-emerald-300">
                 {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
               </span>
             </div>
@@ -675,68 +675,74 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           /* LIVE VIEWFINDER MODE */
           <div className="w-full h-full relative flex items-center justify-center">
             {cameraError ? (
-              /* Resilient Fallback UI with Direct User Actions when permission blocked */
-              <div className="p-5 text-center max-w-sm space-y-3.5 mx-auto">
-                <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto animate-pulse">
-                  <CameraOff className="w-7 h-7" />
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-white">Izin Akses Kamera Perangkat</h4>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {cameraError}
-                  </p>
-                </div>
+              /* Resilient Fallback UI with High-Contrast Readable Card */
+              <div className="p-5 text-center max-w-md w-full space-y-3.5 mx-auto my-auto">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+                  <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-500 mx-auto">
+                    <CameraOff className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-black text-white">
+                      Izin Akses Kamera Perangkat
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                      {cameraError}
+                    </p>
+                  </div>
 
-                {/* Direct Action Buttons - Always Operable */}
-                <div className="space-y-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-95 transition"
-                  >
-                    <Camera className="w-4 h-4" />
-                    <span>Buka Kamera HP Langsung (Aplikasi Kamera)</span>
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-2">
+                  {/* Direct Action Buttons - Always Operable */}
+                  <div className="space-y-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => startCamera(facingMode)}
-                      className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer active:scale-95 transition"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-95 transition"
                     >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Minta Izin Ulang</span>
+                      <Camera className="w-4 h-4 text-white" />
+                      <span className="text-white">Buka Kamera HP Langsung (Aplikasi Kamera)</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={generateSimulatedPhoto}
-                      className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-amber-500/40 cursor-pointer active:scale-95 transition"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Snapshot Instan</span>
-                    </button>
-                  </div>
-                </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startCamera(facingMode)}
+                        className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer active:scale-95 transition"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Minta Izin Ulang</span>
+                      </button>
 
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 text-left space-y-2">
-                  <h5 className="font-bold text-amber-400">Panduan Mengatasi Kamera (Android):</h5>
-                  <ol className="list-decimal list-inside space-y-1 ml-1">
-                    <li>Buka <span className="font-bold">Pengaturan</span> di HP.</li>
-                    <li>Pilih <span className="font-bold">Aplikasi</span> &gt; cari aplikasi browser.</li>
-                    <li>Klik <span className="font-bold">Izin</span>.</li>
-                    <li>Pilih <span className="font-bold">Kamera</span> &gt; pilih "Izinkan".</li>
-                    <li>Segarkan ulang halaman ini.</li>
-                  </ol>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[10px] text-slate-400 text-left space-y-1">
-                  <div className="font-bold text-slate-300 flex items-center gap-1">
-                    <span>💡 Tips Cepat:</span>
+                      <button
+                        type="button"
+                        onClick={generateSimulatedPhoto}
+                        className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-amber-500/40 cursor-pointer active:scale-95 transition"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Snapshot Instan</span>
+                      </button>
+                    </div>
                   </div>
-                  <p>
-                    Ketuk ikon gembok/setelan di sebelah URL browser Anda, lalu klik <span className="font-bold">"Izinkan Kamera"</span>.
-                  </p>
+
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 text-left space-y-2">
+                    <h5 className="font-extrabold text-amber-400">
+                      Panduan Mengatasi Kamera (Android / Browser):
+                    </h5>
+                    <ol className="list-decimal list-inside space-y-1 ml-1 font-medium">
+                      <li>Buka <span className="font-bold text-white">Pengaturan</span> di HP.</li>
+                      <li>Pilih <span className="font-bold text-white">Aplikasi</span> &gt; cari aplikasi browser.</li>
+                      <li>Klik <span className="font-bold text-white">Izin</span>.</li>
+                      <li>Pilih <span className="font-bold text-white">Kamera</span> &gt; pilih &quot;Izinkan&quot;.</li>
+                      <li>Segarkan ulang halaman ini.</li>
+                    </ol>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 text-left space-y-1">
+                    <div className="font-extrabold text-white flex items-center gap-1">
+                      <span>💡 Tips Cepat:</span>
+                    </div>
+                    <p className="font-medium">
+                      Ketuk ikon gembok/setelan di sebelah URL browser Anda, lalu klik <span className="font-bold text-white">&quot;Izinkan Kamera&quot;</span>.
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -751,7 +757,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                 />
 
                 {/* Viewfinder Target Framing Brackets & Guide */}
-                <div className="absolute inset-8 pointer-events-none flex flex-col justify-between items-center border border-white/20 rounded-2xl">
+                <div className="absolute inset-8 pointer-events-none flex flex-col justify-between items-center border border-white/30 rounded-2xl">
                   {/* Top corner brackets */}
                   <div className="w-full flex justify-between p-2">
                     <div className="w-6 h-6 border-t-2 border-l-2 border-cyan-400 rounded-tl-sm" />
@@ -759,12 +765,12 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                   </div>
 
                   {/* Center Target Box */}
-                  <div className="text-center px-4 py-2 bg-black/50 backdrop-blur-xs rounded-xl border border-white/10 max-w-[260px]">
-                    <p className="text-[11px] text-white font-medium">
-                      Arahkan kamera ke karton box / barang yang diterima di toko
+                  <div className="text-center px-4 py-2 bg-slate-900/90 backdrop-blur-xs rounded-xl border border-slate-700 max-w-[260px] shadow-lg">
+                    <p className="text-[11px] text-white font-bold">
+                      Arahkan kamera ke armada / bukti di lokasi
                     </p>
-                    <span className="text-[9px] text-cyan-300 block mt-0.5">
-                      Stempel waktu, PO, dan toko otomatis dibubuhkan
+                    <span className="text-[9px] text-cyan-600 dark:text-cyan-300 font-semibold block mt-0.5">
+                      Stempel waktu &amp; lokasi otomatis dibubuhkan
                     </span>
                   </div>
 
@@ -791,23 +797,23 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
       />
 
       {/* Bottom Action Footer Controls */}
-      <div className="p-4 bg-gradient-to-t from-black via-black/90 to-transparent z-10">
+      <div className="p-4 bg-slate-900 border-t border-slate-800 z-10">
         {capturedImage ? (
           /* Confirmation / Retake Buttons */
           <div className="flex items-center gap-3">
             <button
               onClick={handleRetake}
-              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
+              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Foto Ulang (Retake)</span>
             </button>
             <button
               onClick={handleConfirmPhoto}
-              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer transition active:scale-95"
+              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer transition active:scale-95"
             >
-              <Check className="w-4 h-4" />
-              <span>Gunakan Foto Ini</span>
+              <Check className="w-4 h-4 text-white" />
+              <span className="text-white">Gunakan Foto Ini</span>
             </button>
           </div>
         ) : (
@@ -816,13 +822,13 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
             {/* Native file upload button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex flex-col items-center justify-center text-slate-300 hover:text-white transition cursor-pointer p-2"
+              className="flex flex-col items-center justify-center text-slate-300 hover:text-blue-600 dark:hover:text-white transition cursor-pointer p-2"
               title="Pilih dari Galeri atau Kamera Bawaan"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-1">
-                <Upload className="w-4 h-4 text-slate-300" />
+              <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1">
+                <Upload className="w-4 h-4 text-slate-200" />
               </div>
-              <span className="text-[10px]">Kamera HP / File</span>
+              <span className="text-[10px] font-bold">Kamera HP / File</span>
             </button>
 
             {/* Big Center Shutter Button - ALWAYS ACTIVE & OPERABLE */}
@@ -831,14 +837,14 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                 type="button"
                 onClick={handleShutterClick}
                 disabled={isProcessing}
-                className="w-18 h-18 rounded-full border-4 border-white/80 p-1 flex items-center justify-center transition active:scale-90 shadow-2xl cursor-pointer disabled:opacity-50 group hover:border-cyan-400"
+                className="w-16 h-16 rounded-full border-4 border-cyan-500/80 p-1 flex items-center justify-center transition active:scale-90 shadow-xl cursor-pointer disabled:opacity-50 group hover:border-cyan-400"
                 title={cameraError ? 'Ambil Foto Langsung via Kamera Perangkat' : 'Jepret Foto Sekarang'}
               >
-                <div className="w-full h-full rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 group-hover:from-cyan-400 group-hover:to-blue-400 group-active:from-cyan-300 group-active:to-blue-300 transition-all shadow-inner flex items-center justify-center">
+                <div className="w-full h-full rounded-full bg-gradient-to-tr from-cyan-600 to-blue-600 group-hover:from-cyan-500 group-hover:to-blue-500 transition-all shadow-inner flex items-center justify-center">
                   <Camera className="w-6 h-6 text-white" />
                 </div>
               </button>
-              <span className="text-[10px] text-slate-300 font-bold mt-1.5">
+              <span className="text-[10px] text-slate-200 font-extrabold mt-1.5">
                 {cameraError ? 'Buka Kamera HP' : 'Jepret Foto'}
               </span>
             </div>
@@ -846,12 +852,12 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
             {/* Cancel / Close button */}
             <button
               onClick={handleClose}
-              className="flex flex-col items-center justify-center text-slate-400 hover:text-white transition cursor-pointer p-2"
+              className="flex flex-col items-center justify-center text-slate-300 hover:text-rose-600 dark:hover:text-white transition cursor-pointer p-2"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-1">
-                <X className="w-4 h-4 text-slate-400" />
+              <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1">
+                <X className="w-4 h-4 text-slate-200" />
               </div>
-              <span className="text-[10px]">Batal</span>
+              <span className="text-[10px] font-bold">Batal</span>
             </button>
           </div>
         )}

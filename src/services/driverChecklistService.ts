@@ -5,6 +5,7 @@ import {
 } from '../types';
 
 const STORAGE_KEY = 'akk_driver_vehicle_checklists_v2';
+const IS_PROD_BUILD = Boolean(import.meta.env.PROD);
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
   // 1. Mesin & Fluida
@@ -157,6 +158,26 @@ export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status
 ];
 
 class DriverChecklistService {
+  public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
+    const existingMap = new Map<string, VehicleChecklistItem>();
+    if (Array.isArray(existingItems)) {
+      existingItems.forEach(item => {
+        existingMap.set(item.name.toLowerCase(), item);
+      });
+    }
+
+    return STANDARD_CHECKLIST_ITEMS.map((std, idx) => {
+      const matched = existingMap.get(std.name.toLowerCase());
+      return {
+        id: matched?.id || `item-${Date.now()}-${idx + 1}`,
+        ...std,
+        status: matched?.status || 'ok',
+        note: matched?.note || '',
+        photoUrl: matched?.photoUrl
+      };
+    });
+  }
+
   private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
     const today = new Date().toISOString().split('T')[0];
     const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
@@ -201,6 +222,18 @@ class DriverChecklistService {
         list = [];
       }
 
+      list = list.map(chk => {
+        const syncedItems = this.syncItemsWithStandard(chk.items);
+        const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+        return {
+          ...chk,
+          items: syncedItems,
+          overallStatus,
+          passedCount,
+          issueCount
+        };
+      });
+
       if (driverId) {
         list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(driverId.toLowerCase()));
       }
@@ -210,7 +243,7 @@ class DriverChecklistService {
 
       return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch {
-      return this.generateInitialSampleChecklists();
+      return IS_PROD_BUILD ? [] : this.generateInitialSampleChecklists();
     }
   }
 
@@ -221,12 +254,21 @@ class DriverChecklistService {
 
   public saveChecklist(checklist: DriverVehicleChecklist): boolean {
     try {
+      const syncedItems = this.syncItemsWithStandard(checklist.items);
+      const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+      const normalizedChecklist: DriverVehicleChecklist = {
+        ...checklist,
+        items: syncedItems,
+        overallStatus,
+        passedCount,
+        issueCount
+      };
       const all = this.getChecklists();
-      const existingIdx = all.findIndex(c => c.id === checklist.id);
+      const existingIdx = all.findIndex(c => c.id === normalizedChecklist.id);
       if (existingIdx >= 0) {
-        all[existingIdx] = checklist;
+        all[existingIdx] = normalizedChecklist;
       } else {
-        all.unshift(checklist);
+        all.unshift(normalizedChecklist);
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
       return true;

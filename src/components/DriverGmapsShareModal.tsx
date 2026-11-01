@@ -34,6 +34,8 @@ interface DriverGmapsShareModalProps {
   driverName?: string;
   plateNumber?: string;
   driverId?: string;
+  userJobdeskRole?: 'driver' | 'helper';
+  initialCategory?: GmapsReportCategory;
   onReportSubmitted: (report: {
     category: GmapsReportCategory;
     delivery: Schedule | null;
@@ -57,9 +59,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   driverName = 'Supir AKK',
   plateNumber = 'P 8125 VC',
   driverId,
+  userJobdeskRole = 'driver',
+  initialCategory,
   onReportSubmitted
 }) => {
-  const [category, setCategory] = useState<GmapsReportCategory>('isi_bbm');
+  const isHelperJobdesk = userJobdeskRole === 'helper';
+  const [category, setCategory] = useState<GmapsReportCategory>(
+    isHelperJobdesk ? 'kendala_jalan' : 'isi_bbm'
+  );
   const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
   const [photoList, setPhotoList] = useState<string[]>([]);
@@ -193,6 +200,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (isOpen) {
       resetFormFields();
       setQueueCompletedToast(null);
+      if (initialCategory) {
+        setCategory(isHelperJobdesk && initialCategory === 'isi_bbm' ? 'kendala_jalan' : initialCategory);
+      } else {
+        setCategory(isHelperJobdesk ? 'kendala_jalan' : 'isi_bbm');
+      }
       try {
         const checklists = driverChecklistService.getChecklists();
         const activeChecklist = driverId
@@ -226,7 +238,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       stopLiveCamera();
       resetFormFields();
     }
-  }, [isOpen, driverId, plateNumber]);
+  }, [isOpen, driverId, plateNumber, isHelperJobdesk, initialCategory]);
 
   // Timer detikan real-time selama kru sedang mengantri di customer
   useEffect(() => {
@@ -835,15 +847,23 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Header - Clean Cohesive Design */}
           <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm font-black shrink-0">
+              <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-sm font-black shrink-0 ${
+                isHelperJobdesk ? 'bg-cyan-600' : 'bg-blue-600'
+              }`}>
                 <Share2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white">
-                  Lapor Kendala, Absen &amp; Isi BBM (Solar)
-                </h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-black text-white">
+                    {isHelperJobdesk
+                      ? 'Fitur Kendala & Absen Pelanggan'
+                      : 'Isi (Foto) BBM, Kendala & Absen Pelanggan'}
+                  </h3>
+                </div>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  Dokumentasi kendala jalan, absen pelanggan, dan pengisian BBM (Solar)
+                  {isHelperJobdesk
+                    ? 'Dokumentasi fitur kendala di jalan dan fitur absen pelanggan'
+                    : 'Dokumentasi isi (foto) BBM, fitur kendala, dan fitur absen pelanggan'}
                 </p>
               </div>
             </div>
@@ -862,28 +882,30 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             
-            {/* Category Selector Tabs: 1. Isi BBM (Solar), 2. Kendala di Jalan, 3. Absen Kiriman Pelanggan */}
+            {/* Category Selector Tabs */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Pilih Jenis Laporan:
+                Pilih Kategori:
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetFormFields();
-                    setCategory('isi_bbm');
-                    setReportSubMode('kendala_umum');
-                  }}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                    category === 'isi_bbm'
-                      ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Fuel className="w-3.5 h-3.5 shrink-0" />
-                  <span>Isi BBM (Solar)</span>
-                </button>
+              <div className={`grid grid-cols-1 ${isHelperJobdesk ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2`}>
+                {!isHelperJobdesk && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetFormFields();
+                      setCategory('isi_bbm');
+                      setReportSubMode('kendala_umum');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      category === 'isi_bbm'
+                        ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Fuel className="w-3.5 h-3.5 shrink-0" />
+                    <span>Isi (Foto) BBM</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -899,7 +921,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   }`}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Kendala di Jalan</span>
+                  <span>Fitur Kendala</span>
                 </button>
 
                 <button
@@ -916,7 +938,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   }`}
                 >
                   <Store className="w-3.5 h-3.5 shrink-0" />
-                  <span>Absen Kiriman Pelanggan</span>
+                  <span>Absen Pelanggan</span>
                 </button>
               </div>
             </div>
