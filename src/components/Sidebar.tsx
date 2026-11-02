@@ -139,7 +139,7 @@ export interface NavCategory {
   checkAccess: (user: UserProfile) => boolean;
 }
 
-const SidebarComponent: React.FC<SidebarProps> = ({
+export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   onOpenAuth,
@@ -179,21 +179,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     const syncUser = () => {
-      const nextUser = logisticsStore.getCurrentUser();
-      setCurrentUser(prev => {
-        if (
-          prev.id === nextUser.id &&
-          prev.fullName === nextUser.fullName &&
-          prev.role === nextUser.role &&
-          prev.status === nextUser.status &&
-          prev.email === nextUser.email
-        ) {
-          return prev;
-        }
-        return { ...nextUser };
-      });
-      const nextPending = logisticsStore.getPendingUsersCount();
-      setPendingUsersCount(prev => (prev === nextPending ? prev : nextPending));
+      setCurrentUser({ ...logisticsStore.getCurrentUser() });
+      setPendingUsersCount(logisticsStore.getPendingUsersCount());
     };
     const unsub = logisticsStore.subscribe(syncUser);
     window.addEventListener('akk-branch-updated', syncUser);
@@ -224,14 +211,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
     const btn = categoryRefs.current[catId];
     if (btn) {
       const rect = btn.getBoundingClientRect();
-      const cat = categories.find(c => c.id === catId);
-      const totalItems = cat ? cat.groups.reduce((acc, g) => acc + g.items.length, 0) : 5;
-      const totalGroups = cat ? cat.groups.length : 1;
-      const estimatedHeight = Math.min(
-        window.innerHeight - 24,
-        64 + totalItems * 54 + totalGroups * 28
-      );
-      const clamped = Math.max(12, Math.min(rect.top, window.innerHeight - estimatedHeight - 12));
+      // Clamp so dropdown fits comfortably inside viewport without jumping
+      const clamped = Math.max(16, Math.min(rect.top, window.innerHeight - 440));
       setDropdownTop(clamped);
     }
   };
@@ -310,7 +291,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
     }
   };
 
-  // Define Navigation Schema with "Dashboard Logistik & Pengiriman" in Logistik & Pengiriman
+  // Define Navigation Schema with "Dashboard Operasional" & "Analitik Armada & Kru" in Logistik & Pengiriman
   const categories: NavCategory[] = [
     {
       id: 'dashboard',
@@ -337,7 +318,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       label: 'Logistik & Pengiriman',
       shortLabel: 'Logistik',
       icon: <Truck className="w-5 h-5" />,
-      defaultTab: 'operational_dashboard',
       badge: pendingReportsCount > 0 ? (
         <span className="text-[10px] font-bold bg-rose-500 text-white px-1.5 py-0.2 rounded-full">
           {pendingReportsCount}
@@ -355,9 +335,15 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           items: [
             {
               tab: 'operational_dashboard',
-              label: 'Dashboard Logistik & Pengiriman',
-              icon: <BarChart3 className="w-4 h-4 text-blue-500" />,
-              description: 'Analitik performa armada, kru & ketepatan waktu kirim'
+              label: 'Dashboard Operasional',
+              icon: <Truck className="w-4 h-4 text-blue-500" />,
+              description: 'Monitoring armada & status pengiriman real-time'
+            },
+            {
+              tab: 'analytics_reports',
+              label: 'Analitik Armada & Kru',
+              icon: <BarChart3 className="w-4 h-4 text-indigo-500" />,
+              description: 'Metrik produktivitas supir dan utilitas kendaraan'
             }
           ]
         },
@@ -403,6 +389,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Evaluasi Jalur GPS (Excel)',
               icon: <FileSpreadsheet className="w-4 h-4 text-emerald-500" />,
               description: 'Unggah file Excel tracking GPS vendor'
+            },
+            {
+              tab: 'customer_map',
+              label: 'Jaringan Toko & Wilayah Mitra',
+              icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
+              description: 'Peta sebaran retail store Jawa Timur & Bali'
             }
           ]
         },
@@ -663,13 +655,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       icon: <Megaphone className="w-5 h-5" />,
       checkAccess: (user) =>
         canAccess(user, 'marketing', 'kampanye') ||
-        canAccess(user, 'marketing', 'leads_pipeline') ||
-        canAccess(user, 'customer_map') ||
+        canAccess(user, 'finance_tax', 'kas_bank') ||
         user.role === 'super_admin' ||
         user.role === 'spv_logistik',
       groups: [
         {
-          groupTitle: 'Pemasaran & Pemetaan Wilayah',
+          groupTitle: 'Marketing & Keuangan',
           items: [
             {
               tab: 'marketing_online',
@@ -684,35 +675,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               description: 'Pipeline prospek pabrik dan industri'
             },
             {
-              tab: 'customer_map',
-              label: 'Jaringan Toko & Wilayah Mitra',
-              icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
-              description: 'Peta sebaran retail store Jawa Timur & Bali'
-            }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'finance_tax',
-      label: 'Finance & Tax',
-      shortLabel: 'Finance',
-      icon: <FileText className="w-5 h-5" />,
-      defaultTab: 'finance_dashboard',
-      checkAccess: (user) =>
-        canAccess(user, 'finance_tax', 'kas_bank') ||
-        canAccess(user, 'finance_dashboard') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
-      groups: [
-        {
-          groupTitle: 'Keuangan & Perpajakan',
-          items: [
-            {
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
               icon: <FileText className="w-4 h-4 text-emerald-500" />,
-              description: 'Faktur penjualan, pajak & konfirmasi piutang'
+              description: 'Faktur penjualan dan konfirmasi piutang'
             }
           ]
         }
@@ -897,7 +863,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   // Determine if a category contains the currently active tab
   const isCategoryActive = (cat: NavCategory): boolean => {
     if (cat.defaultTab === currentTab) return true;
-    if (cat.id === 'logistik' && (currentTab === 'operational_dashboard' || currentTab === 'analytics_reports')) return true;
     for (const group of cat.groups) {
       if (group.items.some(item => item.tab === currentTab)) return true;
     }
@@ -912,7 +877,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       {/* ============================================================== */}
       {/* MOBILE TOP BAR (lg:hidden)                                     */}
       {/* ============================================================== */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-[1100] h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between">
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
           className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition active:scale-95"
@@ -941,7 +906,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       <aside
         ref={asideRef}
         onMouseLeave={handleMouseLeaveCat}
-        className={`hidden lg:block fixed inset-y-0 left-0 z-[1100] transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] overflow-visible ${
+        className={`hidden lg:block fixed inset-y-0 left-0 z-30 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] overflow-visible ${
           isMinimized ? 'w-20' : 'w-72'
         }`}
       >
@@ -1077,14 +1042,11 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 position: 'fixed',
                 left: isMinimized ? '88px' : '296px',
                 top: `${dropdownTop}px`,
-                zIndex: 1200
+                zIndex: 60
               }}
               className="hidden lg:block animate-in fade-in zoom-in-95 duration-150 before:absolute before:-left-6 before:top-0 before:bottom-0 before:w-8 before:bg-transparent"
             >
-              <div
-                style={{ maxHeight: `calc(100vh - ${dropdownTop + 16}px)` }}
-                className="w-80 overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 pb-4 text-left"
-              >
+              <div className="w-80 max-h-[calc(100vh-80px)] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 text-left">
                 {/* Clean Category Header */}
                 <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800/80 mb-1.5 flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
@@ -1108,9 +1070,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                         </div>
                       )}
                       {group.items.map((item) => {
-                        const isItemActive =
-                          currentTab === item.tab ||
-                          (item.tab === 'operational_dashboard' && currentTab === 'analytics_reports');
+                        const isItemActive = currentTab === item.tab;
 
                         return (
                           <button
@@ -1206,7 +1166,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       {/* MOBILE ACCORDION DRAWER (lg:hidden)                            */}
       {/* ============================================================== */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-[1200] flex">
+        <div className="lg:hidden fixed inset-0 z-50 flex">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity duration-300"
             onClick={() => setIsMobileOpen(false)}
@@ -1318,6 +1278,4 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   );
 };
 
-export const Sidebar = React.memo(SidebarComponent);
 export default Sidebar;
-

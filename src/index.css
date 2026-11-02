@@ -981,13 +981,3 @@ html.dark .leaflet-cluster-spider-leg {
 .leaflet-overlay-pane svg path.leaflet-interactive {
   fill: none !important;
 }
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(200%);
-  }
-}
-

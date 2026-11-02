@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, startTransition } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import { DashboardOverview } from './components/DashboardOverview';
@@ -30,7 +30,6 @@ import { E2ETesterModule } from './components/E2ETesterModule';
 import { MasterCabang } from './components/MasterCabang';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
-import { ThreeDLogoLoader } from './components/ThreeDLogoLoader';
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
@@ -100,21 +99,8 @@ export default function App() {
   const { notifications, setOnNavigateCallback, setIsDrawerOpen } = useToast();
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const [activeNavTab, setActiveNavTab] = useState<NavTab>(currentTab);
-
-  const selectTabImmediate = useCallback((nextTab: NavTab) => {
-    setActiveNavTab(nextTab);
-    startTransition(() => {
-      setCurrentTab(nextTab);
-    });
-  }, []);
-
-  useEffect(() => {
-    setActiveNavTab(currentTab);
-  }, [currentTab]);
-
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => logisticsStore.isAuthenticated());
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(() => !logisticsStore.isAuthenticated());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
   const [selectedOriginBranchId, setSelectedOriginBranchId] = useState<string>(() =>
     branchStore.getSelectedOriginBranchId()
@@ -139,10 +125,7 @@ export default function App() {
     });
 
     const unsubscribe = logisticsStore.subscribe(() => {
-      if (active) {
-        const nextAuth = logisticsStore.isAuthenticated();
-        setIsAuthenticated(prev => (prev === nextAuth ? prev : nextAuth));
-      }
+      if (active) setIsAuthenticated(logisticsStore.isAuthenticated());
     });
     return () => {
       active = false;
@@ -151,8 +134,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setOnNavigateCallback((tab) => selectTabImmediate(tab as NavTab));
-  }, [setOnNavigateCallback, selectTabImmediate]);
+    setOnNavigateCallback((tab) => setCurrentTab(tab as NavTab));
+  }, [setOnNavigateCallback]);
 
   const toggleSidebar = () => {
     setIsSidebarMinimized(prev => {
@@ -210,8 +193,8 @@ export default function App() {
       case 'dashboard': return 'Dashboard Eksekutif (Rangkuman Operasional & Penjualan)';
       case 'driver_portal': return 'Portal Driver Mobile (Tugas Pengiriman & Status Supir)';
       case 'driver_reports': return 'Laporan & Kendala Kiriman Kru (Driver & Helper)';
-      case 'analytics_reports': return 'Dashboard Logistik & Pengiriman';
-      case 'operational_dashboard': return 'Dashboard Logistik & Pengiriman';
+      case 'analytics_reports': return 'Laporan Analitik Performa Armada & Kru';
+      case 'operational_dashboard': return 'Dashboard Logistik & Operasional';
       case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
       case 'fleets': return 'Manajemen Armada & Kru Supir';
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
@@ -319,11 +302,12 @@ export default function App() {
 
   if (isAuthChecking) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-4 selection:bg-amber-500 selection:text-slate-950">
-        <ThreeDLogoLoader
-          statusText="Memverifikasi sesi Hostinger..."
-          subText="Autentikasi diperiksa langsung ke backend sebelum aplikasi dibuka."
-        />
+      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <ShieldCheck className="w-9 h-9 text-emerald-400 animate-pulse" />
+          <div className="text-sm font-semibold">Memverifikasi sesi Hostinger...</div>
+          <div className="text-xs text-slate-500">Autentikasi diperiksa langsung ke backend sebelum aplikasi dibuka.</div>
+        </div>
       </div>
     );
   }
@@ -354,8 +338,8 @@ export default function App() {
 
       {/* Sidebar Navigation - Left Rail (Fixed on Desktop, Drawer on Mobile) */}
       <Sidebar
-        currentTab={activeNavTab}
-        onSelectTab={selectTabImmediate}
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
         onOpenAuth={handleOpenAuth}
         isMinimized={isSidebarMinimized}
         onToggleMinimize={toggleSidebar}
@@ -364,7 +348,7 @@ export default function App() {
       {/* Main Content Area with smooth offset transition for Sidebar */}
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[padding] ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
         {/* Desktop Top Header Bar Matching Modern SaaS Layout */}
-        <header className="hidden lg:flex sticky top-0 z-[1050] h-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
+        <header className="hidden lg:flex sticky top-0 z-20 h-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div className="min-w-0">
               <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight truncate">
@@ -374,7 +358,7 @@ export default function App() {
                 <span>Berikut ringkasan bisnis &amp; operasional hari ini</span>
                 <span>&middot;</span>
                 <span className="font-medium text-slate-700 dark:text-slate-300 truncate">
-                  {getTabTitle(activeNavTab)}
+                  {getTabTitle(currentTab)}
                 </span>
               </div>
             </div>
@@ -387,8 +371,8 @@ export default function App() {
             {/* Quick Driver Mobile Mode Switcher */}
             <button
               onClick={() =>
-                selectTabImmediate(
-                  activeNavTab === 'driver_portal'
+                setCurrentTab(
+                  currentTab === 'driver_portal'
                     ? isAdmin()
                       ? 'dashboard'
                       : 'operational_dashboard'
@@ -494,7 +478,7 @@ export default function App() {
                     onClick={() => setCurrentTab(isDriver() ? 'driver_portal' : 'operational_dashboard')}
                     className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.4)]"
                   >
-                    {isDriver() ? 'Ke Portal Driver Mobile \u2192' : 'Ke Dashboard Logistik & Pengiriman \u2192'}
+                    {isDriver() ? 'Ke Portal Driver Mobile \u2192' : 'Ke Dashboard Operasional \u2192'}
                   </button>
                   {isAdmin() && (
                     <button
@@ -509,12 +493,16 @@ export default function App() {
             )
           )}
 
-          {(currentTab === 'operational_dashboard' || currentTab === 'analytics_reports') && (
-            <AnalyticsReportingModule />
+          {currentTab === 'operational_dashboard' && (
+            <DashboardOverview onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
           )}
 
           {currentTab === 'driver_reports' && (
             <DriverReportsManagement />
+          )}
+
+          {currentTab === 'analytics_reports' && (
+            <AnalyticsReportingModule />
           )}
 
           {currentTab === 'schedules' && (canManageFleet() || canAccess(currentUser, 'schedules')) && (

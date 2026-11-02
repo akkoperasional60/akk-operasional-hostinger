@@ -466,10 +466,9 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               <button
                 onClick={handleGateOutConfirm}
                 disabled={isUpdating}
-                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 flex items-center gap-1.5 shadow-lg shadow-blue-600/30 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 flex items-center justify-center gap-1.5 shadow-lg shadow-blue-600/30 transition cursor-pointer"
               >
                 <span>Gate-Out</span>
-                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           )}

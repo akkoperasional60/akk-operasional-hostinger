@@ -8,95 +8,161 @@ const STORAGE_KEY = 'akk_driver_vehicle_checklists_v2';
 const IS_PROD_BUILD = Boolean(import.meta.env.PROD);
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
-  // 1. Oli Mesin
+  // 1. Mesin & Fluida
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Oli Mesin',
-    description: 'Periksa volume dan kondisi warna oli mesin pada dipstick berada di batas aman'
+    name: 'Oli Mesin & Indikator Dipstick',
+    description: 'Volume oli berada di antara batas MIN dan MAX, tidak ada perubahan warna pekat terbakar'
   },
-  // 2. Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Air Radiator',
-    description: 'Periksa level air radiator (coolant) pada tabung reservoir dan pastikan tutup rapat'
+    name: 'Air Radiator (Coolant) & Reservoir',
+    description: 'Level tabung cadangan air radiator cukup dan tutup radiator terpasang rapat'
   },
-  // 3. Foto Oli Mesin & Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Foto Oli Mesin & Air Radiator',
-    description: 'Ambil foto bukti fisik pengecekan oli mesin dan air radiator armada'
+    name: 'Minyak Rem & Minyak Kopling',
+    description: 'Ketinggian minyak rem pada tangki cadangan aman, tidak ada kebocoran master silinder'
   },
-  // 4. Air Accu
+  {
+    category: 'mesin_fluida',
+    categoryLabel: 'Mesin & Cairan Fluida',
+    name: 'Air Wiper Washer & Nozzle',
+    description: 'Cairan wiper terisi penuh dan semprotan nozzle kaca depan bekerja lancar'
+  },
+  {
+    category: 'mesin_fluida',
+    categoryLabel: 'Mesin & Cairan Fluida',
+    name: 'Pemeriksaan Kolong Mesin (Kebocoran)',
+    description: 'Tidak ada tetesan oli, solar, atau air pendingin di bawah kolong mesin/transmisi'
+  },
+
+  // 2. Rem, Roda & Kaki-kaki
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
+    name: 'Rem Kaki (Pedal Rem Utama)',
+    description: 'Pedal rem padat dan tidak ambles saat ditekan, respons pengereman pakem'
+  },
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
+    name: 'Rem Parkir / Handbrake',
+    description: 'Mampu menahan kendaraan pada kemiringan dan tuas mengunci dengan presisi'
+  },
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
+    name: 'Tekanan & Kondisi Ban Depan',
+    description: 'Tekanan ban sesuai standar (60-70 PSI), alur kembang ban tidak gundul, tanpa robek samping'
+  },
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
+    name: 'Tekanan & Kondisi Ban Belakang / Gandar',
+    description: 'Tekanan ban belakang ganda (75-85 PSI), baut roda kencang lengkap, sela ban bersih dari batu'
+  },
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
+    name: 'Ban Serep & Tekanan Udara',
+    description: 'Ban cadangan terpasang kuat pada bracket pengunci dan memiliki tekanan udara siap pakai'
+  },
+
+  // 3. Lampu & Kelistrikan
   {
     category: 'lampu_listrik',
-    categoryLabel: 'Kelistrikan & Accu',
-    name: 'Air Accu',
-    description: 'Periksa batas level cairan air accu (aki) berada di antara garis Upper dan Lower'
+    categoryLabel: 'Lampu & Sistem Kelistrikan',
+    name: 'Lampu Utama (Dekat & Jauh)',
+    description: 'Headlamp menyala terang di kedua sisi, sorot lampu fokus, kaca headlamp tidak pecah'
   },
-  // 5. Rem Mobil & Minyak Rem
   {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda',
-    name: 'Rem Mobil & Minyak Rem',
-    description: 'Periksa fungsi pijakan rem mobil pakem serta level minyak rem pada tabung master'
+    category: 'lampu_listrik',
+    categoryLabel: 'Lampu & Sistem Kelistrikan',
+    name: 'Lampu Sein (L/R) & Hazard',
+    description: 'Lampu sein depan, samping, belakang berkedip normal; hazard darurat berfungsi serentak'
   },
-  // 6. Foto Minyak Rem
   {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda',
-    name: 'Foto Minyak Rem',
-    description: 'Ambil foto bukti fisik level tabung minyak rem armada'
+    category: 'lampu_listrik',
+    categoryLabel: 'Lampu & Sistem Kelistrikan',
+    name: 'Lampu Rem & Lampu Mundur',
+    description: 'Lampu rem menyala merah terang saat diinjak, lampu mundur putih & sirine buzzer aktif'
   },
-  // 7. Kebersihan Kabin
+  {
+    category: 'lampu_listrik',
+    categoryLabel: 'Lampu & Sistem Kelistrikan',
+    name: 'Klakson & Karet Wiper Depan',
+    description: 'Klakson bersuara lantang, bilah wiper fleksibel dan menyeka kaca depan dengan bersih'
+  },
+  {
+    category: 'lampu_listrik',
+    categoryLabel: 'Lampu & Sistem Kelistrikan',
+    name: 'Baterai / Aki & Indikator Dashboard',
+    description: 'Terminal aki bersih kencang, alternator mengisi normal, tidak ada check-engine menyala'
+  },
+
+  // 4. Fisik, Bodi & Legalitas Dokumen
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Kabin & Inventaris',
-    name: 'Kebersihan Kabin',
-    description: 'Pastikan ruang kabin pengemudi bersih, rapi, dan bebas dari sampah/kotoran'
+    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
+    name: 'STNK Asli & Masa Pajak Aktif',
+    description: 'STNK asli berada di dashboard dan masa berlaku pajak tahunan / 5 tahunan masih aktif'
   },
-  // 8. Inventaris Mobil
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Kabin & Inventaris',
-    name: 'Inventaris Mobil',
-    description: 'Periksa kelengkapan inventaris wajib mobil (dongkrak, kunci roda, dokumen jalan)'
+    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
+    name: 'Buku Uji KIR Dishub Aktif',
+    description: 'Buku uji berkala KIR Dishub valid, stempel tanggal uji berikutnya belum terlewat'
   },
-  // 9. Ban Cadangan
   {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda',
-    name: 'Ban Cadangan',
-    description: 'Pastikan ban cadangan terpasang kuat dan memiliki tekanan angin siap pakai'
+    category: 'fisik_dokumen',
+    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
+    name: 'Kaca Spion & Kaca Depan',
+    description: 'Spion kiri-kanan-dalam kokoh dan bersih dari debu/retak, visibilitas pandangan jelas'
+  },
+  {
+    category: 'fisik_dokumen',
+    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
+    name: 'Pintu Boks & Engsel Pengunci',
+    description: 'Engsel dan tuas kunci pintu boks belakang rapat, karet penutup kedap air dan tidak bocor'
+  },
+
+  // 5. Keselamatan K3 & Perlengkapan Darurat
+  {
+    category: 'darurat_k3',
+    categoryLabel: 'Perlengkapan K3 & Darurat',
+    name: 'APAR (Alat Pemadam Api Ringan)',
+    description: 'APAR terpasang di kabin, jarum manometer berada di zona hijau, segel pengaman utuh'
+  },
+  {
+    category: 'darurat_k3',
+    categoryLabel: 'Perlengkapan K3 & Darurat',
+    name: 'Segitiga Pengaman & Kotak P3K',
+    description: 'Minimal 2 unit segitiga pengaman reflektor dan kotak P3K lengkap dengan kasa & antiseptik'
+  },
+  {
+    category: 'darurat_k3',
+    categoryLabel: 'Perlengkapan K3 & Darurat',
+    name: 'Dongkrak Hidrolik & Kunci Roda',
+    description: 'Kapasitas dongkrak sesuai tonase armada (min 5 ton) dan kunci roda pas dengan mur'
+  },
+  {
+    category: 'darurat_k3',
+    categoryLabel: 'Perlengkapan K3 & Darurat',
+    name: 'Terpal Cadangan & Tali Pengikat Muatan',
+    description: 'Terpal pelindung muatan anti air utuh dan tali tambang webbing pengikat koli siap pakai'
   }
 ];
-
-// Alias nama checklist lama agar histori v2 tetap bisa dipetakan ke format 9 poin.
-const LEGACY_NAME_ALIASES: Record<string, string> = {
-  'oli mesin & indikator dipstick': 'oli mesin',
-  'air radiator (coolant) & reservoir': 'air radiator',
-  'baterai / aki & indikator dashboard': 'air accu',
-  'minyak rem & minyak kopling': 'rem mobil & minyak rem',
-  'rem kaki (pedal rem utama)': 'rem mobil & minyak rem',
-  'ban serep & tekanan udara': 'ban cadangan',
-  'dongkrak hidrolik & kunci roda': 'inventaris mobil',
-  'stnk asli & masa pajak aktif': 'inventaris mobil',
-  'buku uji kir dishub aktif': 'inventaris mobil'
-};
 
 class DriverChecklistService {
   public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
     const existingMap = new Map<string, VehicleChecklistItem>();
     if (Array.isArray(existingItems)) {
       existingItems.forEach(item => {
-        const lower = item.name.toLowerCase().trim();
-        existingMap.set(lower, item);
-        const mappedAlias = LEGACY_NAME_ALIASES[lower];
-        if (mappedAlias && !existingMap.has(mappedAlias)) {
-          existingMap.set(mappedAlias, item);
-        }
+        existingMap.set(item.name.toLowerCase(), item);
       });
     }
 
@@ -274,19 +340,6 @@ class DriverChecklistService {
 
     return { overallStatus, passedCount, issueCount };
   }
-  public deleteChecklist(id: string): boolean {
-    const cleanId = String(id || '').trim();
-    if (!cleanId) return false;
-    try {
-      const all = this.getChecklists();
-      const filtered = all.filter(c => c.id !== cleanId);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
 }
 
 export const driverChecklistService = new DriverChecklistService();

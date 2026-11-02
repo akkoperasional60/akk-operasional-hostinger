@@ -36,8 +36,7 @@ import {
   UserCheck,
   Fuel,
   LogIn,
-  LogOut,
-  Trash2
+  LogOut
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverShiftService } from '../services/driverShiftService';
@@ -50,131 +49,22 @@ export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
 
 export const DriverReportsManagement: React.FC = () => {
   const { addNotification } = useToast();
-  const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
-
-  useEffect(() => {
-    const syncUser = () => setCurrentUser({ ...logisticsStore.getCurrentUser() });
-    const unsub = logisticsStore.subscribe(syncUser);
-    return () => unsub();
-  }, []);
+  const currentUser = logisticsStore.getCurrentUser();
 
   // Role authorization: Status & Solutions can only be accessed/managed by SPV Logistik and Super Admin
   const isAuthorizedSpvOrAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    const r = (currentUser?.role || '').toLowerCase();
     const name = (currentUser?.fullName || '').toLowerCase();
     return (
-      r === 'superadmin' ||
-      r === 'spvlogistik' ||
+      r === 'super_admin' ||
+      r === 'spv_logistik' ||
       r === 'admin' ||
-      r === 'manager' ||
-      r === 'operasional' ||
-      r === 'pengiriman' ||
-      name.includes('super') ||
       name.includes('spv') ||
       name.includes('supervisor') ||
       name.includes('bayu') ||
       name.includes('bahri')
     );
   }, [currentUser]);
-
-  // Role authorization: Hapus laporan HANYA untuk Super Admin
-  const isSuperAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
-    const email = (currentUser?.email || '').toLowerCase().trim();
-    const name = (currentUser?.fullName || '').toLowerCase().trim();
-    const username = ((currentUser as any)?.username || '').toLowerCase().trim();
-    return (
-      r === 'superadmin' ||
-      r === 'admin' ||
-      r === 'manager' ||
-      email === 'akkoperasional60@gmail.com' ||
-      name.includes('super admin') ||
-      name === 'super' ||
-      username.includes('super')
-    );
-  }, [currentUser]);
-
-  const fleets = useMemo(() => logisticsStore.getFleets(), []);
-  const schedules = useMemo(() => logisticsStore.getSchedules(), []);
-
-  // Helper untuk menampilkan Plat Nomor beserta Nama Inisial Armada (contoh: P 8711 UW (N21 / NL2))
-  const formatPlateWithInitial = (plateRaw?: string): string => {
-    const raw = (plateRaw || '-').trim();
-    if (!raw || raw === '-') return '-';
-    if (raw.includes('(') && raw.includes(')')) return raw;
-    const cleanPlate = raw.replace(/\s+/g, '').toUpperCase();
-    const matchedFleet = fleets.find(
-      f => (f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate
-    );
-    if (matchedFleet?.initialCode) {
-      return `${matchedFleet.plateNumber} (${matchedFleet.initialCode})`;
-    }
-    return raw;
-  };
-
-  // Helper untuk menentukan Nama Area Kirim pada Laporan Pengisian BBM
-  const resolveFuelAreaKirim = (rep: DriverHelperReport): string => {
-    const rawArea = (rep.areaName || '').trim();
-    const cleanedArea = rawArea
-      .replace(/\s*\(?SPBU\s*(Farly|Gajah\s*Mada)\)?/gi, '')
-      .replace(/^Pengisian\s*BBM\s*(Solar)?\s*[-:•]?\s*/i, '')
-      .trim();
-
-    const isGenericSpbuOnly =
-      !cleanedArea ||
-      cleanedArea === '-' ||
-      /^(spbu|farly|gajah\s*mada|pengisian\s*bbm|isi\s*bbm|operasional\s*dc|rute\s*pengiriman)$/i.test(cleanedArea);
-
-    if (!isGenericSpbuOnly) {
-      return cleanedArea;
-    }
-
-    const rDate = rep.date || getLocalDateStr(rep.timestamp);
-    const repPlateClean = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-    const repDriverClean = (rep.driverName || '').trim().toLowerCase();
-
-    // 1. Cek dari jadwal pengiriman pada tanggal yang sama
-    const sameDaySchedule = schedules.find(s => {
-      const sDate = getLocalDateStr(s.departureDate);
-      const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-      const sDriver = (s.crew?.name || '').trim().toLowerCase();
-      return sDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
-    });
-    if (sameDaySchedule) {
-      return (sameDaySchedule.areaName || sameDaySchedule.store?.storeName || 'Area Kirim Terjadwal').trim();
-    }
-
-    // 2. Cek dari laporan kiriman/absen kru pada hari yang sama
-    const sameDayOtherReport = reports.find(other => {
-      if (other.id === rep.id || other.category === 'isi_bbm') return false;
-      const oDate = other.date || getLocalDateStr(other.timestamp);
-      const oPlate = (other.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-      const oDriver = (other.driverName || '').trim().toLowerCase();
-      const oArea = (other.areaName || '').trim();
-      return (
-        oDate === rDate &&
-        oArea &&
-        oArea !== '-' &&
-        !/^(presensi|keamanan|operasional)/i.test(oArea) &&
-        ((repPlateClean && oPlate === repPlateClean) || (repDriverClean && oDriver === repDriverClean))
-      );
-    });
-    if (sameDayOtherReport?.areaName) {
-      return sameDayOtherReport.areaName;
-    }
-
-    // 3. Cek dari jadwal pengiriman terbaru untuk armada/driver tersebut
-    const anySchedule = schedules.find(s => {
-      const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-      const sDriver = (s.crew?.name || '').trim().toLowerCase();
-      return (repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean);
-    });
-    if (anySchedule) {
-      return (anySchedule.areaName || anySchedule.store?.storeName || 'Rute Pengiriman Aktif').trim();
-    }
-
-    return cleanedArea || 'Rute Pengiriman DC';
-  };
 
   // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline
   const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline'>('operasional');
@@ -256,18 +146,6 @@ export const DriverReportsManagement: React.FC = () => {
   const [solutionText, setSolutionText] = useState<string>('');
   const [solutionStatus, setSolutionStatus] = useState<'follow_up' | 'verified' | 'resolved'>('resolved');
 
-  // Super Admin Delete Confirmation Modal State
-  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
-    id: string;
-    shiftId?: string;
-    driverName: string;
-    plateNumber: string;
-    areaName: string;
-    date?: string;
-    label: string;
-    isShiftRecord?: boolean;
-  } | null>(null);
-
   // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru)
   const [scheduleChangeNotifs, setScheduleChangeNotifs] = useState<
     Array<{
@@ -329,8 +207,10 @@ export const DriverReportsManagement: React.FC = () => {
     };
 
     const pollInterval = setInterval(() => {
-      driverReportService.syncWithServer().catch(() => {});
-    }, 10000);
+      driverReportService.syncWithServer().then(() => {
+        setReports(driverReportService.getReports());
+      }).catch(() => {});
+    }, 2000);
 
     window.addEventListener('driver-report-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
@@ -645,49 +525,6 @@ export const DriverReportsManagement: React.FC = () => {
     setSolutionModalReport(null);
   };
 
-  const handleConfirmDeleteReport = () => {
-    if (!deleteConfirmTarget) return;
-    if (!isSuperAdmin) {
-      addNotification('sla_warning', 'Akses Dibatasi', 'Fitur hapus laporan hanya diizinkan untuk Super Admin.');
-      setDeleteConfirmTarget(null);
-      return;
-    }
-
-    driverReportService.deleteReport(deleteConfirmTarget.id);
-    if (deleteConfirmTarget.shiftId) {
-      driverReportService.deleteReport(deleteConfirmTarget.shiftId);
-    }
-    if (deleteConfirmTarget.isShiftRecord) {
-      // Hapus juga semua laporan presensi_shift yang cocok dengan kru & tanggal yang sama agar tidak muncul kembali
-      reports
-        .filter(
-          r =>
-            r.category === 'presensi_shift' &&
-            (r.id === deleteConfirmTarget.id ||
-              (deleteConfirmTarget.shiftId && r.shiftId === deleteConfirmTarget.shiftId) ||
-              (deleteConfirmTarget.driverName &&
-                deleteConfirmTarget.date &&
-                r.driverName.toLowerCase() === deleteConfirmTarget.driverName.toLowerCase() &&
-                (r.date || getLocalDateStr(r.timestamp)) === deleteConfirmTarget.date))
-        )
-        .forEach(r => driverReportService.deleteReport(r.id));
-
-      driverShiftService.deleteShift(
-        deleteConfirmTarget.shiftId || deleteConfirmTarget.id,
-        deleteConfirmTarget.driverName,
-        deleteConfirmTarget.date
-      );
-    }
-
-    loadReports();
-    addNotification(
-      'schedule',
-      'Laporan Berhasil Dihapus',
-      `Laporan ${deleteConfirmTarget.label} (${deleteConfirmTarget.driverName} • ${deleteConfirmTarget.plateNumber}) telah dihapus oleh Super Admin.`
-    );
-    setDeleteConfirmTarget(null);
-  };
-
   const handleExportCsv = () => {
     if (filteredReports.length === 0) return;
 
@@ -753,7 +590,6 @@ export const DriverReportsManagement: React.FC = () => {
     const reportShiftRecords = reports.filter(r => r.category === 'presensi_shift');
     const combinedMap = new Map<string, {
       id: string;
-      shiftId?: string;
       date: string;
       driverName: string;
       userRole: string;
@@ -769,7 +605,6 @@ export const DriverReportsManagement: React.FC = () => {
       const key = r.shiftId || `${r.driverName.toLowerCase()}-${r.date || getLocalDateStr(r.timestamp)}`;
       combinedMap.set(key, {
         id: r.id,
-        shiftId: r.shiftId,
         date: r.date || getLocalDateStr(r.timestamp),
         driverName: r.driverName,
         userRole: r.userRole || 'Driver',
@@ -831,19 +666,16 @@ export const DriverReportsManagement: React.FC = () => {
       if (fuelLocationFilter !== 'all' && resolvedLoc !== fuelLocationFilter) return false;
       if (fuelSearchQuery.trim()) {
         const q = fuelSearchQuery.toLowerCase().trim();
-        const areaKirim = resolveFuelAreaKirim(r).toLowerCase();
-        const plateWithInit = formatPlateWithInitial(r.plateNumber).toLowerCase();
         return (
           r.driverName.toLowerCase().includes(q) ||
-          plateWithInit.includes(q) ||
-          areaKirim.includes(q) ||
+          r.plateNumber.toLowerCase().includes(q) ||
           resolvedLoc.toLowerCase().includes(q) ||
           r.notes.toLowerCase().includes(q)
         );
       }
       return true;
     });
-  }, [reports, fuelLocationFilter, fuelSearchQuery, schedules, fleets]);
+  }, [reports, fuelLocationFilter, fuelSearchQuery]);
 
   const totalFuelReportsCount = useMemo(() => {
     return reports.filter(r =>
@@ -1127,13 +959,12 @@ export const DriverReportsManagement: React.FC = () => {
                     <th className="py-3 px-4 text-center">Waktu Check-In</th>
                     <th className="py-3 px-4 text-center">Waktu Check-Out</th>
                     <th className="py-3 px-4 text-center">Status Shift</th>
-                    {isSuperAdmin && <th className="py-3 px-4 text-center">Tindakan</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {checkinCheckoutList.length === 0 ? (
                     <tr>
-                      <td colSpan={isSuperAdmin ? 9 : 8} className="py-10 text-center text-slate-500">
+                      <td colSpan={8} className="py-10 text-center text-slate-500">
                         Belum ada data laporan Check-In &amp; Check-Out kru pengiriman.
                       </td>
                     </tr>
@@ -1150,7 +981,7 @@ export const DriverReportsManagement: React.FC = () => {
                         </td>
                         <td className="py-3 px-4">
                           <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
-                            {formatPlateWithInitial(item.plateNumber)}
+                            {item.plateNumber}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{item.areaName}</td>
@@ -1179,30 +1010,6 @@ export const DriverReportsManagement: React.FC = () => {
                             </span>
                           )}
                         </td>
-                        {isSuperAdmin && (
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDeleteConfirmTarget({
-                                  id: item.id,
-                                  shiftId: item.shiftId,
-                                  driverName: item.driverName,
-                                  plateNumber: formatPlateWithInitial(item.plateNumber),
-                                  areaName: item.areaName,
-                                  date: item.date,
-                                  label: 'Presensi Check-In / Check-Out',
-                                  isShiftRecord: true
-                                })
-                              }
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
-                              title="Hapus Data Check-In/Out (Khusus Super Admin)"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Hapus</span>
-                            </button>
-                          </td>
-                        )}
                       </tr>
                     ))
                   )}
@@ -1246,16 +1053,14 @@ export const DriverReportsManagement: React.FC = () => {
                 type="button"
                 onClick={() => {
                   if (fuelReportsList.length === 0) return;
-                  const headers = ['Tanggal', 'Waktu', 'Nama Driver', 'Nomor Kendaraan', 'Area Kirim', 'Lokasi SPBU', 'Status'];
+                  const headers = ['Tanggal', 'Waktu', 'Nama Driver', 'Nomor Kendaraan', 'Lokasi SPBU', 'Status'];
                   const rows = fuelReportsList.map(r => {
                     const loc = r.fuelLocation || (r.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
-                    const areaKirim = resolveFuelAreaKirim(r);
                     return [
                       r.date || getLocalDateStr(r.timestamp),
                       new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                       `"${r.driverName}"`,
-                      `"${formatPlateWithInitial(r.plateNumber)}"`,
-                      `"${areaKirim}"`,
+                      r.plateNumber,
                       `"SPBU ${loc}"`,
                       r.status === 'verified' ? 'Terverifikasi' : 'Tercatat'
                     ];
@@ -1370,24 +1175,21 @@ export const DriverReportsManagement: React.FC = () => {
                     <th className="py-3 px-4">Tanggal &amp; Waktu</th>
                     <th className="py-3 px-4">Driver / Kru</th>
                     <th className="py-3 px-4">Nomor Kendaraan</th>
-                    <th className="py-3 px-4">Area Kirim</th>
                     <th className="py-3 px-4">Lokasi BBM (Solar)</th>
                     <th className="py-3 px-4 text-center">Foto Bukti</th>
                     <th className="py-3 px-4 text-center">Status</th>
-                    {isSuperAdmin && <th className="py-3 px-4 text-center">Tindakan</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {fuelReportsList.length === 0 ? (
                     <tr>
-                      <td colSpan={isSuperAdmin ? 9 : 8} className="py-10 text-center text-slate-500">
+                      <td colSpan={7} className="py-10 text-center text-slate-500">
                         Belum ada laporan pengisian BBM (Solar) di lokasi Farly maupun Gajah Mada.
                       </td>
                     </tr>
                   ) : (
                     fuelReportsList.map((rep, idx) => {
                       const loc = rep.fuelLocation || (rep.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
-                      const areaKirim = resolveFuelAreaKirim(rep);
                       return (
                         <tr key={rep.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
                           <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
@@ -1402,18 +1204,12 @@ export const DriverReportsManagement: React.FC = () => {
                           <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
                             {rep.driverName}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 px-4">
                             <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
-                              {formatPlateWithInitial(rep.plateNumber)}
+                              {rep.plateNumber}
                             </span>
                           </td>
                           <td className="py-3 px-4">
-                            <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
-                              <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span>{areaKirim}</span>
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
                             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
                               loc === 'Gajah Mada'
                                 ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
@@ -1423,7 +1219,7 @@ export const DriverReportsManagement: React.FC = () => {
                               <span>SPBU {loc}</span>
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <td className="py-3 px-4 text-center">
                             {rep.photoUrl ? (
                               <button
                                 type="button"
@@ -1437,33 +1233,11 @@ export const DriverReportsManagement: React.FC = () => {
                               <span className="text-slate-400 text-[11px]">-</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <td className="py-3 px-4 text-center">
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
                               <CheckCircle2 className="w-3 h-3" /> Tercatat
                             </span>
                           </td>
-                          {isSuperAdmin && (
-                            <td className="py-3 px-4 text-center whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDeleteConfirmTarget({
-                                    id: rep.id,
-                                    driverName: rep.driverName,
-                                    plateNumber: formatPlateWithInitial(rep.plateNumber),
-                                    areaName: `${areaKirim} • SPBU ${loc}`,
-                                    date: rep.date || getLocalDateStr(rep.timestamp),
-                                    label: 'Pengisian BBM (Solar)'
-                                  })
-                                }
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
-                                title="Hapus Laporan BBM (Khusus Super Admin)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Hapus</span>
-                              </button>
-                            </td>
-                          )}
                         </tr>
                       );
                     })
@@ -1757,25 +1531,6 @@ export const DriverReportsManagement: React.FC = () => {
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                             <span>Dipulihkan oleh {rep.verifiedBy || 'Tim Pengiriman'}</span>
                           </div>
-                        )}
-                        {isSuperAdmin && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDeleteConfirmTarget({
-                                id: rep.id,
-                                driverName: rep.driverName,
-                                plateNumber: rep.plateNumber,
-                                areaName: rep.areaName,
-                                date: rep.date,
-                                label: 'Peringatan Mode Offline'
-                              })
-                            }
-                            className="p-2 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 transition active:scale-95 cursor-pointer"
-                            title="Hapus Riwayat Offline (Khusus Super Admin)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         )}
                       </div>
                     </div>
@@ -2228,11 +1983,11 @@ export const DriverReportsManagement: React.FC = () => {
                             )}
                           </td>
 
-                          {/* 3. Armada (Beserta Nama Inisial Armada) */}
+                          {/* 3. Armada */}
                           <td className="py-2.5 px-3 align-middle whitespace-nowrap">
                             <span className="inline-flex items-center gap-1.5 font-mono font-bold text-amber-300 text-[11px] bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
                               <Truck className="w-3 h-3 text-amber-400 shrink-0" />
-                              {formatPlateWithInitial(item.plateNumber)}
+                              {item.plateNumber}
                             </span>
                           </td>
 
@@ -2435,7 +2190,7 @@ export const DriverReportsManagement: React.FC = () => {
                             )}
                           </td>
 
-                          {/* 10. Tindakan (Edit, Centang, dan Hapus Khusus Super Admin) */}
+                          {/* 10. Tindakan (Edit dan Centang) */}
                           <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
                             {isAuthorizedSpvOrAdmin ? (
                               <div className="inline-flex items-center justify-center gap-1.5">
@@ -2460,26 +2215,6 @@ export const DriverReportsManagement: React.FC = () => {
                                 >
                                   <Check className="w-3.5 h-3.5" />
                                 </button>
-                                {isSuperAdmin && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setDeleteConfirmTarget({
-                                        id: item.id,
-                                        driverName: item.driverName,
-                                        plateNumber: formatPlateWithInitial(item.plateNumber),
-                                        areaName: item.areaName,
-                                        date: item.date,
-                                        label: 'Kendala Lapangan'
-                                      })
-                                    }
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
-                                    title="Hapus Laporan (Khusus Super Admin)"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Hapus</span>
-                                  </button>
-                                )}
                               </div>
                             ) : (
                               <div className="inline-flex items-center justify-center gap-1 text-[10px] text-slate-500">
@@ -2544,6 +2279,31 @@ export const DriverReportsManagement: React.FC = () => {
                 </div>
               </div>
 
+              {/* Preset Quick Solution Chips */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>Pilih Template Arahan Cepat SPV:</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    'Gunakan jalur lingkar bypass barat untuk menghindari titik macet pasar.',
+                    'Tepi jalan aman, bantuan mekanik & armada pengganti sedang meluncur.',
+                    'PIC Toko sudah kami infokan kendala jalan, keterlambatan 20-30 menit telah dimaklumi.',
+                    'Segera merapat ke bengkel rekanan AKK terdekat di area tersebut untuk pengecekan darurat.'
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setSolutionText(preset)}
+                      className="text-left p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-amber-500/40 text-[10px] text-slate-300 hover:text-amber-300 transition cursor-pointer leading-tight"
+                    >
+                      &bull; {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Solution Textarea */}
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-white block">
@@ -2585,6 +2345,10 @@ export const DriverReportsManagement: React.FC = () => {
                     <span className="text-emerald-300 font-bold">Terverifikasi / Selesai</span>
                   </label>
                 </div>
+              </div>
+
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-200">
+                <strong>Catatan Integrasi:</strong> Setelah disimpan, supir <strong>{solutionModalReport.driverName}</strong> akan melihat banner arahan ini di Portal Driver HP miliknya dan dapat langsung menekan tombol konfirmasi kerja.
               </div>
 
             </div>
@@ -2707,74 +2471,6 @@ export const DriverReportsManagement: React.FC = () => {
               </button>
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* 🗑️ MODAL KONFIRMASI HAPUS LAPORAN (KHUSUS SUPER ADMIN) */}
-      {deleteConfirmTarget && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                  <Trash2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-white">
-                    Hapus Laporan {deleteConfirmTarget.label}
-                  </h3>
-                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">
-                    Otorisasi Khusus Super Admin
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmTarget(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3 text-xs">
-              <p className="text-slate-300 leading-relaxed">
-                Apakah Anda yakin ingin menghapus data laporan ini secara permanen dari sistem?
-              </p>
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Kru Pengiriman:</span>
-                  <span className="font-bold text-white">{deleteConfirmTarget.driverName}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Armada:</span>
-                  <span className="font-mono font-bold text-amber-300">{deleteConfirmTarget.plateNumber}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Area / Lokasi:</span>
-                  <span className="font-semibold text-slate-200 truncate max-w-[200px]">{deleteConfirmTarget.areaName}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmTarget(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDeleteReport}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition cursor-pointer active:scale-95"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Ya, Hapus Laporan</span>
-              </button>
-            </div>
           </div>
         </div>
       )}

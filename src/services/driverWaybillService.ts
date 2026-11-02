@@ -177,11 +177,30 @@ class DriverWaybillService {
         changed = true;
       }
       if (schedule.crew?.name && existing.crew.driverName !== schedule.crew.name) {
+        existing.crew.driverId = schedule.crewId;
         existing.crew.driverName = schedule.crew.name;
+        if (schedule.crew.phone) existing.crew.driverPhone = schedule.crew.phone;
         changed = true;
       }
-      if (schedule.crewHelper?.name && existing.crew.helperName !== schedule.crewHelper.name) {
-        existing.crew.helperName = schedule.crewHelper.name;
+      const nextHelper1 = schedule.crewHelper?.name || '-';
+      if (existing.crew.helperName !== nextHelper1) {
+        existing.crew.helperName = nextHelper1;
+        changed = true;
+      }
+      const nextHelper2 = schedule.crewHelper2?.name;
+      if (existing.crew.helper2Name !== nextHelper2) {
+        existing.crew.helper2Name = nextHelper2;
+        changed = true;
+      }
+      const nextStoreName = schedule.store?.storeName || schedule.areaName || existing.destination.storeName;
+      const nextAreaName = schedule.areaName || schedule.store?.city || existing.destination.areaName;
+      if (existing.destination.storeName !== nextStoreName || existing.destination.areaName !== nextAreaName) {
+        existing.destination = {
+          ...existing.destination,
+          storeName: nextStoreName,
+          areaName: nextAreaName,
+          address: schedule.store?.address || `Area Pengiriman Distribusi ${nextAreaName}`
+        };
         changed = true;
       }
       if (schedule.status === 'delivered') {

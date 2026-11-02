@@ -1,5 +1,6 @@
 import { logisticsStore } from './store';
 import { Fleet, Crew, VehicleType, FleetStatus, CrewStatus } from '../types';
+import { resolveCanonicalFleetMeta } from '../data/mockData';
 
 /**
  * Backward-compatible service name retained to avoid breaking old imports.
@@ -85,16 +86,21 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     return Number.isFinite(parsed) ? parsed : fallbackValue;
   };
 
+  const canonical =
+    resolveCanonicalFleetMeta(row?.plateNumber || row?.plate_number || row?.id) ||
+    fallback;
+
   return {
+    ...(canonical || {} as Fleet),
     ...(fallback || {} as Fleet),
-    id: row.id || fallback?.id || `flt-${Date.now()}`,
-    plateNumber: row.plateNumber || row.plate_number || fallback?.plateNumber || '',
-    vehicleType: (row.vehicleType || row.vehicle_type || fallback?.vehicleType || 'Engkel STD') as VehicleType,
-    initialCode: row.initialCode ?? row.initial_code ?? fallback?.initialCode,
-    brand: row.brand ?? row.brand_name ?? fallback?.brand,
-    engineCc: row.engineCc ?? row.engine_cc ?? fallback?.engineCc,
-    boxCapacityM3: numberOrFallback(row.boxCapacityM3 ?? row.box_capacity_m3, fallback?.boxCapacityM3),
-    boxDimensions: row.boxDimensions ?? row.box_dimensions ?? fallback?.boxDimensions,
+    id: row.id || fallback?.id || canonical?.id || `flt-${Date.now()}`,
+    plateNumber: row.plateNumber || row.plate_number || fallback?.plateNumber || canonical?.plateNumber || '',
+    vehicleType: (row.vehicleType || row.vehicle_type || fallback?.vehicleType || canonical?.vehicleType || 'Engkel STD') as VehicleType,
+    initialCode: row.initialCode || row.initial_code || fallback?.initialCode || canonical?.initialCode,
+    brand: row.brand ?? row.brand_name ?? fallback?.brand ?? canonical?.brand,
+    engineCc: row.engineCc ?? row.engine_cc ?? fallback?.engineCc ?? canonical?.engineCc,
+    boxCapacityM3: numberOrFallback(row.boxCapacityM3 ?? row.box_capacity_m3, fallback?.boxCapacityM3 ?? canonical?.boxCapacityM3),
+    boxDimensions: row.boxDimensions ?? row.box_dimensions ?? fallback?.boxDimensions ?? canonical?.boxDimensions,
     boxInnerMultiplierPercent: numberOrFallback(
       row.boxInnerMultiplierPercent ?? row.box_inner_multiplier_percent,
       fallback?.boxInnerMultiplierPercent

@@ -90,7 +90,8 @@ import {
   INITIAL_PROFILES,
   INITIAL_CREW_HISTORY,
   INITIAL_AREA_APPROVALS,
-  INITIAL_SCANNED_DOCUMENTS
+  INITIAL_SCANNED_DOCUMENTS,
+  resolveCanonicalFleetMeta
 } from '../data/mockData';
 import {
   INITIAL_SALES_ORDERS,
@@ -1749,12 +1750,25 @@ class LogisticsStore {
     return newLog;
   }
 
+  private enrichFleetItem(f: Fleet): Fleet {
+    const canonical = resolveCanonicalFleetMeta(f);
+    if (!canonical) return f;
+    return {
+      ...f,
+      initialCode: f.initialCode || canonical.initialCode,
+      vehicleType: f.vehicleType || canonical.vehicleType,
+      brand: f.brand || canonical.brand
+    };
+  }
+
   public getFleets(): Fleet[] {
-    return [...this.fleets];
+    return this.fleets.map(f => this.enrichFleetItem(f));
   }
 
   public setFleets(fleets: Fleet[]): void {
-    const validFleets = fleets.filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'));
+    const validFleets = fleets
+      .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
+      .map(f => this.enrichFleetItem(f));
     this.fleets = validFleets;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     this.notify();
@@ -1950,11 +1964,19 @@ class LogisticsStore {
         return refCrew;
       };
 
+      const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+      const matchedFleet =
+        this.fleets.find(f => f.id === sch.fleetId) ||
+        (sch.fleet?.plateNumber
+          ? this.fleets.find(f => normPlate(f.plateNumber) === normPlate(sch.fleet?.plateNumber))
+          : undefined) ||
+        sch.fleet;
+
       return {
         ...sch,
         areaName,
         store: areaStore,
-        fleet: this.fleets.find(f => f.id === sch.fleetId) || sch.fleet,
+        fleet: matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined,
         crew: findMatchingCrew(sch.crewId, sch.crew),
         crewHelper: (sch.crewHelperId || sch.crewHelper) ? findMatchingCrew(sch.crewHelperId, sch.crewHelper) : undefined,
         crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
@@ -2900,7 +2922,7 @@ class LogisticsStore {
       ]);
 
       if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-        this.fleets = fleetPayload.data;
+        this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
         this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
       }
       if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {

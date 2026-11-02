@@ -313,7 +313,6 @@ async function startServer() {
     });
   }
 
-
   const getSessionUser = async (req: any): Promise<any | null> => {
     const parsed = verifySessionToken(readCookie(req, SESSION_COOKIE));
     if (!parsed) return null;
@@ -1419,7 +1418,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   // Persistence: MySQL app_state. Transport: same-origin API + SSE.
   let inMemoryDriverReports: any[] = [];
   let inMemoryReportsLoadedFromDb = false;
-  const deletedDriverReportIds = new Set<string>();
   const driverReportSseClients = new Set<express.Response>();
 
   const loadDriverReportsFromDbIfNeeded = async (): Promise<any[]> => {
@@ -1436,7 +1434,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ? JSON.parse(rows[0].state_json)
           : rows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryDriverReports = parsed.filter((r: any) => !deletedDriverReportIds.has(String(r?.id || '')));
+          inMemoryDriverReports = parsed;
         }
       }
     } catch (err: any) {
@@ -1520,12 +1518,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   app.get("/api/driver-reports", requireScheduleStatusWrite, async (_req, res) => {
     const list = await loadDriverReportsFromDbIfNeeded();
-    return res.json({
-      success: true,
-      reports: list,
-      deletedIds: Array.from(deletedDriverReportIds),
-      count: list.length
-    });
+    return res.json({ success: true, reports: list, count: list.length });
   });
 
   app.post("/api/driver-reports", requireScheduleStatusWrite, async (req, res) => {
@@ -1534,9 +1527,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
     if (report && typeof report === 'object' && String(report.id || '').trim()) {
       const safeReport = { ...report, id: String(report.id).slice(0, 160) };
-      if (deletedDriverReportIds.has(safeReport.id)) {
-        return res.json({ success: true, ignoredDeleted: true, count: inMemoryDriverReports.length });
-      }
       const idx = inMemoryDriverReports.findIndex((r: any) => r.id === safeReport.id);
       if (idx >= 0) {
         // Preserve supervisor solution fields when a driver's older local copy is synced.
@@ -1570,7 +1560,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       for (const r of [...reports.slice(0, 60), ...inMemoryDriverReports]) {
         if (!r || !String(r.id || '').trim()) continue;
         const id = String(r.id).slice(0, 160);
-        if (deletedDriverReportIds.has(id)) continue;
         const normalized = { ...r, id };
         const existing = map.get(id);
         if (!existing) {
@@ -1597,12 +1586,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       );
       await persistDriverReportsToDb(inMemoryDriverReports);
       broadcastDriverReportEvent("reports_synced", { count: inMemoryDriverReports.length });
-      return res.json({
-        success: true,
-        reports: inMemoryDriverReports,
-        deletedIds: Array.from(deletedDriverReportIds),
-        count: inMemoryDriverReports.length
-      });
+      return res.json({ success: true, reports: inMemoryDriverReports, count: inMemoryDriverReports.length });
     }
 
     return res.status(400).json({ success: false, error: "Payload report tidak valid" });
@@ -1659,39 +1643,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       return res.json({ success: true, report: updated });
     }
     return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
-  });
-
-  app.delete("/api/driver-reports/:id", requireSuperAdmin, async (req: any, res) => {
-    try {
-      const reportId = String(req.params.id || '').trim();
-      if (!reportId) {
-        return res.status(400).json({ success: false, error: "ID laporan wajib diisi" });
-      }
-
-      const authUser = await getSessionUser(req);
-      const authRole = String(authUser?.role || '').toLowerCase();
-      if (isDatabaseConfigured()) {
-        if (!authUser || (authRole !== 'super_admin' && authRole !== 'admin')) {
-          return res.status(403).json({ success: false, error: "Akses hapus laporan khusus Super Admin" });
-        }
-      } else if (authUser && authRole !== 'super_admin' && authRole !== 'admin') {
-        return res.status(403).json({ success: false, error: "Akses hapus laporan khusus Super Admin" });
-      }
-
-      await loadDriverReportsFromDbIfNeeded();
-      deletedDriverReportIds.add(reportId);
-      inMemoryDriverReports = inMemoryDriverReports.filter((r: any) => String(r?.id || '') !== reportId);
-      await persistDriverReportsToDb(inMemoryDriverReports);
-      broadcastDriverReportEvent("report_deleted", { id: reportId });
-
-      return res.json({
-        success: true,
-        deletedId: reportId,
-        count: inMemoryDriverReports.length
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message || "Gagal menghapus laporan" });
-    }
   });
 
   app.post("/api/schedules/:id/bypass-checklist", requireSuperAdmin, express.json(), async (req: any, res) => {
@@ -1768,7 +1719,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         );
       }
 
-      const crewIds = [updatedSchedule.crewId, updatedSchedule.crewHelperId, updatedSchedule.crewHelper2Id]
+      const crewIds = [updatedSchedule.crewId, updatedSchedule.crewHelperId]
         .map((value: any) => String(value || '').trim())
         .filter(Boolean);
       for (const crewId of [...new Set(crewIds)]) {

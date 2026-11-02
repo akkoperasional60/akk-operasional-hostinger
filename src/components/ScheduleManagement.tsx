@@ -831,29 +831,14 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
         ? [-8.1724, 113.6995]
         : CENTRAL_WAREHOUSE.coordinates;
 
-    const depDateObj = new Date(newSchedule.departureDate);
-    const arrDateObj = new Date(newSchedule.estimatedArrival);
-    const fmtHhMm = (d: Date, fallback: string) =>
-      isNaN(d.getTime())
-        ? fallback
-        : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    const fmtYyyyMmDd = (d: Date) =>
-      isNaN(d.getTime())
-        ? ''
-        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
     const scheduleData = {
       ...newSchedule,
       areaName: targetAreaLabel,
       cargoDescription: `Karton Box & Sheet Kemasan - Area ${targetAreaLabel}`,
       originName: originWarehouseLabel,
       originCoords: originTuple,
-      departureDate: depDateObj.toISOString(),
-      estimatedArrival: arrDateObj.toISOString(),
-      departureTime: fmtHhMm(depDateObj, '07:30'),
-      targetReturnTime: fmtHhMm(arrDateObj, '17:00'),
-      deliveryDate: fmtYyyyMmDd(depDateObj),
-      returnDate: fmtYyyyMmDd(arrDateObj),
+      departureDate: new Date(newSchedule.departureDate).toISOString(),
+      estimatedArrival: new Date(newSchedule.estimatedArrival).toISOString(),
       areaApprovalStatus: (areaCheck?.requiresApproval ? 'approved' : 'not_required') as 'approved' | 'not_required',
       areaTripCount: (areaCheck?.tripCount || 0) + 1,
       isManuallyEdited: true

@@ -24,7 +24,6 @@ import { driverChecklistService } from '../services/driverChecklistService';
 import { driverReportService, DriverHelperReport } from '../services/driverReportService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { logisticsStore } from '../services/store';
-import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
 
 export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'isi_bbm';
 
@@ -106,13 +105,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   );
   const fleetInitial = matchedFleet?.initialCode || (autoPlateNumber.includes('8848') ? 'N3 / NS1' : autoPlateNumber.includes('8125') ? 'N1 / NP1' : autoPlateNumber.includes('8509') ? 'A3 / NP3' : undefined);
 
-  // GPS Coordinates (Direkam otomatis secara real-time high-accuracy untuk sistem)
+  // GPS Coordinates (Direkam otomatis di background untuk sistem)
   const [driverLat, setDriverLat] = useState<number>(-8.2190);
   const [driverLng, setDriverLng] = useState<number>(114.3680);
-  const [hasLiveGpsFix, setHasLiveGpsFix] = useState<boolean>(false);
-  const [gpsAccuracyMeters, setGpsAccuracyMeters] = useState<number | null>(null);
-  const [isRefreshingGps, setIsRefreshingGps] = useState<boolean>(false);
-  const gpsWatchIdRef = useRef<number | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -201,24 +196,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   };
 
-  const requestFreshGpsLocation = () => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-    setIsRefreshingGps(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setDriverLat(pos.coords.latitude);
-        setDriverLng(pos.coords.longitude);
-        setHasLiveGpsFix(true);
-        setGpsAccuracyMeters(typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null);
-        setIsRefreshingGps(false);
-      },
-      () => {
-        setIsRefreshingGps(false);
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-    );
-  };
-
   useEffect(() => {
     if (isOpen) {
       resetFormFields();
@@ -243,43 +220,24 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       }
 
       refreshActiveQueue();
-      requestFreshGpsLocation();
 
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
-        try {
-          if (gpsWatchIdRef.current !== null) {
-            navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-          }
-          gpsWatchIdRef.current = navigator.geolocation.watchPosition(
-            (pos) => {
-              setDriverLat(pos.coords.latitude);
-              setDriverLng(pos.coords.longitude);
-              setHasLiveGpsFix(true);
-              setGpsAccuracyMeters(typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null);
-            },
-            () => {},
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
-          );
-        } catch {}
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            setDriverLat(pos.coords.latitude);
+            setDriverLng(pos.coords.longitude);
+          },
+          () => {
+            setDriverLat(-8.2190);
+            setDriverLng(114.3680);
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
       }
     } else {
-      if (typeof navigator !== 'undefined' && navigator.geolocation && gpsWatchIdRef.current !== null) {
-        try {
-          navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-        } catch {}
-        gpsWatchIdRef.current = null;
-      }
       stopLiveCamera();
       resetFormFields();
     }
-    return () => {
-      if (typeof navigator !== 'undefined' && navigator.geolocation && gpsWatchIdRef.current !== null) {
-        try {
-          navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-        } catch {}
-        gpsWatchIdRef.current = null;
-      }
-    };
   }, [isOpen, driverId, plateNumber, isHelperJobdesk, initialCategory]);
 
   // Timer detikan real-time selama kru sedang mengantri di customer
@@ -401,21 +359,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     setIsCameraActive(false);
   };
 
-  const effectivePreciseGps = React.useMemo(() => {
-    const targetPointName =
-      category === 'istirahat'
-        ? customerNameInput.trim()
-        : category === 'isi_bbm'
-        ? `SPBU ${fuelLocation}`
-        : customerOutletInput.trim();
-    return resolvePreciseCustomerGps({
-      customerName: targetPointName,
-      areaName: currentAreaName,
-      rawLat: hasLiveGpsFix ? driverLat : null,
-      rawLng: hasLiveGpsFix ? driverLng : null
-    });
-  }, [category, customerNameInput, fuelLocation, customerOutletInput, currentAreaName, hasLiveGpsFix, driverLat, driverLng]);
-
   // Watermark stamper helper
   const applyWatermarkToCanvas = (canvas: HTMLCanvasElement): string => {
     const ctx = canvas.getContext('2d');
@@ -457,7 +400,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const initialText = fleetInitial ? ` [${fleetInitial}]` : '';
     const targetCustomerLabel =
       category === 'istirahat' && customerNameInput.trim()
-        ? `Pelanggan: ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})`
+        ? `Pelanggan: ${customerNameInput.trim()} (${currentAreaName})`
         : category === 'isi_bbm'
         ? `Lokasi BBM: SPBU ${fuelLocation}`
         : `Area: ${currentAreaName}`;
@@ -466,11 +409,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
     ctx.fillStyle = '#cbd5e1';
     ctx.font = `bold ${fontSize - 2}px monospace`;
-    ctx.fillText(
-      `🕒 ${nowStr} | 📍 GPS: ${effectivePreciseGps.latitude.toFixed(6)}, ${effectivePreciseGps.longitude.toFixed(6)}`,
-      16,
-      bannerY + 14 + (fontSize * 2)
-    );
+    ctx.fillText(`🕒 ${nowStr} | 📍 GPS: ${driverLat.toFixed(5)}, ${driverLng.toFixed(5)}`, 16, bannerY + 14 + (fontSize * 2));
 
     const stampedUrl = canvas.toDataURL('image/jpeg', 0.72);
     addPhotoToList(stampedUrl);
@@ -558,7 +497,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     e.target.value = '';
   };
 
-  const gmapsLink = effectivePreciseGps.gmapsUrl;
+  const gmapsLink = `https://www.google.com/maps?q=${driverLat},${driverLng}`;
 
   const getWhatsAppShareText = () => {
     const categoryLabel =
@@ -574,7 +513,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
     const customerLine =
       category === 'istirahat' && customerNameInput.trim()
-        ? `*Nama Pelanggan:* ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})\n`
+        ? `*Nama Pelanggan:* ${customerNameInput.trim()}\n`
         : category === 'isi_bbm'
         ? `*Lokasi SPBU:* ${fuelLocation}\n`
         : '';
@@ -588,7 +527,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       `*No. Surat Jalan:* ${currentWaybillNo}\n` +
       `*Jumlah Foto Bukti:* ${photoList.length} Foto\n` +
       (category !== 'isi_bbm' ? `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` : '') +
-      `*Koordinat GPS Presisi:* ${effectivePreciseGps.coordsFormatted}\n` +
       `*Titik Google Maps:* ${gmapsLink}\n` +
       `*Waktu:* ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
     );
@@ -636,9 +574,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const submittedPhoto = photoList[0] || null;
     const submittedPhotos = [...photoList];
     const submittedCustomer = category === 'istirahat' ? customerNameInput.trim() : undefined;
-    const finalLat = effectivePreciseGps.latitude;
-    const finalLng = effectivePreciseGps.longitude;
-    const finalGmapsUrl = effectivePreciseGps.gmapsUrl;
 
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
@@ -652,9 +587,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       notes: submittedNotes,
       photoUrl: submittedPhoto,
       photoUrls: submittedPhotos,
-      latitude: finalLat,
-      longitude: finalLng,
-      gmapsUrl: finalGmapsUrl
+      latitude: driverLat,
+      longitude: driverLng,
+      gmapsUrl: gmapsLink
     });
 
     resetFormFields();
@@ -667,9 +602,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       photoUrls: submittedPhotos,
       distanceMeters: null,
       isWithinRadius: true,
-      driverLat: finalLat,
-      driverLng: finalLng,
-      gmapsUrl: finalGmapsUrl,
+      driverLat,
+      driverLng,
+      gmapsUrl: gmapsLink,
       plateNumber: autoPlateNumber,
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation}` : currentAreaName
     });
@@ -1094,38 +1029,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       setCustomerNameInput(e.target.value);
                       if (validationError) setValidationError(null);
                     }}
-                    placeholder="Contoh: KDS / Muzaki / Toko Aza / Toko Grosir Makmur"
+                    placeholder="Contoh: Toko Grosir Makmur / Bpk. Hendra"
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
                   />
-                </div>
-
-                {/* Live Precise GPS Pin Preview per Pelanggan */}
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-blue-500/30 flex items-center justify-between gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    <MapPin className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-white truncate">
-                        {effectivePreciseGps.subAreaLabel}
-                      </div>
-                      <div className="text-[10px] font-mono text-blue-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        <span>GPS: {effectivePreciseGps.coordsFormatted}</span>
-                        {gpsAccuracyMeters !== null && hasLiveGpsFix && (
-                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                            Akurasi ±{gpsAccuracyMeters}m
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestFreshGpsLocation}
-                    className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Segarkan titik koordinat GPS presisi"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isRefreshingGps ? 'animate-spin' : ''}`} />
-                    <span>Perbarui GPS</span>
-                  </button>
                 </div>
               </div>
             )}
