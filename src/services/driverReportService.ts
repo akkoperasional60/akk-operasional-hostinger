@@ -1,3 +1,5 @@
+import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+
 export interface DriverHelperReport {
   id: string;
   timestamp: string;
@@ -47,25 +49,39 @@ export interface DriverHelperReport {
 }
 
 const STORAGE_KEY = 'akk_driver_helper_reports_v2';
+const DELETED_REPORTS_KEY = 'akk_deleted_driver_report_ids_v1';
 
 export const getLocalDateStr = (input?: string | Date): string => {
-  if (!input) {
+  const fallbackNow = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  }
-  if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
-    return input.trim();
+  };
+  if (!input) return fallbackNow();
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed || trimmed.toLowerCase().includes('invalid')) return fallbackNow();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T\s]/);
+    if (isoPrefix) return isoPrefix[1];
+    const dmy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) {
+      return `${dmy[3]}-${ dmy[2].padStart(2, '0') }-${ dmy[1].padStart(2, '0') }`;
+    }
   }
   const d = input instanceof Date ? input : new Date(input);
   if (isNaN(d.getTime())) {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return fallbackNow();
   }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
+  private deletedReportIds: Set<string> = new Set<string>();
+  private deletedIdsLoaded = false;
+  private syncedToServerIds: Set<string> = new Set<string>();
+  private isSyncingWithServer = false;
+  private lastServerSyncAt = 0;
   private seqCounter = 0;
   private channel: BroadcastChannel | null = null;
   private eventSource: EventSource | null = null;
@@ -73,12 +89,17 @@ class DriverReportService {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      this.loadDeletedReportIds(true);
       try {
         if ('BroadcastChannel' in window) {
           this.channel = new BroadcastChannel('akk_driver_reports_realtime');
           this.channel.onmessage = (evt) => {
             const msg = evt.data;
             if (!msg) return;
+            if (msg.deletedId) {
+              this.applyRemoteDeletion(String(msg.deletedId), false);
+              return;
+            }
             if (Array.isArray(msg.reports)) {
               this.mergeIncomingReports(msg.reports, false);
             } else if (msg.report && msg.report.id) {
@@ -89,6 +110,9 @@ class DriverReportService {
       } catch {}
 
       window.addEventListener('storage', (evt) => {
+        if (evt.key === DELETED_REPORTS_KEY) {
+          this.loadDeletedReportIds(true);
+        }
         if (evt.key === STORAGE_KEY && evt.newValue) {
           try {
             const parsed = JSON.parse(evt.newValue);
@@ -98,6 +122,42 @@ class DriverReportService {
           } catch {}
         }
       });
+    }
+  }
+
+  private loadDeletedReportIds(force: boolean = false) {
+    if (this.deletedIdsLoaded && !force) return;
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(DELETED_REPORTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => {
+            if (id) this.deletedReportIds.add(String(id));
+          });
+        }
+      }
+      this.deletedIdsLoaded = true;
+    } catch {}
+  }
+
+  private saveDeletedReportIds() {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(Array.from(this.deletedReportIds).slice(-500)));
+    } catch {}
+  }
+
+  private applyRemoteDeletion(id: string, broadcastToPeers: boolean = false) {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return;
+    this.deletedReportIds.add(cleanId);
+    this.saveDeletedReportIds();
+    const current = this.getStoredReports().filter(r => r.id !== cleanId);
+    this.persistListInternal(current, broadcastToPeers);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated'));
     }
   }
 
@@ -112,7 +172,9 @@ class DriverReportService {
       es.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data);
-          if (
+          if (data.type === 'report_deleted' && data.payload?.id) {
+            this.applyRemoteDeletion(String(data.payload.id), false);
+          } else if (
             data.type === 'report_upserted' ||
             data.type === 'solution_updated' ||
             data.type === 'solution_acknowledged'
@@ -121,7 +183,7 @@ class DriverReportService {
               this.mergeIncomingReports([data.payload], false);
             }
           } else if (data.type === 'reports_synced') {
-            this.syncWithServer().catch(() => {});
+            this.syncWithServer(true).catch(() => {});
           }
         } catch {}
       };
@@ -139,47 +201,102 @@ class DriverReportService {
         }
         this.reconnectTimer = window.setTimeout(() => {
           this.reconnectTimer = null;
-          this.syncWithServer().catch(() => {});
+          this.syncWithServer(true).catch(() => {});
         }, 4000);
       };
     } catch {}
   }
 
-  public async syncWithServer(): Promise<void> {
+  public async syncWithServer(force: boolean = false): Promise<void> {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (this.isSyncingWithServer) return;
+    const nowMs = Date.now();
+    if (!force && nowMs - this.lastServerSyncAt < 4000) return;
+    this.isSyncingWithServer = true;
+    this.lastServerSyncAt = nowMs;
     try {
       const res = await fetch('/api/driver-reports', { credentials: 'include' });
       if (!res.ok) return;
       this.ensureServerRealtimeSync();
       const json = await res.json();
+      if (Array.isArray(json.deletedIds) && json.deletedIds.length > 0) {
+        let hasNewDeleted = false;
+        json.deletedIds.forEach((delId: any) => {
+          const clean = String(delId || '').trim();
+          if (clean && !this.deletedReportIds.has(clean)) {
+            this.deletedReportIds.add(clean);
+            hasNewDeleted = true;
+          }
+        });
+        if (hasNewDeleted) {
+          this.saveDeletedReportIds();
+          if (this.memoryReports) {
+            this.memoryReports = this.memoryReports.filter(r => !this.deletedReportIds.has(r.id));
+          }
+        }
+      }
+      const serverIds = new Set<string>();
       if (Array.isArray(json.reports) && json.reports.length > 0) {
+        json.reports.forEach((r: any) => {
+          if (r?.id) {
+            serverIds.add(String(r.id));
+            this.syncedToServerIds.add(String(r.id));
+          }
+        });
         this.mergeIncomingReports(json.reports, false);
       }
       const localList = this.getReports();
-      if (localList.length > 0 && (!Array.isArray(json.reports) || json.reports.length < localList.length)) {
+      const unsyncedReports = localList
+        .slice(0, 25)
+        .filter(r => r?.id && !serverIds.has(r.id) && !this.syncedToServerIds.has(r.id));
+      if (unsyncedReports.length > 0) {
+        unsyncedReports.forEach(r => this.syncedToServerIds.add(r.id));
         await fetch('/api/driver-reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ reports: localList.slice(0, 60) })
+          body: JSON.stringify({ reports: unsyncedReports })
         });
       }
-    } catch {}
+    } catch {
+      // ignore transient network errors
+    } finally {
+      this.isSyncingWithServer = false;
+    }
   }
 
   private pushReportToServer(report: DriverHelperReport) {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (report?.id) {
+      this.syncedToServerIds.add(report.id);
+    }
     fetch('/api/driver-reports', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ report })
-    }).catch(() => {});
+    }).catch(() => {
+      if (report?.id) {
+        this.syncedToServerIds.delete(report.id);
+      }
+    });
   }
 
   private normalizeList(parsed: DriverHelperReport[]): DriverHelperReport[] {
+    this.loadDeletedReportIds();
     const seenIds = new Set<string>();
-    return parsed.map((r, index) => {
+    const filtered = parsed.filter(r => !r?.id || !this.deletedReportIds.has(String(r.id)));
+
+    // Hitung frekuensi koordinat mentah agar koordinat duplikat antar pelanggan otomatis dipresisikan per toko
+    const coordFreq = new Map<string, number>();
+    filtered.forEach(r => {
+      if (typeof r.latitude === 'number' && typeof r.longitude === 'number') {
+        const k = `${r.latitude.toFixed(4)},${r.longitude.toFixed(4)}`;
+        coordFreq.set(k, (coordFreq.get(k) || 0) + 1);
+      }
+    });
+
+    return filtered.map((r, index) => {
       let uniqueId = r.id || `REP-2026-${1000 + index}`;
       if (seenIds.has(uniqueId)) {
         uniqueId = `${uniqueId}-${index + 1}`;
@@ -198,11 +315,42 @@ class DriverReportService {
         : r.photoUrl
         ? [r.photoUrl]
         : [];
+
+      let finalLat = r.latitude;
+      let finalLng = r.longitude;
+      let finalGmapsUrl = r.gmapsUrl;
+
+      if (r.category === 'istirahat' || r.category === 'isi_bbm') {
+        const customerName =
+          r.customerOutletName ||
+          (r.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+          (r.category === 'isi_bbm' && r.fuelLocation ? `SPBU ${r.fuelLocation}` : '');
+        const coordKey =
+          typeof r.latitude === 'number' && typeof r.longitude === 'number'
+            ? `${r.latitude.toFixed(4)},${r.longitude.toFixed(4)}`
+            : '';
+        const isDuplicate = coordKey ? (coordFreq.get(coordKey) || 0) > 1 : false;
+        const precise = resolvePreciseCustomerGps({
+          customerName,
+          areaName: r.areaName,
+          rawLat: r.latitude,
+          rawLng: r.longitude,
+          rawGmapsUrl: r.gmapsUrl,
+          isDuplicateCoordInGroup: isDuplicate
+        });
+        finalLat = precise.latitude;
+        finalLng = precise.longitude;
+        finalGmapsUrl = precise.gmapsUrl;
+      }
+
       return {
         ...r,
         id: uniqueId,
         photoUrl: r.photoUrl || photoUrls[0] || null,
         photoUrls,
+        latitude: finalLat,
+        longitude: finalLng,
+        gmapsUrl: finalGmapsUrl,
         status: resolvedStatus,
         date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
       };
@@ -210,34 +358,64 @@ class DriverReportService {
   }
 
   private mergeIncomingReports(incoming: DriverHelperReport[], broadcastToPeers: boolean = false) {
+    this.loadDeletedReportIds();
     const current = this.getStoredReports();
     const map = new Map<string, DriverHelperReport>();
     for (const r of current) {
-      map.set(r.id, r);
+      if (!this.deletedReportIds.has(r.id)) {
+        map.set(r.id, r);
+      }
     }
     let changedReport: DriverHelperReport | null = null;
+    let hasMeaningfulChange = false;
     for (const inc of incoming) {
-      if (!inc || !inc.id) continue;
+      if (!inc || !inc.id || this.deletedReportIds.has(inc.id)) continue;
       const existing = map.get(inc.id);
       if (!existing) {
         map.set(inc.id, inc);
         changedReport = inc;
+        hasMeaningfulChange = true;
       } else {
         const incHasSol = Boolean(inc.solution && inc.solution.trim());
         const exHasSol = Boolean(existing.solution && existing.solution.trim());
-        const merged: DriverHelperReport = {
-          ...existing,
-          ...inc,
-          solution: incHasSol ? inc.solution : existing.solution,
-          solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
-          solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
-          status: incHasSol ? (inc.status === 'pending' ? 'resolved' : inc.status) : (exHasSol ? existing.status : inc.status),
-          photoUrl: inc.photoUrl || existing.photoUrl,
-          photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
-        };
-        map.set(inc.id, merged);
-        changedReport = merged;
+        const nextSolution = incHasSol ? inc.solution : existing.solution;
+        const nextStatus = incHasSol
+          ? (inc.status === 'pending' ? 'resolved' : inc.status)
+          : (exHasSol ? existing.status : inc.status);
+        const nextCheckout = inc.checkoutTimeFormatted || existing.checkoutTimeFormatted;
+        const nextQueueStatus = inc.customerQueueStatus || existing.customerQueueStatus;
+        const nextOfflineStatus = inc.offlineStatus || existing.offlineStatus;
+        const nextAck = inc.driverAcknowledged ?? existing.driverAcknowledged;
+        const nextNotes = inc.notes || existing.notes;
+
+        const isDiff =
+          nextSolution !== existing.solution ||
+          nextStatus !== existing.status ||
+          nextCheckout !== existing.checkoutTimeFormatted ||
+          nextQueueStatus !== existing.customerQueueStatus ||
+          nextOfflineStatus !== existing.offlineStatus ||
+          nextAck !== existing.driverAcknowledged ||
+          nextNotes !== existing.notes;
+
+        if (isDiff) {
+          const merged: DriverHelperReport = {
+            ...existing,
+            ...inc,
+            solution: nextSolution,
+            solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
+            solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
+            status: nextStatus,
+            photoUrl: inc.photoUrl || existing.photoUrl,
+            photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
+          };
+          map.set(inc.id, merged);
+          changedReport = merged;
+          hasMeaningfulChange = true;
+        }
       }
+    }
+    if (!hasMeaningfulChange) {
+      return;
     }
     const mergedList = this.normalizeList(
       Array.from(map.values()).sort(
@@ -251,6 +429,11 @@ class DriverReportService {
   }
 
   private getStoredReports(): DriverHelperReport[] {
+    this.loadDeletedReportIds();
+    if (this.memoryReports !== null) {
+      return this.memoryReports;
+    }
+
     let storedList: DriverHelperReport[] = [];
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       try {
@@ -264,36 +447,6 @@ class DriverReportService {
       } catch (e) {
         console.warn('Failed to read from localStorage:', e);
       }
-    }
-
-    if (this.memoryReports && this.memoryReports.length > 0) {
-      if (storedList.length === 0) return this.memoryReports;
-      // Merge memoryReports and storedList so neither in-memory nor localStorage changes are ever lost
-      const map = new Map<string, DriverHelperReport>();
-      for (const r of storedList) map.set(r.id, r);
-      for (const m of this.memoryReports) {
-        const ex = map.get(m.id);
-        if (!ex) {
-          map.set(m.id, m);
-        } else {
-          const mHasSol = Boolean(m.solution && m.solution.trim());
-          const exHasSol = Boolean(ex.solution && ex.solution.trim());
-          map.set(m.id, {
-            ...ex,
-            ...m,
-            solution: mHasSol ? m.solution : ex.solution,
-            solutionBy: mHasSol ? m.solutionBy : ex.solutionBy,
-            solutionAt: mHasSol ? m.solutionAt : ex.solutionAt,
-            status: mHasSol ? m.status : (exHasSol ? ex.status : m.status)
-          });
-        }
-      }
-      this.memoryReports = this.normalizeList(
-        Array.from(map.values()).sort(
-          (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-        )
-      );
-      return this.memoryReports;
     }
 
     this.memoryReports = storedList;
@@ -588,9 +741,28 @@ class DriverReportService {
   }
 
   public deleteReport(id: string): boolean {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return false;
+    this.deletedReportIds.add(cleanId);
+    this.saveDeletedReportIds();
+
     const list = this.getReports();
-    const filtered = list.filter(r => r.id !== id);
+    const filtered = list.filter(r => r.id !== cleanId);
+    this.memoryReports = filtered;
     this.saveReports(filtered);
+
+    if (this.channel) {
+      try {
+        this.channel.postMessage({ deletedId: cleanId });
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(cleanId)}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      }).catch(() => {});
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('driver-report-updated'));

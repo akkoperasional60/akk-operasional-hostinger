@@ -76,14 +76,13 @@ import {
   UserProfile
 } from '../types';
 import { logisticsStore } from '../services/store';
-import { resolveCanonicalFleetMeta } from '../data/mockData';
+import { resolveCanonicalFleetMeta, INITIAL_FLEETS } from '../data/mockData';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverOfflineSyncService, OfflineTaskAction, DriverSyncState } from '../services/driverOfflineSyncService';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { driverShiftService } from '../services/driverShiftService';
 import { supabaseRealtimeSync } from '../services/supabaseRealtimeSync';
-import { persistSchedulesToDatabase } from '../services/supabaseService';
 import { useToast } from '../context/ToastContext';
 import { getDriverPortalDepartureLabel, getAreaScheduleTiming } from '../utils/areaScheduleRules';
 import { attendanceService } from '../services/attendanceService';
@@ -472,7 +471,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   useEffect(() => {
     const timer = setInterval(() => {
       setRealtimeNow(new Date());
-    }, 1000);
+    }, 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -489,15 +488,62 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return (
       realtimeNow.toLocaleTimeString('id-ID', {
         hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        minute: '2-digit'
       }) + ' WIB'
     );
   }, [realtimeNow]);
 
+  // Helper kunci identitas kru terpadu agar pergantian ID antara usr-xxx dan crw-xxx tidak pernah mereset status Check-In / Checklist
+  const getDriverStorageScopes = (): string[] => {
+    const scopes = new Set<string>();
+    const rawSelected = String(selectedDriverId || '').trim();
+    if (rawSelected) {
+      scopes.add(rawSelected);
+      const stripped = rawSelected.replace(/^crw-/, '');
+      if (stripped) {
+        scopes.add(stripped);
+        scopes.add(`crw-${stripped}`);
+      }
+    }
+    const uid = String(currentUser?.id || '').trim();
+    if (uid && uid !== 'guest') {
+      scopes.add(uid);
+      scopes.add(`crw-${uid}`);
+    }
+    const nameKey = String(portalDisplayName || currentUser?.fullName || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    if (nameKey) {
+      scopes.add(`name_${nameKey}`);
+    }
+    return Array.from(scopes);
+  };
+
+  const readDriverScopedValue = (prefix: string): string => {
+    try {
+      for (const scope of getDriverStorageScopes()) {
+        const val =
+          (typeof localStorage !== 'undefined' ? localStorage.getItem(`${prefix}${scope}`) : null) ||
+          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`${prefix}${scope}`) : null);
+        if (val) return val;
+      }
+    } catch {}
+    return '';
+  };
+
+  const writeDriverScopedValue = (prefix: string, value: string): void => {
+    try {
+      for (const scope of getDriverStorageScopes()) {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(`${prefix}${scope}`, value);
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(`${prefix}${scope}`, value);
+      }
+    } catch {}
+  };
+
   // 🕒 Driver Check-in Shift Management (PIN 2x Verification) & Alur Pasca Check-In
   const [activeShift, setActiveShift] = useState<DriverShiftCheckin | null>(() =>
-    driverShiftService.getActiveShift(selectedDriverId)
+    driverShiftService.getActiveShift(selectedDriverId, portalDisplayName)
   );
   const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
   const [checkinModalMode, setCheckinModalMode] = useState<'checkin' | 'change_pin'>('checkin');
@@ -516,33 +562,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Alur Baru: Setelah Check-In -> Pilih/Kunci Armada -> Isi Checklist Armada -> Simpan -> Persiapan Keluar -> SJ Keluar & Gate-Out -> Konfirmasi Tiba di Gudang
   const [selectedFleetId, setSelectedFleetId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
-    } catch {
-      return '';
-    }
+    return readDriverScopedValue('akk_locked_fleet_');
   });
   const [isFleetLockedAfterCheckin, setIsFleetLockedAfterCheckin] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
-    } catch {
-      return false;
-    }
+    return readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
   });
   const [isChecklistCompletedAfterCheckin, setIsChecklistCompletedAfterCheckin] = useState<boolean>(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      return localStorage.getItem(`akk_checklist_done_${selectedDriverId}`) === todayStr;
-    } catch {
-      return false;
-    }
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_checklist_done_');
+    return val === todayStr || val === todayUtc;
   });
   const [isHelperPositionSkipped, setIsHelperPositionSkipped] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
-    } catch {
-      return false;
-    }
+    return readDriverScopedValue('akk_helper_skipped_') === 'true';
   });
   const [isPostCheckinFleetModalOpen, setIsPostCheckinFleetModalOpen] = useState<boolean>(false);
   const [waybillRefreshTick, setWaybillRefreshTick] = useState<number>(0);
@@ -590,7 +622,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       argoArrivalBy: string;
     }>
   ) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     setSharedScheduleFlowMap(prev => {
       const next = { ...prev };
       scheduleIds.filter(Boolean).forEach(id => {
@@ -610,14 +642,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Sync active shift on driver change or shift event
   useEffect(() => {
-    if (selectedDriverId) {
-      setActiveShift(driverShiftService.getActiveShift(selectedDriverId));
+    if (selectedDriverId || portalDisplayName) {
+      setActiveShift(driverShiftService.getActiveShift(selectedDriverId, portalDisplayName));
       try {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const savedFleet = localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
-        const savedLocked = localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
-        const savedChecklistDone = localStorage.getItem(`akk_checklist_done_${selectedDriverId}`) === todayStr;
-        const savedHelperSkip = localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
+        const todayStr = getLocalDateStr();
+        const todayUtc = new Date().toISOString().slice(0, 10);
+        const savedFleet = readDriverScopedValue('akk_locked_fleet_');
+        const savedLocked = readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
+        const savedChecklistVal = readDriverScopedValue('akk_checklist_done_');
+        const savedChecklistDone = savedChecklistVal === todayStr || savedChecklistVal === todayUtc;
+        const savedHelperSkip = readDriverScopedValue('akk_helper_skipped_') === 'true';
         setSelectedFleetId(savedFleet);
         setIsFleetLockedAfterCheckin(savedLocked);
         setIsChecklistCompletedAfterCheckin(savedChecklistDone);
@@ -625,11 +659,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       } catch {}
     }
 
-    const onShiftUpdated = (e: any) => {
-      const updated = e.detail as DriverShiftCheckin;
-      if (updated && updated.driverId === selectedDriverId) {
-        setActiveShift(updated.status !== 'checked_out' ? updated : null);
-      }
+    const onShiftUpdated = () => {
+      setActiveShift(driverShiftService.getActiveShift(selectedDriverId, portalDisplayName));
     };
 
     const onWaybillUpdated = () => {
@@ -642,7 +673,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       window.removeEventListener('driver-shift-updated', onShiftUpdated);
       window.removeEventListener('driver-waybill-updated', onWaybillUpdated);
     };
-  }, [selectedDriverId]);
+  }, [selectedDriverId, portalDisplayName, currentUser?.id]);
 
   // Load checklists when selected driver or deliveries change
   useEffect(() => {
@@ -718,16 +749,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const handleUpdate = () => loadDriverKendalaReports();
     window.addEventListener('driver-report-updated', handleUpdate);
 
-    // Real-time fast sync setiap 1.5 detik agar begitu SPV/Tim Pengiriman mengirim solusi, detik itu juga tampil di Portal Driver
+    // Sinkronisasi berkala setiap 10 detik (didukung SSE / BroadcastChannel real-time tanpa membebani RAM HP)
     const fastSyncTimer = setInterval(() => {
       driverReportService.syncWithServer().then(() => loadDriverKendalaReports()).catch(() => {});
-    }, 1500);
+    }, 10000);
 
     return () => {
       clearInterval(fastSyncTimer);
       window.removeEventListener('driver-report-updated', handleUpdate);
     };
-  }, [selectedDriverId, crews, portalDisplayName, currentUser, todayLocalStr, deliveries.length, activeShift?.plateNumber]);
+  }, [selectedDriverId, portalDisplayName, todayLocalStr]);
 
   const activeDriverSolutions = useMemo(() => {
     return driverKendalaReports
@@ -1078,9 +1109,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
 
     if (assignedFleet) {
+      const todayLocal = getLocalDateStr();
+      const todayUtc = new Date().toISOString().slice(0, 10);
       const byFleet = checklists.find(
         c =>
-          (matchesCrewOrPartner(c) || c.date === new Date().toISOString().slice(0, 10)) &&
+          (matchesCrewOrPartner(c) || c.date === todayLocal || c.date === todayUtc) &&
           (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)
       );
       if (byFleet) return byFleet;
@@ -1090,40 +1123,42 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Status apakah driver sudah klik Konfirmasi Tiba di Gudang hari ini (membuka kunci Pasca-Jalan)
   const [hasConfirmedArrivalFlag, setHasConfirmedArrivalFlag] = useState<boolean>(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      return localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr;
-    } catch {
-      return false;
-    }
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_confirmed_arrival_');
+    return val === todayStr || val === todayUtc;
   });
 
   useEffect(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      setHasConfirmedArrivalFlag(
-        localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr
-      );
-    } catch {}
-  }, [selectedDriverId]);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_confirmed_arrival_');
+    setHasConfirmedArrivalFlag(val === todayStr || val === todayUtc);
+  }, [selectedDriverId, portalDisplayName]);
 
   const hasConfirmedArrivalToday = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
     const hasDeliveredToday = deliveries.some(
-      d => d.status === 'delivered' && ((d.actualArrival || d.departureDate || '').slice(0, 10) === todayStr)
+      d => {
+        if (d.status !== 'delivered') return false;
+        const dSlice = (d.actualArrival || d.departureDate || '').slice(0, 10);
+        return dSlice === todayStr || dSlice === todayUtc;
+      }
     );
     return Boolean(hasConfirmedArrivalFlag || hasDeliveredToday);
   }, [hasConfirmedArrivalFlag, deliveries]);
 
   // Cek apakah jadwal/armada bersama (Driver A & Helper B) sudah selesai Checklist Pra-Jalan hari ini
   const sharedCrewPreTripState = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
     const driverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
     const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
     const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
 
     const matchingPreTrip = checklists.find(c => {
-      if (c.date !== todayStr || c.inspectionType !== 'pre_trip') return false;
+      if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
       const cName = (c.driverName || '').trim().toLowerCase();
       if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
       if (primarySharedSchedule) {
@@ -1137,7 +1172,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
 
     const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
-    const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
+    const isSameDayFlow = Boolean(sharedFlow?.date === todayStr || sharedFlow?.date === todayUtc);
     const isPreparedOrInTransit = Boolean(
       primarySharedSchedule &&
         ((sharedFlow?.checklistCompleted && isSameDayFlow) ||
@@ -1146,7 +1181,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           ['in_transit', 'picked_up'].includes(primarySharedSchedule.status))
     );
 
-    const isDone = Boolean(matchingPreTrip || (isChecklistCompletedAfterCheckin && isSameDayFlow) || isPreparedOrInTransit);
+    const isDone = Boolean(matchingPreTrip || isChecklistCompletedAfterCheckin || isPreparedOrInTransit);
     const completedBy =
       matchingPreTrip?.driverName ||
       sharedFlow?.checklistCompletedBy ||
@@ -1197,11 +1232,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     setSelectedFleetId(targetF.id);
     setIsFleetLockedAfterCheckin(true);
     setIsHelperPositionSkipped(false);
-    try {
-      localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetF.id);
-      localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-      localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'false');
-    } catch {}
+    writeDriverScopedValue('akk_locked_fleet_', targetF.id);
+    writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+    writeDriverScopedValue('akk_helper_skipped_', 'false');
     if (selectedDriverId) {
       logisticsStore.updateCrew(selectedDriverId, { currentFleetId: targetF.id });
     }
@@ -2471,6 +2504,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           ...d,
           status: newStatus,
           notes: extraNotes !== undefined ? extraNotes : d.notes,
+          actualDeparture: newStatus === 'in_transit' ? (d.actualDeparture || new Date().toISOString()) : d.actualDeparture,
           actualArrival: newStatus === 'delivered' ? new Date().toISOString() : d.actualArrival,
           podPhotoUrl: podData?.podPhotoUrl || d.podPhotoUrl,
           podPhotoTimestamp: podData?.podPhotoTimestamp || d.podPhotoTimestamp
@@ -2510,10 +2544,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       if (targetFleet?.id) {
         setSelectedFleetId(targetFleet.id);
         setIsFleetLockedAfterCheckin(true);
-        try {
-          localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
-          localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-        } catch {}
+        writeDriverScopedValue('akk_locked_fleet_', targetFleet.id);
+        writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
       }
       const fresh = driverChecklistService.createNewChecklistTemplate(
         selectedDriverId,
@@ -2585,6 +2617,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
 
     const gateOutIso = new Date().toISOString();
+    const nowTimeWib =
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const nextGateOutMap = { ...keluarArgoMap, [delivery.id]: nowTimeWib };
+    setKeluarArgoMap(nextGateOutMap);
+    try {
+      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextGateOutMap));
+    } catch {}
+
+    logisticsStore.updateSchedule(delivery.id, {
+      actualDeparture: gateOutIso
+    });
+
     updateSharedScheduleFlow([delivery.id], {
       fleetId: preparedSchedule.fleetId,
       plateNumber: preparedSchedule.fleet?.plateNumber || '-',
@@ -2702,7 +2746,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
 
     // Otomatis Check-Out saat klik Tiba di Gudang (tanpa manual Check-Out)
-    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId);
+    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
     if (currentActiveShift) {
       const targetDriverId = currentActiveShift.driverId || selectedDriverId;
       await driverShiftService.checkOutDriver(
@@ -2718,11 +2762,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       setActiveShift(null);
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     setHasConfirmedArrivalFlag(true);
-    try {
-      localStorage.setItem(`akk_confirmed_arrival_${selectedDriverId}`, todayStr);
-    } catch {}
+    writeDriverScopedValue('akk_confirmed_arrival_', todayStr);
 
     setActiveTab('delivered');
     await loadDeliveriesRef.current(true);
@@ -3097,7 +3139,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang (termasuk sinkronisasi shift partner di armada yang sama)
     let autoCheckedOut = false;
-    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId);
+    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
     if (currentActiveShift) {
       const targetDriverId = currentActiveShift.driverId || selectedDriverId;
       await driverShiftService.checkOutDriver(
@@ -3114,11 +3156,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       autoCheckedOut = true;
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     setHasConfirmedArrivalFlag(true);
-    try {
-      localStorage.setItem(`akk_confirmed_arrival_${selectedDriverId}`, todayStr);
-    } catch {}
+    writeDriverScopedValue('akk_confirmed_arrival_', todayStr);
 
     setPodModal({
       isOpen: false,
@@ -5100,11 +5140,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none text-[10px]">
                   {[
                     { key: 'all', label: 'Semua' },
-                    { key: 'mesin_fluida', label: 'Mesin' },
+                    { key: 'mesin_fluida', label: 'Oli & Radiator' },
+                    { key: 'lampu_listrik', label: 'Air Accu' },
                     { key: 'rem_roda', label: 'Rem & Ban' },
-                    { key: 'lampu_listrik', label: 'Lampu' },
-                    { key: 'fisik_dokumen', label: 'Dokumen' },
-                    { key: 'darurat_k3', label: 'Darurat K3' }
+                    { key: 'fisik_dokumen', label: 'Kabin & Inventaris' }
                   ].map(cat => (
                     <button
                       key={cat.key}
@@ -5135,8 +5174,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         }`}
                       >
                         <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="font-bold truncate text-slate-200">{item.name}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold truncate text-slate-200">{item.name}</span>
+                            {item.photoUrl && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold shrink-0">
+                                Foto Tersimpan
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-slate-400 line-clamp-1">{item.description}</div>
+                          {item.photoUrl && (
+                            <img
+                              src={item.photoUrl}
+                              alt={item.name}
+                              className="w-28 h-16 object-cover rounded-lg border border-cyan-500/30 mt-1"
+                            />
+                          )}
                           {item.note && (
                             <div className="text-[9px] text-rose-300 italic mt-0.5">Catatan: {item.note}</div>
                           )}
@@ -6800,14 +6853,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         defaultInspectionType={checklistInspectionType}
         canSelectPostTrip={hasConfirmedArrivalToday}
         onSaved={(saved) => {
-          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayStr = getLocalDateStr();
           setIsFleetLockedAfterCheckin(true);
           if (saved.inspectionType === 'pre_trip') {
             setIsChecklistCompletedAfterCheckin(true);
-            try {
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
-            } catch {}
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+            writeDriverScopedValue('akk_checklist_done_', todayStr);
 
             // Sinkronkan status Checklist & Persiapan Keluar ke jadwal aktif bersama agar Partner (Driver/Helper) tidak perlu isi ulang
             const activeScheduleIds = deliveries
@@ -6876,7 +6927,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialMode={checkinModalMode}
         onCheckinSuccess={(shift) => {
           setActiveShift(shift);
-          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayStr = getLocalDateStr();
 
           // 1. Jika user terjadwal / berposisi sebagai HELPER:
           // Helper TIDAK mengisi Checklist Armada setelah Check-In, langsung diarahkan ke Jadwal Aktif untuk Validasi SJ & Gate-Out
@@ -6885,14 +6936,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             setIsFleetLockedAfterCheckin(true);
             if (assignedFleet?.id) {
               setSelectedFleetId(assignedFleet.id);
+              writeDriverScopedValue('akk_locked_fleet_', assignedFleet.id);
             }
-            try {
-              localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
-              if (assignedFleet?.id) {
-                localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, assignedFleet.id);
-              }
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-            } catch {}
+            writeDriverScopedValue('akk_helper_skipped_', 'true');
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
             setIsPostCheckinFleetModalOpen(false);
             setBottomNav('deliveries');
             setActiveTab('active');
@@ -6911,14 +6958,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             setIsChecklistCompletedAfterCheckin(true);
             if (assignedFleet?.id) {
               setSelectedFleetId(assignedFleet.id);
+              writeDriverScopedValue('akk_locked_fleet_', assignedFleet.id);
             }
-            try {
-              if (assignedFleet?.id) {
-                localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, assignedFleet.id);
-              }
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
-            } catch {}
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+            writeDriverScopedValue('akk_checklist_done_', todayStr);
             setIsPostCheckinFleetModalOpen(false);
             setBottomNav('deliveries');
             setActiveTab('active');
@@ -6935,10 +6978,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           if (targetFleet?.id) {
             setSelectedFleetId(targetFleet.id);
             setIsFleetLockedAfterCheckin(true);
-            try {
-              localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-            } catch {}
+            writeDriverScopedValue('akk_locked_fleet_', targetFleet.id);
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
           }
 
           const fresh = driverChecklistService.createNewChecklistTemplate(
@@ -7085,9 +7126,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 type="button"
                 onClick={() => {
                   setIsHelperPositionSkipped(true);
-                  try {
-                    localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
-                  } catch {}
+                  writeDriverScopedValue('akk_helper_skipped_', 'true');
                   setIsPostCheckinFleetModalOpen(false);
                   setBottomNav('deliveries');
                   setActiveTab('active');
@@ -7373,7 +7412,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
                 >
                   <option value="">-- Pilih Armada Truk --</option>
-                  {fleets.map(f => {
+                  {(fleets.length > 0 ? fleets : INITIAL_FLEETS).map(f => {
                     const meta = resolveCanonicalFleetMeta(f);
                     const initLabel = f.initialCode || meta?.initialCode || f.vehicleType || '';
                     return (

@@ -33,7 +33,21 @@ export function useRoleAccess(): UseRoleAccessReturn {
 
   useEffect(() => {
     const unsubscribe = logisticsStore.subscribe(() => {
-      setUser(logisticsStore.getCurrentUser());
+      const next = logisticsStore.getCurrentUser();
+      setUser(prev => {
+        if (
+          prev.id === next.id &&
+          prev.fullName === next.fullName &&
+          prev.role === next.role &&
+          prev.status === next.status &&
+          prev.email === next.email &&
+          prev.permissions === next.permissions
+        ) {
+          return prev;
+        }
+        return { ...next };
+      });
+      setIsSupabaseAuthenticated(Boolean(next?.id && next.id !== 'guest'));
     });
 
     setIsSupabaseAuthenticated(Boolean(logisticsStore.getCurrentUser()?.id && logisticsStore.getCurrentUser().id !== 'guest'));

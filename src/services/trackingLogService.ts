@@ -140,7 +140,7 @@ function loadSharedScheduleFlowMap(): Record<string, SharedFlowRecord> {
   return {};
 }
 
-function loadGateOutConfirmMap(): Record<string, boolean> {
+function loadGateOutConfirmMap(): Record<string, boolean | string> {
   try {
     const raw = localStorage.getItem('akk_driver_keluar_argo_v1');
     if (raw) {
@@ -164,12 +164,96 @@ function loadSavedRouteEvaluations(): TrackingEvaluation[] {
 
 function formatTimeWib(isoOrStr?: string): string {
   if (!isoOrStr) return '-';
-  if (/^\d{2}:\d{2}/.test(isoOrStr)) return `${isoOrStr.substring(0, 5)} WIB`;
-  const d = new Date(isoOrStr);
+  const clean = String(isoOrStr).trim();
+  const hhmmMatch = clean.match(/^(\d{2})[:.](\d{2})/);
+  if (hhmmMatch && !clean.includes('T')) {
+    return `${hhmmMatch[1]}:${hhmmMatch[2]} WIB`;
+  }
+  const isoLocalMatch = clean.match(/T(\d{2}):(\d{2})/);
+  if (isoLocalMatch && (clean.endsWith('+07:00') || !clean.endsWith('Z'))) {
+    return `${isoLocalMatch[1]}:${isoLocalMatch[2]} WIB`;
+  }
+  const d = new Date(clean);
   if (isNaN(d.getTime())) return '-';
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mm} WIB`;
+}
+
+function extractHhMm(timeStr?: string): string | null {
+  if (!timeStr) return null;
+  const m = String(timeStr).trim().match(/(\d{2})[:.](\d{2})/);
+  if (!m) return null;
+  return `${m[1]}:${m[2]}`;
+}
+
+function resolveScheduleCreatorTargets(sch: Schedule, store?: RetailStore): {
+  targetDepDate: string;
+  targetDepHhMm: string;
+  targetDepIso: string;
+  targetRetDate: string;
+  targetRetHhMm: string;
+  targetRetIso: string;
+} {
+  const rawDepIso = sch.departureDate || '';
+  const rawArrIso = sch.estimatedArrival || sch.departureDate || '';
+  const depDatePart = (sch.deliveryDate || rawDepIso).substring(0, 10) || new Date().toISOString().substring(0, 10);
+  const retDatePart = (sch.returnDate || rawArrIso || depDatePart).substring(0, 10) || depDatePart;
+
+  const windowParts = (store?.deliveryWindow || sch.store?.deliveryWindow || '').split('-').map(s => s.trim());
+  const windowDep = extractHhMm(windowParts[0]);
+  const windowRet = extractHhMm(windowParts[1]);
+
+  const notesDepMatch = (sch.notes || '').match(/Berangkat\s+(?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}[:.]\d{2})/i);
+  const notesRetMatch = (sch.notes || '').match(/(?:Target\s+)?Pulang\s+(?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}[:.]\d{2})/i);
+
+  const isoDepHhMm = extractHhMm(
+    rawDepIso.includes('T')
+      ? formatTimeWib(rawDepIso)
+      : undefined
+  );
+  const isoRetHhMm = extractHhMm(
+    rawArrIso.includes('T')
+      ? formatTimeWib(rawArrIso)
+      : undefined
+  );
+
+  const areaUpper = (sch.areaName || store?.storeName || '').toUpperCase();
+  const isOutTown =
+    areaUpper.includes('DENPASAR') ||
+    areaUpper.includes('SINGARAJA') ||
+    areaUpper.includes('NEGARA') ||
+    areaUpper.includes('BALI') ||
+    areaUpper.includes('JEMBER') ||
+    areaUpper.includes('LUMAJANG') ||
+    areaUpper.includes('SITUBONDO') ||
+    areaUpper.includes('BONDOWOSO');
+
+  const targetDepHhMm =
+    extractHhMm(sch.departureTime) ||
+    extractHhMm(notesDepMatch?.[1]) ||
+    windowDep ||
+    isoDepHhMm ||
+    (isOutTown ? '15:00' : '07:30');
+
+  const targetRetHhMm =
+    extractHhMm(sch.targetReturnTime) ||
+    extractHhMm(notesRetMatch?.[1]) ||
+    windowRet ||
+    isoRetHhMm ||
+    '17:00';
+
+  const targetDepIso = `${depDatePart}T${targetDepHhMm}:00+07:00`;
+  const targetRetIso = `${retDatePart}T${targetRetHhMm}:00+07:00`;
+
+  return {
+    targetDepDate: depDatePart,
+    targetDepHhMm,
+    targetDepIso,
+    targetRetDate: retDatePart,
+    targetRetHhMm,
+    targetRetIso
+  };
 }
 
 function diffMinutesBetween(targetIso?: string, actualIso?: string): number {
@@ -182,6 +266,9 @@ function diffMinutesBetween(targetIso?: string, actualIso?: string): number {
 
 class TrackingLogAnalyticsService {
   private logs: TrackingLog[] = [];
+  private cachedReportKey: string = '';
+  private cachedReportResult: AnalyticsSummaryReport | null = null;
+  private cachedReportAt: number = 0;
 
   constructor() {
     this.logs = [];
@@ -236,16 +323,36 @@ class TrackingLogAnalyticsService {
     const fuelLogs: FuelLog[] = logisticsStore.getFuelLogs();
     const crewHistory: CrewDeliveryHistory[] = logisticsStore.getCrewDeliveryHistory();
     const driverReports: DriverHelperReport[] = driverReportService.getReports();
+
+    const cacheKey = `${filters.startDate}|${filters.endDate}|${filters.fleetId}|${filters.crewId}|${filters.status || 'all'}|${filters.island}|${filters.searchQuery}|${schedules.length}|${fleets.length}|${crews.length}|${fuelLogs.length}|${crewHistory.length}|${driverReports.length}|${schedules[0]?.status || ''}`;
+    const nowMs = Date.now();
+    if (this.cachedReportResult && this.cachedReportKey === cacheKey && nowMs - this.cachedReportAt < 2500) {
+      return this.cachedReportResult;
+    }
+
     const sharedFlowMap = loadSharedScheduleFlowMap();
     const gateOutConfirmMap = loadGateOutConfirmMap();
     const evaluations = loadSavedRouteEvaluations();
 
+    const storeById = new Map<string, RetailStore>();
+    for (const s of stores) {
+      if (s.id) storeById.set(s.id, s);
+    }
+    const fleetById = new Map<string, Fleet>();
+    for (const f of fleets) {
+      if (f.id) fleetById.set(f.id, f);
+    }
+    const crewById = new Map<string, Crew>();
+    for (const c of crews) {
+      if (c.id) crewById.set(c.id, c);
+    }
+
     // Filter schedules based on active filter options
     const filteredSchedules = schedules.filter((sch: Schedule) => {
-      const store = stores.find((s: RetailStore) => s.id === sch.storeId) || sch.store;
-      const fleet = fleets.find((f: Fleet) => f.id === sch.fleetId) || sch.fleet;
-      const crew = crews.find((c: Crew) => c.id === sch.crewId) || sch.crew;
-      const helper = sch.crewHelperId ? crews.find((c: Crew) => c.id === sch.crewHelperId) : sch.crewHelper;
+      const store = (sch.storeId ? storeById.get(sch.storeId) : undefined) || sch.store;
+      const fleet = (sch.fleetId ? fleetById.get(sch.fleetId) : undefined) || sch.fleet;
+      const crew = (sch.crewId ? crewById.get(sch.crewId) : undefined) || sch.crew;
+      const helper = sch.crewHelperId ? crewById.get(sch.crewHelperId) : sch.crewHelper;
 
       const returnIso = (sch.estimatedArrival || sch.departureDate || '').substring(0, 10);
       const depIso = (sch.departureDate || '').substring(0, 10);
@@ -355,10 +462,10 @@ class TrackingLogAnalyticsService {
 
     // Build RouteEvaluationSummary list with Gate-Out & Tiba di Argo SLA calculation
     const routeEvaluations: RouteEvaluationSummary[] = filteredSchedules.map((sch: Schedule) => {
-      const store = stores.find((s: RetailStore) => s.id === sch.storeId) || sch.store;
-      const fleet = fleets.find((f: Fleet) => f.id === sch.fleetId) || sch.fleet;
-      const crew = crews.find((c: Crew) => c.id === sch.crewId) || sch.crew;
-      const helper = sch.crewHelperId ? crews.find((c: Crew) => c.id === sch.crewHelperId) : sch.crewHelper;
+      const store = (sch.storeId ? storeById.get(sch.storeId) : undefined) || sch.store;
+      const fleet = (sch.fleetId ? fleetById.get(sch.fleetId) : undefined) || sch.fleet;
+      const crew = (sch.crewId ? crewById.get(sch.crewId) : undefined) || sch.crew;
+      const helper = sch.crewHelperId ? crewById.get(sch.crewHelperId) : sch.crewHelper;
 
       const schDate = (sch.estimatedArrival || sch.departureDate || '').substring(0, 10);
       const depDate = (sch.departureDate || '').substring(0, 10);
@@ -378,11 +485,20 @@ class TrackingLogAnalyticsService {
       const avgSpeedKmh = matchedEval?.avgSpeedKmh || avgFleetSpeedFromEvaluasi;
       const maxSpeedKmh = matchedEval?.maxSpeedKmh || defaultMaxSpeed;
 
-      // Check Gate-Out keluar gudang & Tiba di Argo records
+      // Check Gate-Out keluar gudang & Tiba di Gudang (Argo) records integrated with Target Berangkat & Target Kepulangan Pembuat Jadwal
+      const targets = resolveScheduleCreatorTargets(sch, store);
       const sharedFlow = sharedFlowMap[sch.id];
+      const rawGateOutEntry = gateOutConfirmMap[sch.id];
+      const gateOutNoteMatch = (sch.notes || '').match(/\[(\d{2}[:.]\d{2}):\s*Tim pengiriman keluar dari gerbang gudang/i);
+      const parsedGateOutHhMm =
+        (typeof rawGateOutEntry === 'string' ? extractHhMm(rawGateOutEntry) : null) ||
+        extractHhMm(gateOutNoteMatch?.[1]);
+
       const hasGateOutFlag = Boolean(
         sharedFlow?.gateOutConfirmed ||
-        gateOutConfirmMap[sch.id] ||
+        rawGateOutEntry ||
+        sch.actualDeparture ||
+        parsedGateOutHhMm ||
         sch.status === 'in_transit' ||
         sch.status === 'picked_up' ||
         sch.status === 'delivered'
@@ -396,19 +512,27 @@ class TrackingLogAnalyticsService {
 
       const gateOutIso =
         sharedFlow?.gateOutTimestamp ||
-        (hasGateOutFlag ? sch.departureDate : undefined);
+        sch.actualDeparture ||
+        (parsedGateOutHhMm ? `${targets.targetDepDate}T${parsedGateOutHhMm}:00+07:00` : undefined) ||
+        (hasGateOutFlag ? targets.targetDepIso : undefined);
+
+      const argoReturnNoteMatch = (sch.notes || '').match(/\[(\d{2}[:.]\d{2}):\s*(?:Tiba di Gudang|Armada tiba kembali)/i);
+      const parsedArgoReturnHhMm =
+        extractHhMm(matchedEndReport?.timestamp ? formatTimeWib(matchedEndReport.timestamp) : undefined) ||
+        extractHhMm(argoReturnNoteMatch?.[1]);
 
       const argoReturnIso =
         sharedFlow?.argoArrivalTimestamp ||
         sch.actualArrival ||
         sch.podPhotoTimestamp ||
+        (parsedArgoReturnHhMm ? `${targets.targetRetDate}T${parsedArgoReturnHhMm}:00+07:00` : undefined) ||
         matchedEndReport?.timestamp ||
-        (sch.status === 'delivered' ? sch.estimatedArrival : undefined);
+        (sch.status === 'delivered' ? targets.targetRetIso : undefined);
 
-      const gateOutDelayMin = gateOutIso ? diffMinutesBetween(sch.departureDate, gateOutIso) : 0;
+      const gateOutDelayMin = gateOutIso ? diffMinutesBetween(targets.targetDepIso, gateOutIso) : 0;
       const gateOutStatus: 'tepat_waktu' | 'terlambat' | 'belum' = !hasGateOutFlag
         ? 'belum'
-        : gateOutDelayMin <= 15
+        : gateOutDelayMin <= 0
         ? 'tepat_waktu'
         : 'terlambat';
 
@@ -419,10 +543,10 @@ class TrackingLogAnalyticsService {
         sch.podPhotoTimestamp ||
         matchedEndReport
       );
-      const argoReturnDelayMin = argoReturnIso ? diffMinutesBetween(sch.estimatedArrival, argoReturnIso) : 0;
+      const argoReturnDelayMin = argoReturnIso ? diffMinutesBetween(targets.targetRetIso, argoReturnIso) : 0;
       const argoReturnStatus: 'tepat_waktu' | 'terlambat' | 'belum' = !hasArgoReturn
         ? 'belum'
-        : argoReturnDelayMin <= 15
+        : argoReturnDelayMin <= 0
         ? 'tepat_waktu'
         : 'terlambat';
 
@@ -449,10 +573,10 @@ class TrackingLogAnalyticsService {
         bbmStartKm,
         avgSpeedKmh,
         maxSpeedKmh,
-        scheduledDepartureTime: formatTimeWib(sch.departureDate),
+        scheduledDepartureTime: `${targets.targetDepHhMm} WIB`,
         actualGateOutTime: hasGateOutFlag ? formatTimeWib(gateOutIso) : '-',
         gateOutStatus,
-        scheduledReturnTime: formatTimeWib(sch.estimatedArrival),
+        scheduledReturnTime: `${targets.targetRetHhMm} WIB`,
         actualArgoReturnTime: hasArgoReturn ? formatTimeWib(argoReturnIso) : '-',
         argoReturnStatus,
         isOnTime,
@@ -658,7 +782,7 @@ class TrackingLogAnalyticsService {
       routeEvaluations.length
     );
 
-    return {
+    const result: AnalyticsSummaryReport = {
       overall: {
         totalDistanceKm: totalDistanceFromBbmKm,
         avgFleetSpeedKmh: avgFleetSpeedFromEvaluasi,
@@ -691,6 +815,10 @@ class TrackingLogAnalyticsService {
       routeEvaluations,
       filteredLogs: []
     };
+    this.cachedReportKey = cacheKey;
+    this.cachedReportResult = result;
+    this.cachedReportAt = nowMs;
+    return result;
   }
 }
 

@@ -252,12 +252,12 @@ export const AnalyticsReportingModule: React.FC = () => {
         'KM Awal BBM (KM)': r.bbmStartKm,
         'Rata2 Kecepatan Evaluasi Jalur (KM/H)': r.avgSpeedKmh,
         'Kecepatan Maks (KM/H)': r.maxSpeedKmh,
-        'Jadwal Berangkat': r.scheduledDepartureTime,
+        'Target Berangkat (Pembuat Jadwal)': r.scheduledDepartureTime,
         'Aktual Gate-Out': r.actualGateOutTime,
         'Status Gate-Out': r.gateOutStatus === 'tepat_waktu' ? 'Tepat Waktu' : r.gateOutStatus === 'terlambat' ? 'Terlambat' : 'Belum Gate-Out',
-        'Jadwal Pulang': r.scheduledReturnTime,
-        'Aktual Tiba di Argo': r.actualArgoReturnTime,
-        'Status Kepulangan Argo': r.argoReturnStatus === 'tepat_waktu' ? 'Tepat Waktu' : r.argoReturnStatus === 'terlambat' ? 'Terlambat' : 'Belum Tiba',
+        'Target Kepulangan (Pembuat Jadwal)': r.scheduledReturnTime,
+        'Aktual Tiba di Gudang': r.actualArgoReturnTime,
+        'Status Kepulangan': r.argoReturnStatus === 'tepat_waktu' ? 'Tepat Waktu' : r.argoReturnStatus === 'terlambat' ? 'Terlambat' : 'Belum Tiba',
         'Ketepatan Tim': r.isOnTime ? 'Tepat Waktu' : 'Terlambat'
       }));
     } else if (datasetType === 'fleet') {
@@ -382,9 +382,9 @@ export const AnalyticsReportingModule: React.FC = () => {
     setTimeout(() => setExportSuccessToast(null), 4000);
   };
 
-  // Pie Chart Data for Punctuality (SLA Gate-Out & Tiba di Argo)
+  // Pie Chart Data for Punctuality (SLA Target Berangkat & Target Kepulangan Pembuat Jadwal)
   const slaPieData = [
-    { name: 'Tepat Waktu (Gate-Out & Argo)', value: Math.max(report.overall.onTimeCount, 1), color: '#10b981' },
+    { name: 'Tepat Waktu (Sesuai Target Berangkat & Kepulangan)', value: Math.max(report.overall.onTimeCount, 1), color: '#10b981' },
     { name: 'Terlambat', value: report.overall.lateCount, color: '#f43f5e' }
   ];
 
@@ -415,14 +415,14 @@ export const AnalyticsReportingModule: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1.5">
                 <Activity className="w-3 h-3" />
-                Evaluasi Performa Operasional Terintegrasi
+                Dashboard Operasional &amp; Analitik Performa Terintegrasi
               </span>
             </div>
             <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-              Laporan Analitik Performa Armada &amp; Kru
+              Dashboard Logistik &amp; Pengiriman
             </h2>
             <p className="text-slate-400 text-xs max-w-2xl">
-              Terintegrasi langsung dengan KM Awal BBM, Evaluasi Jalur, Jadwal &amp; Penugasan, Frekuensi Armada pada Kru Pengiriman, serta Ketepatan Waktu Gate-Out &amp; Tiba di Gudang Argo.
+              Terintegrasi langsung dengan KM Awal BBM, Evaluasi Jalur, Jadwal &amp; Penugasan, Frekuensi Armada pada Kru Pengiriman, serta Ketepatan Waktu terhadap Target Berangkat &amp; Target Kepulangan dari Pembuat Jadwal.
             </p>
           </div>
 
@@ -892,7 +892,7 @@ export const AnalyticsReportingModule: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. Ketepatan Waktu (SLA: Gate-Out Keluar Gudang & Klik Tiba di Argo) */}
+        {/* 4. Ketepatan Waktu (SLA: Terintegrasi Target Berangkat & Target Kepulangan Pembuat Jadwal) */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -911,7 +911,7 @@ export const AnalyticsReportingModule: React.FC = () => {
             </span>
           </div>
           <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-            <span className="text-slate-400">Gate-Out &amp; Tiba Argo:</span>
+            <span className="text-slate-400">Target Berangkat &amp; Pulang:</span>
             <span className="text-teal-300 font-bold">
               {report.overall.onTimeCount} Tepat • {report.overall.lateCount} Terlambat
             </span>
@@ -990,19 +990,19 @@ export const AnalyticsReportingModule: React.FC = () => {
                   <span>Ketepatan Waktu Tim Pengiriman (SLA)</span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Berdasarkan klik Gate-Out keluar gudang &amp; klik Sudah Tiba di Argo
+                  Terintegrasi Target Berangkat &amp; Target Kepulangan dari Pembuat Jadwal
                 </p>
               </div>
 
-              <div className="h-52 w-full my-2">
+              <div className="h-48 w-full my-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={slaPieData}
                       cx="50%"
                       cy="50%"
-                      innerRadius={48}
-                      outerRadius={72}
+                      innerRadius={46}
+                      outerRadius={70}
                       paddingAngle={4}
                       dataKey="value"
                     >
@@ -1024,18 +1024,34 @@ export const AnalyticsReportingModule: React.FC = () => {
                 </ResponsiveContainer>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80 text-center">
-                <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-2">
-                  <span className="text-[10px] text-emerald-300 block">Tim Tepat Waktu</span>
-                  <span className="text-sm font-black text-emerald-400 font-mono">
-                    {report.overall.onTimeCount} Kiriman
-                  </span>
+              <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-2">
+                    <span className="text-[10px] text-emerald-300 block">Tim Tepat Waktu</span>
+                    <span className="text-sm font-black text-emerald-400 font-mono">
+                      {report.overall.onTimeCount} Kiriman
+                    </span>
+                  </div>
+                  <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2">
+                    <span className="text-[10px] text-rose-300 block">Tim Terlambat</span>
+                    <span className="text-sm font-black text-rose-400 font-mono">
+                      {report.overall.lateCount} Kiriman
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2">
-                  <span className="text-[10px] text-rose-300 block">Tim Terlambat</span>
-                  <span className="text-sm font-black text-rose-400 font-mono">
-                    {report.overall.lateCount} Kiriman
-                  </span>
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 bg-slate-950/60 border border-slate-800 rounded-xl px-2.5 py-1.5">
+                  <div className="flex items-center justify-between">
+                    <span>Target Berangkat:</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      {report.overall.gateOutOnTimeCount} Tepat / {report.overall.gateOutLateCount} Telat
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between border-l border-slate-800 pl-2">
+                    <span>Target Pulang:</span>
+                    <span className="font-mono font-bold text-cyan-400">
+                      {report.overall.argoReturnOnTimeCount} Tepat / {report.overall.argoReturnLateCount} Telat
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1251,23 +1267,23 @@ export const AnalyticsReportingModule: React.FC = () => {
       {activeTab === 'routes' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-cyan-400" />
-                <span>Daftar Evaluasi Rute, Gate-Out Gudang &amp; Kepulangan Tiba di Argo ({report.routeEvaluations.length} Rute)</span>
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                Ketepatan waktu terekam otomatis saat Driver/Helper klik Gate-Out keluar gudang dan saat klik Sudah Tiba di Argo
-              </p>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Navigation className="w-4 h-4 text-cyan-400" />
+                  <span>Daftar Evaluasi Rute, Target Berangkat &amp; Target Kepulangan ({report.routeEvaluations.length} Rute)</span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Ketepatan waktu kiriman terintegrasi langsung dengan Target Berangkat &amp; Target Kepulangan yang disetting oleh Pembuat Jadwal
+                </p>
+              </div>
+              <button
+                onClick={() => handleExportCSV('routes')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Ekspor Evaluasi Rute (CSV)</span>
+              </button>
             </div>
-            <button
-              onClick={() => handleExportCSV('routes')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Ekspor Evaluasi Rute (CSV)</span>
-            </button>
-          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -1277,8 +1293,8 @@ export const AnalyticsReportingModule: React.FC = () => {
                   <th className="py-3 px-4">Armada &amp; Kru</th>
                   <th className="py-3 px-4 text-right">KM Awal BBM</th>
                   <th className="py-3 px-4 text-right">Kecepatan Evaluasi</th>
-                  <th className="py-3 px-4 text-center">Gate-Out (Keluar Gudang)</th>
-                  <th className="py-3 px-4 text-center">Kepulangan (Tiba di Argo)</th>
+                  <th className="py-3 px-4 text-center">Target Berangkat vs Gate-Out</th>
+                  <th className="py-3 px-4 text-center">Target Kepulangan vs Tiba di Gudang</th>
                   <th className="py-3 px-4 text-center">Status Ketepatan Tim</th>
                   <th className="py-3 px-4 text-center">Rincian</th>
                 </tr>
@@ -1312,8 +1328,8 @@ export const AnalyticsReportingModule: React.FC = () => {
                       <div className="text-[10px] text-slate-500">Maks: {ev.maxSpeedKmh} km/h</div>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <div className="text-[10px] text-slate-400">Jadwal: {ev.scheduledDepartureTime}</div>
-                      <div className="text-[11px] font-bold text-white">Aktual: {ev.actualGateOutTime}</div>
+                      <div className="text-[10px] text-slate-400">Target Berangkat: {ev.scheduledDepartureTime}</div>
+                      <div className="text-[11px] font-bold text-white">Aktual Gate-Out: {ev.actualGateOutTime}</div>
                       <span className={`inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-bold border ${
                         ev.gateOutStatus === 'tepat_waktu'
                           ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
@@ -1322,15 +1338,15 @@ export const AnalyticsReportingModule: React.FC = () => {
                           : 'bg-slate-800 text-slate-400 border-slate-700'
                       }`}>
                         {ev.gateOutStatus === 'tepat_waktu'
-                          ? 'Gate-Out Tepat Waktu'
+                          ? 'Berangkat Tepat Waktu'
                           : ev.gateOutStatus === 'terlambat'
-                          ? 'Gate-Out Terlambat'
+                          ? 'Berangkat Terlambat'
                           : 'Menunggu Gate-Out'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <div className="text-[10px] text-slate-400">Target: {ev.scheduledReturnTime}</div>
-                      <div className="text-[11px] font-bold text-white">Tiba Argo: {ev.actualArgoReturnTime}</div>
+                      <div className="text-[10px] text-slate-400">Target Pulang: {ev.scheduledReturnTime}</div>
+                      <div className="text-[11px] font-bold text-white">Tiba di Gudang: {ev.actualArgoReturnTime}</div>
                       <span className={`inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-bold border ${
                         ev.argoReturnStatus === 'tepat_waktu'
                           ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
@@ -1339,10 +1355,10 @@ export const AnalyticsReportingModule: React.FC = () => {
                           : 'bg-slate-800 text-slate-400 border-slate-700'
                       }`}>
                         {ev.argoReturnStatus === 'tepat_waktu'
-                          ? 'Tiba Tepat Waktu'
+                          ? 'Pulang Tepat Waktu'
                           : ev.argoReturnStatus === 'terlambat'
                           ? 'Pulang Terlambat'
-                          : 'Belum Tiba di Argo'}
+                          : 'Belum Tiba di Gudang'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -1407,21 +1423,21 @@ export const AnalyticsReportingModule: React.FC = () => {
                 </span>
               </div>
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] text-slate-400 block">Gate-Out Gudang</span>
+                <span className="text-[10px] text-slate-400 block">Aktual Gate-Out</span>
                 <span className="text-sm font-black text-white font-mono">
                   {selectedRouteDetail.actualGateOutTime}
                 </span>
                 <span className="text-[10px] text-slate-400 block">
-                  Jadwal: {selectedRouteDetail.scheduledDepartureTime}
+                  Target Berangkat: {selectedRouteDetail.scheduledDepartureTime}
                 </span>
               </div>
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] text-slate-400 block">Tiba di Argo</span>
+                <span className="text-[10px] text-slate-400 block">Tiba di Gudang</span>
                 <span className="text-sm font-black text-emerald-400 font-mono">
                   {selectedRouteDetail.actualArgoReturnTime}
                 </span>
                 <span className="text-[10px] text-slate-400 block">
-                  Target: {selectedRouteDetail.scheduledReturnTime}
+                  Target Pulang: {selectedRouteDetail.scheduledReturnTime}
                 </span>
               </div>
             </div>
@@ -1443,8 +1459,8 @@ export const AnalyticsReportingModule: React.FC = () => {
                 <span className="text-slate-400">Status Ketepatan Tim Pengiriman:</span>
                 <span className={`font-bold ${selectedRouteDetail.isOnTime ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {selectedRouteDetail.isOnTime
-                    ? 'Tepat Waktu (Sesuai Jadwal Gate-Out & Kepulangan Argo)'
-                    : `Terlambat (${selectedRouteDetail.slaDelayMinutes} menit dari jadwal)`}
+                    ? 'Tepat Waktu (Sesuai Target Berangkat & Target Kepulangan Pembuat Jadwal)'
+                    : `Terlambat (${selectedRouteDetail.slaDelayMinutes} menit dari Target Pembuat Jadwal)`}
                 </span>
               </div>
             </div>
