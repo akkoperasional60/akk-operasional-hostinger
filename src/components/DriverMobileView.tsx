@@ -76,6 +76,7 @@ import {
   UserProfile
 } from '../types';
 import { logisticsStore } from '../services/store';
+import { resolveCanonicalFleetMeta, INITIAL_FLEETS } from '../data/mockData';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverOfflineSyncService, OfflineTaskAction, DriverSyncState } from '../services/driverOfflineSyncService';
 import { driverChecklistService } from '../services/driverChecklistService';
@@ -90,7 +91,7 @@ import { DriverSuratJalanModal } from './DriverSuratJalanModal';
 import { DriverVehicleChecklistModal } from './DriverVehicleChecklistModal';
 import { DriverCheckinModal } from './DriverCheckinModal';
 import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
-import { DriverGmapsShareModal } from './DriverGmapsShareModal';
+import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareModal';
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -470,7 +471,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   useEffect(() => {
     const timer = setInterval(() => {
       setRealtimeNow(new Date());
-    }, 1000);
+    }, 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -487,51 +488,93 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return (
       realtimeNow.toLocaleTimeString('id-ID', {
         hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        minute: '2-digit'
       }) + ' WIB'
     );
   }, [realtimeNow]);
 
+  // Helper kunci identitas kru terpadu agar pergantian ID antara usr-xxx dan crw-xxx tidak pernah mereset status Check-In / Checklist
+  const getDriverStorageScopes = (): string[] => {
+    const scopes = new Set<string>();
+    const rawSelected = String(selectedDriverId || '').trim();
+    if (rawSelected) {
+      scopes.add(rawSelected);
+      const stripped = rawSelected.replace(/^crw-/, '');
+      if (stripped) {
+        scopes.add(stripped);
+        scopes.add(`crw-${stripped}`);
+      }
+    }
+    const uid = String(currentUser?.id || '').trim();
+    if (uid && uid !== 'guest') {
+      scopes.add(uid);
+      scopes.add(`crw-${uid}`);
+    }
+    const nameKey = String(portalDisplayName || currentUser?.fullName || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    if (nameKey) {
+      scopes.add(`name_${nameKey}`);
+    }
+    return Array.from(scopes);
+  };
+
+  const readDriverScopedValue = (prefix: string): string => {
+    try {
+      for (const scope of getDriverStorageScopes()) {
+        const val =
+          (typeof localStorage !== 'undefined' ? localStorage.getItem(`${prefix}${scope}`) : null) ||
+          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`${prefix}${scope}`) : null);
+        if (val) return val;
+      }
+    } catch {}
+    return '';
+  };
+
+  const writeDriverScopedValue = (prefix: string, value: string): void => {
+    try {
+      for (const scope of getDriverStorageScopes()) {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(`${prefix}${scope}`, value);
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(`${prefix}${scope}`, value);
+      }
+    } catch {}
+  };
+
   // 🕒 Driver Check-in Shift Management (PIN 2x Verification) & Alur Pasca Check-In
   const [activeShift, setActiveShift] = useState<DriverShiftCheckin | null>(() =>
-    driverShiftService.getActiveShift(selectedDriverId)
+    driverShiftService.getActiveShift(selectedDriverId, portalDisplayName)
   );
   const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
   const [checkinModalMode, setCheckinModalMode] = useState<'checkin' | 'change_pin'>('checkin');
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState<boolean>(false);
   const [isGmapsShareModalOpen, setIsGmapsShareModalOpen] = useState<boolean>(false);
+  const [gmapsInitialCategory, setGmapsInitialCategory] = useState<GmapsReportCategory | undefined>(undefined);
+  const [gmapsModalRoleOverride, setGmapsModalRoleOverride] = useState<'driver' | 'helper' | undefined>(undefined);
+  const [jobdeskRoleOverride, setJobdeskRoleOverride] = useState<'auto' | 'driver' | 'helper'>('auto');
+
+  const openGmapsFeature = (cat?: GmapsReportCategory, roleForModal?: 'driver' | 'helper') => {
+    setGmapsInitialCategory(cat);
+    setGmapsModalRoleOverride(roleForModal);
+    setIsGmapsShareModalOpen(true);
+  };
 
   // Alur Baru: Setelah Check-In -> Pilih/Kunci Armada -> Isi Checklist Armada -> Simpan -> Persiapan Keluar -> SJ Keluar & Gate-Out -> Konfirmasi Tiba di Gudang
   const [selectedFleetId, setSelectedFleetId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
-    } catch {
-      return '';
-    }
+    return readDriverScopedValue('akk_locked_fleet_');
   });
   const [isFleetLockedAfterCheckin, setIsFleetLockedAfterCheckin] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
-    } catch {
-      return false;
-    }
+    return readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
   });
   const [isChecklistCompletedAfterCheckin, setIsChecklistCompletedAfterCheckin] = useState<boolean>(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      return localStorage.getItem(`akk_checklist_done_${selectedDriverId}`) === todayStr;
-    } catch {
-      return false;
-    }
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_checklist_done_');
+    return val === todayStr || val === todayUtc;
   });
   const [isHelperPositionSkipped, setIsHelperPositionSkipped] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
-    } catch {
-      return false;
-    }
+    return readDriverScopedValue('akk_helper_skipped_') === 'true';
   });
   const [isPostCheckinFleetModalOpen, setIsPostCheckinFleetModalOpen] = useState<boolean>(false);
   const [waybillRefreshTick, setWaybillRefreshTick] = useState<number>(0);
@@ -579,7 +622,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       argoArrivalBy: string;
     }>
   ) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     setSharedScheduleFlowMap(prev => {
       const next = { ...prev };
       scheduleIds.filter(Boolean).forEach(id => {
@@ -599,14 +642,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Sync active shift on driver change or shift event
   useEffect(() => {
-    if (selectedDriverId) {
-      setActiveShift(driverShiftService.getActiveShift(selectedDriverId));
+    if (selectedDriverId || portalDisplayName) {
+      setActiveShift(driverShiftService.getActiveShift(selectedDriverId, portalDisplayName));
       try {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const savedFleet = localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
-        const savedLocked = localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
-        const savedChecklistDone = localStorage.getItem(`akk_checklist_done_${selectedDriverId}`) === todayStr;
-        const savedHelperSkip = localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
+        const todayStr = getLocalDateStr();
+        const todayUtc = new Date().toISOString().slice(0, 10);
+        const savedFleet = readDriverScopedValue('akk_locked_fleet_');
+        const savedLocked = readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
+        const savedChecklistVal = readDriverScopedValue('akk_checklist_done_');
+        const savedChecklistDone = savedChecklistVal === todayStr || savedChecklistVal === todayUtc;
+        const savedHelperSkip = readDriverScopedValue('akk_helper_skipped_') === 'true';
         setSelectedFleetId(savedFleet);
         setIsFleetLockedAfterCheckin(savedLocked);
         setIsChecklistCompletedAfterCheckin(savedChecklistDone);
@@ -614,11 +659,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       } catch {}
     }
 
-    const onShiftUpdated = (e: any) => {
-      const updated = e.detail as DriverShiftCheckin;
-      if (updated && updated.driverId === selectedDriverId) {
-        setActiveShift(updated.status !== 'checked_out' ? updated : null);
-      }
+    const onShiftUpdated = () => {
+      setActiveShift(driverShiftService.getActiveShift(selectedDriverId, portalDisplayName));
     };
 
     const onWaybillUpdated = () => {
@@ -631,7 +673,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       window.removeEventListener('driver-shift-updated', onShiftUpdated);
       window.removeEventListener('driver-waybill-updated', onWaybillUpdated);
     };
-  }, [selectedDriverId]);
+  }, [selectedDriverId, portalDisplayName, currentUser?.id]);
 
   // Load checklists when selected driver or deliveries change
   useEffect(() => {
@@ -707,16 +749,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const handleUpdate = () => loadDriverKendalaReports();
     window.addEventListener('driver-report-updated', handleUpdate);
 
-    // Real-time fast sync setiap 1.5 detik agar begitu SPV/Tim Pengiriman mengirim solusi, detik itu juga tampil di Portal Driver
+    // Sinkronisasi berkala setiap 10 detik (didukung SSE / BroadcastChannel real-time tanpa membebani RAM HP)
     const fastSyncTimer = setInterval(() => {
       driverReportService.syncWithServer().then(() => loadDriverKendalaReports()).catch(() => {});
-    }, 1500);
+    }, 10000);
 
     return () => {
       clearInterval(fastSyncTimer);
       window.removeEventListener('driver-report-updated', handleUpdate);
     };
-  }, [selectedDriverId, crews, portalDisplayName, currentUser, todayLocalStr, deliveries.length, activeShift?.plateNumber]);
+  }, [selectedDriverId, portalDisplayName, todayLocalStr]);
 
   const activeDriverSolutions = useMemo(() => {
     return driverKendalaReports
@@ -1067,9 +1109,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
 
     if (assignedFleet) {
+      const todayLocal = getLocalDateStr();
+      const todayUtc = new Date().toISOString().slice(0, 10);
       const byFleet = checklists.find(
         c =>
-          (matchesCrewOrPartner(c) || c.date === new Date().toISOString().slice(0, 10)) &&
+          (matchesCrewOrPartner(c) || c.date === todayLocal || c.date === todayUtc) &&
           (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)
       );
       if (byFleet) return byFleet;
@@ -1079,40 +1123,42 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Status apakah driver sudah klik Konfirmasi Tiba di Gudang hari ini (membuka kunci Pasca-Jalan)
   const [hasConfirmedArrivalFlag, setHasConfirmedArrivalFlag] = useState<boolean>(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      return localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr;
-    } catch {
-      return false;
-    }
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_confirmed_arrival_');
+    return val === todayStr || val === todayUtc;
   });
 
   useEffect(() => {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      setHasConfirmedArrivalFlag(
-        localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr
-      );
-    } catch {}
-  }, [selectedDriverId]);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const val = readDriverScopedValue('akk_confirmed_arrival_');
+    setHasConfirmedArrivalFlag(val === todayStr || val === todayUtc);
+  }, [selectedDriverId, portalDisplayName]);
 
   const hasConfirmedArrivalToday = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
     const hasDeliveredToday = deliveries.some(
-      d => d.status === 'delivered' && ((d.actualArrival || d.departureDate || '').slice(0, 10) === todayStr)
+      d => {
+        if (d.status !== 'delivered') return false;
+        const dSlice = (d.actualArrival || d.departureDate || '').slice(0, 10);
+        return dSlice === todayStr || dSlice === todayUtc;
+      }
     );
     return Boolean(hasConfirmedArrivalFlag || hasDeliveredToday);
   }, [hasConfirmedArrivalFlag, deliveries]);
 
   // Cek apakah jadwal/armada bersama (Driver A & Helper B) sudah selesai Checklist Pra-Jalan hari ini
   const sharedCrewPreTripState = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
     const driverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
     const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
     const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
 
     const matchingPreTrip = checklists.find(c => {
-      if (c.date !== todayStr || c.inspectionType !== 'pre_trip') return false;
+      if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
       const cName = (c.driverName || '').trim().toLowerCase();
       if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
       if (primarySharedSchedule) {
@@ -1126,7 +1172,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
 
     const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
-    const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
+    const isSameDayFlow = Boolean(sharedFlow?.date === todayStr || sharedFlow?.date === todayUtc);
     const isPreparedOrInTransit = Boolean(
       primarySharedSchedule &&
         ((sharedFlow?.checklistCompleted && isSameDayFlow) ||
@@ -1135,7 +1181,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           ['in_transit', 'picked_up'].includes(primarySharedSchedule.status))
     );
 
-    const isDone = Boolean(matchingPreTrip || (isChecklistCompletedAfterCheckin && isSameDayFlow) || isPreparedOrInTransit);
+    const isDone = Boolean(matchingPreTrip || isChecklistCompletedAfterCheckin || isPreparedOrInTransit);
     const completedBy =
       matchingPreTrip?.driverName ||
       sharedFlow?.checklistCompletedBy ||
@@ -1186,11 +1232,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     setSelectedFleetId(targetF.id);
     setIsFleetLockedAfterCheckin(true);
     setIsHelperPositionSkipped(false);
-    try {
-      localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetF.id);
-      localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-      localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'false');
-    } catch {}
+    writeDriverScopedValue('akk_locked_fleet_', targetF.id);
+    writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+    writeDriverScopedValue('akk_helper_skipped_', 'false');
     if (selectedDriverId) {
       logisticsStore.updateCrew(selectedDriverId, { currentFleetId: targetF.id });
     }
@@ -1235,6 +1279,163 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   useEffect(() => {
     spvCrewFilterRef.current = spvCrewFilter;
   }, [spvCrewFilter]);
+
+  // State & Handler Fitur Perubahan Urgent (Rolling Pagi) sebelum Gate-Out / setelah Check-In
+  const [urgentRollingModal, setUrgentRollingModal] = useState<{
+    isOpen: boolean;
+    delivery: Schedule | null;
+    driverId: string;
+    helper1Id: string;
+    helper2Id: string;
+    fleetId: string;
+    areaName: string;
+    reason: string;
+  }>({
+    isOpen: false,
+    delivery: null,
+    driverId: '',
+    helper1Id: '',
+    helper2Id: '',
+    fleetId: '',
+    areaName: '',
+    reason: 'Rolling pagi mendadak sebelum keberangkatan dari gudang'
+  });
+
+  const handleOpenUrgentRollingModal = (delivery: Schedule) => {
+    if (!canManageAllPortalSchedules) {
+      addNotification(
+        'delivery',
+        'Akses Ditolak',
+        'Perubahan urgent (rolling pagi) hanya dapat dilakukan oleh SPV Logistik atau Super Admin.'
+      );
+      return;
+    }
+
+    const matchedDriver =
+      crews.find(c => c.id === delivery.crewId) ||
+      (delivery.crew?.name ? crews.find(c => c.name.trim().toLowerCase() === delivery.crew!.name.trim().toLowerCase()) : undefined);
+    const matchedHelper1 =
+      (delivery.crewHelperId ? crews.find(c => c.id === delivery.crewHelperId) : undefined) ||
+      (delivery.crewHelper?.name ? crews.find(c => c.name.trim().toLowerCase() === delivery.crewHelper!.name.trim().toLowerCase()) : undefined);
+    const matchedHelper2 =
+      (delivery.crewHelper2Id ? crews.find(c => c.id === delivery.crewHelper2Id) : undefined) ||
+      (delivery.crewHelper2?.name ? crews.find(c => c.name.trim().toLowerCase() === delivery.crewHelper2!.name.trim().toLowerCase()) : undefined);
+    const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+    const matchedFleet =
+      fleets.find(f => f.id === delivery.fleetId) ||
+      (delivery.fleet?.plateNumber ? fleets.find(f => normPlate(f.plateNumber) === normPlate(delivery.fleet?.plateNumber)) : undefined) ||
+      assignedFleet;
+
+    setUrgentRollingModal({
+      isOpen: true,
+      delivery,
+      driverId: matchedDriver?.id || delivery.crewId || '',
+      helper1Id: matchedHelper1?.id || delivery.crewHelperId || '',
+      helper2Id: matchedHelper2?.id || delivery.crewHelper2Id || '',
+      fleetId: matchedFleet?.id || delivery.fleetId || '',
+      areaName: delivery.areaName || delivery.store?.storeName || '',
+      reason: 'Rolling pagi mendadak sebelum keberangkatan dari gudang'
+    });
+  };
+
+  const handleSaveUrgentRolling = async () => {
+    const targetDelivery = urgentRollingModal.delivery;
+    if (!targetDelivery) return;
+
+    if (!canManageAllPortalSchedules) {
+      addNotification(
+        'delivery',
+        'Akses Ditolak',
+        'Perubahan urgent (rolling pagi) hanya dapat dilakukan oleh SPV Logistik atau Super Admin.'
+      );
+      return;
+    }
+
+    const newDriver = crews.find(c => c.id === urgentRollingModal.driverId) || targetDelivery.crew;
+    const newHelper1 = urgentRollingModal.helper1Id
+      ? crews.find(c => c.id === urgentRollingModal.helper1Id)
+      : undefined;
+    const newHelper2 = urgentRollingModal.helper2Id
+      ? crews.find(c => c.id === urgentRollingModal.helper2Id)
+      : undefined;
+    const newFleetRaw =
+      fleets.find(f => f.id === urgentRollingModal.fleetId) ||
+      targetDelivery.fleet ||
+      assignedFleet;
+    const canonicalMeta = resolveCanonicalFleetMeta(newFleetRaw);
+    const newFleet = newFleetRaw
+      ? {
+          ...newFleetRaw,
+          initialCode: newFleetRaw.initialCode || canonicalMeta?.initialCode,
+          vehicleType: newFleetRaw.vehicleType || canonicalMeta?.vehicleType,
+          brand: newFleetRaw.brand || canonicalMeta?.brand
+        }
+      : undefined;
+
+    const cleanArea = (urgentRollingModal.areaName || targetDelivery.areaName || targetDelivery.store?.storeName || '').trim();
+    const cleanReason = (urgentRollingModal.reason || 'Rolling pagi mendadak').trim();
+    const actorName = portalDisplayName || currentDriver?.name || activeShift?.driverName || 'SPV Logistik / Super Admin';
+    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const rollingNote = `[ROLLING URGENT PAGI ${timeStr} WIB oleh ${actorName}: ${cleanReason}]`;
+
+    const updatedSchedule: Schedule = {
+      ...targetDelivery,
+      crewId: newDriver?.id || urgentRollingModal.driverId || targetDelivery.crewId,
+      crew: newDriver,
+      crewHelperId: newHelper1?.id || '',
+      crewHelper: newHelper1,
+      crewHelper2Id: newHelper2?.id || '',
+      crewHelper2: newHelper2,
+      fleetId: newFleet?.id || urgentRollingModal.fleetId || targetDelivery.fleetId,
+      fleet: newFleet,
+      areaName: cleanArea || targetDelivery.areaName,
+      notes: targetDelivery.notes
+        ? `${targetDelivery.notes.replace(/\[ROLLING URGENT PAGI[^\]]*\]\s*/g, '').trim()} ${rollingNote}`.trim()
+        : rollingNote
+    };
+
+    const nextSchedules = logisticsStore
+      .getSchedules()
+      .map(s => (s.id === updatedSchedule.id ? updatedSchedule : s));
+
+    const persisted = await persistSchedulesToDatabase(nextSchedules, undefined, {
+      source: 'urgent_rolling_driver_portal'
+    });
+
+    if (!persisted.success) {
+      addNotification(
+        'delivery',
+        'Rolling Pagi Gagal Disimpan',
+        persisted.message || 'Perubahan belum tersimpan ke Hostinger MySQL.'
+      );
+      return;
+    }
+
+    logisticsStore.batchSyncSchedules([], [{ id: updatedSchedule.id, data: updatedSchedule }]);
+    driverWaybillService.getWaybillForSchedule(updatedSchedule);
+    logisticsStore.addScheduleChangeLog({
+      actionType: 'manual_edit',
+      fileName: `Rolling Pagi (${cleanArea || targetDelivery.trackingNumber})`,
+      summary: `Perubahan urgent kru/armada sebelum Gate-Out oleh ${actorName}`,
+      changes: [
+        `Driver: ${newDriver?.name || '-'}`,
+        `Helper 1: ${newHelper1?.name || 'Tanpa Helper'}`,
+        `Helper 2: ${newHelper2?.name || 'Tanpa Helper 2'}`,
+        `Armada: ${newFleet?.plateNumber || '-'}${newFleet?.initialCode ? ` (${newFleet.initialCode})` : ''}`,
+        `Area: ${cleanArea || '-'}`
+      ]
+    });
+    setWaybillRefreshTick(t => t + 1);
+    await loadDeliveries(true);
+
+    setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }));
+
+    addNotification(
+      'delivery',
+      'Perubahan Urgent (Rolling Pagi) Tersimpan',
+      `Jadwal ${cleanArea || targetDelivery.trackingNumber} berhasil disimpan ke Hostinger MySQL: Driver ${newDriver?.name || '-'}, Helper ${newHelper1?.name || 'Tanpa Helper'}, Armada ${newFleet?.plateNumber || '-'}${newFleet?.initialCode ? ` (${newFleet.initialCode})` : ''}.`
+    );
+  };
 
   // Cek apakah role akun saat ini adalah SPV Logistik atau Super Admin (bisa melihat semua jadwal & menghapus jadwal)
   const canManageAllPortalSchedules = useMemo(() => {
@@ -1672,6 +1873,64 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       deliveredDeliveries: delivered
     };
   }, [deliveries, keluarArgoMap, canManageAllPortalSchedules, spvCrewFilter]);
+
+  // 🧭 Deteksi Posisi Jobdesk Terjadwal (Driver vs Helper) untuk Jadwal Tertentu maupun Portal Utama
+  const getScheduledJobdeskForDelivery = (delivery?: Schedule | null): 'driver' | 'helper' => {
+    // Role override hanya untuk SPV/Super Admin saat meninjau jadwal kru lain.
+    // Driver/helper biasa selalu mengikuti posisi yang benar-benar terjadwal.
+    if (canManageAllPortalSchedules && jobdeskRoleOverride === 'driver') return 'driver';
+    if (canManageAllPortalSchedules && jobdeskRoleOverride === 'helper') return 'helper';
+
+    const targetPersonName = (
+      (canManageAllPortalSchedules && spvCrewFilter !== 'all' ? spvCrewFilter : '') ||
+      currentUser?.fullName ||
+      portalDisplayName ||
+      currentDriver?.name ||
+      ''
+    ).trim();
+
+    if (delivery && targetPersonName) {
+      if (delivery.backupCrewName && doesCrewNameMatch(delivery.backupCrewName, targetPersonName)) {
+        return delivery.backupPosition === 'helper' || delivery.backupPosition === 'helper2' ? 'helper' : 'driver';
+      }
+      const helper1OnSch = delivery.crewHelper?.name || (delivery.crewHelperId ? crews.find(c => c.id === delivery.crewHelperId)?.name : '') || '';
+      const helper2OnSch = delivery.crewHelper2?.name || (delivery.crewHelper2Id ? crews.find(c => c.id === delivery.crewHelper2Id)?.name : '') || '';
+      const driverOnSch = delivery.crew?.name || (delivery.crewId ? crews.find(c => c.id === delivery.crewId)?.name : '') || '';
+
+      if (doesCrewNameMatch(helper1OnSch, targetPersonName) || doesCrewNameMatch(helper2OnSch, targetPersonName)) {
+        return 'helper';
+      }
+      if (doesCrewNameMatch(driverOnSch, targetPersonName)) {
+        return 'driver';
+      }
+    }
+
+    if (canManageAllPortalSchedules && spvCrewFilter !== 'all') {
+      const matchedFilterUser = logisticsStore.getUsers().find(u => u.fullName.toLowerCase() === spvCrewFilter.toLowerCase());
+      if (matchedFilterUser?.role === 'crew_helper') return 'helper';
+      if (matchedFilterUser?.role === 'driver') return 'driver';
+    }
+
+    return isUserHelperRole ? 'helper' : 'driver';
+  };
+
+  const effectiveJobdeskRole = useMemo<'driver' | 'helper'>(() => {
+    const primaryTarget = activeDeliveries[0] || primarySharedSchedule || scheduledDeliveries[0] || deliveries[0] || null;
+    return getScheduledJobdeskForDelivery(primaryTarget);
+  }, [
+    jobdeskRoleOverride,
+    activeDeliveries,
+    primarySharedSchedule,
+    scheduledDeliveries,
+    deliveries,
+    canManageAllPortalSchedules,
+    spvCrewFilter,
+    currentUser?.fullName,
+    portalDisplayName,
+    currentDriver?.name,
+    crews,
+    isUserHelperRole
+  ]);
 
   // 📄 Surat Jalan Keluar (SJ Keluar):
   // Tersinkronisasi penuh antara Driver & Helper dalam satu armada/jadwal:
@@ -2245,6 +2504,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           ...d,
           status: newStatus,
           notes: extraNotes !== undefined ? extraNotes : d.notes,
+          actualDeparture: newStatus === 'in_transit' ? (d.actualDeparture || new Date().toISOString()) : d.actualDeparture,
           actualArrival: newStatus === 'delivered' ? new Date().toISOString() : d.actualArrival,
           podPhotoUrl: podData?.podPhotoUrl || d.podPhotoUrl,
           podPhotoTimestamp: podData?.podPhotoTimestamp || d.podPhotoTimestamp
@@ -2284,10 +2544,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       if (targetFleet?.id) {
         setSelectedFleetId(targetFleet.id);
         setIsFleetLockedAfterCheckin(true);
-        try {
-          localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
-          localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-        } catch {}
+        writeDriverScopedValue('akk_locked_fleet_', targetFleet.id);
+        writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
       }
       const fresh = driverChecklistService.createNewChecklistTemplate(
         selectedDriverId,
@@ -2359,6 +2617,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
 
     const gateOutIso = new Date().toISOString();
+    const nowTimeWib =
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const nextGateOutMap = { ...keluarArgoMap, [delivery.id]: nowTimeWib };
+    setKeluarArgoMap(nextGateOutMap);
+    try {
+      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextGateOutMap));
+    } catch {}
+
+    logisticsStore.updateSchedule(delivery.id, {
+      actualDeparture: gateOutIso
+    });
+
     updateSharedScheduleFlow([delivery.id], {
       fleetId: preparedSchedule.fleetId,
       plateNumber: preparedSchedule.fleet?.plateNumber || '-',
@@ -2382,6 +2652,127 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       'schedule',
       'Gate-Out Dikonfirmasi • Siap Cetak SJ (SJ Print)',
       `Armada ${preparedSchedule.fleet?.plateNumber || ''} resmi keluar gerbang DC. Surat Jalan (${wb.waybillNumber}) kini siap dicetak oleh Driver & Helper.`
+    );
+  };
+
+  // 📋 Alur Khusus Helper: Validasi SJ (Surat Jalan) sebelum Gate-Out
+  const handleHelperValidateSJ = (delivery: Schedule) => {
+    if (!activeShift && !isSuperAdminUser) {
+      addNotification(
+        'sla_warning',
+        'Check-In Shift Helper Terlebih Dahulu',
+        'Silakan lakukan Check-In terlebih dahulu sebelum melakukan Validasi SJ.'
+      );
+      setCheckinModalMode('checkin');
+      setIsCheckinModalOpen(true);
+      return;
+    }
+
+    const nowTime =
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const nextMap = { ...keluarArgoMap, [delivery.id]: nowTime };
+    setKeluarArgoMap(nextMap);
+    setSjKeluarSistemMap(nextMap);
+    try {
+      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextMap));
+      localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextMap));
+    } catch {}
+
+    updateSharedScheduleFlow([delivery.id], {
+      fleetId: assignedFleet?.id || delivery.fleetId,
+      plateNumber: assignedFleet?.plateNumber || delivery.fleet?.plateNumber || '-',
+      vehicleType: assignedFleet?.vehicleType || delivery.fleet?.vehicleType || '-',
+      preparedForGateOut: true,
+      preparedBy: portalDisplayName
+    });
+
+    const preparedSchedule: Schedule = {
+      ...delivery,
+      fleet: assignedFleet || delivery.fleet,
+      fleetId: assignedFleet?.id || delivery.fleetId
+    };
+    const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
+    if (delivery.status === 'scheduled' && wb.status !== 'in_transit') {
+      driverWaybillService.updateWaybillStatus(wb.id, 'checker_verified');
+    }
+    setWaybillRefreshTick(t => t + 1);
+    setActiveWaybillToView(wb);
+    setIsWaybillModalOpen(true);
+
+    addNotification(
+      'delivery',
+      'Validasi SJ Selesai • Siap Gate-Out',
+      `Surat Jalan (${wb.waybillNumber}) untuk rute ${delivery.areaName || delivery.store?.storeName || 'Pengiriman'} telah divalidasi oleh Helper. Silakan lanjut klik Gate-Out.`
+    );
+  };
+
+  // 🏁 Alur Khusus Helper: Klik Tiba di Gudang -> Otomatis Check-Out (Tidak Manual & Tanpa Isi Checklist Armada)
+  const handleHelperTibaDiGudangAutoCheckout = async (delivery: Schedule) => {
+    const argoArrivalIso = new Date().toISOString();
+    const arrivalNote = `Tiba di Gudang Argo (Dikonfirmasi oleh Helper: ${portalDisplayName} • Otomatis Check-Out)`;
+
+    const podData = {
+      podPhotoTimestamp: argoArrivalIso,
+      podReceiverName: 'Gudang Argo DC',
+      podConditionNote: arrivalNote
+    };
+
+    updateSharedScheduleFlow([delivery.id], {
+      argoArrivalTimestamp: argoArrivalIso,
+      argoArrivalBy: portalDisplayName
+    });
+
+    await handleUpdateStatus(delivery, 'delivered', arrivalNote, podData, 'available');
+
+    driverWaybillService.getWaybillForSchedule({
+      ...delivery,
+      status: 'delivered',
+      fleet: assignedFleet || delivery.fleet,
+      fleetId: assignedFleet?.id || delivery.fleetId
+    });
+    driverWaybillService.updateWaybillStatus(`WB-${delivery.id}`, 'delivered', arrivalNote);
+    setWaybillRefreshTick(t => t + 1);
+
+    driverReportService.addReport({
+      driverId: selectedDriverId,
+      driverName: currentDriver?.name || portalDisplayName,
+      userRole: 'Helper',
+      helperName: delivery?.crewHelper?.name || portalDisplayName,
+      plateNumber: assignedFleet?.plateNumber || delivery?.fleet?.plateNumber || '-',
+      category: 'akhir_kiriman',
+      areaName: delivery.areaName || delivery.store?.storeName || 'Gudang Argo',
+      deliveryId: delivery.id,
+      notes: arrivalNote
+    });
+
+    // Otomatis Check-Out saat klik Tiba di Gudang (tanpa manual Check-Out)
+    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
+    if (currentActiveShift) {
+      const targetDriverId = currentActiveShift.driverId || selectedDriverId;
+      await driverShiftService.checkOutDriver(
+        targetDriverId,
+        undefined,
+        {
+          driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
+          userRole: 'Helper',
+          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || delivery?.fleet?.plateNumber || '-',
+          areaName: delivery.areaName || delivery.store?.storeName || 'Gudang Argo'
+        }
+      );
+      setActiveShift(null);
+    }
+
+    const todayStr = getLocalDateStr();
+    setHasConfirmedArrivalFlag(true);
+    writeDriverScopedValue('akk_confirmed_arrival_', todayStr);
+
+    setActiveTab('delivered');
+    await loadDeliveriesRef.current(true);
+
+    addNotification(
+      'delivery',
+      'Tiba di Gudang • Otomatis Check-Out Berlaku (Helper)',
+      `Konfirmasi tiba di gudang oleh Helper (${portalDisplayName}) berhasil. Shift Anda telah otomatis Check-Out tanpa manual.`
     );
   };
 
@@ -2527,6 +2918,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const fleetStatusChoice = bypassChecklistModal.postTripFleetStatus || 'available';
 
     try {
+      let updatedSchedule: Schedule = {
+        ...targetDelivery,
+        status: 'delivered',
+        isChecklistBypassed: true
+      };
       const response = await fetch(`/api/schedules/${encodeURIComponent(targetDelivery.id)}/bypass-checklist`, {
         method: 'POST',
         credentials: 'same-origin',
@@ -2537,23 +2933,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         })
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.success) {
+      const isPreviewHost =
+        typeof window !== 'undefined' &&
+        (window.location.hostname.endsWith('.run.app') ||
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1');
+
+      if (response.ok && payload?.success) {
+        if (payload.schedule) {
+          updatedSchedule = payload.schedule;
+        }
+        await logisticsStore.hydrateOperationalDataFromHostinger();
+      } else if (isPreviewHost && isSuperAdminUser) {
+        const nowIso = new Date().toISOString();
+        const adminDisplayName = currentUser?.fullName || 'Super Admin';
+        logisticsStore.updateSchedule(targetDelivery.id, {
+          status: 'delivered',
+          actualDeparture: targetDelivery.actualDeparture || targetDelivery.departureDate || nowIso,
+          actualArrival: targetDelivery.actualArrival || targetDelivery.estimatedArrival || nowIso,
+          isChecklistBypassed: true,
+          checklistBypassedBy: adminDisplayName,
+          checklistBypassedAt: nowIso,
+          notes: `${targetDelivery.notes ? `${targetDelivery.notes} • ` : ''}[Bypass Checklist Super Admin: ${customNote}]`
+        });
+        await handleUpdateStatus(targetDelivery, 'delivered', customNote, undefined, fleetStatusChoice);
+        updatedSchedule = {
+          ...targetDelivery,
+          status: 'delivered',
+          actualDeparture: targetDelivery.actualDeparture || targetDelivery.departureDate || nowIso,
+          actualArrival: targetDelivery.actualArrival || targetDelivery.estimatedArrival || nowIso,
+          isChecklistBypassed: true,
+          checklistBypassedBy: adminDisplayName,
+          checklistBypassedAt: nowIso
+        };
+      } else {
         throw new Error(payload?.error || `HTTP ${response.status}`);
       }
 
-      const updatedSchedule: Schedule = payload.schedule || {
-        ...targetDelivery,
-        status: 'delivered',
-        isChecklistBypassed: true
-      };
       const adminName = updatedSchedule.checklistBypassedBy || currentUser?.fullName || 'Super Admin';
       const targetFleet = assignedFleet || targetDelivery.fleet || fleets.find(f => f.id === targetDelivery.fleetId);
       const depIso = updatedSchedule.actualDeparture || updatedSchedule.departureDate || new Date().toISOString();
       const arrIso = updatedSchedule.actualArrival || updatedSchedule.estimatedArrival || new Date().toISOString();
-
-      // Refresh source-of-truth data first; fleet/crew counters and schedule status
-      // are written atomically by the authenticated Hostinger endpoint.
-      await logisticsStore.hydrateOperationalDataFromHostinger();
 
       updateSharedScheduleFlow([targetDelivery.id], {
         fleetId: targetFleet?.id || targetDelivery.fleetId,
@@ -2719,7 +3139,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang (termasuk sinkronisasi shift partner di armada yang sama)
     let autoCheckedOut = false;
-    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId);
+    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
     if (currentActiveShift) {
       const targetDriverId = currentActiveShift.driverId || selectedDriverId;
       await driverShiftService.checkOutDriver(
@@ -2736,11 +3156,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       autoCheckedOut = true;
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     setHasConfirmedArrivalFlag(true);
-    try {
-      localStorage.setItem(`akk_confirmed_arrival_${selectedDriverId}`, todayStr);
-    } catch {}
+    writeDriverScopedValue('akk_confirmed_arrival_', todayStr);
 
     setPodModal({
       isOpen: false,
@@ -3321,16 +3739,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     <span>Check-In</span>
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCheckoutModalOpen(true);
-                    }}
-                    className="px-2.5 py-1.5 rounded-xl neu-button text-emerald-400 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer active:scale-95"
+                  <div
+                    className="px-2.5 py-1.5 rounded-xl neu-pressed border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1 select-none"
+                    title="Check-Out otomatis berlaku saat Anda mengklik Tiba di Gudang"
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Aktif ({activeShift.checkinTimeFormatted})</span>
-                  </button>
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    <span>Aktif ({activeShift.checkinTimeFormatted}) • Auto Check-Out</span>
+                  </div>
                 )}
               </div>
 
@@ -3911,43 +4326,68 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Komposisi Kru Otomatis Menyesuaikan: Driver Utama, Helper 1, Helper 2 + Info Back Up / Menggantikan */}
+                      {/* Komposisi Kru Otomatis Menyesuaikan: Driver Utama, Helper 1, Helper 2 + Pemisahan Jobdesk Otomatis */}
                       <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-2 text-xs">
-                        <div className={`grid ${hasHelper2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                              <User className="w-3.5 h-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="text-[10px] text-slate-400 block truncate">Driver Utama</span>
-                              <strong className="text-white text-[11px] block truncate">{driverCrewName}</strong>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 min-w-0 border-l border-slate-800 pl-2">
-                            <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
-                              <User className="w-3.5 h-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="text-[10px] text-slate-400 block truncate">
-                                {hasHelper2 ? 'Helper 1' : 'Helper 1 / Kernet'}
-                              </span>
-                              <strong className="text-cyan-300 text-[11px] block truncate">{helper1Name}</strong>
-                            </div>
-                          </div>
-
-                          {hasHelper2 && (
-                            <div className="flex items-center gap-2 min-w-0 border-l border-slate-800 pl-2">
-                              <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                                <User className="w-3.5 h-3.5" />
+                        {(() => {
+                          const activeCardRole = getScheduledJobdeskForDelivery(delivery);
+                          return (
+                            <div className={`grid ${hasHelper2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                              <div
+                                onClick={() => { if (canManageAllPortalSchedules) setJobdeskRoleOverride('driver'); }}
+                                title="Klik untuk melihat alur sebagai Driver Utama"
+                                className={`flex items-center gap-2 min-w-0 p-1.5 rounded-xl transition cursor-pointer ${
+                                  activeCardRole === 'driver'
+                                    ? 'bg-amber-500/10 border border-amber-500/40'
+                                    : 'hover:bg-slate-900/60 border border-transparent'
+                                }`}
+                              >
+                                <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                                  <User className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[10px] text-slate-400 block truncate">Driver Utama</span>
+                                  <strong className="text-white text-[11px] block truncate">{driverCrewName}</strong>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <span className="text-[10px] text-emerald-400/90 font-semibold block truncate">Helper 2</span>
-                                <strong className="text-emerald-300 text-[11px] block truncate">{helper2Name}</strong>
+
+                              <div
+                                onClick={() => { if (canManageAllPortalSchedules) setJobdeskRoleOverride('helper'); }}
+                                title="Klik untuk melihat alur sebagai Helper"
+                                className={`flex items-center gap-2 min-w-0 p-1.5 rounded-xl transition cursor-pointer ${
+                                  activeCardRole === 'helper'
+                                    ? 'bg-cyan-500/10 border border-cyan-500/40'
+                                    : 'border-l border-slate-800 pl-2 hover:bg-slate-900/60'
+                                }`}
+                              >
+                                <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                                  <User className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[10px] text-slate-400 block truncate">
+                                    {hasHelper2 ? 'Helper 1' : 'Helper 1 / Kernet'}
+                                  </span>
+                                  <strong className="text-cyan-300 text-[11px] block truncate">{helper1Name}</strong>
+                                </div>
                               </div>
+
+                              {hasHelper2 && (
+                                <div
+                                  onClick={() => { if (canManageAllPortalSchedules) setJobdeskRoleOverride('helper'); }}
+                                  title="Klik untuk melihat alur sebagai Helper 2"
+                                  className="flex items-center gap-2 min-w-0 border-l border-slate-800 pl-2 p-1.5 rounded-xl hover:bg-slate-900/60 transition cursor-pointer"
+                                >
+                                  <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                                    <User className="w-3.5 h-3.5" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="text-[10px] text-emerald-400/90 font-semibold block truncate">Helper 2</span>
+                                    <strong className="text-emerald-300 text-[11px] block truncate">{helper2Name}</strong>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
+                          );
+                        })()}
 
                         {isBackupMode && (
                           <div className="pt-2 border-t border-slate-800/90 flex items-center justify-between gap-2 text-[11px]">
@@ -3968,10 +4408,28 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           delivery.estimatedArrival,
                           store?.deliveryWindow || delivery.store?.deliveryWindow
                         );
-                        const deliveryFleetObj =
+                        const normPlateCode = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+                        const rawDeliveryFleetObj =
                           fleets.find(f => f.id === delivery.fleetId) ||
+                          (delivery.fleet?.plateNumber
+                            ? fleets.find(f => normPlateCode(f.plateNumber) === normPlateCode(delivery.fleet?.plateNumber))
+                            : undefined) ||
                           delivery.fleet ||
                           assignedFleet;
+                        const canonicalFleet = resolveCanonicalFleetMeta(
+                          rawDeliveryFleetObj || delivery.fleet?.plateNumber || delivery.fleetId
+                        );
+                        const deliveryFleetObj = rawDeliveryFleetObj
+                          ? {
+                              ...rawDeliveryFleetObj,
+                              initialCode:
+                                rawDeliveryFleetObj.initialCode ||
+                                canonicalFleet?.initialCode ||
+                                rawDeliveryFleetObj.vehicleType ||
+                                canonicalFleet?.vehicleType,
+                              vehicleType: rawDeliveryFleetObj.vehicleType || canonicalFleet?.vehicleType
+                            }
+                          : canonicalFleet;
                         const fleetLiveInfo = deliveryFleetObj
                           ? logisticsStore.getFleetLiveOperationalInfo(
                               deliveryFleetObj,
@@ -3981,7 +4439,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
                         return (
                           <div className="space-y-2">
-                            {/* Informasi Armada & Area Kirim (Tanpa Keterangan Status: Ready) */}
+                            {/* Informasi Armada & Area Kirim (Inisial Armada Muncul di Hostinger & AI Studio) */}
                             {deliveryFleetObj && fleetLiveInfo && (
                               <div className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
                                 <div className="flex items-center gap-2 min-w-0">
@@ -3989,9 +4447,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   <div className="min-w-0">
                                     <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
                                       <span className="font-mono">{deliveryFleetObj.plateNumber}</span>
-                                      {deliveryFleetObj.initialCode && (
-                                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
-                                          {deliveryFleetObj.initialCode}
+                                      {(deliveryFleetObj.initialCode || deliveryFleetObj.vehicleType) && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-mono font-bold">
+                                          {deliveryFleetObj.initialCode || deliveryFleetObj.vehicleType}
                                         </span>
                                       )}
                                       {fleetLiveInfo.effectiveStatus !== 'available' && (
@@ -4117,179 +4575,285 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       )}
 
-                      {/* Driver Status Action Workflow Buttons:
-                          1. Check-In -> 2. Pemilihan Armada -> 3. Pengisian Checklist -> 4. Persiapan Keluar (Otomatis ke SJ Keluar & Gate-Out) -> Di Jalan -> Konfirmasi Tiba di Gudang */}
+                      {/* Pembagian Tampilan & Alur Jobdesk Terjadwal: DRIVER vs HELPER */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
-                        {delivery.status === 'scheduled' && (() => {
-                          const todayStr = new Date().toISOString().slice(0, 10);
-                          const sharedFlow = sharedScheduleFlowMap[delivery.id];
-                          const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
-
-                          // Tombol Gate-Out & Buka SJ Keluar HANYA aktif jika Driver SUDAH CHECK-IN SHIFT (activeShift) & Checklist Armada Hari Ini Sudah Diisi/Selesai
-                          const isChecklistDoneToday = Boolean(
-                            isChecklistCompletedAfterCheckin ||
-                            (sharedFlow?.checklistCompleted && isSameDayFlow) ||
-                            (sharedCrewPreTripState.isDone && latestChecklist?.date === todayStr)
-                          );
-
-                          const isReadyForGateOut = Boolean(
-                            activeShift &&
-                            isChecklistDoneToday &&
-                            (keluarArgoMap[delivery.id] || (sharedFlow?.preparedForGateOut && isSameDayFlow) || (sharedFlow?.gateOutConfirmed && isSameDayFlow))
-                          );
-
+                        {(() => {
+                          const cardJobdeskRole = getScheduledJobdeskForDelivery(delivery);
                           return (
-                            <div className="space-y-2">
-                              {isReadyForGateOut ? (
-                                <>
-                                  <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center justify-between gap-2">
-                                    <span className="flex items-center gap-1.5 truncate">
-                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                      <span className="truncate">
-                                        Checklist Armada Selesai ({sharedCrewPreTripState.completedBy}) • Tinggal Keluar Gerbang
-                                      </span>
+                            <>
+                              {delivery.status === 'scheduled' && (() => {
+                                const todayStr = new Date().toISOString().slice(0, 10);
+                                const sharedFlow = sharedScheduleFlowMap[delivery.id];
+                                const isSameDayFlow = Boolean(sharedFlow?.date === todayStr);
+
+                                const isChecklistDoneToday = Boolean(
+                                  isChecklistCompletedAfterCheckin ||
+                                  (sharedFlow?.checklistCompleted && isSameDayFlow) ||
+                                  (sharedCrewPreTripState.isDone && latestChecklist?.date === todayStr)
+                                );
+
+                                const isSjValidated = Boolean(
+                                  keluarArgoMap[delivery.id] ||
+                                  (sharedFlow?.preparedForGateOut && isSameDayFlow) ||
+                                  (sharedFlow?.gateOutConfirmed && isSameDayFlow)
+                                );
+
+                                const isReadyForGateOut = Boolean(
+                                  activeShift &&
+                                  isChecklistDoneToday &&
+                                  isSjValidated
+                                );
+
+                                // ALUR KHUSUS HELPER PADA STATUS SCHEDULED:
+                                // Helper = Check-In -> Validasi SJ -> Gate-Out (Tanpa mengisi Checklist Armada)
+                                if (cardJobdeskRole === 'helper') {
+                                  return (
+                                    <div className="space-y-2">
+                                      {!activeShift && !isSuperAdminUser ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setCheckinModalMode('checkin');
+                                            setIsCheckinModalOpen(true);
+                                          }}
+                                          className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                        >
+                                          <KeyRound className="w-4 h-4" />
+                                          <span>Check-In Helper Dulu Untuk Validasi SJ &amp; Gate-Out</span>
+                                        </button>
+                                      ) : (
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleHelperValidateSJ(delivery)}
+                                            className={`py-2.5 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer ${
+                                              isSjValidated
+                                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                                : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                                            }`}
+                                          >
+                                            <FileText className="w-4 h-4" />
+                                            <span>{isSjValidated ? '✓ SJ Tervalidasi (Lihat)' : 'Validasi SJ'}</span>
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => handleConfirmSharedGateOut(delivery)}
+                                            className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                          >
+                                            <span>Gate-Out</span>
+                                          </button>
+                                        </div>
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenUrgentRollingModal(delivery)}
+                                        className="w-full py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                        title="Ubah kru atau armada secara mendadak (rolling pagi) sebelum keluar dari gudang"
+                                      >
+                                        <RefreshCw className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                        <span>Perubahan Urgent (Rolling Pagi)</span>
+                                      </button>
+
+                                      {isSuperAdminUser && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenBypassChecklistModal(delivery)}
+                                          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 border border-amber-500/40 text-amber-300 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
+                                          title="Khusus Akun Super Admin: Simpan langsung ke riwayat selesai tanpa harus isi checklist"
+                                        >
+                                          <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>⚡ Tembus Jadwal ke Selesai (Tanpa Checklist)</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
+                                // ALUR KHUSUS DRIVER PADA STATUS SCHEDULED:
+                                // Driver = Check-In -> Isi Checklist Armada (Pra-Jalan) -> Gate-Out
+                                return (
+                                  <div className="space-y-2">
+                                    {isReadyForGateOut ? (
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleConfirmSharedGateOut(delivery)}
+                                          className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                        >
+                                          <span>Gate-Out</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePersiapanKeluar(delivery)}
+                                          className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                        >
+                                          <FileText className="w-4 h-4" />
+                                          <span>Lihat SJ Keluar</span>
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePersiapanKeluar(delivery)}
+                                          className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                        >
+                                          <ClipboardCheck className="w-4 h-4" />
+                                          <span>
+                                            {!activeShift
+                                              ? (isSuperAdminUser ? 'Tembus / Isi Checklist Armada (Super Admin)' : 'Check-In Dulu Untuk Isi Checklist Armada')
+                                              : 'Isi Checklist Armada (Pra-Berangkat)'}
+                                          </span>
+                                        </button>
+
+                                        {isSuperAdminUser && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenBypassChecklistModal(delivery)}
+                                            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 border border-amber-500/40 text-amber-300 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
+                                            title="Khusus Akun Super Admin: Simpan langsung ke riwayat selesai tanpa harus isi checklist"
+                                          >
+                                            <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>⚡ Tembus Jadwal ke Selesai (Tanpa Checklist)</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenUrgentRollingModal(delivery)}
+                                      className="w-full py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                      title="Ubah kru atau armada secara mendadak (rolling pagi) sebelum keluar dari gudang"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                      <span>Perubahan Urgent (Rolling Pagi)</span>
+                                    </button>
+
+                                    {activeTab !== 'active' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setTransferModal({
+                                          isOpen: true,
+                                          delivery,
+                                          reason: 'Darurat / Halangan pribadi',
+                                          transferType: 'Oper ke driver lain (Driver cari pengganti)',
+                                          gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+                                          constraintNote: ''
+                                        })}
+                                        className="w-full py-2.5 px-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                      >
+                                        <ArrowRightLeft className="w-4 h-4 text-blue-400" />
+                                        <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
+                              {(delivery.status === 'picked_up' || delivery.status === 'in_transit') && (
+                                <div className="space-y-2">
+                                  <div className="px-3 py-1.5 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5">
+                                      <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                      <span>Status: Di Jalan (Sudah Gate-Out dari Gudang)</span>
                                     </span>
                                   </div>
 
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmSharedGateOut(delivery)}
-                                      className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
-                                    >
-                                      <ArrowRight className="w-4 h-4" />
-                                      <span>Keluar Gerbang (Gate-Out)</span>
-                                    </button>
+                                  {cardJobdeskRole === 'helper' ? (
+                                    <>
+                                      {activeTab === 'active' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleHelperTibaDiGudangAutoCheckout(delivery)}
+                                          className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                        >
+                                          <CheckCircle2 className="w-4 h-4" />
+                                          <span>Tiba di Gudang</span>
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {activeTab === 'active' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPodModal({
+                                            isOpen: true,
+                                            delivery,
+                                            conditionNote: '',
+                                            serviceNote: '',
+                                            hasSignature: true,
+                                            photoUrl: null,
+                                            photoTimestamp: null,
+                                            postTripFleetStatus: 'available'
+                                          })}
+                                          className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
+                                        >
+                                          <CheckCircle2 className="w-4 h-4" />
+                                          <span>Tiba di Gudang</span>
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handlePersiapanKeluar(delivery)}
-                                      className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
-                                    >
-                                      <FileText className="w-4 h-4" />
-                                      <span>Buka SJ Keluar</span>
-                                    </button>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="space-y-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => handlePersiapanKeluar(delivery)}
-                                    className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                    onClick={() => {
+                                      setBottomNav('surat_jalan');
+                                      setWaybillStatusFilter('in_transit');
+                                    }}
+                                    className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-blue-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
                                   >
-                                    <ClipboardCheck className="w-4 h-4" />
-                                    <span>
-                                      {!activeShift
-                                        ? (isSuperAdminUser ? 'Tembus / Isi Checklist (Super Admin)' : 'Check-In Dulu Untuk Isi Checklist')
-                                        : 'Isi Checklist Armada (Pra-Jalan)'}
-                                    </span>
+                                    <FileText className="w-3.5 h-3.5 text-blue-400" />
+                                    <span>Lihat SJ Keluar (Di Jalan)</span>
                                   </button>
-
-                                  {isSuperAdminUser && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenBypassChecklistModal(delivery)}
-                                      className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 border border-amber-500/40 text-amber-300 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
-                                      title="Khusus Akun Super Admin: Simpan langsung ke riwayat selesai tanpa harus isi checklist"
-                                    >
-                                      <Zap className="w-3.5 h-3.5 text-amber-400" />
-                                      <span>⚡ Tembus Jadwal ke Selesai (Tanpa Checklist)</span>
-                                    </button>
-                                  )}
                                 </div>
                               )}
 
-                              {activeTab !== 'active' && (
-                                <button
-                                  type="button"
-                                  onClick={() => setTransferModal({
-                                    isOpen: true,
-                                    delivery,
-                                    reason: 'Darurat / Halangan pribadi',
-                                    transferType: 'Oper ke driver lain (Driver cari pengganti)',
-                                    gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
-                                    constraintNote: ''
-                                  })}
-                                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
-                                >
-                                  <ArrowRightLeft className="w-4 h-4 text-blue-400" />
-                                  <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
-                                </button>
+                              {delivery.status === 'delayed' && (
+                                <div className="space-y-2">
+                                  {activeTab === 'active' && (
+                                    cardJobdeskRole === 'helper' ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleHelperTibaDiGudangAutoCheckout(delivery)}
+                                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
+                                      >
+                                        <CheckCircle2 className="w-4 h-4" />
+                                        <span>Tiba di Gudang</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPodModal({
+                                          isOpen: true,
+                                          delivery,
+                                          conditionNote: '',
+                                          serviceNote: '',
+                                          hasSignature: true,
+                                          photoUrl: null,
+                                          photoTimestamp: null,
+                                          postTripFleetStatus: 'available'
+                                        })}
+                                        className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
+                                      >
+                                        <CheckCircle2 className="w-4 h-4" />
+                                        <span>Tiba di Gudang</span>
+                                      </button>
+                                    )
+                                  )}
+                                  <span className="text-[10px] text-slate-400 block text-center">
+                                    Status saat ini: Terlaporkan Kendala ke SPV Logistik.
+                                  </span>
+                                </div>
                               )}
-                            </div>
+                            </>
                           );
                         })()}
-
-                        {(delivery.status === 'picked_up' || delivery.status === 'in_transit') && (
-                          <div className="space-y-2">
-                            <div className="px-3 py-1.5 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold flex items-center justify-between">
-                              <span className="flex items-center gap-1.5">
-                                <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                                <span>Status: Di Jalan (Sudah Gate-Out dari Gudang)</span>
-                              </span>
-                            </div>
-
-                            {activeTab === 'active' && (
-                              <button
-                                type="button"
-                                onClick={() => setPodModal({
-                                  isOpen: true,
-                                  delivery,
-                                  conditionNote: '',
-                                  serviceNote: '',
-                                  hasSignature: true,
-                                  photoUrl: null,
-                                  photoTimestamp: null,
-                                  postTripFleetStatus: 'available'
-                                })}
-                                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>Konfirmasi Tiba di Gudang</span>
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setBottomNav('surat_jalan');
-                                setWaybillStatusFilter('in_transit');
-                              }}
-                              className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-blue-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
-                            >
-                              <FileText className="w-3.5 h-3.5 text-blue-400" />
-                              <span>Lihat SJ Keluar (Di Jalan)</span>
-                            </button>
-                          </div>
-                        )}
-
-                        {delivery.status === 'delayed' && (
-                          <div className="space-y-2">
-                            {activeTab === 'active' && (
-                              <button
-                                type="button"
-                                onClick={() => setPodModal({
-                                  isOpen: true,
-                                  delivery,
-                                  conditionNote: '',
-                                  serviceNote: '',
-                                  hasSignature: true,
-                                  photoUrl: null,
-                                  photoTimestamp: null,
-                                  postTripFleetStatus: 'available'
-                                })}
-                                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>Konfirmasi Tiba di Gudang</span>
-                              </button>
-                            )}
-                            <span className="text-[10px] text-slate-400 block text-center">
-                              Status saat ini: Terlaporkan Kendala ke SPV Logistik.
-                            </span>
-                          </div>
-                        )}
 
                         {delivery.status === 'delivered' && (
                           <div className="space-y-2">
@@ -4564,7 +5128,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                      Item Pemeriksaan Standar (23 Poin)
+                      Item Pemeriksaan Standar ({latestChecklist.items.length} Poin)
                     </h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">
                       Klik tombol status untuk memperbarui catatan inspeksi armada langsung di peramban.
@@ -4576,11 +5140,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none text-[10px]">
                   {[
                     { key: 'all', label: 'Semua' },
-                    { key: 'mesin_fluida', label: 'Mesin' },
+                    { key: 'mesin_fluida', label: 'Oli & Radiator' },
+                    { key: 'lampu_listrik', label: 'Air Accu' },
                     { key: 'rem_roda', label: 'Rem & Ban' },
-                    { key: 'lampu_listrik', label: 'Lampu' },
-                    { key: 'fisik_dokumen', label: 'Dokumen' },
-                    { key: 'darurat_k3', label: 'Darurat K3' }
+                    { key: 'fisik_dokumen', label: 'Kabin & Inventaris' }
                   ].map(cat => (
                     <button
                       key={cat.key}
@@ -4611,8 +5174,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         }`}
                       >
                         <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="font-bold truncate text-slate-200">{item.name}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold truncate text-slate-200">{item.name}</span>
+                            {item.photoUrl && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold shrink-0">
+                                Foto Tersimpan
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-slate-400 line-clamp-1">{item.description}</div>
+                          {item.photoUrl && (
+                            <img
+                              src={item.photoUrl}
+                              alt={item.name}
+                              className="w-28 h-16 object-cover rounded-lg border border-cyan-500/30 mt-1"
+                            />
+                          )}
                           {item.note && (
                             <div className="text-[9px] text-rose-300 italic mt-0.5">Catatan: {item.note}</div>
                           )}
@@ -4835,24 +5412,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                         <span className="truncate">{wb.destination.address}</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-300">
-                        <div>
-                          Muatan: <strong>{wb.totalKoli} Koli</strong> ({(wb.totalWeightKg / 1000).toFixed(1)} Ton)
-                        </div>
-                        <div className="text-right">
-                          Segel Box: <strong className="font-mono text-amber-300">{wb.securitySealNumber}</strong>
-                        </div>
-                      </div>
                     </div>
 
-                    {/* Action Bar per Waybill Card (Tersinkronisasi: Jika salah satu sudah klik Gate-Out, tampilan langsung SJ Print) */}
+                    {/* Action Bar per Waybill Card */}
                     <div className="space-y-2 pt-1">
-                      {(wb.status === 'in_transit' || wb.status === 'gate_out') && (
-                        <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center justify-between">
-                          <span>✓ Gate-Out Selesai • Tersinkronisasi Driver &amp; Helper</span>
-                          <span className="font-mono uppercase text-emerald-400">Siap SJ Print</span>
-                        </div>
-                      )}
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -4895,7 +5458,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             className="py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
                             title="Konfirmasi Keluar Gerbang DC (Gate-Out)"
                           >
-                            <ArrowRight className="w-3.5 h-3.5" />
                             <span>Gate-Out</span>
                           </button>
                         )}
@@ -4979,8 +5541,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-800/60 text-slate-400">
-                    <span>Muatan: {d.cargoWeightTon} Ton</span>
+                  <div className="flex items-center justify-end text-[11px] pt-1.5 border-t border-slate-800/60 text-slate-400">
                     <span className="text-emerald-400 font-semibold flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>Status: Selesai</span>
@@ -5071,14 +5632,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
 
               {activeShift && (
-                <button
-                  type="button"
-                  onClick={() => setIsCheckoutModalOpen(true)}
-                  className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Check-Out Shift (Gabung ke Laporan Kiriman Kru)</span>
-                </button>
+                <div className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 text-emerald-300 text-[11px] font-bold border border-emerald-500/30 flex items-center justify-center gap-2 text-center">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Check-Out berlaku otomatis saat Anda mengklik tombol <strong>Tiba di Gudang</strong> pada jadwal pengiriman.</span>
+                </div>
               )}
             </div>
 
@@ -5118,31 +5675,56 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'deliveries' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
             </button>
 
-            {/* 2. Checklist */}
-            <button
-              type="button"
-              onClick={() => setBottomNav('checklist')}
-              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
-                bottomNav === 'checklist'
-                  ? 'text-blue-600 dark:text-blue-400 font-bold'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              <div className={`p-1 rounded-xl transition ${bottomNav === 'checklist' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <span className="text-[11px] leading-tight mt-0.5">Checklist</span>
-              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'checklist' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
-            </button>
+            {/* 2. Checklist Armada (Khusus Driver) ATAU Validasi SJ (Khusus Helper) */}
+            {effectiveJobdeskRole === 'helper' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setBottomNav('surat_jalan');
+                  setWaybillStatusFilter('all');
+                }}
+                className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                  bottomNav === 'surat_jalan'
+                    ? 'text-cyan-600 dark:text-cyan-400 font-bold'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' ? 'bg-cyan-50 dark:bg-cyan-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                  <ClipboardCheck className="w-5 h-5" />
+                </div>
+                <span className="text-[11px] leading-tight mt-0.5">Validasi SJ</span>
+                <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' ? 'bg-cyan-600 dark:bg-cyan-400 scale-100' : 'scale-0 opacity-0'}`} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBottomNav('checklist')}
+                className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                  bottomNav === 'checklist'
+                    ? 'text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <div className={`p-1 rounded-xl transition ${bottomNav === 'checklist' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <span className="text-[11px] leading-tight mt-0.5">Checklist</span>
+                <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'checklist' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+              </button>
+            )}
 
             {/* 3. CENTER: Elevated Action Button (+) */}
             <div className="flex flex-col items-center justify-center -mt-7">
               <button
                 type="button"
-                onClick={() => setIsGmapsShareModalOpen(true)}
+                onClick={() => openGmapsFeature(undefined, effectiveJobdeskRole)}
                 className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/35 ring-4 ring-white dark:ring-slate-900 transition-all duration-200 active:scale-95 hover:scale-105 cursor-pointer group"
-                title="Lapor Kendala & Absen Kiriman Pelanggan (+)"
-                aria-label="Lapor Kendala & Absen Kiriman Pelanggan"
+                title={
+                  effectiveJobdeskRole === 'helper'
+                    ? 'Jobdesk Helper: Fitur Kendala & Absen Pelanggan (+)'
+                    : 'Jobdesk Driver: Isi (Foto) BBM, Fitur Kendala & Absen Pelanggan (+)'
+                }
+                aria-label="Fitur Lapangan Driver & Helper"
               >
                 <Plus className="w-7 h-7 stroke-[2.5] transition-transform duration-200 group-hover:rotate-90 text-white" />
               </button>
@@ -5612,14 +6194,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 2: Konfirmasi Tiba di Gudang Argo */}
+      {/* MODAL 2: Konfirmasi Tiba di Gudang Argo (Khusus Alur Driver: Isi Kendala Armada Setelah Tiba di Gudang + Otomatis Check-Out + Lanjut Checklist Pasca Berangkat) */}
       {podModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle2 className="w-5 h-5 shrink-0" />
-                <h3 className="text-sm font-black text-white">Konfirmasi Tiba di Gudang Argo</h3>
+                <div>
+                  <h3 className="text-sm font-black text-white">Tiba di Gudang</h3>
+                </div>
               </div>
               <button
                 onClick={() => setPodModal({ isOpen: false, delivery: null, conditionNote: '', serviceNote: '', hasSignature: true, photoUrl: null, photoTimestamp: null, postTripFleetStatus: 'available' })}
@@ -5660,7 +6244,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">Keterangan Konfirmasi Tiba di Gudang:</label>
+              <label className="text-xs font-bold text-slate-300 block">Keterangan Tiba di Gudang:</label>
               <input
                 type="text"
                 value={podModal.conditionNote}
@@ -5670,9 +6254,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               />
             </div>
 
-            {/* Pilihan Status Armada Sampai di Argo (Aman Tidak Perlu Servis vs Perlu Perawatan) */}
+            {/* Isi Kendala Armada Setelah Tiba di Gudang (Aman vs Ada Kendala / Perlu Servis) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 block">Status Armada Sampai di Argo:</label>
+              <label className="text-xs font-bold text-slate-300 block">Isi Kendala Armada Setelah Tiba di Gudang:</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -5684,7 +6268,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   }`}
                 >
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Aman Tidak Perlu Servis</span>
+                  <span>Aman Tidak Ada Kendala</span>
                 </button>
                 <button
                   type="button"
@@ -5696,15 +6280,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   }`}
                 >
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Perlu Perawatan</span>
+                  <span>Ada Kendala Armada / Servis</span>
                 </button>
               </div>
 
-              {/* Input Apa yang Perlu Diservis jika memilih Perlu Perawatan */}
+              {/* Input Detail Kendala Armada jika memilih Ada Kendala Armada / Servis */}
               {podModal.postTripFleetStatus === 'maintenance' && (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 space-y-1.5 animate-in fade-in duration-150">
                   <label className="text-xs font-bold text-amber-300 block">
-                    Apa yang Perlu Diservis / Diperbaiki pada Armada: <span className="text-rose-400">*</span>
+                    Detail Kendala Armada Setelah Tiba di Gudang: <span className="text-rose-400">*</span>
                   </label>
                   <textarea
                     rows={2}
@@ -5800,7 +6384,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Konfirmasi Tiba di Gudang Argo</span>
+                <span>Tiba di Gudang</span>
               </button>
             </div>
           </div>
@@ -6269,14 +6853,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         defaultInspectionType={checklistInspectionType}
         canSelectPostTrip={hasConfirmedArrivalToday}
         onSaved={(saved) => {
-          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayStr = getLocalDateStr();
           setIsFleetLockedAfterCheckin(true);
           if (saved.inspectionType === 'pre_trip') {
             setIsChecklistCompletedAfterCheckin(true);
-            try {
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
-            } catch {}
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+            writeDriverScopedValue('akk_checklist_done_', todayStr);
 
             // Sinkronkan status Checklist & Persiapan Keluar ke jadwal aktif bersama agar Partner (Driver/Helper) tidak perlu isi ulang
             const activeScheduleIds = deliveries
@@ -6345,42 +6927,59 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialMode={checkinModalMode}
         onCheckinSuccess={(shift) => {
           setActiveShift(shift);
-          const todayStr = new Date().toISOString().slice(0, 10);
-          // Jika partner (Driver/Helper dalam 1 jadwal/armada yang sama) SUDAH isi armada & checklist,
+          const todayStr = getLocalDateStr();
+
+          // 1. Jika user terjadwal / berposisi sebagai HELPER:
+          // Helper TIDAK mengisi Checklist Armada setelah Check-In, langsung diarahkan ke Jadwal Aktif untuk Validasi SJ & Gate-Out
+          if (effectiveJobdeskRole === 'helper') {
+            setIsHelperPositionSkipped(true);
+            setIsFleetLockedAfterCheckin(true);
+            if (assignedFleet?.id) {
+              setSelectedFleetId(assignedFleet.id);
+              writeDriverScopedValue('akk_locked_fleet_', assignedFleet.id);
+            }
+            writeDriverScopedValue('akk_helper_skipped_', 'true');
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+            setIsPostCheckinFleetModalOpen(false);
+            setBottomNav('deliveries');
+            setActiveTab('active');
+            addNotification(
+              'delivery',
+              'Check-In Helper Berhasil • Silakan Validasi SJ & Gate-Out',
+              `Presensi Check-In Helper tersimpan. Sesuai alur Jobdesk Helper, Anda langsung diarahkan ke Validasi SJ & Gate-Out tanpa mengisi Checklist Armada.`
+            );
+            return;
+          }
+
+          // 2. Jika partner (Driver/Helper dalam 1 jadwal/armada yang sama) SUDAH isi armada & checklist,
           // langsung sinkronkan ke Jadwal Aktif (Keluar Gerbang / Check-Out) tanpa mengulang pengisian!
           if (sharedCrewPreTripState.isDone) {
             setIsFleetLockedAfterCheckin(true);
             setIsChecklistCompletedAfterCheckin(true);
             if (assignedFleet?.id) {
               setSelectedFleetId(assignedFleet.id);
+              writeDriverScopedValue('akk_locked_fleet_', assignedFleet.id);
             }
-            try {
-              if (assignedFleet?.id) {
-                localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, assignedFleet.id);
-              }
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
-            } catch {}
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
+            writeDriverScopedValue('akk_checklist_done_', todayStr);
             setIsPostCheckinFleetModalOpen(false);
             setBottomNav('deliveries');
             setActiveTab('active');
             addNotification(
               'delivery',
               'Check-In Tersinkronisasi • Siap Keluar Gerbang',
-              `Armada (${assignedFleet?.plateNumber || ''}) & Checklist telah diselesaikan oleh ${sharedCrewPreTripState.completedBy}. Tampilan langsung menuju Jadwal Aktif untuk Keluar Gerbang / Check-Out tanpa aktivitas ganda.`
+              `Armada (${assignedFleet?.plateNumber || ''}) & Checklist telah diselesaikan oleh ${sharedCrewPreTripState.completedBy}. Tampilan langsung menuju Jadwal Aktif untuk Keluar Gerbang.`
             );
             return;
           }
 
-          // Alur Langsung: Setelah Check-In, SISTEM LANGSUNG MEMBUKA FORM CHECKLIST ARMADA!
+          // 3. Alur Khusus DRIVER: Setelah Check-In, SISTEM LANGSUNG MEMBUKA FORM CHECKLIST ARMADA PRA-BERANGKAT!
           const targetFleet = assignedFleet || activeDeliveries[0]?.fleet || deliveries[0]?.fleet || fleets[0];
           if (targetFleet?.id) {
             setSelectedFleetId(targetFleet.id);
             setIsFleetLockedAfterCheckin(true);
-            try {
-              localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetFleet.id);
-              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-            } catch {}
+            writeDriverScopedValue('akk_locked_fleet_', targetFleet.id);
+            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
           }
 
           const fresh = driverChecklistService.createNewChecklistTemplate(
@@ -6399,8 +6998,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
           addNotification(
             'delivery',
-            'Check-In Berhasil • Silakan Isi Checklist Armada',
-            `Presensi Check-In tersimpan. Silakan isi & simpan Form Checklist Armada (${targetFleet?.plateNumber || ''}) untuk mengaktifkan Tombol Buka SJ Keluar & Keluar Gerbang.`
+            'Check-In Driver Berhasil • Silakan Isi Checklist Armada',
+            `Presensi Check-In Driver tersimpan. Silakan isi & simpan Form Checklist Armada (${targetFleet?.plateNumber || ''}) sebelum berangkat.`
           );
         }}
       />
@@ -6527,9 +7126,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 type="button"
                 onClick={() => {
                   setIsHelperPositionSkipped(true);
-                  try {
-                    localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
-                  } catch {}
+                  writeDriverScopedValue('akk_helper_skipped_', 'true');
                   setIsPostCheckinFleetModalOpen(false);
                   setBottomNav('deliveries');
                   setActiveTab('active');
@@ -6645,10 +7242,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 11: Lapor Kendala & Absen Kiriman Pelanggan */}
+      {/* MODAL 11: Lapor Kendala, BBM & Absen Kiriman Pelanggan (Terpisah Sesuai Jobdesk Driver vs Helper) */}
       <DriverGmapsShareModal
         isOpen={isGmapsShareModalOpen}
-        onClose={() => setIsGmapsShareModalOpen(false)}
+        onClose={() => {
+          setIsGmapsShareModalOpen(false);
+          setGmapsInitialCategory(undefined);
+          setGmapsModalRoleOverride(undefined);
+        }}
         deliveries={deliveries}
         driverId={selectedDriverId}
         driverName={
@@ -6659,6 +7260,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           'Kru Pengiriman'
         }
         plateNumber={assignedFleet?.plateNumber || activeShift?.plateNumber || 'P 8125 VC'}
+        userJobdeskRole={gmapsModalRoleOverride || effectiveJobdeskRole}
+        initialCategory={gmapsInitialCategory}
         onReportSubmitted={async (report) => {
           loadDriverKendalaReports();
           if (report.delivery) {
@@ -6687,6 +7290,174 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           );
         }}
       />
+
+      {/* MODAL 12: Perubahan Urgent (Rolling Pagi Sebelum Tim Pengiriman Keluar dari Gudang / Gate-Out) */}
+      {urgentRollingModal.isOpen && urgentRollingModal.delivery && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center shrink-0">
+                  <RefreshCw className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                    Perubahan Urgent (Rolling Pagi)
+                  </h3>
+                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                    Rolling Mendadak Sebelum Keluar Gudang (Gate-Out)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
+                className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 text-xs text-rose-900 dark:text-rose-200">
+              Gunakan fitur ini apabila terdapat <strong>rolling mendadak pada pagi hari</strong> (pergantian Driver, Helper, Armada, atau Rute Area Kirim) setelah Check-In atau tepat sebelum tim pengiriman Gate-Out dari gudang.
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Area Pengiriman / Rute Tujuan:
+                </label>
+                <input
+                  type="text"
+                  value={urgentRollingModal.areaName}
+                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, areaName: e.target.value }))}
+                  placeholder="Contoh: Situbondo / Denpasar 1 / Muncar"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Driver Utama (Pengemudi):
+                </label>
+                <select
+                  value={urgentRollingModal.driverId}
+                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, driverId: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                >
+                  <option value="">-- Pilih Driver Utama --</option>
+                  {crews.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.role ? `(${c.role})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Helper 1 / Kernet:
+                  </label>
+                  <select
+                    value={urgentRollingModal.helper1Id}
+                    onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, helper1Id: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                  >
+                    <option value="">-- Tanpa Helper 1 --</option>
+                    {crews
+                      .filter(c => c.id !== urgentRollingModal.driverId)
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Helper 2 (Opsional):
+                  </label>
+                  <select
+                    value={urgentRollingModal.helper2Id}
+                    onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, helper2Id: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                  >
+                    <option value="">-- Tanpa Helper 2 --</option>
+                    {crews
+                      .filter(c => c.id !== urgentRollingModal.driverId && c.id !== urgentRollingModal.helper1Id)
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Armada Pengiriman (Plat Nomor &amp; Inisial):
+                </label>
+                <select
+                  value={urgentRollingModal.fleetId}
+                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, fleetId: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                >
+                  <option value="">-- Pilih Armada Truk --</option>
+                  {(fleets.length > 0 ? fleets : INITIAL_FLEETS).map(f => {
+                    const meta = resolveCanonicalFleetMeta(f);
+                    const initLabel = f.initialCode || meta?.initialCode || f.vehicleType || '';
+                    return (
+                      <option key={f.id} value={f.id}>
+                        {f.plateNumber} {initLabel ? `— ${initLabel}` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Keterangan / Alasan Rolling Pagi:
+                </label>
+                <input
+                  type="text"
+                  value={urgentRollingModal.reason}
+                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Contoh: Rolling kru pagi sebelum berangkat dari gudang..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
+                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveUrgentRolling}
+                className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Simpan Rolling Pagi</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

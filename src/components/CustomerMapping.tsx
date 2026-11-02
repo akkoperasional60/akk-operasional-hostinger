@@ -207,16 +207,24 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
     return Array.from(set).sort();
   }, [normalizedStores, selectedRegionType, selectedKabupaten]);
 
+  const [visibleStoreLimit, setVisibleStoreLimit] = useState<number>(80);
+
+  React.useEffect(() => {
+    setVisibleStoreLimit(80);
+  }, [selectedRegionType, selectedKabupaten, selectedKecamatan, searchQuery, isRadiusMode, radiusKm]);
+
   const filteredStores = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return normalizedStores
       .map(st => {
-        const distFromPivot = calculateHaversineDistanceKm(
-          activeRadiusCenter[0],
-          activeRadiusCenter[1],
-          st.latitude,
-          st.longitude
-        );
+        const distFromPivot = isRadiusMode
+          ? calculateHaversineDistanceKm(
+              activeRadiusCenter[0],
+              activeRadiusCenter[1],
+              st.latitude,
+              st.longitude
+            )
+          : 0;
         return {
           ...st,
           distanceFromPivotKm: distFromPivot
@@ -250,6 +258,10 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         return Number(a.nomor || 0) - Number(b.nomor || 0);
       });
   }, [normalizedStores, selectedRegionType, selectedKabupaten, selectedKecamatan, searchQuery, isRadiusMode, radiusKm, activeRadiusCenter]);
+
+  const visibleStores = useMemo(() => {
+    return filteredStores.slice(0, visibleStoreLimit);
+  }, [filteredStores, visibleStoreLimit]);
 
   const getRegionBadgeClasses = (locType: StoreLocationType) => {
     if (locType === 'dalam_kota') {
@@ -1157,8 +1169,19 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
               <span className="text-[11px] text-slate-500">Klik baris untuk detail & jadwal</span>
             </div>
 
-            <div className="overflow-y-auto space-y-2 pr-1 flex-1">
-              {filteredStores.map(store => {
+            <div
+              className="overflow-y-auto space-y-2 pr-1 flex-1"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (
+                  visibleStoreLimit < filteredStores.length &&
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 180
+                ) {
+                  setVisibleStoreLimit(prev => Math.min(filteredStores.length, prev + 80));
+                }
+              }}
+            >
+              {visibleStores.map(store => {
                 const isSelected = selectedStore?.id === store.id;
                 const badgeMeta = getRegionBadgeClasses(store.locType);
                 return (
@@ -1193,6 +1216,16 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                   </div>
                 );
               })}
+
+              {visibleStoreLimit < filteredStores.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleStoreLimit(prev => Math.min(filteredStores.length, prev + 120))}
+                  className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-blue-300 transition cursor-pointer"
+                >
+                  Tampilkan Lebih Banyak ({visibleStores.length} dari {filteredStores.length} Toko)
+                </button>
+              )}
 
               {filteredStores.length === 0 && (
                 <div className="text-center py-10 text-slate-500 text-xs">
