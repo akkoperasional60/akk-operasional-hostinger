@@ -3,8 +3,11 @@ import {
   VehicleChecklistItem,
   OverallChecklistStatus
 } from '../types';
+import { getLocalDateStr } from './driverReportService';
+import { safeSetItem } from './store';
 
-const STORAGE_KEY = 'akk_driver_vehicle_checklists_v2';
+const STORAGE_KEY = 'akk_driver_vehicle_checklists_v4';
+const LEGACY_STORAGE_KEYS = ['akk_driver_vehicle_checklists_v3', 'akk_driver_vehicle_checklists_v2'] as const;
 const IS_PROD_BUILD = Boolean(import.meta.env.PROD);
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
@@ -73,7 +76,6 @@ export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status
   }
 ];
 
-// Alias nama checklist lama agar histori v2 tetap bisa dipetakan ke format 9 poin.
 const LEGACY_NAME_ALIASES: Record<string, string> = {
   'oli mesin & indikator dipstick': 'oli mesin',
   'air radiator (coolant) & reservoir': 'air radiator',
@@ -87,6 +89,18 @@ const LEGACY_NAME_ALIASES: Record<string, string> = {
 };
 
 class DriverChecklistService {
+  private memoryChecklists: DriverVehicleChecklist[] | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (evt) => {
+        if (evt.key === STORAGE_KEY || LEGACY_STORAGE_KEYS.includes(evt.key as any)) {
+          this.memoryChecklists = null;
+        }
+      });
+    }
+  }
+
   public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
     const existingMap = new Map<string, VehicleChecklistItem>();
     if (Array.isArray(existingItems)) {
@@ -99,7 +113,6 @@ class DriverChecklistService {
         }
       });
     }
-
     return STANDARD_CHECKLIST_ITEMS.map((std, idx) => {
       const matched = existingMap.get(std.name.toLowerCase());
       return {
@@ -113,7 +126,7 @@ class DriverChecklistService {
   }
 
   private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
       id: `chk-item-${idx + 1}`,
       ...item,
@@ -148,9 +161,14 @@ class DriverChecklistService {
     ];
   }
 
-  public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
+  private loadAllChecklists(): DriverVehicleChecklist[] {
+    if (this.memoryChecklists !== null) {
+      return this.memoryChecklists;
+    }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const primaryRaw = localStorage.getItem(STORAGE_KEY);
+      const legacyRaw = primaryRaw ? null : (localStorage.getItem(LEGACY_STORAGE_KEYS[0]) || localStorage.getItem(LEGACY_STORAGE_KEYS[1]));
+      const raw = primaryRaw || legacyRaw;
       let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(list)) {
         list = [];
@@ -168,17 +186,29 @@ class DriverChecklistService {
         };
       });
 
-      if (driverId) {
-        list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(driverId.toLowerCase()));
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      this.memoryChecklists = list;
+      if (!primaryRaw && legacyRaw) {
+        safeSetItem(STORAGE_KEY, JSON.stringify(list));
       }
-      if (fleetId) {
-        list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
-      }
-
-      return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return list;
     } catch {
-      return IS_PROD_BUILD ? [] : this.generateInitialSampleChecklists();
+      const fallback = IS_PROD_BUILD ? [] : this.generateInitialSampleChecklists();
+      this.memoryChecklists = fallback;
+      return fallback;
     }
+  }
+
+  public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
+    let list = [...this.loadAllChecklists()];
+    if (driverId) {
+      const lowerDriver = driverId.toLowerCase();
+      list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(lowerDriver));
+    }
+    if (fleetId) {
+      list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
+    }
+    return list;
   }
 
   public getLatestChecklistForDriver(driverId: string): DriverVehicleChecklist | null {
@@ -204,7 +234,29 @@ class DriverChecklistService {
       } else {
         all.unshift(normalizedChecklist);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      const trimmedAll = all.slice(0, 40).map((chk, idx) => {
+        // Keep full photos for recent 8 checklists; strip heavy base64 on older historical entries to prevent QuotaExceededError
+        if (idx < 8) return chk;
+        return {
+          ...chk,
+          photoEvidenceUrl: chk.photoEvidenceUrl?.startsWith('data:') ? undefined : chk.photoEvidenceUrl,
+          items: chk.items.map(it => ({
+            ...it,
+            photoUrl: it.photoUrl?.startsWith('data:') ? undefined : it.photoUrl
+          }))
+        };
+      });
+      this.memoryChecklists = trimmedAll;
+      const savedOk = safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll));
+      if (!savedOk) {
+        // Fallback: keep only the latest 3 checklists if device storage is critically full
+        safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 3)));
+      }
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
+        }
+      } catch {}
       return true;
     } catch (err) {
       console.error('Failed to save checklist:', err);
@@ -222,7 +274,7 @@ class DriverChecklistService {
     fuelPercent: number = 80
   ): DriverVehicleChecklist {
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = getLocalDateStr(now);
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const items: VehicleChecklistItem[] = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
@@ -274,19 +326,20 @@ class DriverChecklistService {
 
     return { overallStatus, passedCount, issueCount };
   }
+
   public deleteChecklist(id: string): boolean {
     const cleanId = String(id || '').trim();
     if (!cleanId) return false;
     try {
-      const all = this.getChecklists();
-      const filtered = all.filter(c => c.id !== cleanId);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+      const list = this.loadAllChecklists();
+      const filtered = list.filter(c => c.id !== cleanId);
+      this.memoryChecklists = filtered;
+      safeSetItem(STORAGE_KEY, JSON.stringify(filtered));
       return true;
     } catch {
       return false;
     }
   }
-
 }
 
 export const driverChecklistService = new DriverChecklistService();

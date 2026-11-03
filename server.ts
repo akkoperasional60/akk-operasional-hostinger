@@ -1305,6 +1305,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const authRole = String((req as any).authUser?.role || '');
       const authName = String((req as any).authUser?.full_name || 'Super Admin');
 
+      if (source === 'urgent_rolling_driver_portal' && !['super_admin', 'spv_logistik'].includes(authRole)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Rolling Pagi hanya dapat dilakukan oleh SPV Logistik atau Super Admin'
+        });
+      }
+
       // Bypass checklist is a privileged historical-correction action. Existing
       // bypassed rows may be re-persisted by other authorized roles, but only a
       // Super Admin may introduce a NEW bypass flag.

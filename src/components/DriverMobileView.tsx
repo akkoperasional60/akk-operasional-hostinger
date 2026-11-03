@@ -83,6 +83,7 @@ import { driverChecklistService } from '../services/driverChecklistService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { driverShiftService } from '../services/driverShiftService';
 import { supabaseRealtimeSync } from '../services/supabaseRealtimeSync';
+import { persistSchedulesToDatabase } from '../services/supabaseService';
 import { useToast } from '../context/ToastContext';
 import { getDriverPortalDepartureLabel, getAreaScheduleTiming } from '../utils/areaScheduleRules';
 import { attendanceService } from '../services/attendanceService';
@@ -1280,6 +1281,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     spvCrewFilterRef.current = spvCrewFilter;
   }, [spvCrewFilter]);
 
+  const canManageUrgentRolling = (): boolean => {
+    const r1 = String(currentUser?.role || '').toLowerCase();
+    const r2 = String(syncedUserRoleInfo.rawRole || '').toLowerCase();
+    const r3 = String(logisticsStore.getCurrentUser()?.role || '').toLowerCase();
+    return [r1, r2, r3].some(role => role === 'super_admin' || role === 'spv_logistik');
+  };
+
   // State & Handler Fitur Perubahan Urgent (Rolling Pagi) sebelum Gate-Out / setelah Check-In
   const [urgentRollingModal, setUrgentRollingModal] = useState<{
     isOpen: boolean;
@@ -1302,7 +1310,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   });
 
   const handleOpenUrgentRollingModal = (delivery: Schedule) => {
-    if (!canManageAllPortalSchedules) {
+    if (!canManageUrgentRolling()) {
       addNotification(
         'delivery',
         'Akses Ditolak',
@@ -1342,7 +1350,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const targetDelivery = urgentRollingModal.delivery;
     if (!targetDelivery) return;
 
-    if (!canManageAllPortalSchedules) {
+    if (!canManageUrgentRolling()) {
       addNotification(
         'delivery',
         'Akses Ditolak',

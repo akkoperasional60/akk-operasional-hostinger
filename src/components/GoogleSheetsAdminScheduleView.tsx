@@ -2039,37 +2039,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     }
   };
 
-  // Month-specific active schedule dataset: reactive state linked with logisticsStore
+  // Month-specific active schedule dataset: strictly derived from real schedules in logisticsStore
   const [weeks, setWeeks] = useState<AdminScheduleWeek[]>(() => {
-    const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
-    // 1. First priority: Real schedules in logisticsStore
+    const effectiveMonth = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
     const storeSchedules = logisticsStore.getSchedules();
-    const weeksFromStore = convertSchedulesToAdminWeeks(storeSchedules, selectedYear, effectiveMonth);
-    if (weeksFromStore.length > 0 && weeksFromStore[0]?.days?.length > 0) {
-      return weeksFromStore;
-    }
-
-    // 2. Second priority: Local cache
-    const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-    try {
-      const saved = localStorage.getItem(cacheKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.days?.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {}
-
-    // 3. Fallback: Distinct month template
-    return buildMonthSpecificSchedule(selectedYear, effectiveMonth);
+    return convertSchedulesToAdminWeeks(storeSchedules, selectedYear, effectiveMonth);
   });
 
   const weeksRef = React.useRef(weeks);
   weeksRef.current = weeks;
 
+  const selectedYearMonthRef = React.useRef({ year: selectedYear, month: selectedMonth });
+  selectedYearMonthRef.current = { year: selectedYear, month: selectedMonth };
+
   // On initial mount, load persisted schedules from server database if available & auto-repair legacy overwritten standby schedules
   useEffect(() => {
+    // Bersihkan cache template lama agar jadwal dummy tidak pernah bocor ke bulan baru
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('akk_admin_schedule_cache_') || k === 'akk_admin_schedule_weeks_cache') {
+          localStorage.removeItem(k);
+        }
+      });
+    } catch {}
+
     const allSchedules = logisticsStore.getSchedules();
     const allCrews = logisticsStore.getCrews();
     allSchedules.forEach(s => {
@@ -2098,52 +2091,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     });
 
     fetchPersistedSchedulesFromServer().then(res => {
-      if (res.exists && res.schedules.length > 0) {
+      if (res.exists && Array.isArray(res.schedules)) {
         console.info(`[Database Persistence] Loaded ${res.count} persisted schedules from server.`);
-        logisticsStore.batchSyncSchedules(res.schedules, [], { isImport: false });
-        if (res.weeks && res.weeks.length > 0) {
-          setWeeks(res.weeks);
+        if (res.schedules.length > 0) {
+          logisticsStore.batchSyncSchedules(res.schedules, [], { isImport: false });
         }
+        const { year: curYr, month: curMo } = selectedYearMonthRef.current;
+        const effectiveMo = curMo === -1 ? new Date().getMonth() : curMo;
+        const syncedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), curYr, effectiveMo);
+        setWeeks(syncedWeeks);
       }
     }).catch(err => console.warn('[Database Persistence Load Error]', err));
   }, []);
 
   // Keep weeks and store in sync whenever selectedYear, selectedMonth changes or store updates
   useEffect(() => {
-    const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
+    const effectiveMonth = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
     const storeSchedules = logisticsStore.getSchedules();
     const weeksFromStore = convertSchedulesToAdminWeeks(storeSchedules, selectedYear, effectiveMonth);
+    setWeeks(weeksFromStore);
 
-    if (weeksFromStore.length > 0 && weeksFromStore[0]?.days?.length > 0) {
-      setWeeks(weeksFromStore);
-      const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(weeksFromStore));
-        localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(weeksFromStore));
-      } catch {}
-    } else {
-      // Seed from cache or template into logisticsStore so data becomes persistent
-      const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-      let initialWeeks: AdminScheduleWeek[] = [];
-      try {
-        const saved = localStorage.getItem(cacheKey);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.days?.length > 0) {
-            initialWeeks = parsed;
-          }
-        }
-      } catch {}
-
-      if (initialWeeks.length === 0) {
-        initialWeeks = buildMonthSpecificSchedule(selectedYear, effectiveMonth);
-      }
-
-      setWeeks(initialWeeks);
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(initialWeeks));
-        localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(initialWeeks));
-      } catch {}
+    const monthName = MONTH_NAMES[effectiveMonth] || 'Januari';
+    const expectedSuffix = `${monthName} ${selectedYear}`;
+    if (!selectedCalendarDate.endsWith(expectedSuffix)) {
+      const firstScheduledDate = weeksFromStore[0]?.days?.[0]?.dateString;
+      const now = new Date();
+      const defaultDayNum = (now.getFullYear() === selectedYear && now.getMonth() === effectiveMonth)
+        ? String(now.getDate()).padStart(2, '0')
+        : '01';
+      const nextCalDate = firstScheduledDate || `${defaultDayNum} ${expectedSuffix}`;
+      setSelectedCalendarDate(nextCalDate);
+      setSelectedDayFilter(nextCalDate);
     }
 
     // Subscribe to store updates (from manual edits in ScheduleManagement or modals)
@@ -2154,13 +2132,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       const curSchedules = logisticsStore.getSchedules();
       const updatedWeeks = convertSchedulesToAdminWeeks(curSchedules, selectedYear, effectiveMonth);
-      if (updatedWeeks.length > 0 && updatedWeeks[0]?.days?.length > 0) {
-        const curTrips = weeksRef.current.flatMap(w => w.days).reduce((acc, d) => acc + (d.pengiriman?.length || 0), 0);
-        const newTrips = updatedWeeks.flatMap(w => w.days).reduce((acc, d) => acc + (d.pengiriman?.length || 0), 0);
-        if (newTrips >= curTrips || curTrips === 0) {
-          setWeeks(updatedWeeks);
-        }
-      }
+      setWeeks(updatedWeeks);
     });
 
     return unsubscribe;
@@ -2179,83 +2151,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const yr = d.getFullYear();
       const mo = d.getMonth();
       const dayNum = d.getDate();
-      const DAY_NAMES_ID = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
-      const dayName = DAY_NAMES_ID[d.getDay()];
       const dateStr = `${String(dayNum).padStart(2, '0')} ${MONTH_NAMES[mo]} ${yr}`;
 
       const stdArea = standardizeAreaName(created.areaName || created.store?.storeName || '');
       const armadaCode = created.fleet?.initialCode || created.fleet?.plateNumber || 'DS1';
-      const newTrip: DeliveryAssignment = {
-        id: created.id,
-        driver: created.crew?.name || '-',
-        helper: created.crewHelper?.name || '-',
-        helper2: created.crewHelper2?.name || '-',
-        area: stdArea,
-        armada: armadaCode,
-        target: created.notes || `Rute ${stdArea}`,
-        isManuallyEdited: true
-      };
+      const driverLabel = created.crew?.name || '-';
 
-      const cacheKey = `akk_admin_schedule_cache_${yr}_${mo}`;
-      let targetWeeks: AdminScheduleWeek[] = [];
-      const curEffectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
-
-      if (yr === selectedYear && mo === curEffectiveMonth) {
-        targetWeeks = [...weeksRef.current];
-      } else {
-        try {
-          const cached = localStorage.getItem(cacheKey);
-          if (cached) targetWeeks = JSON.parse(cached);
-        } catch {}
-        if (!targetWeeks || targetWeeks.length === 0) {
-          targetWeeks = buildMonthSpecificSchedule(yr, mo);
-        }
-      }
-
-      let foundDay = false;
-      const updatedWeeks = targetWeeks.map((w, wIdx) => {
-        const hasDay = w.days.some(dayObj => dayObj.dayNumber === dayNum);
-        if (hasDay) {
-          foundDay = true;
-          return {
-            ...w,
-            days: w.days.map(dayObj => {
-              if (dayObj.dayNumber === dayNum) {
-                const exists = dayObj.pengiriman.some(p => p.id === created.id);
-                return {
-                  ...dayObj,
-                  pengiriman: exists
-                    ? dayObj.pengiriman.map(p => (p.id === created.id ? newTrip : p))
-                    : [...dayObj.pengiriman, newTrip]
-                };
-              }
-              return dayObj;
-            })
-          };
-        }
-        if (wIdx === targetWeeks.length - 1 && !foundDay) {
-          foundDay = true;
-          const newDays = [
-            ...w.days,
-            {
-              dayName,
-              dayNumber: dayNum,
-              dateString: dateStr,
-              pengiriman: [newTrip],
-              gudang: [],
-              pengirimanOff: [],
-              karyawanIzin: []
-            }
-          ].sort((a, b) => a.dayNumber - b.dayNumber);
-          return { ...w, days: newDays };
-        }
-        return w;
-      });
-
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(updatedWeeks));
-        localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(updatedWeeks));
-      } catch {}
+      const updatedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), yr, mo);
 
       if (selectedYear !== yr) setSelectedYear(yr);
       if (selectedMonth !== -1 && selectedMonth !== mo) setSelectedMonth(mo);
@@ -2263,7 +2165,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       setSelectedCalendarDate(dateStr);
       setSelectedDayFilter(dateStr);
       setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
-      setSyncSuccessMessage(`✅ Jadwal baru (${newTrip.driver} • ${stdArea} • ${armadaCode}) otomatis masuk ke Jadwal & Penugasan dan Portal Driver!`);
+      setSyncSuccessMessage(`✅ Jadwal baru (${driverLabel} • ${stdArea} • ${armadaCode}) otomatis masuk ke Jadwal & Penugasan dan Portal Driver!`);
       setTimeout(() => setSyncSuccessMessage(null), 6000);
     };
 
@@ -2433,6 +2335,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         status: t.bypassChecklistDirectComplete ? 'delivered' : 'scheduled',
         departureDate: departureIso,
         estimatedArrival: estArrivalIso,
+        departureTime: depTime,
+        targetReturnTime: retTime,
+        deliveryDate: depDateIso,
+        returnDate: retDateIso,
         actualDeparture: t.bypassChecklistDirectComplete ? departureIso : undefined,
         actualArrival: t.bypassChecklistDirectComplete ? estArrivalIso : undefined,
         isChecklistBypassed: t.bypassChecklistDirectComplete || undefined,
@@ -2504,15 +2410,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
     });
 
-    const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.dayNumber - b.dayNumber);
-    const mergedWeeks: AdminScheduleWeek[] = [
-      {
-        weekNumber: 1,
-        weekLabel: `JADWAL PENGIRIMAN AKTIF (${(MONTH_NAMES[targetMonth] || 'JANUARI').toUpperCase()} ${targetYear} • ${sortedDays.length} HARI)`,
-        dateRangeLabel: `${MONTH_NAMES[targetMonth] || 'Januari'} ${targetYear}`,
-        days: sortedDays
-      }
-    ];
+      const mergedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), targetYear, targetMonth);
 
     if (selectedYear !== targetYear) setSelectedYear(targetYear);
     if (selectedMonth !== -1 && selectedMonth !== targetMonth) setSelectedMonth(targetMonth);
@@ -2645,6 +2543,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         status: 'scheduled',
         departureDate: departureIso,
         estimatedArrival: estArrivalIso,
+        departureTime: depTime,
+        targetReturnTime: retTime,
+        deliveryDate: depIsoDate,
+        returnDate: retIsoDate,
         cargoDescription: `Karton Box & Sheet Kemasan - Area ${stdArea}`,
         cargoWeightTon: isBali ? 4.5 : 2.5,
         isInterIsland: isBali,
@@ -2752,6 +2654,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
 
       if (targetId && storeSchedules.some(s => s.id === targetId)) {
+        const existingSch = storeSchedules.find(s => s.id === targetId);
         logisticsStore.updateSchedule(targetId, {
           fleetId: matchedFleet ? matchedFleet.id : undefined,
           fleet: matchedFleet,
@@ -2764,7 +2667,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           areaName: stdArea,
           departureDate: departureIso,
           estimatedArrival: estArrivalIso,
-          notes: target,
+          departureTime: depTime,
+          targetReturnTime: retTime,
+          deliveryDate: depIsoDate,
+          returnDate: retIsoDate,
+          store: existingSch?.store
+            ? {
+                ...existingSch.store,
+                storeName: stdArea,
+                deliveryWindow: `${depTime} - ${retTime}`
+              }
+            : undefined,
+          notes: target || `Rute ${stdArea} (Berangkat ${depIsoDate} ${depTime} • Target Pulang ${retIsoDate} ${retTime})`,
           isManuallyEdited: true
         });
       } else {
@@ -2802,6 +2716,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           status: 'scheduled',
           departureDate: departureIso,
           estimatedArrival: estArrivalIso,
+          departureTime: depTime,
+          targetReturnTime: retTime,
+          deliveryDate: depIsoDate,
+          returnDate: retIsoDate,
           cargoDescription: `Karton Box & Sheet Kemasan - Area ${stdArea}`,
           cargoWeightTon: isBali ? 4.5 : 2.5,
           isInterIsland: isBali,
@@ -2974,7 +2892,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   // Filtered weeks & days dynamically adapted to selected month, year, and Cabang
   const filteredWeeks = useMemo(() => {
-    let result = weeks;
+    const effectiveMonth = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
+    const expectedMonthYearSuffix = `${MONTH_NAMES[effectiveMonth]} ${selectedYear}`.toLowerCase();
+
+    let result = weeks.map(w => ({
+      ...w,
+      days: w.days.filter(d =>
+        String(d.dateString || '').trim().toLowerCase().endsWith(expectedMonthYearSuffix)
+      )
+    })).filter(w => w.days.length > 0);
+
     if (selectedWeekNum !== 'all') {
       result = result.filter(w => w.weekNumber === selectedWeekNum);
     }
@@ -2991,7 +2918,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       })).filter(w => w.days.length > 0);
     }
     return result;
-  }, [weeks, selectedWeekNum, selectedBranchId]);
+  }, [weeks, selectedWeekNum, selectedBranchId, selectedMonth, selectedYear]);
 
   // Persist snapshot of Kru Free / Stand By Gudang for the selected calendar date to localStorage
   useEffect(() => {
@@ -3040,17 +2967,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   // Build 7-day grid cells for selected month and year
   const calendarGridData = useMemo(() => {
     const year = selectedYear;
-    const monthIdx = selectedMonth === -1 ? 0 : selectedMonth;
+    const monthIdx = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
     const monthName = MONTH_NAMES[monthIdx];
 
     const firstDate = new Date(year, monthIdx, 1);
     const startDayOfWeek = firstDate.getDay(); // 0 = MINGGU, 1 = SENIN, ...
     const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
 
-    const monthDaysMap = new Map<number, AdminScheduleDay>();
+    const monthDaysMap = new Map<string, AdminScheduleDay>();
     filteredWeeks.forEach((w: AdminScheduleWeek) => {
       w.days.forEach((d: AdminScheduleDay) => {
-        monthDaysMap.set(d.dayNumber, d);
+        if (d.dateString) {
+          monthDaysMap.set(d.dateString.trim(), d);
+        }
       });
     });
 
@@ -3082,7 +3011,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const dayName = DAY_NAMES_ARR[dateObj.getDay()];
       const dayFormatted = String(dayNum).padStart(2, '0');
       const dateString = `${dayFormatted} ${monthName} ${year}`;
-      const scheduleDay = monthDaysMap.get(dayNum);
+      const scheduleDay = monthDaysMap.get(dateString);
 
       let lokalCount = 0;
       let luarKotaCount = 0;

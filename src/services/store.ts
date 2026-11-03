@@ -2124,7 +2124,7 @@ class LogisticsStore {
   } {
     const allCrewTrips = this.getCrewDeliveryHistory(crewId);
     // Match area name or city or island
-    const matchedTrips = allCrewTrips.filter(t => 
+    const matchedTrips = allCrewTrips.filter(t =>
       t.area.toLowerCase().includes(areaName.toLowerCase()) ||
       areaName.toLowerCase().includes(t.area.toLowerCase()) ||
       t.city.toLowerCase().includes(areaName.toLowerCase()) ||
@@ -2136,7 +2136,7 @@ class LogisticsStore {
 
     // Check if there is an approved request for this crew and area
     const hasApproval = this.areaApprovals.some(
-      a => a.crewId === crewId && 
+      a => a.crewId === crewId &&
            (a.targetArea.toLowerCase().includes(areaName.toLowerCase()) || areaName.toLowerCase().includes(a.targetArea.toLowerCase())) &&
            a.status === 'approved'
     );
@@ -2217,23 +2217,23 @@ class LogisticsStore {
       };
 
       const helperName = (sch.crewHelper?.name || (sch as any).helper || '').trim();
-      const helper = sch.crewHelperId 
-        ? this.crews.find(c => c.id === sch.crewHelperId) 
+      const helper = sch.crewHelperId
+        ? this.crews.find(c => c.id === sch.crewHelperId)
         : (sch.crewHelper ? sch.crewHelper : (helperName && helperName !== '-' ? { id: `hlp-${helperName}`, name: helperName } : null));
 
       const fleet = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
       const store = this.stores.find(s => s.id === sch.storeId);
-      
+
       const areaName = resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim';
       const island = areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA') || areaName.toUpperCase().includes('BALI')
-        ? 'Bali & Nusa Tenggara' 
+        ? 'Bali & Nusa Tenggara'
         : 'Jawa';
-      const city = areaName.toUpperCase().includes('DENPASAR') ? 'Denpasar' 
-        : (areaName.toUpperCase().includes('SINGARAJA') ? 'Singaraja' 
-        : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso' 
-        : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo' 
+      const city = areaName.toUpperCase().includes('DENPASAR') ? 'Denpasar'
+        : (areaName.toUpperCase().includes('SINGARAJA') ? 'Singaraja'
+        : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso'
+        : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo'
         : (areaName.toUpperCase().includes('JEMBER') ? 'Jember' : 'Banyuwangi'))));
-      
+
       const departureDate = sch.departureDate || '2026-01-05T07:30:00Z';
       const trackingNumber = sch.trackingNumber || `PO-AKK-20260105-${fleet?.plateNumber || sch.fleetId || 'DS3'}`;
 
@@ -2252,8 +2252,8 @@ class LogisticsStore {
       const reqAppr = seqNum >= this.areaThreshold;
 
       const historyItem: CrewDeliveryHistory = {
-        id: existingIndex !== -1 
-          ? this.crewHistory[existingIndex].id 
+        id: existingIndex !== -1
+          ? this.crewHistory[existingIndex].id
           : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
         crewId: crew.id,
         crewName: crew.name,
@@ -2292,8 +2292,8 @@ class LogisticsStore {
           h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === helper.id || h.crewName === helper.name)
         );
         const helperHistoryItem: CrewDeliveryHistory = {
-          id: helperExistingIndex !== -1 
-            ? this.crewHistory[helperExistingIndex].id 
+          id: helperExistingIndex !== -1
+            ? this.crewHistory[helperExistingIndex].id
             : `cdh-sync-hlp-${helper.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
           crewId: helper.id,
           crewName: helper.name,
@@ -2801,7 +2801,7 @@ class LogisticsStore {
       );
     });
     if (matchedCrew) {
-      let crewUser = this.users.find(u => 
+      let crewUser = this.users.find(u =>
         (u.fullName || '').trim().toLowerCase() === matchedCrew.name.trim().toLowerCase() ||
         (u.id === `usr-${matchedCrew.id}`) ||
         (u.email && u.email.toLowerCase().includes(matchedCrew.name.toLowerCase().split(' ')[0]))
@@ -3566,7 +3566,7 @@ class LogisticsStore {
     this.schedules = this.schedules.map(sch => {
       if (sch.id === id) {
         targetSch = sch;
-        const updatedNotes = extraNotes 
+        const updatedNotes = extraNotes
           ? (sch.notes ? `${sch.notes} [${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}: ${extraNotes}]` : extraNotes)
           : sch.notes;
         const updated: Schedule = {
@@ -3843,7 +3843,7 @@ class LogisticsStore {
   public purgeAkkFleets(): { removedCount: number; remainingCount: number } {
     const originalCount = this.fleets.length;
     this.fleets = this.fleets.filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'));
-    
+
     // Ensure all 12 initial fleets are present
     INITIAL_FLEETS.forEach(initF => {
       const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
@@ -3851,7 +3851,7 @@ class LogisticsStore {
         this.fleets.push({ ...initF });
       }
     });
-    
+
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Re-map any schedules pointing to deleted AKK fleets
@@ -4117,7 +4117,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     if (deletedFleet) {
       this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.vehicleType})`);
-      
+
       // Asynchronous backend integration with Supabase
       deleteFleetInSupabase(id, deletedFleet.plateNumber).catch(err => console.warn('[Supabase Fleet Delete Sync Note]', err));
 
@@ -4188,7 +4188,7 @@ class LogisticsStore {
     this.crews = [...this.crews, newCrew];
     this.syncUsersWithCrews();
     this.logActivity('Tambah Kru', newCrew.name, `Menambahkan kru baru ${newCrew.name} sebagai ${newCrew.role}`);
-    
+
     // Asynchronous backend integration with Supabase
     createCrewInSupabase(newCrew).then(res => {
       if (res.data?.id && res.data.id !== newCrew.id) {
@@ -4213,7 +4213,7 @@ class LogisticsStore {
   public updateCrewStatus(id: string, status: Crew['status']) {
     this.crews = this.crews.map(c => (c.id === id ? { ...c, status } : c));
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-    
+
     // Asynchronous backend integration with Supabase
     updateCrewInSupabase(id, { status }).catch(err => console.warn('[Supabase Crew Status Sync Note]', err));
 
@@ -4261,7 +4261,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     if (deletedCrew) {
       this.logActivity('Hapus Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`);
-      
+
       // Asynchronous backend integration with Supabase
       deleteCrewInSupabase(id, deletedCrew.name).catch(err => console.warn('[Supabase Crew Delete Sync Note]', err));
 
@@ -4297,7 +4297,7 @@ class LogisticsStore {
     fetch('/api/stores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(newStore)
     }).catch(err => console.warn('[Hostinger Stores] Tambah toko gagal disinkronkan:', err));
-    
+
     this.dispatchMiddleware({
       entityType: 'store',
       action: 'create',
@@ -4316,7 +4316,7 @@ class LogisticsStore {
     fetch('/api/stores/batch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
     }).catch(err => console.warn('[Hostinger Stores] Batch toko gagal disinkronkan:', err));
-    
+
     this.dispatchMiddleware({
       entityType: 'store',
       action: 'update',
@@ -4554,7 +4554,7 @@ class LogisticsStore {
     if (!part) return;
     const newStock = part.stock + amount;
     const today = new Date().toISOString().substring(0, 10);
-    this.spareParts = this.spareParts.map(p => 
+    this.spareParts = this.spareParts.map(p =>
       p.id === id ? { ...p, stock: newStock, lastRestockDate: today, notes: notes || p.notes } : p
     );
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
@@ -4654,6 +4654,37 @@ class LogisticsStore {
     const latestBattery = getLatest('aki');
     const latestFilter = getLatest('filter');
 
+    const getLatestTireByPosition = (positionKeyword: string) => {
+      const kw = positionKeyword.toLowerCase();
+      const specificMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return text.includes(kw);
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      if (specificMatch) return specificMatch;
+
+      const generalMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return (
+            !text.includes('depan kanan') &&
+            !text.includes('depan kiri') &&
+            !text.includes('belakang kanan') &&
+            !text.includes('belakang kiri')
+          );
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      return generalMatch;
+    };
+
+    const latestTireFR = getLatestTireByPosition('depan kanan');
+    const latestTireFL = getLatestTireByPosition('depan kiri');
+    const latestTireRR = getLatestTireByPosition('belakang kanan');
+    const latestTireRL = getLatestTireByPosition('belakang kiri');
+
     const calculateStatus = (usage: SparePartUsage | undefined, defaultDays: number, defaultKm: number) => {
       if (!usage) {
         return {
@@ -4710,6 +4741,26 @@ class LogisticsStore {
       tire: {
         latest: latestTire,
         ...calculateStatus(latestTire, 365, 50000) // Ban: 1 tahun / 50.000 KM
+      },
+      tireFrontRight: {
+        positionLabel: 'Ban Armada Depan Kanan',
+        latest: latestTireFR,
+        ...calculateStatus(latestTireFR, 365, 50000)
+      },
+      tireFrontLeft: {
+        positionLabel: 'Ban Armada Depan Kiri',
+        latest: latestTireFL,
+        ...calculateStatus(latestTireFL, 365, 50000)
+      },
+      tireRearRight: {
+        positionLabel: 'Ban Armada Belakang Kanan',
+        latest: latestTireRR,
+        ...calculateStatus(latestTireRR, 365, 50000)
+      },
+      tireRearLeft: {
+        positionLabel: 'Ban Armada Belakang Kiri',
+        latest: latestTireRL,
+        ...calculateStatus(latestTireRL, 365, 50000)
       },
       battery: {
         latest: latestBattery,
@@ -4937,7 +4988,7 @@ class LogisticsStore {
       const targetConfig = FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
       const targetRatio = targetConfig.target;
       const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : targetRatio;
-      
+
       // Rata-rata Konsumsi Liter per Kilometer
       const avgLiterPerKm = totalDistanceKm > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : (targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0);
       const avgLiterPer100Km = totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : (targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0);
@@ -5130,26 +5181,26 @@ class LogisticsStore {
       const usableTreadDepthMm = initialTreadDepthMm - minTreadDepthLegalMm;
 
       // Tire brand & model
-      const tireBrandModel = isPickUp 
-        ? 'Bridgestone Ecopia R156 8PR' 
-        : isDouble 
-        ? 'Gajah Tunggal Super Lug Heavy Duty' 
+      const tireBrandModel = isPickUp
+        ? 'Bridgestone Ecopia R156 8PR'
+        : isDouble
+        ? 'Gajah Tunggal Super Lug Heavy Duty'
         : 'Michelin X Multi Z Radial';
 
-      const tireSize = isPickUp 
-        ? '185/80 R14' 
-        : isDouble 
-        ? '7.50-16 14PR' 
+      const tireSize = isPickUp
+        ? '185/80 R14'
+        : isDouble
+        ? '7.50-16 14PR'
         : '7.50-16 12PR';
 
       const maxLifespanKm = isPickUp ? 45000 : isDouble ? 60000 : 55000;
       const currentOdo = fleet.odometerKm || 50000;
-      
+
       // Determine installed kilometer
       const installedAtKm = latestUsage ? latestUsage.odometerKm : Math.max(0, currentOdo - (currentOdo % maxLifespanKm));
       const accumulatedKm = Math.max(1200, currentOdo - installedAtKm);
       const remainingKm = Math.max(0, maxLifespanKm - accumulatedKm);
-      
+
       // Calculate wear percentage (0% to 100%)
       const wearPercentage = Math.min(100, Number(((accumulatedKm / maxLifespanKm) * 100).toFixed(1)));
       const healthScore = Math.max(0, Number((100 - wearPercentage).toFixed(1)));
@@ -5160,14 +5211,14 @@ class LogisticsStore {
 
       // Daily wear rate (mm per day) based on Tracksolid daily mileage
       // Formula: (usableTreadDepthMm / maxLifespanKm) * dailyMileage
-      const dailyWearRateMm = dailyMileage > 0 
-        ? Number(((usableTreadDepthMm / maxLifespanKm) * dailyMileage).toFixed(4)) 
+      const dailyWearRateMm = dailyMileage > 0
+        ? Number(((usableTreadDepthMm / maxLifespanKm) * dailyMileage).toFixed(4))
         : 0.005;
 
       // Estimated days remaining until replacement
       const effectiveDailyKm = Math.max(dailyMileage, 35);
-      const estimatedDaysRemaining = remainingKm > 0 
-        ? Math.round(remainingKm / effectiveDailyKm) 
+      const estimatedDaysRemaining = remainingKm > 0
+        ? Math.round(remainingKm / effectiveDailyKm)
         : 0;
 
       // Projected replacement date
@@ -5191,7 +5242,7 @@ class LogisticsStore {
       } else if (remainingKm <= 9000 || currentTreadDepthMm <= 5.0 || wearPercentage >= 65) {
         status = 'Waspada';
         statusLabel = 'Perlu Rotasi & Jadwal Ganti';
-        recommendation = isRotationNeeded 
+        recommendation = isRotationNeeded
           ? `Disarankan rotasi ban silang (depan-belakang) pada ${rotationDueKm.toLocaleString('id-ID')} KM untuk mencegah aus tidak merata.`
           : `Ban masuk fase aus moderat. Pantau tekanan angin mingguan dan batasi beban overload.`;
       } else {
