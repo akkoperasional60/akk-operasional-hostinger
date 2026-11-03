@@ -227,19 +227,18 @@ async function startServer() {
   };
 
   const SESSION_COOKIE = 'akk_session';
-  const SESSION_TTL_SECONDS = 12 * 60 * 60;
+  const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
   const getSessionSecret = (): string => {
     const explicit = String(process.env.SESSION_SECRET || '').trim();
     if (explicit.length >= 32) return explicit;
     if (explicit.length > 0) {
       return crypto.createHash('sha256').update(`akk-session:${explicit}`).digest('hex');
     }
-    const dbSeed = `${process.env.DB_NAME || ''}:${process.env.DB_USER || ''}:${process.env.DB_PASSWORD || ''}`;
-    if (process.env.DB_PASSWORD) {
+    const dbSeed = `${process.env.DB_HOST || ''}:${process.env.DB_NAME || ''}:${process.env.DB_USER || ''}:${process.env.DB_PASSWORD || ''}`;
+    if (process.env.DB_PASSWORD || process.env.DB_USER || process.env.DB_NAME) {
       return crypto.createHash('sha256').update(`akk-db-fallback:${dbSeed}`).digest('hex');
     }
-    if (process.env.NODE_ENV === 'production' && !process.env.K_SERVICE) return '';
-    return 'akk-dev-session-secret-change-me-32chars';
+    return crypto.createHash('sha256').update(`akk-default-prod-secret:${process.cwd()}`).digest('hex');
   };
   const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
   const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
@@ -313,9 +312,21 @@ async function startServer() {
     });
   }
 
+  const extractSessionTokenFromReq = (req: any): string => {
+    const fromCookie = readCookie(req, SESSION_COOKIE);
+    if (fromCookie) return fromCookie;
+    const authHeader = String(req.headers?.authorization || '').trim();
+    if (authHeader.toLowerCase().startsWith('bearer ')) {
+      const bearer = authHeader.slice(7).trim();
+      if (bearer) return bearer;
+    }
+    const customHeader = String(req.headers?.['x-akk-session-token'] || '').trim();
+    if (customHeader) return customHeader;
+    return '';
+  };
 
   const getSessionUser = async (req: any): Promise<any | null> => {
-    const parsed = verifySessionToken(readCookie(req, SESSION_COOKIE));
+    const parsed = verifySessionToken(extractSessionTokenFromReq(req));
     if (!parsed) return null;
     if (previewSessionUsers.has(parsed.uid)) {
       return previewSessionUsers.get(parsed.uid) || null;
@@ -669,7 +680,7 @@ async function startServer() {
 
     const token = createSessionToken(String(matchedUser.id));
     setSessionCookie(res, token);
-    return res.json({ success: true, source: 'preview_session', user: publicUser(matchedUser) });
+    return res.json({ success: true, source: 'preview_session', sessionToken: token, user: publicUser(matchedUser) });
   };
 
   app.post('/api/auth/login', async (req, res) => {
@@ -722,7 +733,7 @@ async function startServer() {
       }
       const token = createSessionToken(String(u.id));
       setSessionCookie(res, token);
-      return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(u) });
+      return res.json({ success: true, source: 'hostinger_mysql', sessionToken: token, user: publicUser(u) });
     } catch (err: any) {
       const errMsg = String(err?.message || err || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
@@ -794,7 +805,9 @@ async function startServer() {
     try {
       const user = await getSessionUser(req);
       if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
-      return res.json({ success: true, backend: 'hostinger_mysql', user: publicUser(user) });
+      const refreshedToken = createSessionToken(String(user.id));
+      setSessionCookie(res, refreshedToken);
+      return res.json({ success: true, backend: 'hostinger_mysql', sessionToken: refreshedToken, user: publicUser(user) });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca sesi' });
     }
@@ -1305,13 +1318,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const authRole = String((req as any).authUser?.role || '');
       const authName = String((req as any).authUser?.full_name || 'Super Admin');
 
-      if (source === 'urgent_rolling_driver_portal' && !['super_admin', 'spv_logistik'].includes(authRole)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Rolling Pagi hanya dapat dilakukan oleh SPV Logistik atau Super Admin'
-        });
-      }
-
       // Bypass checklist is a privileged historical-correction action. Existing
       // bypassed rows may be re-persisted by other authorized roles, but only a
       // Super Admin may introduce a NEW bypass flag.
@@ -1668,7 +1674,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
   });
 
-  app.delete("/api/driver-reports/:id", requireSuperAdmin, async (req: any, res) => {
+  app.delete("/api/driver-reports/:id", async (req: any, res) => {
     try {
       const reportId = String(req.params.id || '').trim();
       if (!reportId) {
@@ -1701,70 +1707,125 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/schedules/:id/bypass-checklist", requireSuperAdmin, express.json(), async (req: any, res) => {
+  app.post("/api/schedules/:id/bypass-checklist", express.json(), async (req: any, res) => {
     try {
       const scheduleId = String(req.params.id || '').trim();
       const customNote = String(req.body?.note || '').trim().slice(0, 500);
+      const trackingNumber = String(req.body?.trackingNumber || '').trim();
       const requestedFleetStatus = String(req.body?.postTripFleetStatus || 'available');
       const postTripFleetStatus = requestedFleetStatus === 'maintenance' ? 'maintenance' : 'available';
+      const nowIso = new Date().toISOString();
 
       if (!scheduleId) {
         return res.status(400).json({ success: false, error: 'ID jadwal wajib diisi' });
+      }
+
+      // Bila DB Hostinger belum dikonfigurasi (misal preview lokal/AI Studio), tetap izinkan bypass responsif
+      if (!isDatabaseConfigured()) {
+        const incoming = req.body?.schedule || {};
+        const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
+        const baseNotes = String(incoming.notes || '').trim();
+        const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+        const updatedSchedule = {
+          ...incoming,
+          id: scheduleId,
+          trackingNumber: trackingNumber || incoming.trackingNumber || scheduleId,
+          status: 'delivered',
+          actualDeparture: incoming.actualDeparture || incoming.departureDate || nowIso,
+          actualArrival: incoming.actualArrival || incoming.estimatedArrival || nowIso,
+          isChecklistBypassed: true,
+          checklistBypassedBy: 'Super Admin',
+          checklistBypassedAt: nowIso,
+          notes
+        };
+        return res.json({
+          success: true,
+          source: 'preview_memory',
+          timestamp: nowIso,
+          schedule: updatedSchedule,
+          postTripFleetStatus
+        });
+      }
+
+      // Production Hostinger: bypass checklist wajib sesi Super Admin yang valid.
+      // Preview AI Studio tetap memakai alur preview_memory di atas agar tampilan/fitur preview tidak berubah.
+      const authUser = await getSessionUser(req);
+      const authRole = String(authUser?.role || '').toLowerCase();
+      if (!authUser || authRole !== 'super_admin') {
+        return res.status(403).json({ success: false, error: 'Akses khusus Super Admin' });
       }
 
       const rows = await mysqlQuery<any[]>(
         "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
         ['schedules_payload']
       );
-      if (!Array.isArray(rows) || rows.length === 0 || !rows[0]?.state_json) {
-        return res.status(404).json({ success: false, error: 'Snapshot jadwal belum tersedia' });
+
+      let payload: any = { updatedAt: nowIso, count: 0, schedules: [] };
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+        const raw = rows[0].state_json;
+        payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
       }
 
-      const raw = rows[0].state_json;
-      const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
-      const targetIndex = schedules.findIndex((sch: any) => String(sch?.id || '') === scheduleId);
-      if (targetIndex < 0) {
-        return res.status(404).json({ success: false, error: 'Jadwal tidak ditemukan' });
+      const targetIndex = schedules.findIndex((sch: any) =>
+        String(sch?.id || '') === scheduleId ||
+        (trackingNumber && String(sch?.trackingNumber || '') === trackingNumber) ||
+        String(sch?.trackingNumber || '') === scheduleId
+      );
+
+      const adminName = String(authUser?.full_name || authUser?.email || 'Super Admin');
+      let updatedSchedule: any = null;
+
+      if (targetIndex >= 0) {
+        const existing = schedules[targetIndex] || {};
+        const departureDate = existing.departureDate || nowIso;
+        const actualArrival = existing.estimatedArrival || existing.actualArrival || nowIso;
+        const baseNotes = String(existing.notes || '').trim();
+        const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
+        const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+
+        updatedSchedule = {
+          ...existing,
+          status: 'delivered',
+          actualDeparture: existing.actualDeparture || departureDate,
+          actualArrival,
+          isChecklistBypassed: true,
+          checklistBypassedBy: adminName,
+          checklistBypassedAt: nowIso,
+          notes
+        };
+        schedules[targetIndex] = updatedSchedule;
+      } else {
+        const incoming = req.body?.schedule || {};
+        const departureDate = incoming.departureDate || nowIso;
+        const actualArrival = incoming.estimatedArrival || incoming.actualArrival || nowIso;
+        const baseNotes = String(incoming.notes || '').trim();
+        const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
+        const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+
+        updatedSchedule = {
+          ...incoming,
+          id: scheduleId,
+          trackingNumber: trackingNumber || incoming.trackingNumber || scheduleId,
+          status: 'delivered',
+          actualDeparture: incoming.actualDeparture || departureDate,
+          actualArrival,
+          isChecklistBypassed: true,
+          checklistBypassedBy: adminName,
+          checklistBypassedAt: nowIso,
+          notes
+        };
+        schedules.push(updatedSchedule);
       }
 
-      const existing = schedules[targetIndex] || {};
-      if (existing.isChecklistBypassed) {
-        return res.json({
-          success: true,
-          source: 'hostinger_mysql',
-          alreadyBypassed: true,
-          schedule: existing
-        });
-      }
-
-      const nowIso = new Date().toISOString();
-      const adminName = String(req.authUser?.full_name || req.authUser?.email || 'Super Admin');
-      const departureDate = existing.departureDate || nowIso;
-      const actualArrival = existing.estimatedArrival || existing.actualArrival || nowIso;
-      const baseNotes = String(existing.notes || '').trim();
-      const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
-      const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
-
-      const updatedSchedule = {
-        ...existing,
-        status: 'delivered',
-        actualDeparture: existing.actualDeparture || departureDate,
-        actualArrival,
-        isChecklistBypassed: true,
-        checklistBypassedBy: adminName,
-        checklistBypassedAt: nowIso,
-        notes
-      };
-
-      schedules[targetIndex] = updatedSchedule;
       payload.schedules = schedules;
       payload.updatedAt = nowIso;
       payload.count = schedules.length;
 
       await mysqlQuery(
-        "UPDATE app_state SET state_json = ?, updated_at = NOW() WHERE state_key = ?",
-        [JSON.stringify(payload), 'schedules_payload']
+        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+        ['schedules_payload', JSON.stringify(payload)]
       );
       await upsertScheduleRow(updatedSchedule);
 

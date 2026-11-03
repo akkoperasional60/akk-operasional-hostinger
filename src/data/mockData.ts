@@ -197,7 +197,7 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   }
 ];
 
-const CANONICAL_FLEETS: Fleet[] = [
+export const INITIAL_FLEETS: Fleet[] = [
   {
     id: 'flt-01',
     plateNumber: 'P 8125 VC',
@@ -479,8 +479,6 @@ const CANONICAL_FLEETS: Fleet[] = [
   }
 ];
 
-export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : CANONICAL_FLEETS.map(f => ({ ...f }));
-
 export function resolveCanonicalFleetMeta(
   fleetOrPlate?: Partial<Fleet> | string | null
 ): Fleet | undefined {
@@ -493,7 +491,7 @@ export function resolveCanonicalFleetMeta(
   const cleanId = rawId.trim().toLowerCase();
   const cleanInit = rawInit.trim().toUpperCase();
 
-  return CANONICAL_FLEETS.find(f => {
+  return INITIAL_FLEETS.find(f => {
     if (cleanId && f.id.toLowerCase() === cleanId) return true;
     const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
     if (cleanPlate && fPlate === cleanPlate) return true;

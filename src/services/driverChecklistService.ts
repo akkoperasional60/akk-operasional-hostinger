@@ -7,8 +7,6 @@ import { getLocalDateStr } from './driverReportService';
 import { safeSetItem } from './store';
 
 const STORAGE_KEY = 'akk_driver_vehicle_checklists_v4';
-const LEGACY_STORAGE_KEYS = ['akk_driver_vehicle_checklists_v3', 'akk_driver_vehicle_checklists_v2'] as const;
-const IS_PROD_BUILD = Boolean(import.meta.env.PROD);
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
   // 1. Oli Mesin
@@ -81,11 +79,7 @@ const LEGACY_NAME_ALIASES: Record<string, string> = {
   'air radiator (coolant) & reservoir': 'air radiator',
   'baterai / aki & indikator dashboard': 'air accu',
   'minyak rem & minyak kopling': 'rem mobil & minyak rem',
-  'rem kaki (pedal rem utama)': 'rem mobil & minyak rem',
-  'ban serep & tekanan udara': 'ban cadangan',
-  'dongkrak hidrolik & kunci roda': 'inventaris mobil',
-  'stnk asli & masa pajak aktif': 'inventaris mobil',
-  'buku uji kir dishub aktif': 'inventaris mobil'
+  'ban serep & tekanan udara': 'ban cadangan'
 };
 
 class DriverChecklistService {
@@ -94,7 +88,7 @@ class DriverChecklistService {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', (evt) => {
-        if (evt.key === STORAGE_KEY || LEGACY_STORAGE_KEYS.includes(evt.key as any)) {
+        if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3' || evt.key === 'akk_driver_vehicle_checklists_v2') {
           this.memoryChecklists = null;
         }
       });
@@ -166,9 +160,7 @@ class DriverChecklistService {
       return this.memoryChecklists;
     }
     try {
-      const primaryRaw = localStorage.getItem(STORAGE_KEY);
-      const legacyRaw = primaryRaw ? null : (localStorage.getItem(LEGACY_STORAGE_KEYS[0]) || localStorage.getItem(LEGACY_STORAGE_KEYS[1]));
-      const raw = primaryRaw || legacyRaw;
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3') || localStorage.getItem('akk_driver_vehicle_checklists_v2');
       let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(list)) {
         list = [];
@@ -188,12 +180,9 @@ class DriverChecklistService {
 
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       this.memoryChecklists = list;
-      if (!primaryRaw && legacyRaw) {
-        safeSetItem(STORAGE_KEY, JSON.stringify(list));
-      }
       return list;
     } catch {
-      const fallback = IS_PROD_BUILD ? [] : this.generateInitialSampleChecklists();
+      const fallback = this.generateInitialSampleChecklists();
       this.memoryChecklists = fallback;
       return fallback;
     }
@@ -335,6 +324,7 @@ class DriverChecklistService {
       const filtered = list.filter(c => c.id !== cleanId);
       this.memoryChecklists = filtered;
       safeSetItem(STORAGE_KEY, JSON.stringify(filtered));
+      safeSetItem('akk_driver_vehicle_checklists_v3', JSON.stringify(filtered));
       return true;
     } catch {
       return false;

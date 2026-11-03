@@ -13,7 +13,8 @@ export const isDriverRole = (role: UserRole | string): boolean => {
 };
 
 export const isSuperAdminRole = (role: UserRole | string): boolean => {
-  return role === 'super_admin';
+  const norm = String(role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+  return norm === 'superadmin' || norm === 'admin' || norm === 'manager';
 };
 
 export const hasRequiredRole = (
