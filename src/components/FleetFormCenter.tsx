@@ -190,8 +190,8 @@ export const FleetFormCenter: React.FC = () => {
     },
     {
       id: 'procurement',
-      title: 'Formulir Pengadaan',
-      description: 'Input permintaan pengadaan barang distribusi.',
+      title: 'Formulir Pengadaan Armada',
+      description: 'Input permintaan pengadaan armada, suku cadang & perlengkapan distribusi.',
       icon: <ShoppingCart className="w-8 h-8 text-emerald-400" />,
       color: 'bg-emerald-500/10 border-emerald-500/20'
     }
@@ -203,13 +203,13 @@ export const FleetFormCenter: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-wrap justify-between items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-black text-white">Formulir Logistik &amp; Pusat Pemindaian Dokumen</h2>
+            <h2 className="text-xl font-black text-white">Formulir Pengadaan Armada &amp; Pusat Dokumen Logistik</h2>
             <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-bold">
-              Camera AI OCR
+              Pengadaan &amp; OCR
             </span>
           </div>
           <p className="text-slate-400 text-sm mt-1">
-            Pindai fisik Surat Jalan atau lembar checklist inspeksi armada pakai kamera perangkat, otomatis diindeks ke log digital pencarian.
+            Kelola formulir pengadaan armada, servis berkala, serta pindai Surat Jalan dan lembar inspeksi armada ke log digital.
           </p>
         </div>
 
@@ -273,7 +273,7 @@ export const FleetFormCenter: React.FC = () => {
                     onClick={() => { setActiveModal('procurement'); setShowDropdown(false); }}
                     className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-200 text-xs rounded-lg"
                   >
-                    Input Formulir Pengadaan Logistik
+                    Input Formulir Pengadaan Armada
                   </button>
                 </div>
               </div>

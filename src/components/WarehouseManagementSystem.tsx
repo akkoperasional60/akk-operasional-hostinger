@@ -27,6 +27,8 @@ import {
   WarehouseFleetCubicationSimulator
 } from './WarehouseCubicationModules';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import { WarehouseDatabaseBarangView } from './WarehouseDatabaseBarangView';
+import { databaseBarangService } from '../services/databaseBarangService';
 
 export type WmsSubTab =
   | 'overview'
@@ -725,6 +727,13 @@ export const WarehouseManagementSystem: React.FC<{
           ...item,
           tanggalStok: uploadTanggal
         });
+        databaseBarangService.upsertItem({
+          noBarang: item.noBarang,
+          keteranganBarang: item.namaBarang,
+          satuan: item.satuan,
+          kategoriBarang: item.kategoriBarang,
+          stokTersedia: item.stokTersedia
+        });
       });
       return Array.from(map.values());
     });
@@ -736,7 +745,7 @@ export const WarehouseManagementSystem: React.FC<{
     setShowSkuPreviewTable(false);
     setPopupModal({
       title: 'Data Berhasil Disimpan',
-      message: `${count} data barang dari file Excel berhasil diimport ke Master Barang.`
+      message: `${count} data barang dari file Excel berhasil diimport ke Master Barang & Database Barang.`
     });
   };
 
@@ -796,11 +805,18 @@ export const WarehouseManagementSystem: React.FC<{
       tanggalStok: new Date().toISOString().split('T')[0]
     };
     setSkuItems(prev => [item, ...prev]);
+    databaseBarangService.upsertItem({
+      noBarang: item.noBarang,
+      keteranganBarang: item.namaBarang,
+      satuan: item.satuan,
+      kategoriBarang: item.kategoriBarang,
+      stokTersedia: item.stokTersedia
+    });
     setIsAddSkuModalOpen(false);
     setNewSkuForm({ kategoriBarang: 'Karton Box Corrugated', noBarang: '', namaBarang: '', stokTersedia: '', satuan: 'Pcs' });
     setPopupModal({
       title: 'Data Berhasil Disimpan',
-      message: `Barang "${item.namaBarang}" (${item.noBarang}) berhasil ditambahkan ke Gudang ${targetBranch?.name || 'Nusantara'}.`
+      message: `Barang "${item.namaBarang}" (${item.noBarang}) berhasil ditambahkan ke Gudang ${targetBranch?.name || 'Nusantara'} & Database Barang.`
     });
   };
 
@@ -1698,9 +1714,42 @@ export const WarehouseManagementSystem: React.FC<{
       )}
 
       {/* ===================================================================== */}
+      {/* TAB: DATABASE BARANG (NOMOR BARANG, KETERANGAN, SATUAN, DOKUMENTASI)  */}
+      {/* ===================================================================== */}
+      {activeTab === 'scanner' && (
+        <WarehouseDatabaseBarangView
+          onSyncWithMasterSku={records => {
+            setSkuItems(prev => {
+              const map = new Map<string, MasterSkuRecord>();
+              prev.forEach(item => map.set(item.noBarang.toUpperCase(), item));
+              records.forEach(rec => {
+                const key = rec.noBarang.toUpperCase();
+                const existing = map.get(key);
+                map.set(key, {
+                  id: existing?.id || rec.id,
+                  kategoriBarang:
+                    existing?.kategoriBarang ||
+                    rec.kategoriBarang ||
+                    inferKategoriBarang(rec.noBarang, rec.keteranganBarang),
+                  noBarang: rec.noBarang,
+                  namaBarang: rec.keteranganBarang,
+                  stokTersedia: existing?.stokTersedia ?? rec.stokTersedia ?? 1000,
+                  satuan: rec.satuan,
+                  cabang: existing?.cabang || rec.cabang || 'Banyuwangi',
+                  lokasiStock: existing?.lokasiStock || 'Gudang Utama Argopuro',
+                  tanggalStok: rec.updatedAt
+                });
+              });
+              return Array.from(map.values());
+            });
+          }}
+        />
+      )}
+
+      {/* ===================================================================== */}
       {/* TAB: MASTER SKU & STOK BIN GUDANG (DEFAULT FOR OVERVIEW / INVENTORY)  */}
       {/* ===================================================================== */}
-      {(activeTab === 'inventory' || activeTab === 'overview' || activeTab === 'scanner') && (
+      {(activeTab === 'inventory' || activeTab === 'overview') && (
         <div className="space-y-4">
           {/* Header Banner WMS */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

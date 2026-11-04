@@ -37,7 +37,8 @@ import {
   Fuel,
   LogIn,
   LogOut,
-  Trash2
+  Trash2,
+  ChevronDown
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverShiftService } from '../services/driverShiftService';
@@ -269,7 +270,8 @@ export const DriverReportsManagement: React.FC = () => {
     isShiftRecord?: boolean;
   } | null>(null);
 
-  // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru)
+  // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru - diminimize secara default)
+  const [isScheduleNotifExpanded, setIsScheduleNotifExpanded] = useState<boolean>(false);
   const [scheduleChangeNotifs, setScheduleChangeNotifs] = useState<
     Array<{
       id: string;
@@ -1828,43 +1830,86 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* 🔔 NOTIFIKASI PERUBAHAN JADWAL PENGIRIMAN */}
+          {/* 🔔 NOTIFIKASI PERUBAHAN JADWAL PENGIRIMAN (MINIMIZED COMPACT DESIGN) */}
           {scheduleChangeNotifs.length > 0 && (
-            <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 space-y-2 shadow-xs">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-black text-emerald-300">
-                  <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Notifikasi Perubahan Jadwal Pengiriman ({scheduleChangeNotifs.length})</span>
-                </div>
+            <div className="bg-emerald-950/35 border border-emerald-500/30 rounded-xl px-3 py-2 shadow-2xs transition-all">
+              <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
                 <button
                   type="button"
-                  onClick={() => {
-                    setScheduleChangeNotifs([]);
-                    try {
-                      localStorage.removeItem('akk_schedule_change_notifs_v1');
-                    } catch {}
-                  }}
-                  className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 cursor-pointer"
+                  onClick={() => setIsScheduleNotifExpanded(prev => !prev)}
+                  className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer group"
+                  title={isScheduleNotifExpanded ? 'Klik untuk minimize notifikasi' : 'Klik untuk lihat rincian notifikasi'}
                 >
-                  Bersihkan Notifikasi
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
-                {scheduleChangeNotifs.slice(0, 6).map(notif => (
-                  <div
-                    key={notif.id}
-                    className="p-2 rounded-lg bg-slate-950/90 border border-emerald-500/30 text-xs flex items-start justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-bold text-emerald-300 text-[11px] truncate">{notif.title}</div>
-                      <p className="text-[10px] text-slate-300 mt-0.5 leading-snug">{notif.message}</p>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                      {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 text-emerald-400">
+                    <RefreshCw className="w-3 h-3" />
                   </div>
-                ))}
+                  <span className="text-[11px] font-black text-emerald-300 whitespace-nowrap">
+                    Notifikasi Jadwal
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold shrink-0">
+                    {scheduleChangeNotifs.length}
+                  </span>
+                  {scheduleChangeNotifs[0] && (
+                    <span className="text-[11px] text-slate-300 truncate min-w-0 hidden md:inline">
+                      <span className="text-emerald-400/80 font-semibold">{scheduleChangeNotifs[0].title}:</span>{' '}
+                      {scheduleChangeNotifs[0].message}
+                    </span>
+                  )}
+                  {scheduleChangeNotifs[0] && (
+                    <span className="text-[10px] text-slate-400 font-mono shrink-0 hidden sm:inline">
+                      • {new Date(scheduleChangeNotifs[0].timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsScheduleNotifExpanded(prev => !prev)}
+                    className="px-2 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <span>{isScheduleNotifExpanded ? 'Minimize' : 'Lihat'}</span>
+                    <ChevronDown
+                      className={`w-3 h-3 transition-transform duration-200 ${
+                        isScheduleNotifExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScheduleChangeNotifs([]);
+                      setIsScheduleNotifExpanded(false);
+                      try {
+                        localStorage.removeItem('akk_schedule_change_notifs_v1');
+                      } catch {}
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-900/90 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 text-[10px] font-bold border border-slate-700 hover:border-rose-500/40 cursor-pointer transition"
+                    title="Bersihkan Semua Notifikasi"
+                  >
+                    Bersihkan
+                  </button>
+                </div>
               </div>
+
+              {isScheduleNotifExpanded && (
+                <div className="mt-2 pt-2 border-t border-emerald-500/20 grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-28 overflow-y-auto pr-1 animate-in fade-in duration-150">
+                  {scheduleChangeNotifs.slice(0, 6).map(notif => (
+                    <div
+                      key={notif.id}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-950/90 border border-emerald-500/25 text-[11px] flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="font-bold text-emerald-300 mr-1.5">{notif.title}:</span>
+                        <span className="text-slate-300 text-[10px] line-clamp-1">{notif.message}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

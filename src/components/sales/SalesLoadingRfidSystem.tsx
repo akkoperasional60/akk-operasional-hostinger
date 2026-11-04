@@ -23,8 +23,12 @@ import {
   User,
   MapPin,
   Calendar,
-  Edit3
+  Edit3,
+  Download,
+  FileSpreadsheet,
+  Lock
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { logisticsStore } from '../../services/store';
 import { Fleet } from '../../types';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
@@ -37,6 +41,12 @@ import {
   extractExifFromFile,
   drawExifMetadataOnCanvas
 } from '../../utils/exifMetadata';
+import {
+  databaseBarangService,
+  DatabaseBarangRecord,
+  createDefaultBarangThumbnail,
+  estimateDataUrlSizeKb
+} from '../../services/databaseBarangService';
 
 export interface ItemPhotoScanLog {
   id: string;
@@ -56,6 +66,8 @@ export interface SalesOrderItem {
   qtyOrdered: number;
   qtyLoaded: number;
   scans: ItemPhotoScanLog[];
+  dokumentasiUrl?: string;
+  compressedSizeKb?: number;
 }
 
 export interface SalesOrderInvoice {
@@ -421,51 +433,75 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
 
-  // Form states for creating/editing Faktur / Sales Order
+  // Form states for Import File Faktur / Sales Order (Pilih Area -> Upload File -> Review File)
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [soNumber, setSoNumber] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [customerName, setCustomerName] = useState('');
-  const [areaName, setAreaName] = useState<string>(OFFICIAL_DESTINATION_AREAS[0] || 'DENPASAR 1');
+  const [areaName, setAreaName] = useState<string>('');
   const [fleetLabel, setFleetLabel] = useState(defaultFleet);
   const [adminPic, setAdminPic] = useState(defaultAdmin);
   const [notes, setNotes] = useState('');
-  const [draftItems, setDraftItems] = useState<Array<{
+  const [uploadedFileName, setUploadedFileName] = useState<string>('');
+  const [hasReviewedFile, setHasReviewedFile] = useState<boolean>(false);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [dbBarangList, setDbBarangList] = useState<DatabaseBarangRecord[]>(() =>
+    databaseBarangService.getAll()
+  );
+
+  useEffect(() => {
+    const syncDb = () => {
+      setDbBarangList(databaseBarangService.getAll());
+    };
+    window.addEventListener('akk-database-barang-updated', syncDb);
+    window.addEventListener('storage', syncDb);
+    return () => {
+      window.removeEventListener('akk-database-barang-updated', syncDb);
+      window.removeEventListener('storage', syncDb);
+    };
+  }, []);
+
+  // Baris Review File Faktur sesuai template: No Faktur | Nama Pelanggan | Item Barang | Qty | Satuan (Terintegrasi Database Barang)
+  const [reviewRows, setReviewRows] = useState<Array<{
     id: string;
+    noFaktur: string;
+    namaPelanggan: string;
+    itemBarang: string;
+    qty: number;
+    satuan: SalesOrderItem['unit'];
     skuCode: string;
-    itemName: string;
-    unit: SalesOrderItem['unit'];
-    qtyOrdered: number;
-  }>>([
-    {
-      id: 'dr-1',
-      skuCode: 'RFID-KB-001',
-      itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
-      unit: 'Ikat',
-      qtyOrdered: 15
-    }
-  ]);
+    dokumentasiUrl?: string;
+    compressedSizeKb?: number;
+  }>>([]);
+
+  const normalizeUnit = (rawUnit: string): SalesOrderItem['unit'] => {
+    const clean = (rawUnit || '').trim().toLowerCase();
+    if (clean.includes('ikat')) return 'Ikat';
+    if (clean.includes('bal')) return 'Bal';
+    if (clean.includes('pack') || clean.includes('pak')) return 'Pack';
+    if (clean.includes('roll') || clean.includes('rol')) return 'Roll';
+    if (clean.includes('pcs') || clean.includes('buah') || clean.includes('biji')) return 'Pcs';
+    return 'Box';
+  };
 
   const openCreateModal = () => {
-    const seq = String(invoices.length + 1).padStart(3, '0');
     setEditingInvoiceId(null);
-    setInvoiceNumber(`FKT/AKK/2026/11/${seq}`);
-    setSoNumber(`SO-BWI-2611${seq}`);
+    setInvoiceNumber('');
+    setSoNumber('');
     setDate(new Date().toISOString().split('T')[0]);
     setCustomerName('');
-    setAreaName(OFFICIAL_DESTINATION_AREAS[0] || 'DENPASAR 1');
+    // Kosongkan areaName saat awal agar user wajib memilih Nama Area Kirim terlebih dahulu sebelum upload file
+    setAreaName('');
     setFleetLabel(fleetOptions[0] || defaultFleet);
     setAdminPic(adminNames[0] || defaultAdmin);
     setNotes('');
-    setDraftItems([
-      {
-        id: `dr-${Date.now()}`,
-        skuCode: 'RFID-KB-001',
-        itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
-        unit: 'Ikat',
-        qtyOrdered: 20
-      }
-    ]);
+    setUploadedFileName('');
+    setHasReviewedFile(false);
+    setReviewRows([]);
+    if (importFileInputRef.current) {
+      importFileInputRef.current.value = '';
+    }
     setIsModalOpen(true);
   };
 
@@ -479,79 +515,318 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setFleetLabel(inv.fleetLabel);
     setAdminPic(inv.adminPic);
     setNotes(inv.notes || '');
-    setDraftItems(
+    setUploadedFileName(`Edit Manual — ${inv.invoiceNumber}`);
+    setHasReviewedFile(true);
+    setReviewRows(
       inv.items.map(it => ({
         id: it.id,
-        skuCode: it.skuCode,
-        itemName: it.itemName,
-        unit: it.unit,
-        qtyOrdered: it.qtyOrdered
+        noFaktur: inv.invoiceNumber,
+        namaPelanggan: inv.customerName,
+        itemBarang: it.itemName,
+        qty: it.qtyOrdered,
+        satuan: it.unit,
+        skuCode: it.skuCode
       }))
     );
     setIsModalOpen(true);
   };
 
-  const handleAddDraftItem = () => {
-    const nextIdx = draftItems.length + 1;
-    const preset = MASTER_PACKAGING_CATALOG[nextIdx % MASTER_PACKAGING_CATALOG.length];
-    setDraftItems(prev => [
-      ...prev,
+  const handleDownloadTemplateExcel = (format: 'xlsx' | 'csv' = 'xlsx') => {
+    const sampleArea = areaName || 'GENTENG RETAIL';
+    const templateRows = [
       {
-        id: `dr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        skuCode: `RFID-KB-00${nextIdx}`,
-        itemName: preset?.itemName || '',
-        unit: preset?.unit || 'Box',
-        qtyOrdered: 10
+        'No Faktur': 'FKT/AKK/2026/11/001',
+        'Nama Pelanggan': `TK MAKMUR JAYA (${sampleArea})`,
+        'Item Barang': 'Karton Box Corrugated B-Flute 60x40x40 Polos',
+        Qty: 20,
+        Satuan: 'Ikat'
+      },
+      {
+        'No Faktur': 'FKT/AKK/2026/11/001',
+        'Nama Pelanggan': `TK MAKMUR JAYA (${sampleArea})`,
+        'Item Barang': 'Karton Box Duplex Cetak Custom 30x20x15',
+        Qty: 15,
+        Satuan: 'Box'
+      },
+      {
+        'No Faktur': 'FKT/AKK/2026/11/002',
+        'Nama Pelanggan': `UD SUMBER BERKAH (${sampleArea})`,
+        'Item Barang': 'Box Kemasan Roti & Kue Ivory 22x22x8',
+        Qty: 25,
+        Satuan: 'Bal'
       }
-    ]);
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateRows, {
+      header: ['No Faktur', 'Nama Pelanggan', 'Item Barang', 'Qty', 'Satuan']
+    });
+    ws['!cols'] = [
+      { wch: 24 },
+      { wch: 30 },
+      { wch: 44 },
+      { wch: 10 },
+      { wch: 12 }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template_Faktur');
+
+    const safeAreaSlug = (areaName || 'Area_Kirim').replace(/[^a-zA-Z0-9]+/g, '_');
+    if (format === 'csv') {
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Template_Import_Faktur_${safeAreaSlug}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      XLSX.writeFile(wb, `Template_Import_Faktur_${safeAreaSlug}.xlsx`);
+    }
+    showToast('Template Import Faktur (No Faktur, Nama Pelanggan, Item Barang, Qty, Satuan) berhasil diunduh.', 'info');
   };
 
-  const handleSelectCatalogPreset = (rowId: string, skuCode: string) => {
-    const found = MASTER_PACKAGING_CATALOG.find(c => c.skuCode === skuCode);
-    if (!found) return;
-    setDraftItems(prev =>
-      prev.map(r =>
-        r.id === rowId
-          ? { ...r, skuCode: found.skuCode, itemName: found.itemName, unit: found.unit }
-          : r
-      )
-    );
+  const handleFileUploadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!areaName.trim()) {
+      showToast('Pilih Nama Area Kirim terlebih dahulu sebelum mengunggah file faktur!', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const data = evt.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+
+        if (!rawJson || rawJson.length === 0) {
+          showToast('File kosong atau tidak memiliki baris data sesuai template.', 'error');
+          return;
+        }
+
+        const seqBase = String(invoices.length + 1).padStart(3, '0');
+        const defaultFaktur = `FKT/AKK/2026/11/${seqBase}`;
+
+        const parsedRows = rawJson
+          .map((row, idx) => {
+            const keys = Object.keys(row);
+            const findCol = (patterns: string[]) => {
+              const matchedKey = keys.find(k =>
+                patterns.some(p => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(p))
+              );
+              return matchedKey ? String(row[matchedKey] ?? '').trim() : '';
+            };
+
+            const noFakturVal =
+              findCol(['nofaktur', 'nomorfaktur', 'faktur', 'invoice', 'noso']) || defaultFaktur;
+            const namaPelangganVal =
+              findCol(['namapelanggan', 'pelanggan', 'customer', 'toko', 'outlet']) ||
+              `PELANGGAN ${areaName}`;
+            const noBarangVal =
+              findCol(['nomorbarang', 'nobarang', 'kodebarang', 'sku', 'kodesku']) || '';
+            const itemBarangVal =
+              findCol(['itembarang', 'keteranganbarang', 'namabarang', 'item', 'barang', 'produk', 'deskripsi']) || '';
+            const qtyRaw = findCol(['qty', 'jumlah', 'kuantitas', 'volume', 'order']);
+            const satuanRaw = findCol(['satuan', 'unit', 'kemasan', 'uom']) || '';
+
+            const qtyNum = Math.max(1, Number(String(qtyRaw).replace(/[^0-9.]/g, '')) || 0);
+            const matchedDb = databaseBarangService.findMatch(noBarangVal || itemBarangVal, itemBarangVal);
+            const matchedCatalog = MASTER_PACKAGING_CATALOG.find(
+              c => c.itemName.toLowerCase() === itemBarangVal.toLowerCase()
+            );
+
+            const resolvedNoBarang =
+              matchedDb?.noBarang ||
+              noBarangVal.toUpperCase() ||
+              matchedCatalog?.skuCode ||
+              `AKK-BRG-${String(idx + 1).padStart(3, '0')}`;
+            const resolvedKeterangan = matchedDb?.keteranganBarang || itemBarangVal;
+            const resolvedSatuan = normalizeUnit(satuanRaw || matchedDb?.satuan || 'Box');
+            const resolvedDocUrl =
+              matchedDb?.dokumentasiUrl ||
+              createDefaultBarangThumbnail(resolvedNoBarang, resolvedKeterangan, resolvedSatuan);
+            const resolvedSizeKb = matchedDb?.compressedSizeKb || estimateDataUrlSizeKb(resolvedDocUrl);
+
+            return {
+              id: `imp-${Date.now()}-${idx}`,
+              noFaktur: noFakturVal.toUpperCase(),
+              namaPelanggan: namaPelangganVal.toUpperCase(),
+              itemBarang: resolvedKeterangan,
+              qty: qtyNum > 0 ? qtyNum : 10,
+              satuan: resolvedSatuan,
+              skuCode: resolvedNoBarang,
+              dokumentasiUrl: resolvedDocUrl,
+              compressedSizeKb: resolvedSizeKb
+            };
+          })
+          .filter(r => r.itemBarang.trim().length > 0);
+
+        if (parsedRows.length === 0) {
+          showToast(
+            'Pastikan kolom file sesuai template: No Faktur, Nama Pelanggan, Item Barang, Qty, Satuan.',
+            'error'
+          );
+          return;
+        }
+
+        setUploadedFileName(file.name);
+        setReviewRows(parsedRows);
+        setHasReviewedFile(true);
+        showToast(
+          `File "${file.name}" berhasil dibaca (${parsedRows.length} baris item untuk area ${areaName}). Silakan periksa pada tabel Review File di bawah.`,
+          'success'
+        );
+      } catch {
+        showToast('Gagal membaca file. Gunakan format Excel (.xlsx / .xls) atau CSV sesuai template.', 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleLoadSampleImportForArea = () => {
+    if (!areaName.trim()) {
+      showToast('Pilih Nama Area Kirim terlebih dahulu pada Langkah 1!', 'error');
+      return;
+    }
+    const seq1 = String(invoices.length + 1).padStart(3, '0');
+    const seq2 = String(invoices.length + 2).padStart(3, '0');
+    const sampleRows: typeof reviewRows = [
+      {
+        id: `smp-${Date.now()}-1`,
+        noFaktur: `FKT/AKK/2026/11/${seq1}`,
+        namaPelanggan: `TK SINAR KEMASAN (${areaName})`,
+        itemBarang: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
+        qty: 25,
+        satuan: 'Ikat',
+        skuCode: 'RFID-KB-001'
+      },
+      {
+        id: `smp-${Date.now()}-2`,
+        noFaktur: `FKT/AKK/2026/11/${seq1}`,
+        namaPelanggan: `TK SINAR KEMASAN (${areaName})`,
+        itemBarang: 'Karton Box Duplex Cetak Custom 30x20x15',
+        qty: 15,
+        satuan: 'Box',
+        skuCode: 'RFID-KB-002'
+      },
+      {
+        id: `smp-${Date.now()}-3`,
+        noFaktur: `FKT/AKK/2026/11/${seq2}`,
+        namaPelanggan: `UD MITRA MANDIRI (${areaName})`,
+        itemBarang: 'Box Pizza E-Flute Kraft Coklat 25x25x5',
+        qty: 30,
+        satuan: 'Ikat',
+        skuCode: 'RFID-KB-004'
+      }
+    ];
+    setUploadedFileName(`Import_Faktur_${areaName.replace(/\s+/g, '_')}.xlsx`);
+    setReviewRows(sampleRows);
+    setHasReviewedFile(true);
+    showToast(`Data contoh file faktur untuk area ${areaName} siap di-review.`, 'info');
+  };
+
+  const handleAddReviewRow = () => {
+    if (!areaName.trim()) {
+      showToast('Pilih Nama Area Kirim terlebih dahulu!', 'error');
+      return;
+    }
+    const nextIdx = reviewRows.length;
+    const seq = String(invoices.length + 1).padStart(3, '0');
+    const lastRow = reviewRows[reviewRows.length - 1];
+    const dbPreset = dbBarangList[nextIdx % Math.max(1, dbBarangList.length)];
+    const fallbackPreset = MASTER_PACKAGING_CATALOG[nextIdx % MASTER_PACKAGING_CATALOG.length];
+    const resolvedNo = dbPreset?.noBarang || fallbackPreset?.skuCode || `AKK-BRG-00${nextIdx + 1}`;
+    const resolvedKet = dbPreset?.keteranganBarang || fallbackPreset?.itemName || '';
+    const resolvedSat = normalizeUnit(dbPreset?.satuan || fallbackPreset?.unit || 'Box');
+    const resolvedDoc =
+      dbPreset?.dokumentasiUrl || createDefaultBarangThumbnail(resolvedNo, resolvedKet, resolvedSat);
+
+    setReviewRows(prev => [
+      ...prev,
+      {
+        id: `rev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        noFaktur: lastRow?.noFaktur || invoiceNumber || `FKT/AKK/2026/11/${seq}`,
+        namaPelanggan: lastRow?.namaPelanggan || customerName || `TOKO PELANGGAN ${areaName}`,
+        itemBarang: resolvedKet,
+        qty: 10,
+        satuan: resolvedSat,
+        skuCode: resolvedNo,
+        dokumentasiUrl: resolvedDoc,
+        compressedSizeKb: dbPreset?.compressedSizeKb || estimateDataUrlSizeKb(resolvedDoc)
+      }
+    ]);
+    setHasReviewedFile(true);
+    if (!uploadedFileName) {
+      setUploadedFileName(`Input_Terstruktur_${areaName.replace(/\s+/g, '_')}.xlsx`);
+    }
   };
 
   const handleSaveInvoice = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceNumber.trim() || !customerName.trim()) {
-      showToast('Mohon lengkapi Nomor Faktur dan Nama Pelanggan/Toko.', 'error');
-      return;
-    }
-    const validItems = draftItems.filter(d => d.itemName.trim() && Number(d.qtyOrdered) > 0);
-    if (validItems.length === 0) {
-      showToast('Tambahkan minimal 1 item barang dengan jumlah > 0 pada Faktur/SO.', 'error');
+    if (!areaName.trim()) {
+      showToast('Mohon pilih Nama Area Kirim terlebih dahulu!', 'error');
       return;
     }
 
+    const validRows = reviewRows.filter(
+      r => r.noFaktur.trim() && r.namaPelanggan.trim() && r.itemBarang.trim() && Number(r.qty) > 0
+    );
+
+    if (validRows.length === 0) {
+      showToast(
+        'Belum ada data faktur yang valid pada Review File. Pastikan kolom No Faktur, Nama Pelanggan, Item Barang, Qty, dan Satuan terisi.',
+        'error'
+      );
+      return;
+    }
+
+    // Sinkronkan setiap item faktur ke Database Barang Gudang (Nomor Barang, Keterangan Barang, Satuan, Dokumentasi)
+    validRows.forEach((d, idx) => {
+      const code = d.skuCode.trim().toUpperCase() || `AKK-BRG-00${idx + 1}`;
+      databaseBarangService.upsertItem({
+        noBarang: code,
+        keteranganBarang: d.itemBarang.trim(),
+        satuan: d.satuan,
+        dokumentasiUrl: d.dokumentasiUrl,
+        compressedSizeKb: d.compressedSizeKb
+      });
+    });
+
     if (editingInvoiceId) {
+      const firstRow = validRows[0];
       saveInvoices(prev =>
         prev.map(inv => {
           if (inv.id !== editingInvoiceId) return inv;
-          const mergedItems: SalesOrderItem[] = validItems.map(d => {
+          const mergedItems: SalesOrderItem[] = validRows.map((d, idx) => {
             const existing = inv.items.find(old => old.id === d.id);
+            const matchedDb = databaseBarangService.findMatch(d.skuCode, d.itemBarang);
             return {
               id: d.id,
-              skuCode: d.skuCode.trim().toUpperCase(),
-              itemName: d.itemName.trim(),
-              unit: d.unit,
-              qtyOrdered: Number(d.qtyOrdered),
+              skuCode: d.skuCode.trim().toUpperCase() || matchedDb?.noBarang || `AKK-BRG-00${idx + 1}`,
+              itemName: d.itemBarang.trim(),
+              unit: d.satuan,
+              qtyOrdered: Number(d.qty),
               qtyLoaded: existing ? existing.qtyLoaded : 0,
-              scans: existing ? existing.scans : []
+              scans: existing ? existing.scans : [],
+              dokumentasiUrl: d.dokumentasiUrl || matchedDb?.dokumentasiUrl,
+              compressedSizeKb: d.compressedSizeKb || matchedDb?.compressedSizeKb
             };
           });
           return {
             ...inv,
-            invoiceNumber: invoiceNumber.trim().toUpperCase(),
-            soNumber: soNumber.trim().toUpperCase(),
+            invoiceNumber: firstRow.noFaktur.trim().toUpperCase(),
+            soNumber: soNumber.trim().toUpperCase() || inv.soNumber,
             date,
-            customerName: customerName.trim().toUpperCase(),
+            customerName: firstRow.namaPelanggan.trim().toUpperCase(),
             areaName,
             fleetLabel,
             adminPic,
@@ -560,31 +835,62 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
           };
         })
       );
-      showToast(`Faktur ${invoiceNumber} berhasil diperbarui & tersinkron ke Aplikasi RFID!`, 'success');
+      showToast(`Faktur ${firstRow.noFaktur} (Area ${areaName}) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi RFID!`, 'success');
     } else {
-      const newInv: SalesOrderInvoice = {
-        id: `inv-${Date.now()}`,
-        invoiceNumber: invoiceNumber.trim().toUpperCase(),
-        soNumber: soNumber.trim().toUpperCase() || `SO-${Date.now().toString().slice(-5)}`,
+      // Kelompokkan baris hasil import berdasarkan No Faktur + Nama Pelanggan
+      const groupedMap = new Map<
+        string,
+        {
+          noFaktur: string;
+          namaPelanggan: string;
+          rows: typeof validRows;
+        }
+      >();
+
+      validRows.forEach(r => {
+        const key = `${r.noFaktur.trim().toUpperCase()}__${r.namaPelanggan.trim().toUpperCase()}`;
+        if (!groupedMap.has(key)) {
+          groupedMap.set(key, {
+            noFaktur: r.noFaktur.trim().toUpperCase(),
+            namaPelanggan: r.namaPelanggan.trim().toUpperCase(),
+            rows: []
+          });
+        }
+        groupedMap.get(key)!.rows.push(r);
+      });
+
+      const createdInvoices: SalesOrderInvoice[] = Array.from(groupedMap.values()).map((grp, grpIdx) => ({
+        id: `inv-${Date.now()}-${grpIdx}`,
+        invoiceNumber: grp.noFaktur,
+        soNumber: `SO-${areaName.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase()}-${String(invoices.length + grpIdx + 1).padStart(4, '0')}`,
         date,
-        customerName: customerName.trim().toUpperCase(),
+        customerName: grp.namaPelanggan,
         areaName,
         fleetLabel,
         adminPic,
         isLoadingFinished: false,
-        notes: notes.trim(),
-        items: validItems.map((d, i) => ({
-          id: `itm-${Date.now()}-${i}`,
-          skuCode: d.skuCode.trim().toUpperCase() || `RFID-00${i + 1}`,
-          itemName: d.itemName.trim(),
-          unit: d.unit,
-          qtyOrdered: Number(d.qtyOrdered),
-          qtyLoaded: 0,
-          scans: []
-        }))
-      };
-      saveInvoices(prev => [newInv, ...prev]);
-      showToast(`Faktur ${newInv.invoiceNumber} berhasil dibuat! Silakan lanjutkan foto barang di Aplikasi Scan RFID.`, 'success');
+        notes: notes.trim() || (uploadedFileName ? `Diimpor dari file: ${uploadedFileName}` : ''),
+        items: grp.rows.map((d, i) => {
+          const matchedDb = databaseBarangService.findMatch(d.skuCode, d.itemBarang);
+          return {
+            id: `itm-${Date.now()}-${grpIdx}-${i}`,
+            skuCode: d.skuCode.trim().toUpperCase() || matchedDb?.noBarang || `AKK-BRG-00${i + 1}`,
+            itemName: d.itemBarang.trim(),
+            unit: d.satuan,
+            qtyOrdered: Number(d.qty),
+            qtyLoaded: 0,
+            scans: [],
+            dokumentasiUrl: d.dokumentasiUrl || matchedDb?.dokumentasiUrl,
+            compressedSizeKb: d.compressedSizeKb || matchedDb?.compressedSizeKb
+          };
+        })
+      }));
+
+      saveInvoices(prev => [...createdInvoices, ...prev]);
+      showToast(
+        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Area ${areaName} berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan RFID!`,
+        'success'
+      );
     }
 
     setIsModalOpen(false);
@@ -658,8 +964,8 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               onClick={openCreateModal}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              <span>+ Input Faktur / Sales Order Baru</span>
+              <Upload className="w-4 h-4" />
+              <span>+ Import File Faktur / Sales Order Baru</span>
             </button>
             <button
               type="button"
@@ -958,261 +1264,548 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         )}
       </div>
 
-      {/* Modal Input / Edit Faktur & Sales Order */}
+      {/* Modal Import & Review File Faktur / Sales Order (Pilih Area -> Upload File -> Review File) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs overflow-y-auto flex items-start justify-center p-3 sm:p-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl my-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {editingInvoiceId ? 'Edit Faktur / Sales Order (SO)' : 'Input Faktur / Sales Order (SO) Muat Armada Baru'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Rincian item barang ini akan menjadi acuan verifikasi foto &amp; deteksi barang sisa/lebih muat pada Aplikasi RFID.
-                </p>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full p-5 sm:p-6 shadow-2xl my-auto">
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                      {editingInvoiceId
+                        ? `Edit & Review Faktur (${invoiceNumber})`
+                        : 'Import File Faktur / Sales Order (SO) Muat Armada Baru'}
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30">
+                      Pilih Area &rarr; Upload File &rarr; Review File
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Pilih <strong>Nama Area Kirim</strong> terlebih dahulu, lalu unggah file faktur sesuai template (<strong>No Faktur, Nama Pelanggan, Item Barang, Qty, Satuan</strong>) dan lakukan review sebelum disimpan.
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleSaveInvoice} className="space-y-4 mt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Nomor Faktur *</label>
-                  <input
-                    type="text"
-                    required
-                    value={invoiceNumber}
-                    onChange={e => setInvoiceNumber(e.target.value)}
-                    placeholder="FKT/AKK/2026/11/003"
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Nomor Sales Order (SO) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={soNumber}
-                    onChange={e => setSoNumber(e.target.value)}
-                    placeholder="SO-BWI-261103"
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Tanggal Muat *</label>
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={e => setDate(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Nama Toko / Pelanggan *</label>
-                  <input
-                    type="text"
-                    required
-                    value={customerName}
-                    onChange={e => setCustomerName(e.target.value)}
-                    placeholder="cth. TK USAHA JAYA GENTENG"
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Area Kirim *</label>
-                  <select
-                    value={areaName}
-                    onChange={e => setAreaName(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
-                  >
-                    {OFFICIAL_DESTINATION_AREAS.map(ar => (
-                      <option key={ar} value={ar}>{ar}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Armada Box Tujuan *</label>
-                  <select
-                    value={fleetLabel}
-                    onChange={e => setFleetLabel(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
-                  >
-                    {fleetOptions.map(fl => (
-                      <option key={fl} value={fl}>{fl}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Admin Penjualan PIC *</label>
-                  <select
-                    value={adminPic}
-                    onChange={e => setAdminPic(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
-                  >
-                    {adminNames.map(adm => (
-                      <option key={adm} value={adm}>{adm}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Dynamic Item List */}
-              <div className="pt-2">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold uppercase text-slate-700 dark:text-slate-300">
-                    Daftar Item Barang pada Faktur / Sales Order ({draftItems.length} Item)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleAddDraftItem}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Tambah Baris Barang</span>
-                  </button>
+              {/* ================================================================= */}
+              {/* LANGKAH 1: PILIH NAMA AREA KIRIM TERLEBIH DAHULU                   */}
+              {/* ================================================================= */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white text-xs font-black flex items-center justify-center">
+                      1
+                    </span>
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Langkah 1: Pilih Nama Area Kirim &amp; Armada Tujuan Terlebih Dahulu
+                    </span>
+                  </div>
+                  {areaName ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Area Terpilih: {areaName}</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Wajib Pilih Nama Area Kirim Sebelum Upload File</span>
+                    </span>
+                  )}
                 </div>
 
-                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                  {draftItems.map((row, idx) => (
-                    <div
-                      key={row.id}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700"
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-indigo-600 dark:text-indigo-400 mb-1">
+                      1. Pilih Nama Area Kirim *
+                    </label>
+                    <select
+                      required
+                      value={areaName}
+                      onChange={e => setAreaName(e.target.value)}
+                      className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-bold cursor-pointer focus:outline-none ${
+                        areaName
+                          ? 'bg-white dark:bg-slate-900 border-emerald-500/60 text-slate-900 dark:text-white ring-2 ring-emerald-500/10'
+                          : 'bg-white dark:bg-slate-900 border-indigo-500/60 text-slate-900 dark:text-white ring-2 ring-indigo-500/15'
+                      }`}
                     >
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={row.skuCode}
-                          onChange={e =>
-                            setDraftItems(prev =>
-                              prev.map(r => (r.id === row.id ? { ...r, skuCode: e.target.value } : r))
-                            )
-                          }
-                          placeholder="Kode RFID/SKU"
-                          className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold"
-                        />
-                      </div>
+                      <option value="">-- Pilih Nama Area Kirim --</option>
+                      {OFFICIAL_DESTINATION_AREAS.map(ar => (
+                        <option key={ar} value={ar}>
+                          {ar}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                      <div className="sm:col-span-6 space-y-1">
-                        <input
-                          type="text"
-                          required
-                          value={row.itemName}
-                          onChange={e =>
-                            setDraftItems(prev =>
-                              prev.map(r => (r.id === row.id ? { ...r, itemName: e.target.value } : r))
-                            )
-                          }
-                          placeholder={`Nama Barang Kemasan ke-${idx + 1}...`}
-                          className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold"
-                        />
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">Pilih Cepat SKU:</span>
-                          <select
-                            value=""
-                            onChange={e => handleSelectCatalogPreset(row.id, e.target.value)}
-                            className="text-[10px] bg-transparent text-indigo-600 dark:text-indigo-400 font-semibold focus:outline-none cursor-pointer"
-                          >
-                            <option value="">-- Katalog Kemasan AKK --</option>
-                            {MASTER_PACKAGING_CATALOG.map(c => (
-                              <option key={c.skuCode} value={c.skuCode}>
-                                {c.skuCode} - {c.itemName} ({c.unit})
-                              </option>
-                            ))}
-                          </select>
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Armada Box Tujuan *
+                    </label>
+                    <select
+                      value={fleetLabel}
+                      onChange={e => setFleetLabel(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      {fleetOptions.map(fl => (
+                        <option key={fl} value={fl}>
+                          {fl}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Tanggal Muat *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={date}
+                      onChange={e => setDate(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Admin Penjualan PIC *
+                    </label>
+                    <select
+                      value={adminPic}
+                      onChange={e => setAdminPic(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      {adminNames.map(adm => (
+                        <option key={adm} value={adm}>
+                          {adm}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* ================================================================= */}
+              {/* LANGKAH 2: FORMAT TEMPLATE & UPLOAD FILE FAKTUR                    */}
+              {/* ================================================================= */}
+              <div
+                className={`p-4 rounded-2xl border space-y-3 transition ${
+                  areaName
+                    ? 'bg-slate-50 dark:bg-slate-950/70 border-slate-200 dark:border-slate-800'
+                    : 'bg-slate-100/70 dark:bg-slate-950/40 border-slate-200/70 dark:border-slate-800/60 opacity-85'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center ${
+                        areaName ? 'bg-indigo-600 text-white' : 'bg-slate-300 dark:bg-slate-800 text-slate-500'
+                      }`}
+                    >
+                      2
+                    </span>
+                    <div>
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white block">
+                        Langkah 2: Template &amp; Upload File Faktur (.xlsx / .xls / .csv)
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Kolom wajib pada file: <strong>No Faktur</strong>, <strong>Nama Pelanggan</strong>, <strong>Item Barang</strong>, <strong>Qty</strong>, <strong>Satuan</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Download Template Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplateExcel('xlsx')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold shadow-2xs transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Template (.xlsx)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplateExcel('csv')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Template (.csv)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Visual Template Column Preview */}
+                <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                  <div className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    <span>Format Kolom Standar Template Import Faktur</span>
+                    <span>5 Kolom Wajib</span>
+                  </div>
+                  <div className="grid grid-cols-5 divide-x divide-slate-200 dark:divide-slate-800 text-[11px] text-center font-bold bg-slate-50/70 dark:bg-slate-950/60">
+                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">1. No Faktur</div>
+                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">2. Nama Pelanggan</div>
+                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">3. Item Barang</div>
+                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">4. Qty</div>
+                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">5. Satuan</div>
+                  </div>
+                </div>
+
+                {/* File Upload Dropzone */}
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFileUploadChange}
+                  className="hidden"
+                />
+
+                {!areaName ? (
+                  <div className="p-4 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 flex items-center justify-center gap-2.5 text-xs text-amber-600 dark:text-amber-300 font-bold">
+                    <Lock className="w-4 h-4 shrink-0" />
+                    <span>
+                      Silakan pilih <strong>Nama Area Kirim</strong> pada Langkah 1 di atas terlebih dahulu untuk membuka fitur Upload File Faktur.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-xl border-2 border-dashed border-indigo-500/40 bg-indigo-500/5">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {uploadedFileName
+                            ? `File Terunggah: ${uploadedFileName}`
+                            : `Upload File Faktur untuk Area ${areaName}`}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Mendukung file Excel (.xlsx, .xls) atau CSV (.csv) sesuai template 5 kolom di atas
                         </div>
                       </div>
-
-                      <div className="sm:col-span-2">
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={row.qtyOrdered}
-                          onChange={e =>
-                            setDraftItems(prev =>
-                              prev.map(r =>
-                                r.id === row.id ? { ...r, qtyOrdered: Math.max(1, Number(e.target.value)) } : r
-                              )
-                            )
-                          }
-                          className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-center"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-1">
-                        <select
-                          value={row.unit}
-                          onChange={e =>
-                            setDraftItems(prev =>
-                              prev.map(r =>
-                                r.id === row.id
-                                  ? { ...r, unit: e.target.value as SalesOrderItem['unit'] }
-                                  : r
-                              )
-                            )
-                          }
-                          className="w-full px-1.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold"
-                        >
-                          <option value="Box">Box</option>
-                          <option value="Ikat">Ikat</option>
-                          <option value="Bal">Bal</option>
-                          <option value="Pack">Pack</option>
-                          <option value="Roll">Roll</option>
-                          <option value="Pcs">Pcs</option>
-                        </select>
-                      </div>
-
-                      <div className="sm:col-span-1 flex justify-end">
-                        {draftItems.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setDraftItems(prev => prev.filter(r => r.id !== row.id))}
-                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
                     </div>
-                  ))}
+
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => importFileInputRef.current?.click()}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{uploadedFileName ? 'Ganti / Upload Ulang File' : 'Pilih & Upload File Faktur'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLoadSampleImportForArea}
+                        className="px-3 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer transition"
+                      >
+                        Muat Contoh File Area Ini
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ================================================================= */}
+              {/* LANGKAH 3: REVIEW FILE FAKTUR SEBELUM DISIMPAN                     */}
+              {/* ================================================================= */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center ${
+                        reviewRows.length > 0
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-300 dark:bg-slate-800 text-slate-500'
+                      }`}
+                    >
+                      3
+                    </span>
+                    <div>
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white block">
+                        Langkah 3: Review File Faktur ({reviewRows.length} Baris Item)
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Periksa kembali <strong>No Faktur, Nama Pelanggan, Item Barang, Qty, dan Satuan</strong> sebelum disimpan ke Aplikasi RFID
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {reviewRows.length > 0 && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold">
+                        <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25">
+                          {new Set(reviewRows.map(r => r.noFaktur.trim().toUpperCase())).size} No Faktur
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25">
+                          Total Qty: {reviewRows.reduce((acc, r) => acc + (Number(r.qty) || 0), 0)} Kemasan
+                        </span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleAddReviewRow}
+                      disabled={!areaName}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-40 disabled:pointer-events-none text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 text-xs font-bold cursor-pointer transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Baris Review</span>
+                    </button>
+                  </div>
                 </div>
+
+                {!hasReviewedFile && reviewRows.length === 0 ? (
+                  <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-1.5">
+                    <FileSpreadsheet className="w-7 h-7 text-slate-400 mx-auto" />
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Belum Ada File Faktur yang Diunggah untuk Di-Review
+                    </div>
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                      Pilih <strong>Nama Area Kirim</strong> di Langkah 1, lalu klik <strong>Pilih &amp; Upload File Faktur</strong> (atau klik <em>Muat Contoh File Area Ini</em>) di Langkah 2 untuk menampilkan tabel review di sini.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                    <div className="overflow-x-auto max-h-72">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-100 dark:bg-slate-950 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10">
+                          <tr>
+                            <th className="py-2.5 px-2.5 w-8 text-center">#</th>
+                            <th className="py-2.5 px-2.5">No Faktur *</th>
+                            <th className="py-2.5 px-2.5">Nama Pelanggan *</th>
+                            <th className="py-2.5 px-2.5">Item Barang (Terintegrasi Database Barang) *</th>
+                            <th className="py-2.5 px-2.5 w-20 text-center">Qty *</th>
+                            <th className="py-2.5 px-2.5 w-24">Satuan *</th>
+                            <th className="py-2.5 px-2.5 w-28">Dokumentasi</th>
+                            <th className="py-2.5 px-2.5 w-10 text-center">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                          {reviewRows.map((row, idx) => {
+                            const matchedDb =
+                              dbBarangList.find(
+                                d =>
+                                  d.noBarang.toLowerCase() === row.skuCode.toLowerCase() ||
+                                  d.keteranganBarang.toLowerCase() === row.itemBarang.toLowerCase()
+                              ) || databaseBarangService.findMatch(row.skuCode, row.itemBarang);
+                            const docUrl =
+                              row.dokumentasiUrl ||
+                              matchedDb?.dokumentasiUrl ||
+                              createDefaultBarangThumbnail(row.skuCode, row.itemBarang, row.satuan);
+                            const docKb =
+                              row.compressedSizeKb ||
+                              matchedDb?.compressedSizeKb ||
+                              estimateDataUrlSizeKb(docUrl);
+
+                            return (
+                              <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                                <td className="py-2 px-2.5 text-center font-mono font-bold text-slate-400">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-2 px-2.5">
+                                  <input
+                                    type="text"
+                                    required
+                                    value={row.noFaktur}
+                                    onChange={e =>
+                                      setReviewRows(prev =>
+                                        prev.map(r => (r.id === row.id ? { ...r, noFaktur: e.target.value } : r))
+                                      )
+                                    }
+                                    placeholder="FKT/AKK/..."
+                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                                  />
+                                </td>
+                                <td className="py-2 px-2.5">
+                                  <input
+                                    type="text"
+                                    required
+                                    value={row.namaPelanggan}
+                                    onChange={e =>
+                                      setReviewRows(prev =>
+                                        prev.map(r => (r.id === row.id ? { ...r, namaPelanggan: e.target.value } : r))
+                                      )
+                                    }
+                                    placeholder="Nama Pelanggan / Toko"
+                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                                  />
+                                </td>
+                                <td className="py-2 px-2.5 space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[10px] shrink-0">
+                                      {row.skuCode}
+                                    </span>
+                                    <select
+                                      value=""
+                                      onChange={e => {
+                                        const picked = dbBarangList.find(d => d.id === e.target.value);
+                                        if (!picked) return;
+                                        setReviewRows(prev =>
+                                          prev.map(r =>
+                                            r.id === row.id
+                                              ? {
+                                                  ...r,
+                                                  skuCode: picked.noBarang,
+                                                  itemBarang: picked.keteranganBarang,
+                                                  satuan: normalizeUnit(picked.satuan),
+                                                  dokumentasiUrl: picked.dokumentasiUrl,
+                                                  compressedSizeKb: picked.compressedSizeKb
+                                                }
+                                              : r
+                                          )
+                                        );
+                                      }}
+                                      className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 cursor-pointer max-w-[170px] truncate"
+                                      title="Pilih dari Database Barang Gudang"
+                                    >
+                                      <option value="">Pilih dari Database Barang...</option>
+                                      {dbBarangList.map(dbItem => (
+                                        <option key={dbItem.id} value={dbItem.id}>
+                                          [{dbItem.noBarang}] {dbItem.keteranganBarang} ({dbItem.satuan})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    required
+                                    value={row.itemBarang}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      const match = databaseBarangService.findMatch(val, val);
+                                      setReviewRows(prev =>
+                                        prev.map(r =>
+                                          r.id === row.id
+                                            ? {
+                                                ...r,
+                                                itemBarang: val,
+                                                skuCode: match?.noBarang || r.skuCode,
+                                                satuan: match ? normalizeUnit(match.satuan) : r.satuan,
+                                                dokumentasiUrl: match?.dokumentasiUrl || r.dokumentasiUrl,
+                                                compressedSizeKb: match?.compressedSizeKb || r.compressedSizeKb
+                                              }
+                                            : r
+                                        )
+                                      );
+                                    }}
+                                    placeholder="Keterangan Barang / Item Barang..."
+                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                                  />
+                                </td>
+                                <td className="py-2 px-2.5">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    required
+                                    value={row.qty}
+                                    onChange={e =>
+                                      setReviewRows(prev =>
+                                        prev.map(r =>
+                                          r.id === row.id ? { ...r, qty: Math.max(1, Number(e.target.value)) } : r
+                                        )
+                                      )
+                                    }
+                                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-center text-slate-900 dark:text-white"
+                                  />
+                                </td>
+                                <td className="py-2 px-2.5">
+                                  <select
+                                    value={row.satuan}
+                                    onChange={e =>
+                                      setReviewRows(prev =>
+                                        prev.map(r =>
+                                          r.id === row.id
+                                            ? { ...r, satuan: e.target.value as SalesOrderItem['unit'] }
+                                            : r
+                                        )
+                                      )
+                                    }
+                                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                                  >
+                                    <option value="Box">Box</option>
+                                    <option value="Ikat">Ikat</option>
+                                    <option value="Bal">Bal</option>
+                                    <option value="Pack">Pack</option>
+                                    <option value="Roll">Roll</option>
+                                    <option value="Pcs">Pcs</option>
+                                  </select>
+                                </td>
+                                <td className="py-2 px-2.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <img
+                                      src={docUrl}
+                                      alt={row.itemBarang}
+                                      className="w-10 h-7 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                                    />
+                                    <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                      {docKb} KB
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setReviewRows(prev => prev.filter(r => r.id !== row.id))}
+                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                    title="Hapus Baris"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Catatan Pengeluaran Barang / Instruksi Muat</label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  placeholder="cth. Susun barang sesuai urutan bongkar toko..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                />
-              </div>
+              <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex-wrap">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {areaName ? (
+                    <span>
+                      Target Area Kirim: <strong className="text-slate-900 dark:text-white">{areaName}</strong> •{' '}
+                      <strong>{reviewRows.length}</strong> baris item siap disinkronkan
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                      * Pilih Nama Area Kirim pada Langkah 1 terlebih dahulu
+                    </span>
+                  )}
+                </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm cursor-pointer"
-                >
-                  Simpan Faktur &amp; Sinkronkan ke Aplikasi RFID
-                </button>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!areaName || reviewRows.length === 0}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-sm cursor-pointer transition"
+                  >
+                    {editingInvoiceId
+                      ? 'Simpan Perubahan & Sinkronkan ke Aplikasi RFID'
+                      : 'Simpan Hasil Review & Sinkronkan ke Aplikasi RFID'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

@@ -93,6 +93,7 @@ import { DriverVehicleChecklistModal } from './DriverVehicleChecklistModal';
 import { DriverCheckinModal } from './DriverCheckinModal';
 import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareModal';
+import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../utils/areaNormalizer';
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -2365,6 +2366,102 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     standbySyncTick
   ]);
 
+  // Daftar Rute Area Kirim yang tersedia untuk dipilih kru Free / Stand By (Hari Ini + Jadwal Terdaftar + 37 Area Resmi)
+  const standbyAvailableRouteOptions = useMemo(() => {
+    const list: Array<{
+      value: string;
+      scheduleId?: string;
+      label: string;
+      group: 'hari_ini' | 'terjadwal' | 'area_resmi';
+      areaName: string;
+      driverName: string;
+      helperName: string;
+      armadaName: string;
+    }> = [];
+
+    const seenAreaKeys = new Set<string>();
+
+    // 1. Jadwal hari ini (daySchedules dari standbyPortalInfo)
+    standbyPortalInfo.daySchedules.forEach((sch, sIdx) => {
+      const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
+      const drv = sch.crew?.name || '-';
+      const hlp = sch.crewHelper?.name || '-';
+      const arm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      seenAreaKeys.add(area.toUpperCase().trim());
+      list.push({
+        value: sch.id,
+        scheduleId: sch.id,
+        label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv}${hlp !== '-' ? ` • Helper: ${hlp}` : ''}`,
+        group: 'hari_ini',
+        areaName: area,
+        driverName: drv,
+        helperName: hlp,
+        armadaName: arm
+      });
+    });
+
+    // 2. Jadwal snapshot hari ini jika ada yang belum masuk di list
+    standbyPortalInfo.scheduledTrips.forEach((snap, sIdx) => {
+      const area = snap.area || 'Area Kirim';
+      const drv = snap.driver || '-';
+      const hlp = snap.helper || '-';
+      const arm = snap.armada || '-';
+      if (!list.some(item => item.areaName.toLowerCase() === area.toLowerCase())) {
+        seenAreaKeys.add(area.toUpperCase().trim());
+        list.push({
+          value: snap.id || `snap-trip-${sIdx}`,
+          scheduleId: snap.id,
+          label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv}${hlp !== '-' ? ` • Helper: ${hlp}` : ''}`,
+          group: 'hari_ini',
+          areaName: area,
+          driverName: drv,
+          helperName: hlp,
+          armadaName: arm
+        });
+      }
+    });
+
+    // 3. Jadwal lain di store yang berstatus scheduled / in_transit di sistem
+    const allStoreSchedules = logisticsStore.getSchedules();
+    allStoreSchedules.forEach(sch => {
+      if (list.some(item => item.scheduleId === sch.id || item.value === sch.id)) return;
+      const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
+      const drv = sch.crew?.name || '-';
+      const hlp = sch.crewHelper?.name || '-';
+      const arm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      const depDate = (sch.departureDate || '').slice(0, 10);
+      seenAreaKeys.add(area.toUpperCase().trim());
+      list.push({
+        value: sch.id,
+        scheduleId: sch.id,
+        label: `📅 ${area} (${depDate || 'Jadwal'}) (${arm}) — Driver: ${drv}`,
+        group: 'terjadwal',
+        areaName: area,
+        driverName: drv,
+        helperName: hlp,
+        armadaName: arm
+      });
+    });
+
+    // 4. Semua 37 area resmi (OFFICIAL_DESTINATION_AREAS) agar dropdown selalu lengkap dan dapat dipilih
+    OFFICIAL_DESTINATION_AREAS.forEach(areaName => {
+      const areaUpper = areaName.toUpperCase().trim();
+      if (seenAreaKeys.has(areaUpper)) return;
+      seenAreaKeys.add(areaUpper);
+      list.push({
+        value: `area:${areaName}`,
+        label: `🚚 ${areaName} (Rute Resmi AKK)`,
+        group: 'area_resmi',
+        areaName: areaName,
+        driverName: 'Driver Reguler',
+        helperName: '-',
+        armadaName: 'Armada Box'
+      });
+    });
+
+    return list;
+  }, [standbyPortalInfo.daySchedules, standbyPortalInfo.scheduledTrips, deliveries]);
+
   // Handler di Portal Driver untuk Kru Free / Stand By menggantikan kru kiriman area lain yang berhalangan hadir pada Hari H
   const handleConfirmStandbyReplaceFromPortal = () => {
     const standbyName =
@@ -2375,13 +2472,41 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     if (!standbyName) return;
 
-    const allSchedules = logisticsStore.getSchedules();
-    const targetSch =
-      allSchedules.find(s => s.id === standbyReplaceForm.targetScheduleId) ||
-      standbyPortalInfo.daySchedules.find(s => s.id === standbyReplaceForm.targetScheduleId) ||
-      standbyPortalInfo.daySchedules[0] ||
-      allSchedules[0];
+    const chosenOption = standbyAvailableRouteOptions.find(
+      opt => opt.value === standbyReplaceForm.targetScheduleId
+    ) || (standbyReplaceForm.targetScheduleId ? {
+      value: standbyReplaceForm.targetScheduleId,
+      scheduleId: standbyReplaceForm.targetScheduleId.startsWith('area:') ? undefined : standbyReplaceForm.targetScheduleId,
+      areaName: standbyReplaceForm.targetScheduleId.replace(/^area:/, ''),
+      driverName: 'Driver Reguler',
+      helperName: '-',
+      armadaName: 'Armada Box',
+      group: 'area_resmi' as const,
+      label: standbyReplaceForm.targetScheduleId
+    } : standbyAvailableRouteOptions[0]);
 
+    if (!chosenOption) return;
+
+    const nowLocal = new Date();
+    const todayLocalIso = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const targetIso = dateFilterStart || todayLocalIso;
+
+    const allSchedules = logisticsStore.getSchedules();
+    let targetSch = chosenOption.scheduleId
+      ? allSchedules.find(s => s.id === chosenOption.scheduleId)
+      : undefined;
+
+    // Jika belum ada Schedule object untuk area ini pada hari ini, cari di store
+    if (!targetSch) {
+      targetSch = allSchedules.find(s => {
+        const sArea = (s.areaName || s.store?.storeName || '').toLowerCase();
+        const oArea = chosenOption.areaName.toLowerCase();
+        const sDate = (s.departureDate || '').slice(0, 10);
+        return sArea === oArea && sDate === targetIso;
+      });
+    }
+
+    const allFleets = logisticsStore.getFleets();
     const allCrews = logisticsStore.getCrews();
     const matchedCrewObj = allCrews.find(
       c => c.name.toLowerCase().includes(standbyName.toLowerCase()) || standbyName.toLowerCase().includes(c.name.toLowerCase())
@@ -2397,8 +2522,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       rating: 4.8
     };
 
-    let previousCrewName = '-';
-    let targetAreaLabel = 'Area Kirim';
     const posLabel =
       standbyReplaceForm.replacePosition === 'driver'
         ? 'Driver'
@@ -2406,22 +2529,54 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         ? 'Helper 1'
         : 'Helper 2';
 
+    // Jika jadwal belum ada di store (misal memilih dari Area Resmi yang belum terjadwal hari ini), buat schedule baru otomatis
+    if (!targetSch) {
+      const defaultFleet = allFleets[0];
+      const defaultDriver = allCrews.find(c => !c.role.toLowerCase().includes('helper')) || allCrews[0];
+      const defaultHelper = allCrews.find(c => c.role.toLowerCase().includes('helper'));
+      const newId = `SCH-REP-${targetIso}-${Date.now().toString().slice(-4)}`;
+
+      targetSch = {
+        id: newId,
+        trackingNumber: `PO-AKK-${targetIso.replace(/-/g, '')}-${defaultFleet?.initialCode || 'DS1'}-STB`,
+        areaName: chosenOption.areaName,
+        fleetId: defaultFleet?.id || 'flt-01',
+        fleet: defaultFleet,
+        crewId: defaultDriver?.id || 'crw-01',
+        crew: defaultDriver,
+        crewHelperId: defaultHelper?.id,
+        crewHelper: defaultHelper,
+        departureDate: `${targetIso}T07:30:00+07:00`,
+        returnDate: `${targetIso}T16:00:00+07:00`,
+        status: 'scheduled',
+        originName: 'Gudang Pusat AKK Banyuwangi DC',
+        cargoDescription: `Karton Box & Sheet Kemasan - Area ${chosenOption.areaName}`,
+        notes: `Jadwal Penggantian Area ${chosenOption.areaName}`,
+        createdAt: new Date().toISOString(),
+        isManuallyEdited: true
+      } as Schedule;
+      logisticsStore.addSchedule(targetSch);
+    }
+
+    let previousCrewName = '-';
+    let targetAreaLabel = chosenOption.areaName;
+
     if (targetSch) {
-      targetAreaLabel = targetSch.areaName || targetSch.store?.storeName || 'Area Kirim';
+      targetAreaLabel = targetSch.areaName || targetSch.store?.storeName || chosenOption.areaName;
       previousCrewName =
         standbyReplaceForm.replacePosition === 'driver'
-          ? (targetSch.crew?.name || '-')
+          ? (targetSch.crew?.name || chosenOption.driverName || 'Driver Reguler')
           : standbyReplaceForm.replacePosition === 'helper'
-          ? (targetSch.crewHelper?.name || '-')
-          : (targetSch.crewHelper2?.name || '-');
+          ? (targetSch.crewHelper?.name || chosenOption.helperName || 'Helper 1')
+          : (targetSch.crewHelper2?.name || 'Helper 2');
 
       // Hapus jadwal lain di hari yang sama yang sebelumnya di-backup oleh kru yang sama (jika kru mengubah pilihan rute)
       allSchedules.forEach(s => {
         if (
-          s.id !== targetSch.id &&
+          s.id !== targetSch!.id &&
           s.backupCrewName &&
           s.backupCrewName.toLowerCase() === matchedCrewObj.name.toLowerCase() &&
-          (s.departureDate || '').slice(0, 10) === (targetSch.departureDate || '').slice(0, 10)
+          (s.departureDate || '').slice(0, 10) === targetIso
         ) {
           logisticsStore.updateSchedule(s.id, {
             backupCrewId: undefined,
@@ -2442,7 +2597,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         isManuallyEdited: true
       };
 
-      if (allSchedules.some(s => s.id === targetSch.id)) {
+      if (allSchedules.some(s => s.id === targetSch!.id)) {
         logisticsStore.updateSchedule(targetSch.id, patch);
       } else {
         logisticsStore.addSchedule({
@@ -4342,25 +4497,49 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             Pilih Rute Area Kirim (Menggantikan Orang Lain)
                           </label>
                           <select
-                            value={standbyReplaceForm.targetScheduleId || standbyPortalInfo.daySchedules[0]?.id || ''}
+                            value={standbyReplaceForm.targetScheduleId || standbyAvailableRouteOptions[0]?.value || ''}
                             onChange={(e) =>
                               setStandbyReplaceForm(prev => ({ ...prev, targetScheduleId: e.target.value }))
                             }
-                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
+                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 shadow-xs cursor-pointer"
                           >
-                            {standbyPortalInfo.daySchedules.map((sch, sIdx) => {
-                              const targetPerson =
-                                standbyReplaceForm.replacePosition === 'driver'
-                                  ? sch.crew?.name || '-'
-                                  : standbyReplaceForm.replacePosition === 'helper'
-                                  ? sch.crewHelper?.name || '-'
-                                  : sch.crewHelper2?.name || '-';
-                              return (
-                                <option key={sch.id} value={sch.id}>
-                                  #{sIdx + 1} {sch.areaName || sch.store?.storeName} — ({targetPerson})
-                                </option>
-                              );
-                            })}
+                            {standbyAvailableRouteOptions.length === 0 ? (
+                              <option value="" disabled>-- Memuat Daftar Rute Area Kirim... --</option>
+                            ) : (
+                              <>
+                                {standbyAvailableRouteOptions.some(o => o.group === 'hari_ini') && (
+                                  <optgroup label="📍 Rute Kiriman Hari Ini (Terjadwal)">
+                                    {standbyAvailableRouteOptions
+                                      .filter(o => o.group === 'hari_ini')
+                                      .map(opt => (
+                                        <option key={opt.value} value={opt.value}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                )}
+                                {standbyAvailableRouteOptions.some(o => o.group === 'terjadwal') && (
+                                  <optgroup label="📅 Rute Terjadwal di Sistem">
+                                    {standbyAvailableRouteOptions
+                                      .filter(o => o.group === 'terjadwal')
+                                      .map(opt => (
+                                        <option key={opt.value} value={opt.value}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                )}
+                                <optgroup label="🚚 Semua Rute Area Pengiriman Resmi PT AKK">
+                                  {standbyAvailableRouteOptions
+                                    .filter(o => o.group === 'area_resmi')
+                                    .map(opt => (
+                                      <option key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                      </option>
+                                    ))}
+                                </optgroup>
+                              </>
+                            )}
                           </select>
                         </div>
                       </div>

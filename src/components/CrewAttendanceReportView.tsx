@@ -18,7 +18,9 @@ import {
   Check,
   MapPin,
   ShieldCheck,
-  Trash2
+  Trash2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { logisticsStore } from '../services/store';
@@ -336,6 +338,29 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       return a.areaName.localeCompare(b.areaName);
     });
   }, [filteredAttendance, schedules, fleets]);
+
+  // Pagination (Paging) State untuk Daftar Area Jadwal Kirim agar tidak memanjang ke bawah terus
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [groupsPerPage, setGroupsPerPage] = useState<number>(2);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, dateFilterMode, selectedDate, selectedAreaFilter, searchQuery, groupsPerPage]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(groupedByAreaSchedule.length / groupsPerPage)),
+    [groupedByAreaSchedule.length, groupsPerPage]
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedAreaGroups = useMemo(() => {
+    const startIdx = (safeCurrentPage - 1) * groupsPerPage;
+    return groupedByAreaSchedule.slice(startIdx, startIdx + groupsPerPage);
+  }, [groupedByAreaSchedule, safeCurrentPage, groupsPerPage]);
+
+  const pageStartNumber = groupedByAreaSchedule.length === 0 ? 0 : (safeCurrentPage - 1) * groupsPerPage + 1;
+  const pageEndNumber = Math.min(safeCurrentPage * groupsPerPage, groupedByAreaSchedule.length);
 
   const handleVerifyAttendance = (id: string) => {
     if (!isAuthorizedSpvOrAdmin) {
@@ -787,8 +812,94 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {groupedByAreaSchedule.map((group, groupIdx) => {
+        <div className="space-y-3.5">
+          {/* Top Paging & Navigation Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 dark:text-slate-300">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/25 font-black text-[11px]">
+                Halaman {safeCurrentPage} dari {totalPages}
+              </span>
+              <span>
+                Menampilkan Area Jadwal <strong>#{pageStartNumber}–#{pageEndNumber}</strong> dari total{' '}
+                <strong>{groupedByAreaSchedule.length} Area Jadwal</strong>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Page Size Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1 text-[11px]">
+                <span className="text-slate-500 dark:text-slate-400 font-semibold">Tampilkan:</span>
+                <select
+                  value={groupsPerPage}
+                  onChange={(e) => setGroupsPerPage(Number(e.target.value))}
+                  className="bg-transparent font-black text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                >
+                  <option value={2} className="bg-white dark:bg-slate-900">2 Area / Hal</option>
+                  <option value={3} className="bg-white dark:bg-slate-900">3 Area / Hal</option>
+                  <option value={5} className="bg-white dark:bg-slate-900">5 Area / Hal</option>
+                  <option value={10} className="bg-white dark:bg-slate-900">10 Area / Hal</option>
+                </select>
+              </div>
+
+              {/* Page Numbers */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+
+                {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+                  .filter(page => {
+                    if (totalPages <= 7) return true;
+                    return (
+                      page === 1 ||
+                      page === totalPages ||
+                      Math.abs(page - safeCurrentPage) <= 1
+                    );
+                  })
+                  .map((page, idx, arr) => {
+                    const prevPage = arr[idx - 1];
+                    const showEllipsis = prevPage && page - prevPage > 1;
+                    return (
+                      <React.Fragment key={page}>
+                        {showEllipsis && (
+                          <span className="px-1.5 text-xs text-slate-400 font-bold">...</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage(page)}
+                          className={`w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center border ${
+                            safeCurrentPage === page
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {paginatedAreaGroups.map((group, localIdx) => {
+            const globalGroupIdx = (safeCurrentPage - 1) * groupsPerPage + localIdx;
             const verifiedInGroup = group.items.filter(
               i => i.status === 'verified' || i.status === 'resolved'
             ).length;
@@ -818,10 +929,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs"
               >
                 {/* Header Nama Area Kirim & Rincian Jadwal Rute */}
-                <div className="p-3.5 sm:p-4 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                  <div className="flex items-start sm:items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                      #{groupIdx + 1}
+                <div className="p-3 sm:p-3.5 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                      #{globalGroupIdx + 1}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -837,7 +948,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-3 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                      <div className="flex items-center gap-2.5 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
                         <span className="inline-flex items-center gap-1 font-semibold">
                           <User className="w-3.5 h-3.5 text-blue-500" />
                           Driver: <strong className="text-slate-900 dark:text-white">{group.driverName}</strong>
@@ -856,11 +967,11 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap shrink-0">
-                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-xs font-black">
+                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-[11px] font-black">
                       {group.items.length} Titik Pelanggan Dikunjungi
                     </span>
-                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-xs font-bold">
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-[11px] font-bold">
                       {verifiedInGroup}/{group.items.length} Terverifikasi
                     </span>
                     {isSuperAdmin && (
@@ -876,7 +987,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             items: group.items
                           })
                         }
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-xs font-bold transition active:scale-95 cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
                         title="Hapus Seluruh Verifikasi Jadwal Kirim Area Ini (Khusus Super Admin)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -886,19 +997,19 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                   </div>
                 </div>
 
-                {/* Tabel Pelanggan dalam Area Kirim Ini */}
+                {/* Tabel Pelanggan dalam Area Kirim Ini (Compact & Tanpa Scrollbar Horizontal Berlebih) */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100/70 dark:bg-slate-900 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-800">
                       <tr>
-                        <th className="py-2.5 px-3 whitespace-nowrap w-10 text-center">No</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Jam Absen</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Nama Pelanggan / Toko Tujuan</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Kru &amp; Armada</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Titik Lokasi GPS</th>
-                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Foto Bukti</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Keterangan Kiriman</th>
-                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
+                        <th className="py-2 px-2.5 w-9 text-center">No</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">Jam Absen</th>
+                        <th className="py-2 px-2.5">Nama Pelanggan / Toko Tujuan</th>
+                        <th className="py-2 px-2.5">Kru &amp; Armada</th>
+                        <th className="py-2 px-2.5">Titik Lokasi GPS</th>
+                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Foto Bukti</th>
+                        <th className="py-2 px-2.5">Keterangan Kiriman</th>
+                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/70 text-slate-700 dark:text-slate-300">
@@ -933,13 +1044,13 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
                         return (
                           <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                            <td className="py-2.5 px-3 align-middle text-center font-mono font-bold text-slate-400">
+                            <td className="py-2 px-2.5 align-middle text-center font-mono font-bold text-slate-400">
                               {idx + 1}
                             </td>
 
                             {/* Jam Absen */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">
+                            <td className="py-2 px-2.5 align-middle whitespace-nowrap">
+                              <div className="text-[11px] font-bold font-mono text-slate-900 dark:text-white">
                                 {new Date(item.timestamp).toLocaleTimeString('id-ID', {
                                   hour: '2-digit',
                                   minute: '2-digit'
@@ -949,16 +1060,16 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             </td>
 
                             {/* Nama Pelanggan / Toko Tujuan */}
-                            <td className="py-2.5 px-3 align-middle">
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
-                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span>{customerName}</span>
+                            <td className="py-2 px-2.5 align-middle max-w-[190px]">
+                              <div className="inline-flex items-start gap-1.5 px-2 py-1 rounded-lg text-[11px] font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
+                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                                <span className="line-clamp-2 leading-tight">{customerName}</span>
                               </div>
                             </td>
 
                             {/* Kru & Armada */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                              <div className="font-bold text-slate-900 dark:text-white text-xs">
+                            <td className="py-2 px-2.5 align-middle">
+                              <div className="font-bold text-slate-900 dark:text-white text-[11px] leading-snug">
                                 {item.driverName}
                                 {item.helperName && item.helperName !== '-' ? ` & ${item.helperName}` : ''}
                               </div>
@@ -969,14 +1080,14 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             </td>
 
                             {/* Titik Lokasi GPS Presisi per Toko Pelanggan */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            <td className="py-2 px-2.5 align-middle">
                               <div className="text-[11px] font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                                <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span className="truncate max-w-[230px]" title={preciseGps.subAreaLabel}>
+                                <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
+                                <span className="truncate max-w-[180px]" title={preciseGps.subAreaLabel}>
                                   {preciseGps.subAreaLabel}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-2 mt-0.5">
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                 <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700/80">
                                   {preciseGps.coordsFormatted}
                                 </span>
@@ -984,7 +1095,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   href={preciseGps.gmapsUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
                                   title={`Buka titik lokasi presisi ${customerName} (${preciseGps.coordsFormatted}) di Google Maps`}
                                 >
                                   <Navigation className="w-2.5 h-2.5" />
@@ -995,9 +1106,9 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             </td>
 
                             {/* Foto Bukti Absen */}
-                            <td className="py-2.5 px-3 align-middle text-center">
+                            <td className="py-2 px-2.5 align-middle text-center">
                               {item.photoUrl ? (
-                                <div className="relative group w-11 h-11 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
+                                <div className="relative group w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
                                   <img
                                     src={item.photoUrl}
                                     alt={customerName}
@@ -1010,28 +1121,28 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                     className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
                                     title="Perbesar Foto Absen Pelanggan"
                                   >
-                                    <Eye className="w-4 h-4" />
+                                    <Eye className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               ) : (
-                                <span className="inline-block px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
+                                <span className="inline-block px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
                                   Tanpa Foto
                                 </span>
                               )}
                             </td>
 
                             {/* Keterangan Kiriman */}
-                            <td className="py-2.5 px-3 align-middle max-w-[240px]">
+                            <td className="py-2 px-2.5 align-middle max-w-[180px]">
                               <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug line-clamp-2">
                                 {cleanNotes || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}
                               </p>
                             </td>
 
                             {/* Status & Verifikasi + Hapus (Super Admin) */}
-                            <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1.5">
+                            <td className="py-2 px-2.5 align-middle text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1">
                                 {isVerified ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
                                     <CheckCircle2 className="w-3 h-3 shrink-0" />
                                     <span>Terverifikasi</span>
                                   </span>
@@ -1039,7 +1150,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   <button
                                     type="button"
                                     onClick={() => handleVerifyAttendance(item.id)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
                                   >
                                     <Check className="w-3 h-3" />
                                     <span>Verifikasi</span>
@@ -1067,6 +1178,36 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
               </div>
             );
           })}
+
+          {/* Bottom Paging Bar */}
+          {totalPages > 1 && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                Halaman <strong>{safeCurrentPage}</strong> dari <strong>{totalPages}</strong> • Menampilkan Area Jadwal{' '}
+                <strong>#{pageStartNumber}–#{pageEndNumber}</strong> dari <strong>{groupedByAreaSchedule.length}</strong> Area
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Halaman Sebelumnya</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <span>Halaman Berikutnya</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

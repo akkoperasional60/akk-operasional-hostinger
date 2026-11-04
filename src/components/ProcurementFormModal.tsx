@@ -63,7 +63,7 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);
-      doc.text('FORMULIR PERMINTAAN PENGADAAN BARANG / SPAREPART', 18, y + 5.5);
+      doc.text('FORMULIR PENGADAAN ARMADA & SUKU CADANG LOGISTIK', 18, y + 5.5);
 
       y += 16;
       doc.setFont('helvetica', 'normal');
@@ -153,8 +153,8 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-5 border-b">
           <div>
-            <h2 className="text-lg font-bold text-gray-800">Form Permintaan Pengadaan Barang Distribusi</h2>
-            <p className="text-xs text-gray-500">PT Anugrah Kemasan Kreatif - Logistik & Purchasing</p>
+            <h2 className="text-lg font-bold text-gray-800">Formulir Pengadaan Armada</h2>
+            <p className="text-xs text-gray-500">PT Anugrah Kemasan Kreatif - Logistik & Pengadaan Armada</p>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
             <X size={20} />

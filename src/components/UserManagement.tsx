@@ -21,7 +21,7 @@ const MODULE_DEFINITIONS = [
     IconComp: Truck,
     subMenus: [
       { id: 'dashboard_logistik', name: 'Dashboard Logistik & Analitik Armada' },
-      { id: 'armada_ceklis', name: 'Data Armada & Simulasi Kubikasi Armada' },
+      { id: 'armada_ceklis', name: 'Data Armada, Formulir Pengadaan Armada & Simulasi Kubikasi' },
       { id: 'live_map', name: 'Live Map GPS' },
       { id: 'monitoring_sla', name: 'Monitoring SLA, Kru & Evaluasi Jalur' },
       { id: 'rencana_rute', name: 'Jadwal & Penugasan Pengiriman' },
@@ -55,10 +55,10 @@ const MODULE_DEFINITIONS = [
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     IconComp: Package,
     subMenus: [
-      { id: 'stok_barang', name: 'Master SKU, Denah Rak & Kubikasi Barang' },
+      { id: 'stok_barang', name: 'Master SKU, Database Barang, Denah Rak & Kubikasi' },
       { id: 'permintaan_barang', name: 'Inbound (Barang Masuk)' },
       { id: 'opname_stok', name: 'Stok Opname & Kartu Stok' },
-      { id: 'ceklis_muat', name: 'Outbound (Picking & Muat)' }
+      { id: 'ceklis_muat', name: 'Outbound (Picking & Muat) & Database Barang' }
     ]
   },
   {

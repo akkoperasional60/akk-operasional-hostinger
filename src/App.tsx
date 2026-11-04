@@ -218,7 +218,7 @@ export default function App() {
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
       case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
       case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
-      case 'fleet_forms': return 'Formulir Operasional Armada';
+      case 'fleet_forms': return 'Formulir Pengadaan Armada';
       case 'sales_dashboard': return 'Sales Hub: Dashboard & SLA Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
       case 'sales_schedules': return 'Sales Hub: Jadwal Produksi & Kirim';
@@ -240,8 +240,8 @@ export default function App() {
       case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
       case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
       case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
-      case 'warehouse_outbound': return 'WMS: Outbound (Picking & Ceklis Muat)';
-      case 'warehouse_scanner': return 'WMS: Pemindaian Foto Barang & Sinkronisasi Inventaris';
+      case 'warehouse_outbound': return 'WMS: Outbound (Picking & Muat)';
+      case 'warehouse_scanner': return 'WMS: Database Barang (Nomor Barang, Keterangan, Satuan & Dokumentasi)';
       case 'warehouse_slotting': return 'WMS: Denah Rak & Kapasitas Zona Gudang';
       case 'warehouse_opname': return 'WMS: Stok Opname & Kartu Stok Digital';
       case 'warehouse_cubication': return 'WMS: Kubikasi Barang & Berat Barang';

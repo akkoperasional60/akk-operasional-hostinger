@@ -387,9 +387,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           items: [
             {
               tab: 'fleet_forms',
-              label: 'Formulir & Ceklis Muat',
+              label: 'Formulir Pengadaan Armada',
               icon: <FileText className="w-4 h-4 text-amber-500" />,
-              description: 'Checklist sebelum jalan & surat jalan'
+              description: 'Formulir pengadaan armada, servis & surat jalan'
             },
             {
               tab: 'driver_reports',
@@ -526,9 +526,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'warehouse_scanner',
-              label: 'Pemindaian Barcode & AI',
-              icon: <Camera className="w-4 h-4 text-amber-500" />,
-              description: 'Scan label karton box menggunakan kamera'
+              label: 'Database Barang',
+              icon: <Database className="w-4 h-4 text-amber-500" />,
+              description: 'Nomor barang, keterangan, satuan & dokumentasi'
             }
           ]
         }

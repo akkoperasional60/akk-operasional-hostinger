@@ -34,7 +34,9 @@ import {
   ArrowUpDown,
   Layers,
   Activity,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import {
   BarChart,
@@ -117,6 +119,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formStartOdo, setFormStartOdo] = useState<string>('');
   const [formEndOdo, setFormEndOdo] = useState<string>('');
   const [formGasStation, setFormGasStation] = useState<string>('SPBU Farly');
+  const [isGasStationDropdownOpen, setIsGasStationDropdownOpen] = useState<boolean>(false);
   const [formReceiptNumber, setFormReceiptNumber] = useState<string>('');
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
@@ -2832,20 +2835,125 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
+                <div className="relative">
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Lokasi SPBU <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    value={formGasStation}
-                    onChange={(e) => setFormGasStation(e.target.value)}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+
+                  <button
+                    type="button"
+                    onClick={() => setIsGasStationDropdownOpen(prev => !prev)}
+                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-xs text-white flex items-center justify-between gap-2 transition cursor-pointer ${
+                      isGasStationDropdownOpen
+                        ? 'border-amber-400 ring-2 ring-amber-500/20'
+                        : 'border-slate-800 hover:border-amber-500/60'
+                    }`}
                   >
-                    <option value="SPBU Farly">Farly</option>
-                    <option value="SPBU Gajah Mada">Gajah Mada</option>
-                    <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
-                  </select>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MapPin
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          formGasStation.includes('Farly')
+                            ? 'text-amber-400'
+                            : formGasStation.includes('Gajah Mada')
+                            ? 'text-blue-400'
+                            : 'text-rose-400'
+                        }`}
+                      />
+                      <span className="font-bold text-white truncate">
+                        {formGasStation.replace(/^SPBU\s+/i, '')}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
+                          formGasStation.includes('Farly')
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            : formGasStation.includes('Gajah Mada')
+                            ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        }`}
+                      >
+                        {formGasStation.includes('Farly')
+                          ? 'Mitra Utama'
+                          : formGasStation.includes('Gajah Mada')
+                          ? 'Mitra Kota'
+                          : 'Urgent'}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
+                        isGasStationDropdownOpen ? 'rotate-180 text-amber-400' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {isGasStationDropdownOpen && (
+                    <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden divide-y divide-slate-800/80 animate-in fade-in zoom-in-95 duration-150 z-30 relative">
+                      {[
+                        {
+                          value: 'SPBU Farly',
+                          label: 'Farly',
+                          badge: 'Mitra Utama',
+                          desc: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
+                          badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                          iconCls: 'text-amber-400 bg-amber-500/15 border-amber-500/30'
+                        },
+                        {
+                          value: 'SPBU Gajah Mada',
+                          label: 'Gajah Mada',
+                          badge: 'Mitra Kota',
+                          desc: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
+                          badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+                          iconCls: 'text-blue-400 bg-blue-500/15 border-blue-500/30'
+                        },
+                        {
+                          value: 'SPBU Lain (Urgent)',
+                          label: 'SPBU Lain (Urgent)',
+                          badge: 'Darurat / Urgent',
+                          desc: 'Pengisian Darurat Rute Luar Kota / Lintas Pulau',
+                          badgeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+                          iconCls: 'text-rose-400 bg-rose-500/15 border-rose-500/30'
+                        }
+                      ].map(opt => {
+                        const isSelected = formGasStation === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setFormGasStation(opt.value);
+                              setIsGasStationDropdownOpen(false);
+                            }}
+                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                              isSelected ? 'bg-amber-500/10' : 'hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconCls}`}>
+                                <Fuel className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-black text-white">{opt.label}</span>
+                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
+                                    {opt.badge}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.desc}</div>
+                              </div>
+                            </div>
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
+                                isSelected
+                                  ? 'bg-amber-500 border-amber-400 text-slate-950'
+                                  : 'border-slate-700 bg-slate-950 text-transparent'
+                              }`}
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div>

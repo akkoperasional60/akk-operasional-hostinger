@@ -5000,11 +5000,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               }
                               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                             >
-                              {activeDayObj.pengiriman.map((trip, idx) => (
-                                <option key={`rep-trip-${idx}`} value={idx}>
-                                  #{idx + 1} {standardizeAreaName(trip.area)} ({trip.armada}) — Driver: {trip.driver}
-                                </option>
-                              ))}
+                              {activeDayObj.pengiriman.length === 0 ? (
+                                <option value={0}>Tidak ada pengiriman terjadwal pada tanggal ini</option>
+                              ) : (
+                                activeDayObj.pengiriman.map((trip, idx) => (
+                                  <option key={`rep-trip-${idx}`} value={idx}>
+                                    #{idx + 1} {standardizeAreaName(trip.area)} ({trip.armada}) — Driver: {trip.driver}
+                                  </option>
+                                ))
+                              )}
                             </select>
                           </div>
                         </div>

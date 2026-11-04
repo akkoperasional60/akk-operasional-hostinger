@@ -17,7 +17,9 @@ import {
   Upload,
   Plus,
   Trash2,
-  Images
+  Images,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
@@ -91,6 +93,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
   const [customerNameInput, setCustomerNameInput] = useState<string>('');
   const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('Farly');
+  const [isFuelDropdownOpen, setIsFuelDropdownOpen] = useState<boolean>(false);
   const [fuelLiters, setFuelLiters] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [simulatedExtraMin, setSimulatedExtraMin] = useState<number>(0);
@@ -1053,19 +1056,147 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 relative">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
                     Pilih Lokasi Pengisian BBM (Solar) *
                   </label>
-                  <select
-                    value={fuelLocation}
-                    onChange={(e) => setFuelLocation(e.target.value as 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)')}
-                    className="w-full rounded-xl bg-slate-900 border border-amber-500/50 px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
+
+                  {/* Custom Styled Dropdown Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setIsFuelDropdownOpen(prev => !prev)}
+                    className={`w-full rounded-xl bg-slate-900 border px-3.5 py-2.5 text-xs font-bold text-white flex items-center justify-between gap-2 transition cursor-pointer shadow-xs ${
+                      isFuelDropdownOpen
+                        ? 'border-amber-400 ring-2 ring-amber-500/20'
+                        : 'border-amber-500/40 hover:border-amber-400/80'
+                    }`}
                   >
-                    <option value="Farly">Farly</option>
-                    <option value="Gajah Mada">Gajah Mada</option>
-                    <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
-                  </select>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                          fuelLocation === 'Farly'
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                            : fuelLocation === 'Gajah Mada'
+                            ? 'bg-blue-500/15 border-blue-500/40 text-blue-400'
+                            : 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                        }`}
+                      >
+                        <Fuel className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="text-left min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black text-white truncate">
+                            {fuelLocation}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
+                              fuelLocation === 'Farly'
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                : fuelLocation === 'Gajah Mada'
+                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            }`}
+                          >
+                            {fuelLocation === 'Farly'
+                              ? 'SPBU Mitra Utama'
+                              : fuelLocation === 'Gajah Mada'
+                              ? 'SPBU Mitra Kota'
+                              : 'Kondisi Urgent'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal truncate">
+                          {fuelLocation === 'Farly'
+                            ? 'Pos Pengisian Solar Reguler Farly • Banyuwangi'
+                            : fuelLocation === 'Gajah Mada'
+                            ? 'Pos Pengisian Solar Gajah Mada • Banyuwangi'
+                            : 'Pengisian Darurat Rute Luar Kota / Lintas Pulau'}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-amber-400 shrink-0 transition-transform duration-200 ${
+                        isFuelDropdownOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {/* Custom Dropdown List Menu */}
+                  {isFuelDropdownOpen && (
+                    <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden divide-y divide-slate-800/80 animate-in fade-in zoom-in-95 duration-150">
+                      {([
+                        {
+                          value: 'Farly' as const,
+                          title: 'Farly',
+                          badge: 'SPBU Mitra Utama',
+                          subtitle: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
+                          iconBg: 'bg-amber-500/15 border-amber-500/40 text-amber-400',
+                          badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                          activeBg: 'bg-amber-500/10'
+                        },
+                        {
+                          value: 'Gajah Mada' as const,
+                          title: 'Gajah Mada',
+                          badge: 'SPBU Mitra Kota',
+                          subtitle: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
+                          iconBg: 'bg-blue-500/15 border-blue-500/40 text-blue-400',
+                          badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+                          activeBg: 'bg-blue-500/10'
+                        },
+                        {
+                          value: 'SPBU Lain (Urgent)' as const,
+                          title: 'SPBU Lain (Urgent)',
+                          badge: 'Darurat / Urgent',
+                          subtitle: 'Pengisian BBM Solar Darurat di Rute Perjalanan',
+                          iconBg: 'bg-rose-500/15 border-rose-500/40 text-rose-400',
+                          badgeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+                          activeBg: 'bg-rose-500/10'
+                        }
+                      ]).map(opt => {
+                        const isSelected = fuelLocation === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setFuelLocation(opt.value);
+                              setIsFuelDropdownOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2.5 transition cursor-pointer ${
+                              isSelected ? opt.activeBg : 'hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconBg}`}>
+                                <MapPin className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`text-xs font-black ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                                    {opt.title}
+                                  </span>
+                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
+                                    {opt.badge}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                  {opt.subtitle}
+                                </div>
+                              </div>
+                            </div>
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
+                                isSelected
+                                  ? 'bg-amber-500 border-amber-400 text-slate-950'
+                                  : 'border-slate-700 bg-slate-950 text-transparent'
+                              }`}
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
