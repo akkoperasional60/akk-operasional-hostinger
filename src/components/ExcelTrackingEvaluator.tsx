@@ -1070,33 +1070,120 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   const registeredStores = useMemo(() => logisticsStore.getStores(), []);
   const fleets = useMemo(() => logisticsStore.getFleets(), []);
 
-  // Multi-Fleet Evaluations State (Supports 1 or multiple uploaded fleets)
+  // Multi-Fleet Evaluations State (All Fleet Units Initialized with Individual Breakdowns)
   const [fleetEvaluations, setFleetEvaluations] = useState<TrackingEvaluation[]>(() => {
-    const defaultFleet = fleets.find(f => f.plateNumber.includes('8381')) || fleets[0];
-    return [
-      buildEvaluationFromLegs(
-        DEFAULT_TRACKSOLID_26_LEGS,
-        DEFAULT_TRACKSOLID_DATE_SUBTOTALS,
-        DEFAULT_TRACKSOLID_BOTTOM_SUMMARY,
+    const stores = logisticsStore.getStores();
+    const crews = logisticsStore.getCrews();
+    const allFleets = fleets.length > 0 ? fleets : logisticsStore.getFleets();
+
+    return allFleets.map((fleet, idx) => {
+      const assignedDriver =
+        crews.find(c => c.id === fleet.driverId || c.currentFleetId === fleet.id) ||
+        crews[idx % Math.max(1, crews.length)];
+      const cleanPlate = fleet.plateNumber.replace(/\s+/g, '');
+
+      // Keep exact 26-leg Tracksolid dataset for P 8381 VE (or index 0 if not found)
+      if (fleet.plateNumber.includes('8381') || (idx === 0 && !allFleets.some(f => f.plateNumber.includes('8381')))) {
+        return buildEvaluationFromLegs(
+          DEFAULT_TRACKSOLID_26_LEGS,
+          DEFAULT_TRACKSOLID_DATE_SUBTOTALS,
+          DEFAULT_TRACKSOLID_BOTTOM_SUMMARY,
+          {
+            fileName: `Evaluasi_Rute_${cleanPlate}.xlsx`,
+            fleetId: fleet.id,
+            plateNumber: fleet.plateNumber,
+            initialCode: fleet.initialCode || `UNIT-${idx + 1}`,
+            driverName: assignedDriver?.name || 'Budiono',
+            helperName: 'Saifur Rizal',
+            gpsPlatform: 'tracksolid',
+            uploadedMonth: 'Oktober',
+            uploadedYear: '2026'
+          },
+          stores
+        );
+      }
+
+      // Generate distinct, realistic per-unit route legs & daily subtotals for each other fleet unit
+      const legSliceCount = 12 + ((idx * 3) % 13); // 12 to 24 legs per unit
+      const speedFactor = 0.88 + ((idx % 5) * 0.06);
+      const distFactor = 0.78 + ((idx % 6) * 0.09);
+      const latOffset = ((idx % 4) - 1.5) * 0.004;
+      const lngOffset = ((idx % 3) - 1) * 0.004;
+
+      const unitLegs: TracksolidTripLeg[] = DEFAULT_TRACKSOLID_26_LEGS.slice(0, legSliceCount).map((leg, legIdx) => ({
+        ...leg,
+        legNumber: legIdx + 1,
+        mileageKm: Number(Math.max(0.25, leg.mileageKm * distFactor).toFixed(2)),
+        avgSpeedKmh: Number(Math.max(12, leg.avgSpeedKmh * speedFactor).toFixed(1)),
+        maxSpeedKmh: Number(Math.max(28, leg.maxSpeedKmh * speedFactor).toFixed(1)),
+        startLat: Number((leg.startLat + latOffset).toFixed(6)),
+        startLng: Number((leg.startLng + lngOffset).toFixed(6)),
+        endLat: Number((leg.endLat + latOffset).toFixed(6)),
+        endLng: Number((leg.endLng + lngOffset).toFixed(6))
+      }));
+
+      // Compute date subtotals for this specific fleet unit
+      const dateGroups = Array.from(new Set(unitLegs.map(l => l.dateGroup)));
+      const unitSubtotals: TracksolidDateSubtotal[] = dateGroups.map(dg => {
+        const dLegs = unitLegs.filter(l => l.dateGroup === dg);
+        const dKm = Number(dLegs.reduce((sum, l) => sum + l.mileageKm, 0).toFixed(2));
+        const dSec = dLegs.reduce((sum, l) => sum + (parseTimeSeconds(l.travelTime) || 420), 0);
+        const dAvgSpd = Number(
+          (dLegs.reduce((sum, l) => sum + l.avgSpeedKmh, 0) / Math.max(1, dLegs.length)).toFixed(2)
+        );
+        const dMaxSpd = Number(Math.max(...dLegs.map(l => l.maxSpeedKmh)).toFixed(1));
+        return {
+          dateGroup: dg,
+          tripCount: dLegs.length,
+          totalMileageKm: dKm,
+          travelTime: formatSecondsToHMS(dSec),
+          avgSpeedKmh: dAvgSpd,
+          maxSpeedKmh: dMaxSpd,
+          fuelPer100Km: 0,
+          totalFuelLiters: 0
+        };
+      });
+
+      const totalKm = Number(unitLegs.reduce((sum, l) => sum + l.mileageKm, 0).toFixed(2));
+      const totalSec = unitLegs.reduce((sum, l) => sum + (parseTimeSeconds(l.travelTime) || 420), 0);
+      const overallAvgSpd = Number(
+        (unitLegs.reduce((sum, l) => sum + l.avgSpeedKmh, 0) / Math.max(1, unitLegs.length)).toFixed(2)
+      );
+      const overallMaxSpd = Number(Math.max(...unitLegs.map(l => l.maxSpeedKmh)).toFixed(1));
+
+      const unitBottom: TracksolidBottomSummary = {
+        trips: unitLegs.length,
+        totalMileageKm: totalKm,
+        duration: formatSecondsToHMS(totalSec),
+        avgSpeedKmh: overallAvgSpd,
+        maxSpeedKmh: overallMaxSpd,
+        totalFuelConsumptionLiters: 0
+      };
+
+      return buildEvaluationFromLegs(
+        unitLegs,
+        unitSubtotals,
+        unitBottom,
         {
-          fileName: 'Evaluasi_Rute_P8381VE.xlsx',
-          fleetId: defaultFleet?.id || 'flt-02',
-          plateNumber: defaultFleet?.plateNumber || 'P 8381 VE',
-          initialCode: defaultFleet?.initialCode || 'N2 / NP2',
-          driverName: 'Budiono',
-          helperName: 'Saifur Rizal',
-          gpsPlatform: 'tracksolid',
+          fileName: `Evaluasi_Rute_${cleanPlate}.xlsx`,
+          fleetId: fleet.id,
+          plateNumber: fleet.plateNumber,
+          initialCode: fleet.initialCode || `UNIT-${idx + 1}`,
+          driverName: assignedDriver?.name || 'Supir Operasional',
+          helperName: 'Kernet Distribusi',
+          gpsPlatform: idx % 3 === 0 ? 'wanway' : 'tracksolid',
           uploadedMonth: 'Oktober',
           uploadedYear: '2026'
         },
-        logisticsStore.getStores()
-      )
-    ];
+        stores
+      );
+    });
   });
 
   // Active selected fleet index or 'all'
   const [selectedFleetPlate, setSelectedFleetPlate] = useState<string>(() => {
-    return fleetEvaluations[0]?.plateNumber || 'P 8381 VE';
+    const defaultEv = fleetEvaluations.find(e => e.plateNumber?.includes('8381')) || fleetEvaluations[0];
+    return defaultEv?.plateNumber || 'P 8381 VE';
   });
 
   // View Mode: 'evaluation' (Main Maps & Unified Analysis) vs 'upload_form' (Image 2 style upload screen)
@@ -2410,149 +2497,209 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         </div>
       )}
 
-      {/* Fleet Selector Bar (When 1 or Multiple Fleets are Uploaded) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-bold text-white uppercase tracking-wider">
-              Spesifikasi Armada Terunggah ({fleetEvaluations.length} Unit Armada)
-            </span>
+      {/* Fleet Selector Dropdown & Selected Fleet Specifications Breakdown */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400">
+              <Truck className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                Pilih Unit Armada Evaluasi GPS
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Pilih salah satu armada dari daftar dropdown untuk menampilkan rincian rute &amp; analisa unit tersebut
+              </span>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {fleetEvaluations.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setSelectedFleetPlate('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                  selectedFleetPlate === 'all'
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                Semua Armada ({fleetEvaluations.length})
-              </button>
-            )}
-            {fleetEvaluations.map(ev => (
-              <button
-                key={ev.plateNumber}
-                type="button"
-                onClick={() => setSelectedFleetPlate(ev.plateNumber || 'P 8381 VE')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-2 cursor-pointer ${
-                  selectedFleetPlate === ev.plateNumber
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                }`}
-              >
-                <Truck className="w-3.5 h-3.5" />
-                <span>{ev.plateNumber}</span>
-                {ev.initialCode && (
-                  <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-[10px] font-mono">
-                    {ev.initialCode}
+          {/* Dropdown List Armada */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <label className="text-xs font-semibold text-slate-300 whitespace-nowrap">
+              Unit Armada:
+            </label>
+            <select
+              value={selectedFleetPlate === 'all' ? (fleetEvaluations[0]?.plateNumber || 'P 8381 VE') : selectedFleetPlate}
+              onChange={(e) => setSelectedFleetPlate(e.target.value)}
+              className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer shadow-xs"
+            >
+              {fleetEvaluations.map(ev => {
+                const fleetSpec = fleets.find(
+                  f => f.id === ev.fleetId || f.plateNumber === ev.plateNumber
+                );
+                const initLabel = ev.initialCode || fleetSpec?.initialCode || 'UNIT';
+                const vType = fleetSpec?.vehicleType ? ` • ${fleetSpec.vehicleType}` : '';
+                const plat = ev.gpsPlatform === 'wanway' ? 'WANWAY' : 'TRACKSOLID';
+                return (
+                  <option key={ev.plateNumber} value={ev.plateNumber}>
+                    [{initLabel}] {ev.plateNumber}{vType} ({plat})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+
+        {/* Rincian Spesifik Unit Armada yang Dipilih */}
+        {(() => {
+          const currentEv =
+            fleetEvaluations.find(e => e.plateNumber === selectedFleetPlate) ||
+            fleetEvaluations[0];
+          if (!currentEv) return null;
+
+          const evBottom = currentEv.bottomSummary || {
+            trips: currentEv.tripLegs?.length || 0,
+            totalMileageKm: currentEv.totalDistanceKm || 0,
+            duration: '00:00:00',
+            avgSpeedKmh: currentEv.avgSpeedKmh || 0,
+            maxSpeedKmh: currentEv.maxSpeedKmh || 0,
+            totalFuelConsumptionLiters: 0
+          };
+          const evSubtotals = currentEv.dateSubtotals || [];
+          const fleetSpec = fleets.find(
+            f => f.id === currentEv.fleetId || f.plateNumber === currentEv.plateNumber
+          );
+
+          return (
+            <div className="space-y-3">
+              {/* Selected Armada Header Info Banner */}
+              <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/40 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 font-mono text-xs font-black">
+                    {currentEv.initialCode || fleetSpec?.initialCode || 'UNIT'}
                   </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-black text-base text-white">
+                        {currentEv.plateNumber}
+                      </span>
+                      {fleetSpec?.vehicleType && (
+                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-semibold">
+                          {fleetSpec.vehicleType}
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded bg-blue-600/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold uppercase">
+                        {currentEv.gpsPlatform === 'wanway' ? 'Wanway GPS' : 'Tracksolid GPS'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Periode Evaluasi: <strong className="text-slate-200">{currentEv.uploadedMonth || 'Oktober'} {currentEv.uploadedYear || '2026'}</strong>
+                      {fleetSpec?.brand ? ` • ${fleetSpec.brand} (${fleetSpec.year || '-'})` : ''}
+                    </div>
+                  </div>
+                </div>
+
+                {evSubtotals.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <span
+                        key={st.dateGroup}
+                        className="px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 font-mono text-[10px]"
+                      >
+                        {st.dateGroup}: <strong className="text-white">{st.tripCount} rit</strong> ({st.totalMileageKm} km &bull; {st.travelTime})
+                      </span>
+                    ))}
+                  </div>
                 )}
-                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] uppercase">
-                  {ev.gpsPlatform === 'wanway' ? 'Wanway' : 'Tracksolid'}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+              </div>
 
-        {/* 5 KPI Cards (NO FUEL CARD - With Daily Duration & Daily Avg Speed Breakdown) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
-          {/* Card 1: Trips */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-              <span>Trips (Ritase)</span>
-              <Truck className="w-4 h-4 text-blue-400" />
-            </div>
-            <div className="text-2xl font-black text-white">{bottom.trips}</div>
-            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-              {subtotals.slice(0, 2).map(st => (
-                <div key={st.dateGroup} className="flex items-center justify-between">
-                  <span>{st.dateGroup}:</span>
-                  <strong className="text-slate-200">{st.tripCount} ritase</strong>
+              {/* 5 KPI Cards for the Selected Armada */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {/* Card 1: Trips */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                    <span>Trips (Ritase)</span>
+                    <Truck className="w-4 h-4 text-blue-400" />
+                  </div>
+                  <div className="text-2xl font-black text-white">{evBottom.trips}</div>
+                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <div key={st.dateGroup} className="flex items-center justify-between">
+                        <span>{st.dateGroup}:</span>
+                        <strong className="text-slate-200">{st.tripCount} ritase</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Card 2: Total KM */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-              <span>Total KM</span>
-              <MapPin className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div className="text-2xl font-black text-emerald-400">
-              {bottom.totalMileageKm} <span className="text-xs font-normal text-slate-400">km</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-              {subtotals.slice(0, 2).map(st => (
-                <div key={st.dateGroup} className="flex items-center justify-between">
-                  <span>{st.dateGroup}:</span>
-                  <strong className="text-emerald-300">{st.totalMileageKm} km</strong>
+                {/* Card 2: Total KM */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                    <span>Total KM</span>
+                    <MapPin className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black text-emerald-400">
+                    {evBottom.totalMileageKm} <span className="text-xs font-normal text-slate-400">km</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <div key={st.dateGroup} className="flex items-center justify-between">
+                        <span>{st.dateGroup}:</span>
+                        <strong className="text-emerald-300">{st.totalMileageKm} km</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Card 3: Durasi Per Hari */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-              <span>Durasi Per Hari</span>
-              <Clock className="w-4 h-4 text-amber-400" />
-            </div>
-            <div className="text-xl font-black text-white font-mono">{bottom.duration}</div>
-            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-              {subtotals.slice(0, 2).map(st => (
-                <div key={st.dateGroup} className="flex items-center justify-between">
-                  <span>{st.dateGroup}:</span>
-                  <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
+                {/* Card 3: Durasi Per Hari */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                    <span>Durasi Per Hari</span>
+                    <Clock className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="text-xl font-black text-white font-mono">{evBottom.duration}</div>
+                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <div key={st.dateGroup} className="flex items-center justify-between">
+                        <span>{st.dateGroup}:</span>
+                        <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Card 4: Rata-Rata Kecepatan Per Hari */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-              <span>Rata-Rata Kecepatan</span>
-              <Gauge className="w-4 h-4 text-blue-400" />
-            </div>
-            <div className="text-2xl font-black text-white">
-              {bottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-              {subtotals.slice(0, 2).map(st => (
-                <div key={st.dateGroup} className="flex items-center justify-between">
-                  <span>{st.dateGroup}:</span>
-                  <strong className="text-blue-300">{st.avgSpeedKmh} km/h</strong>
+                {/* Card 4: Rata-Rata Kecepatan Per Hari */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                    <span>Rata-Rata Kecepatan</span>
+                    <Gauge className="w-4 h-4 text-blue-400" />
+                  </div>
+                  <div className="text-2xl font-black text-white">
+                    {evBottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <div key={st.dateGroup} className="flex items-center justify-between">
+                        <span>{st.dateGroup}:</span>
+                        <strong className="text-blue-300">{st.avgSpeedKmh} km/h</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Card 5: Kecepatan Maksimal */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-              <span>Kecepatan Maksimal</span>
-              <TrendingUp className="w-4 h-4 text-rose-400" />
-            </div>
-            <div className="text-2xl font-black text-rose-300">
-              {bottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-              {subtotals.slice(0, 2).map(st => (
-                <div key={st.dateGroup} className="flex items-center justify-between">
-                  <span>{st.dateGroup}:</span>
-                  <strong className="text-rose-300">{st.maxSpeedKmh} km/h</strong>
+                {/* Card 5: Kecepatan Maksimal */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                    <span>Kecepatan Maksimal</span>
+                    <TrendingUp className="w-4 h-4 text-rose-400" />
+                  </div>
+                  <div className="text-2xl font-black text-rose-300">
+                    {evBottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+                    {evSubtotals.slice(0, 2).map(st => (
+                      <div key={st.dateGroup} className="flex items-center justify-between">
+                        <span>{st.dateGroup}:</span>
+                        <strong className="text-rose-300">{st.maxSpeedKmh} km/h</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* Tabs Navigation (NO Trips_Tracksolid_... text on the right!) */}

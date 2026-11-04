@@ -88,7 +88,7 @@ class DriverChecklistService {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', (evt) => {
-        if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3' || evt.key === 'akk_driver_vehicle_checklists_v2') {
+        if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3') {
           this.memoryChecklists = null;
         }
       });
@@ -160,7 +160,7 @@ class DriverChecklistService {
       return this.memoryChecklists;
     }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3') || localStorage.getItem('akk_driver_vehicle_checklists_v2');
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3');
       let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(list)) {
         list = [];

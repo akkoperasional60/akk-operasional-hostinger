@@ -45,6 +45,7 @@ import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
 import { FleetChecklistReportView } from './FleetChecklistReportView';
 import { CrewAttendanceReportView } from './CrewAttendanceReportView';
+import { ExifMetadataBadge, createExifMetadataFromDate } from '../utils/exifMetadata';
 
 export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
 
@@ -116,14 +117,14 @@ export const DriverReportsManagement: React.FC = () => {
   const resolveFuelAreaKirim = (rep: DriverHelperReport): string => {
     const rawArea = (rep.areaName || '').trim();
     const cleanedArea = rawArea
-      .replace(/\s*\(?SPBU\s*(Farly|Gajah\s*Mada)\)?/gi, '')
+      .replace(/\s*\(?SPBU\s*(Farly|Gajah\s*Mada|Lain\s*\(Urgent\))\)?/gi, '')
       .replace(/^Pengisian\s*BBM\s*(Solar)?\s*[-:•]?\s*/i, '')
       .trim();
 
     const isGenericSpbuOnly =
       !cleanedArea ||
       cleanedArea === '-' ||
-      /^(spbu|farly|gajah\s*mada|pengisian\s*bbm|isi\s*bbm|operasional\s*dc|rute\s*pengiriman)$/i.test(cleanedArea);
+      /^(spbu|farly|gajah\s*mada|spbu\s*lain.*|pengisian\s*bbm|isi\s*bbm|operasional\s*dc|rute\s*pengiriman)$/i.test(cleanedArea);
 
     if (!isGenericSpbuOnly) {
       return cleanedArea;
@@ -182,7 +183,7 @@ export const DriverReportsManagement: React.FC = () => {
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
   const [checkinSearchQuery, setCheckinSearchQuery] = useState<string>('');
   const [fuelSearchQuery, setFuelSearchQuery] = useState<string>('');
-  const [fuelLocationFilter, setFuelLocationFilter] = useState<'all' | 'Farly' | 'Gajah Mada'>('all');
+  const [fuelLocationFilter, setFuelLocationFilter] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('all');
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1342,21 +1343,20 @@ export const DriverReportsManagement: React.FC = () => {
                 className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
               />
             </div>
-            <div className="flex items-center gap-1.5">
-              {(['all', 'Farly', 'Gajah Mada'] as const).map(loc => (
-                <button
-                  key={loc}
-                  type="button"
-                  onClick={() => setFuelLocationFilter(loc)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                    fuelLocationFilter === loc
-                      ? 'bg-amber-600 text-white border-amber-500'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  {loc === 'all' ? 'Semua Lokasi' : `SPBU ${loc}`}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                Lokasi SPBU:
+              </label>
+              <select
+                value={fuelLocationFilter}
+                onChange={(e) => setFuelLocationFilter(e.target.value as 'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)')}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-amber-500 cursor-pointer"
+              >
+                <option value="all">Semua Lokasi SPBU</option>
+                <option value="Farly">Farly</option>
+                <option value="Gajah Mada">Gajah Mada</option>
+                <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
+              </select>
             </div>
           </div>
 
@@ -2666,7 +2666,17 @@ export const DriverReportsManagement: React.FC = () => {
                 <div className="p-12 text-slate-500 text-xs">Foto tidak tersedia</div>
               )}
 
-              <div className="w-full mt-4 bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5 text-left">
+              {/* EXIF Tag Metadata Kunci untuk Tanggal & Waktu */}
+              <div className="w-full mt-2">
+                <ExifMetadataBadge
+                  exif={
+                    selectedPhotoModal.exifMetadata ||
+                    createExifMetadataFromDate(new Date(selectedPhotoModal.timestamp), 'CAMERA_CAPTURE_SENSOR')
+                  }
+                />
+              </div>
+
+              <div className="w-full mt-2 bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5 text-left">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-amber-400">Keterangan Kru:</span>
                   {selectedPhotoModal.gmapsUrl && (

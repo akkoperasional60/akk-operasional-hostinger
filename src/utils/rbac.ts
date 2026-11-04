@@ -142,6 +142,8 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         aktivitas_harian: isAll || isSales ? 'full_access' : 'none',
         jadwal_admin: isAll || isSales ? 'full_access' : 'none',
         durasi_muat: isAll || isSales ? 'full_access' : 'none',
+        input_faktur_so: isAll || isSales ? 'full_access' : 'none',
+        aplikasi_rfid_muat: isAll || isSales ? 'full_access' : 'none',
         matriks_skil: isAll || isSales ? 'full_access' : 'none',
         pengaturan_sop: isAll || isSales ? 'full_access' : 'none',
         data_kpi: isAll || isSales ? 'full_access' : 'none'
@@ -276,11 +278,13 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   crew_history: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
   tracking_eval: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
   fleet_forms: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  customer_map: { moduleId: 'logistics', subMenuId: 'live_map' },
+  customer_map: { moduleId: 'marketing', subMenuId: 'laporan_kunjungan' },
   sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'dashboard_penjualan' },
   sales_activities: { moduleId: 'sales_admin', subMenuId: 'aktivitas_harian' },
   sales_schedules: { moduleId: 'sales_admin', subMenuId: 'jadwal_admin' },
   sales_loading_duration: { moduleId: 'sales_admin', subMenuId: 'durasi_muat' },
+  sales_invoice_so: { moduleId: 'sales_admin', subMenuId: 'input_faktur_so' },
+  sales_rfid_scanner: { moduleId: 'sales_admin', subMenuId: 'aplikasi_rfid_muat' },
   sales_skill_matrix: { moduleId: 'sales_admin', subMenuId: 'matriks_skil' },
   sales_jobdesk: { moduleId: 'sales_admin', subMenuId: 'pengaturan_sop' },
   sales_kpi: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
@@ -318,13 +322,38 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
 
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
   if (!user) return false;
-  if (user.status === 'inactive') return false;
+  if (user.status === 'inactive' || user.status === 'rejected') return false;
   if (isSuperAdminRole(user.role)) return true;
   if (user.role === 'unassigned') return false;
 
-  // Special case: customer_map is accessible if user has live_map in logistics OR laporan_kunjungan in marketing
-  if (moduleId === 'customer_map' && !subMenuId) {
-    return canAccess(user, 'logistics', 'live_map') || canAccess(user, 'marketing', 'laporan_kunjungan');
+  // Composite tab checks so enabling any sub-option in User Management grants access to the corresponding view
+  if (!subMenuId) {
+    if (moduleId === 'finance_dashboard') {
+      return (
+        canAccess(user, 'finance_tax', 'kas_bank') ||
+        canAccess(user, 'finance_tax', 'faktur_pajak') ||
+        canAccess(user, 'finance_tax', 'rekonsiliasi') ||
+        canAccess(user, 'finance_tax', 'laba_rugi')
+      );
+    }
+    if (moduleId === 'hr_dashboard') {
+      return (
+        canAccess(user, 'hr', 'hr_data_karyawan') ||
+        canAccess(user, 'hr', 'hr_gaji_kpi')
+      );
+    }
+    if (moduleId === 'users') {
+      return (
+        canAccess(user, 'sistem_pengguna', 'daftar_pengguna') ||
+        canAccess(user, 'sistem_pengguna', 'persetujuan_akun')
+      );
+    }
+    if (moduleId === 'purchasing_dashboard') {
+      return (
+        canAccess(user, 'purchasing', 'permintaan_pembelian') ||
+        canAccess(user, 'purchasing', 'evaluasi_harga')
+      );
+    }
   }
 
   // Map NavTab to (moduleId, subMenuId) if moduleId is a tab name
@@ -338,23 +367,35 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
   const defaultModules = getDefaultPermissionsForRole(user.role);
   const defaultMod = defaultModules[resolvedModuleId];
 
-  // Authorization must come from the server-synced user profile, never from localStorage.
-  // UserManagement may keep per-branch editor state locally, but it also merges and persists
-  // the effective module permissions through /api/users/:id (Super Admin protected).
+  // Authorization strictly follows user.permissions.modules saved in User Management (Hostinger MySQL),
+  // falling back to role defaults ONLY when user.permissions.modules does not have this module configured.
   const userModules = user.permissions?.modules;
   const userMod = userModules?.[resolvedModuleId];
-
-  const isPrimaryLogisticsRole = resolvedModuleId === 'logistics' && isSpvLogistikRole(user.role);
   const isCrew = isDriverRole(user.role);
 
-  const modulePerms = userMod
-    ? (isPrimaryLogisticsRole && !userMod.enabled && defaultMod?.enabled ? defaultMod : userMod)
-    : defaultMod;
+  const modulePerms = userMod !== undefined ? userMod : defaultMod;
 
   if (!modulePerms || !modulePerms.enabled) return false;
 
   if (resolvedSubMenuId) {
     let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
+
+    // If a new submenu was added after this user's permissions were saved in MySQL (e.g. input_faktur_so / aplikasi_rfid_muat),
+    // inherit from related submenu or role default when subPerm is undefined (never when explicitly set to 'none').
+    if (subPerm === undefined && modulePerms.enabled) {
+      if (
+        resolvedModuleId === 'sales_admin' &&
+        (resolvedSubMenuId === 'input_faktur_so' || resolvedSubMenuId === 'aplikasi_rfid_muat')
+      ) {
+        subPerm =
+          modulePerms.subMenus?.['durasi_muat'] ||
+          modulePerms.subMenus?.['aktivitas_harian'] ||
+          defaultMod?.subMenus?.[resolvedSubMenuId] ||
+          'none';
+      } else {
+        subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'none';
+      }
+    }
 
     // Legacy migration guard: for driver / crew_helper accounts that had old default (portal_driver + monitoring_sla only)
     // without explicit branch permissions, only portal_driver is enabled by default.
@@ -362,7 +403,8 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
       isCrew &&
       resolvedModuleId === 'logistics' &&
       resolvedSubMenuId === 'monitoring_sla' &&
-      userMod?.subMenus
+      userMod?.subMenus &&
+      !user.permissions?.branchPermissions
     ) {
       const activeKeys = Object.entries(userMod.subMenus)
         .filter(([, v]) => v === 'full_access' || v === 'read_only')
@@ -376,18 +418,66 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
       }
     }
 
-    // Fix bug where a new SPV Logistik / Operasional / Pengiriman user has logistics.enabled = true
-    // but subMenus other than dashboard_logistik were stuck on 'none' from initial registration
-    if ((!subPerm || subPerm === 'none') && isPrimaryLogisticsRole && modulePerms.enabled) {
-      const subValues = Object.values(modulePerms.subMenus || {});
-      const activeCount = subValues.filter(v => v === 'full_access' || v === 'read_only').length;
-      if (activeCount <= 1) {
-        subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'full_access';
-      }
-    }
     if (!subPerm || subPerm === 'none') return false;
   }
 
   return true;
 };
+
+export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
+  const roleDefault = getDefaultTabForRole(user.role);
+  if (canAccess(user, roleDefault)) {
+    return roleDefault;
+  }
+  const priorityTabs = [
+    'operational_dashboard',
+    'schedules',
+    'driver_portal',
+    'fleet_forms',
+    'driver_reports',
+    'tracking_eval',
+    'fleets',
+    'crew_history',
+    'spareparts',
+    'fuel_efficiency',
+    'warehouse_fleet_cubication',
+    'sales_dashboard',
+    'sales_activities',
+    'sales_schedules',
+    'sales_loading_duration',
+    'sales_invoice_so',
+    'sales_rfid_scanner',
+    'sales_skill_matrix',
+    'sales_jobdesk',
+    'sales_kpi_individual',
+    'warehouse_dashboard',
+    'warehouse_inventory',
+    'warehouse_inbound',
+    'warehouse_outbound',
+    'warehouse_opname',
+    'marketing_online',
+    'marketing_offline',
+    'customer_map',
+    'purchasing_dashboard',
+    'purchasing_stock_overview',
+    'finance_dashboard',
+    'hr_dashboard',
+    'ga_security',
+    'ga_hk',
+    'ga_aset',
+    'training_videos',
+    'training_karyawan',
+    'dashboard',
+    'users',
+    'branches',
+    'activity_log'
+  ];
+  for (const tab of priorityTabs) {
+    if (canAccess(user, tab)) {
+      return tab;
+    }
+  }
+  return roleDefault;
+};
+
 

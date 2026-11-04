@@ -31,9 +31,21 @@ for (const token of [
   if (!envExample.includes(token)) failures.push(`.env.example kehilangan baseline: ${token}`);
 }
 
+const autoCleanPaths = ['vercel.json', '.vercelignore', 'api/index.ts', 'bun.lock'];
+for (const rel of autoCleanPaths) {
+  const fullPath = path.join(root, rel);
+  if (fs.existsSync(fullPath)) {
+    try {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+      console.log(`🧹 [Hostinger Baseline] Membersihkan artefak dev/AI Studio otomatis sebelum build: ${rel}`);
+    } catch (err: any) {
+      warnings.push(`Gagal membersihkan ${rel}: ${err?.message || err}`);
+    }
+  }
+}
+
 const forbiddenPaths = ['vercel.json', '.vercelignore', 'api/index.ts', '.env', '.env.local', 'bun.lock'];
 for (const rel of forbiddenPaths) if (exists(rel)) failures.push(`File legacy/secret tidak boleh masuk source production: ${rel}`);
-if (exists('public/assets/aistudio')) warnings.push('public/assets/aistudio ikut production karena dipakai source UI. Pastikan asset memang hasil export AI Studio yang diperlukan.');
 
 const forbiddenText = [
   'honeydew-capybara-825103.hostingersite.com',

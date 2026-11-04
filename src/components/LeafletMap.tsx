@@ -9,6 +9,33 @@ import { CENTRAL_WAREHOUSE } from '../data/mockData';
 import { RetailStore, TrackingPoint, RouteStop } from '../types';
 import { extractCoordinatesFromObject, getStoreLocationType, getStorePriorityLevel } from '../utils/coordinateParser';
 
+// Prevent Leaflet _onZoomTransitionEnd / _getMapPanePos from crashing when map unmounts during a zoom transition
+if (typeof L !== 'undefined' && L.Map && L.Map.prototype) {
+  const origGetMapPanePos = (L.Map.prototype as any)._getMapPanePos;
+  if (origGetMapPanePos && !(L.Map.prototype as any).__safeMapPanePatched) {
+    (L.Map.prototype as any).__safeMapPanePatched = true;
+    (L.Map.prototype as any)._getMapPanePos = function () {
+      if (!this._mapPane) {
+        return L.point(0, 0);
+      }
+      return origGetMapPanePos.apply(this, arguments);
+    };
+    const origOnZoomTransitionEnd = (L.Map.prototype as any)._onZoomTransitionEnd;
+    if (origOnZoomTransitionEnd) {
+      (L.Map.prototype as any)._onZoomTransitionEnd = function () {
+        if (!this._mapPane || !this._loaded) {
+          return;
+        }
+        return origOnZoomTransitionEnd.apply(this, arguments);
+      };
+    }
+  }
+}
+
+const isMapAlive = (map: L.Map | null | undefined): map is L.Map => {
+  return Boolean(map && (map as any)._mapPane && (map as any)._container && (map as any)._loaded);
+};
+
 interface LeafletMapProps {
   stores?: RetailStore[];
   selectedStoreId?: string | null;
@@ -141,11 +168,12 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
   // Invalidate Map Size when entering/exiting Fullscreen
   useEffect(() => {
-    if (mapInstanceRef.current) {
+    if (isMapAlive(mapInstanceRef.current)) {
       const timer = setTimeout(() => {
-        mapInstanceRef.current?.invalidateSize();
+        if (!isMapAlive(mapInstanceRef.current)) return;
+        mapInstanceRef.current.invalidateSize({ animate: false });
         if (currentBoundsRef.current && !userInteractedRef.current) {
-          mapInstanceRef.current?.fitBounds(currentBoundsRef.current, {
+          mapInstanceRef.current.fitBounds(currentBoundsRef.current, {
             padding: [50, 50],
             maxZoom: 13,
             animate: false
@@ -170,7 +198,10 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       center: initialCenter,
       zoom: zoomLevel,
       zoomControl: true,
-      scrollWheelZoom: true
+      scrollWheelZoom: true,
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false
     });
 
     // Detect user pan/drag and zoom events so automatic re-renders do NOT override user positioning
@@ -209,16 +240,16 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     let resizeObserver: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
       resizeObserver = new ResizeObserver(() => {
-        if (mapInstanceRef.current) {
+        if (isMapAlive(mapInstanceRef.current)) {
           const currentCenter = mapInstanceRef.current.getCenter();
           const currentZoom = mapInstanceRef.current.getZoom();
 
-          mapInstanceRef.current.invalidateSize({ pan: false });
+          mapInstanceRef.current.invalidateSize({ pan: false, animate: false });
 
           // Preserve exact coordinates and zoom level during container resize
           if (userInteractedRef.current) {
             mapInstanceRef.current.setView(currentCenter, currentZoom, { animate: false });
-          } else if (currentBoundsRef.current) {
+          } else if (currentBoundsRef.current && currentBoundsRef.current.isValid()) {
             mapInstanceRef.current.fitBounds(currentBoundsRef.current, {
               padding: [45, 45],
               maxZoom: 13,
@@ -232,7 +263,9 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
     // Invalidate size after layout stabilization
     const timer = setTimeout(() => {
-      map.invalidateSize();
+      if (isMapAlive(map)) {
+        map.invalidateSize({ animate: false });
+      }
     }, 200);
 
     return () => {
@@ -276,27 +309,27 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     } catch {}
 
     // Register popupopen listener to lock map focus precisely on specific marker coordinate without drift
-    map.off('popupopen zoomend moveend');
-    map.on('popupopen', (e: L.PopupEvent) => {
+    const handlePopupOpen = (e: L.PopupEvent) => {
       const popup = e.popup;
       const latLng = popup?.getLatLng();
-      if (latLng && mapInstanceRef.current) {
+      if (latLng && isMapAlive(mapInstanceRef.current)) {
         userInteractedRef.current = true;
         mapInstanceRef.current.panTo(latLng, {
-          animate: true,
-          duration: 0.25
+          animate: false
         });
       }
-    });
+    };
 
-    map.on('zoomend moveend', () => {
-      if (mapInstanceRef.current && layerGroupRef.current) {
+    const handleZoomMoveEnd = () => {
+      if (isMapAlive(mapInstanceRef.current) && layerGroupRef.current) {
         if (!mapInstanceRef.current.hasLayer(layerGroupRef.current)) {
           layerGroupRef.current.addTo(mapInstanceRef.current);
         }
-        mapInstanceRef.current.invalidateSize({ pan: false });
       }
-    });
+    };
+
+    map.on('popupopen', handlePopupOpen);
+    map.on('zoomend moveend', handleZoomMoveEnd);
 
     if (layerGroupRef.current) {
       try {
@@ -734,47 +767,54 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
     // Only auto-center/fitBounds if user has NOT manually dragged/zoomed the map,
     // OR if it's the initial load, OR if an intentional filter/store selection occurred.
-    if (!userInteractedRef.current || !initialFitDoneRef.current) {
+    if ((!userInteractedRef.current || !initialFitDoneRef.current) && isMapAlive(map)) {
       if (selectedStoreId) {
         const selectedStore = stores.find(s => s.id === selectedStoreId);
         if (selectedStore) {
           const sLat = Number(selectedStore.latitude);
           const sLng = Number(selectedStore.longitude);
           if (!isNaN(sLat) && !isNaN(sLng)) {
-            map.setView([sLat, sLng], Math.max(map.getZoom(), 13), { animate: true });
+            map.setView([sLat, sLng], Math.max(map.getZoom(), 13), { animate: false });
           }
         }
       } else if (centerCoords) {
         map.setView(centerCoords, zoomLevel, { animate: false });
       } else if (bounds.length > 0) {
-        map.fitBounds(L.latLngBounds(bounds), {
-          padding: [45, 45],
-          maxZoom: 13,
-          animate: initialFitDoneRef.current
-        });
-        initialFitDoneRef.current = true;
+        const latLngBounds = L.latLngBounds(bounds);
+        if (latLngBounds.isValid()) {
+          map.fitBounds(latLngBounds, {
+            padding: [45, 45],
+            maxZoom: 13,
+            animate: false
+          });
+          initialFitDoneRef.current = true;
+        }
       }
     }
 
     // Flush map tile and vector graphics buffers after layer remounting
     const flushTimer = setTimeout(() => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize({ pan: false });
+      if (isMapAlive(mapInstanceRef.current)) {
+        mapInstanceRef.current.invalidateSize({ pan: false, animate: false });
       }
     }, 60);
 
     return () => {
       clearTimeout(flushTimer);
+      try {
+        map.off('popupopen', handlePopupOpen);
+        map.off('zoomend moveend', handleZoomMoveEnd);
+      } catch {}
     };
   }, [stores, selectedStoreId, trackingPoints, stops, showWarehouse, highlightIsland, plannedPolyline, isFleetMode, selectedFleetName, centerCoords, zoomLevel, isFullscreen, enableClustering, isRadiusMode, radiusKm, radiusCenter, forceUpdateTrigger]);
 
   const handleResetView = () => {
-    if (mapInstanceRef.current && currentBoundsRef.current) {
+    if (isMapAlive(mapInstanceRef.current) && currentBoundsRef.current && currentBoundsRef.current.isValid()) {
       userInteractedRef.current = false;
       mapInstanceRef.current.fitBounds(currentBoundsRef.current, {
         padding: [45, 45],
         maxZoom: 13,
-        animate: true
+        animate: false
       });
     }
   };

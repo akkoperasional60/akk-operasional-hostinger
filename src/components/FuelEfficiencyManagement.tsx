@@ -116,11 +116,51 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formCostPerLiter, setFormCostPerLiter] = useState<number>(STANDARD_FUEL_PRICES['BioSolar']);
   const [formStartOdo, setFormStartOdo] = useState<string>('');
   const [formEndOdo, setFormEndOdo] = useState<string>('');
-  const [formGasStation, setFormGasStation] = useState<string>(COMMON_GAS_STATIONS[0]);
+  const [formGasStation, setFormGasStation] = useState<string>('SPBU Farly');
   const [formReceiptNumber, setFormReceiptNumber] = useState<string>('');
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
+
+  // Daftar nama driver untuk dropdown pengisian manual BBM
+  const driverDropdownOptions = useMemo(() => {
+    const defaultDrivers = [
+      'Zainul Agustiar',
+      'Ach Taufiq',
+      'Faisol Arifin',
+      'Aldi Wahyu Pradana',
+      'Arif Bagus Muhammad Iqbal',
+      'Budiono',
+      'Suwarno',
+      'Rudin Slamet',
+      'Supriyanto',
+      'Nanda Tegar Hadi Saputra',
+      'Adit',
+      'Aan Adi Saputra',
+      'Bintang Wahyu Pratama',
+      'Alphian Bayu Nugraha',
+      'Mohamad Rohman',
+      'Riki Novandito Ardiansyah',
+      'Saifur Rizal'
+    ];
+    const map = new Map<string, { id: string; name: string; role: string }>();
+    crews.forEach(c => {
+      if (c.name && c.name.trim()) {
+        map.set(c.name.trim().toLowerCase(), {
+          id: c.id,
+          name: c.name.trim(),
+          role: c.role || 'Driver'
+        });
+      }
+    });
+    defaultDrivers.forEach((name, idx) => {
+      const key = name.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { id: `drv-${idx + 1}`, name, role: 'Driver' });
+      }
+    });
+    return Array.from(map.values());
+  }, [crews]);
 
   // Trip route calculator state
   const [calcFleetType, setCalcFleetType] = useState<VehicleType>('Engkel Long');
@@ -697,16 +737,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <Download className="w-4 h-4 text-emerald-400" />
               <span className="hidden sm:inline">Ekspor CSV</span>
             </button>
-
-            {onNavigateToFleets && (
-              <button
-                onClick={onNavigateToFleets}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs font-medium transition cursor-pointer"
-              >
-                <Truck className="w-3.5 h-3.5" />
-                <span>Manajemen Armada &rarr;</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -949,17 +979,17 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           {/* ========================================================================= */}
           {/* SECTION A: VISUALISASI KONSUMSI BBM HARIAN PER ARMADA (GRAFIK BATANG)      */}
           {/* ========================================================================= */}
-          <div className="bg-slate-900/85 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4">
+          <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
                     <BarChart className="w-5 h-5" />
                   </div>
                   <h3 className="text-base font-bold text-white tracking-tight">
                     Visualisasi Konsumsi BBM Harian per Armada
                   </h3>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                     Grafik Batang Harian
                   </span>
                 </div>
@@ -976,7 +1006,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <select
                     value={dailyFleetFilter}
                     onChange={(e) => setDailyFleetFilter(e.target.value)}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
+                    className="bg-transparent text-slate-200 font-semibold text-xs focus:outline-none cursor-pointer"
                   >
                     <option value="all" className="bg-slate-900">Semua Armada</option>
                     {fleets.map(f => (
@@ -993,7 +1023,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <select
                     value={dailyRangeDays}
                     onChange={(e) => setDailyRangeDays(Number(e.target.value))}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
+                    className="bg-transparent text-slate-200 font-semibold text-xs focus:outline-none cursor-pointer"
                   >
                     <option value={7} className="bg-slate-900">7 Hari Terakhir</option>
                     <option value={14} className="bg-slate-900">14 Hari Terakhir</option>
@@ -1004,27 +1034,27 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                 {/* Metric Selector */}
                 {dailyFleetFilter === 'all' && (
-                  <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs">
+                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                     <button
                       onClick={() => setDailyMetric('liters')}
-                      className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'liters' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
+                        dailyMetric === 'liters' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       Liter BBM
                     </button>
                     <button
                       onClick={() => setDailyMetric('literPerKm')}
-                      className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'literPerKm' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
+                        dailyMetric === 'literPerKm' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       Liter / KM
                     </button>
                     <button
                       onClick={() => setDailyMetric('distanceKm')}
-                      className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'distanceKm' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
+                        dailyMetric === 'distanceKm' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       Jarak (KM)
@@ -1034,11 +1064,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                 {/* Stacked or Grouped Bar Mode */}
                 {dailyFleetFilter === 'all' && dailyMetric === 'liters' && (
-                  <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs">
+                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                     <button
                       onClick={() => setDailyChartMode('grouped')}
-                      className={`px-2 py-1 rounded-lg font-medium transition cursor-pointer text-[11px] ${
-                        dailyChartMode === 'grouped' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
+                        dailyChartMode === 'grouped' ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white'
                       }`}
                       title="Batang Berdampingan"
                     >
@@ -1046,8 +1076,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     </button>
                     <button
                       onClick={() => setDailyChartMode('stacked')}
-                      className={`px-2 py-1 rounded-lg font-medium transition cursor-pointer text-[11px] ${
-                        dailyChartMode === 'stacked' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
+                        dailyChartMode === 'stacked' ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white'
                       }`}
                       title="Batang Bertumpuk (Total Harian)"
                     >
@@ -1058,7 +1088,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                 <button
                   onClick={() => setActiveTab('daily')}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 border border-slate-700 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
                 >
                   <span>Tampilan Detail Harian</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1222,17 +1252,17 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           {/* ========================================================================= */}
           {/* SECTION B: ANALISIS RATA-RATA KONSUMSI LITER PER KM TIAP UNIT KENDARAAN    */}
           {/* ========================================================================= */}
-          <div className="bg-slate-900/85 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4">
+          <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="p-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                     <Gauge className="w-5 h-5" />
                   </div>
                   <h3 className="text-base font-bold text-white tracking-tight">
                     Rata-rata Konsumsi Liter per Kilometer (L/KM) Tiap Unit Kendaraan
                   </h3>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                     Metrik Standar L/KM
                   </span>
                 </div>
@@ -1244,7 +1274,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setActiveTab('liter_km')}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 hover:text-emerald-200 border border-slate-700 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 border border-slate-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
                 >
                   <span>Buka Tabel & Kalkulator L/KM Lengkap</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1255,12 +1285,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             {/* FORMULA CALLOUT BANNER */}
             <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-blue-500/20 text-blue-400 font-mono font-bold text-xs shrink-0">
+                <div className="p-2 rounded-lg bg-blue-500/15 text-blue-400 border border-blue-500/30 font-mono font-bold text-xs shrink-0">
                   L/KM
                 </div>
                 <div>
                   <span className="font-bold text-white">Rumus Konsumsi: </span>
-                  <span className="font-mono text-amber-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  <span className="font-mono text-amber-400 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                     Liter / KM = Total Liter &divide; Total Jarak (KM)
                   </span>
                   <span className="text-slate-400 ml-2">
@@ -1276,43 +1306,112 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             {/* SIDE-BY-SIDE: BAR CHART L/KM VS TARGET & SUMMARY TABLE */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               {/* L/KM Comparison Bar Chart (5 Cols) */}
-              <div className="lg:col-span-5 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 flex flex-col justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5 mb-1">
-                    <BarChart className="w-4 h-4 text-emerald-400" />
-                    <span>Komparasi Aktual L/KM vs Target Pabrikan</span>
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mb-3">
-                    Bar hijau/biru lebih pendek dari bar abu-abu menandakan armada lebih irit dari target.
-                  </p>
+              <div className="lg:col-span-5 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <BarChart className="w-4 h-4 text-emerald-400" />
+                      <span>Komparasi Aktual L/KM vs Target Pabrikan</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Semakin rendah bar realisasi dibanding target, semakin irit konsumsi BBM unit.
+                    </p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-400 shrink-0">
+                    {lKmComparisonChartData.filter(d => d.aktualLKm <= d.targetLKm).length}/{lKmComparisonChartData.length} Unit Irit
+                  </span>
                 </div>
 
-                <div className="h-60 w-full">
+                {/* Summary Pill Row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Rata-rata Aktual</div>
+                    <div className="text-sm font-black text-emerald-400 font-mono mt-0.5">
+                      {kpiSummary.overallAvgLiterPerKm || 0.1333} <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Standar Pabrik</div>
+                    <div className="text-sm font-black text-slate-300 font-mono mt-0.5">
+                      0.1333 <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Unit Terbaik</div>
+                    <div className="text-sm font-black text-amber-400 font-mono mt-0.5 truncate">
+                      {unitLKmAnalysis[0]?.initialCode || unitLKmAnalysis[0]?.plateNumber || '-'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Horizontal Comparison Bars (Audience-Friendly Visual) */}
+                <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={lKmComparisonChartData}
-                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                      layout="vertical"
+                      margin={{ top: 4, right: 18, left: 4, bottom: 4 }}
+                      barCategoryGap="22%"
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="unit" stroke="#94a3b8" fontSize={10} />
-                      <YAxis stroke="#94a3b8" fontSize={10} domain={[0, 0.25]} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={true} vertical={false} />
+                      <XAxis type="number" stroke="#94a3b8" fontSize={10} domain={[0, 0.22]} unit=" L" />
+                      <YAxis
+                        type="category"
+                        dataKey="unit"
+                        stroke="#94a3b8"
+                        fontSize={10}
+                        width={68}
+                        tick={{ fontWeight: 700 }}
+                      />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: '#0f172a',
                           borderColor: '#334155',
-                          borderRadius: '8px',
+                          borderRadius: '10px',
                           fontSize: '11px'
                         }}
-                        formatter={(val: any, name: any) => [
-                          `${val} L / KM (${Number((val * 100).toFixed(2))} L/100 KM)`,
-                          name === 'aktualLKm' ? 'Realisasi L/KM' : 'Target Standar L/KM'
+                        formatter={(val: any, name: any, item: any) => [
+                          `${val} L/KM (${Number((val * 100).toFixed(2))} L/100KM • ${
+                            name === 'aktualLKm' ? item.payload.aktualKmL : item.payload.targetKmL
+                          } KM/L)`,
+                          name === 'aktualLKm' ? 'Realisasi Aktual' : 'Target Pabrikan'
                         ]}
+                        labelFormatter={(label, payload) => {
+                          const p = payload?.[0]?.payload;
+                          return p ? `Armada ${label} (${p.plate} • ${p.tipe})` : `Armada ${label}`;
+                        }}
                       />
-                      <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
-                      <Bar dataKey="aktualLKm" name="Realisasi L/KM" fill="#10b981" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="targetLKm" name="Target L/KM" fill="#64748b" radius={[3, 3, 0, 0]} />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px' }} />
+                      <Bar dataKey="aktualLKm" name="Realisasi L/KM" fill="#10b981" radius={[0, 4, 4, 0]} barSize={8}>
+                        {lKmComparisonChartData.map((entry, idx) => (
+                          <Cell
+                            key={`cell-akt-${idx}`}
+                            fill={entry.aktualLKm <= entry.targetLKm ? '#10b981' : '#f59e0b'}
+                          />
+                        ))}
+                      </Bar>
+                      <Bar dataKey="targetLKm" name="Target Pabrikan L/KM" fill="#64748b" radius={[0, 4, 4, 0]} barSize={8} />
                     </BarChart>
                   </ResponsiveContainer>
+                </div>
+
+                {/* Legend Status Guide */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" />
+                      <span>Hemat (&le; Target)</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 inline-block" />
+                      <span>Melebihi Target</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-slate-500 inline-block" />
+                      <span>Batas Target</span>
+                    </span>
+                  </div>
+                  <span className="font-mono">Satuan: L/KM</span>
                 </div>
               </div>
 
@@ -1387,148 +1486,38 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             </div>
           </div>
 
-          {/* MAIN CHARTS ROW */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* BAR CHART: REALIZATION VS TARGET PER ARMADA */}
-            <div className="lg:col-span-2 bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <BarChart className="w-4 h-4 text-amber-400" />
-                    <span>Rasio Realisasi Konsumsi BBM vs Target Standar (KM / Liter)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400">Semakin tinggi nilai bar, semakin hemat konsumsi bahan bakar armada.</p>
-                </div>
-              </div>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={fleetComparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
-                    <YAxis stroke="#94a3b8" fontSize={11} domain={[0, 14]} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(val: any, name: any) => [`${val} KM / Liter`, name === 'realisasi' ? 'Realisasi Aktual' : 'Target Standar']}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                    <Bar dataKey="realisasi" name="Realisasi Aktual (KM/L)" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="target" name="Target Standar (KM/L)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+          {/* TIMELINE AREA CHART */}
+          <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
+              <TrendingUp className="w-4 h-4 text-blue-400" />
+              <span>Tren Pengisian BBM & Jarak Tempuh Harian</span>
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">Volume liter yang diisikan dan akumulasi jarak tempuh kendaraan.</p>
 
-            {/* PIE CHART: FUEL TYPE BREAKDOWN */}
-            <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 flex flex-col justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
-                  <Fuel className="w-4 h-4 text-emerald-400" />
-                  <span>Komposisi Penggunaan Jenis BBM</span>
-                </h3>
-                <p className="text-xs text-slate-400">Total volume liter berdasarkan jenis bahan bakar.</p>
-              </div>
-
-              <div className="h-52 w-full my-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={fuelTypePieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={75}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {fuelTypePieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(val: any) => [`${val.toLocaleString('id-ID')} Liter`, 'Total']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="space-y-1.5 border-t border-slate-800 pt-2 text-xs">
-                {fuelTypePieData.map((item, idx) => (
-                  <div key={item.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }} />
-                      <span className="text-slate-300 font-medium">{item.name}</span>
-                    </div>
-                    <span className="font-mono font-bold text-slate-200">{item.value.toLocaleString('id-ID')} L</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* TIMELINE AREA CHART & FLEET HEALTH CARDS */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* AREA CHART */}
-            <div className="lg:col-span-2 bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
-                <TrendingUp className="w-4 h-4 text-blue-400" />
-                <span>Tren Pengisian BBM & Jarak Tempuh Harian</span>
-              </h3>
-              <p className="text-xs text-slate-400 mb-4">Volume liter yang diisikan dan akumulasi jarak tempuh kendaraan.</p>
-
-              <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={timelineChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorLiters" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorDistance" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
-                    <YAxis stroke="#94a3b8" fontSize={11} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="liters" name="Volume BBM (Liter)" stroke="#f59e0b" fillOpacity={1} fill="url(#colorLiters)" />
-                    <Area type="monotone" dataKey="distance" name="Jarak Tempuh (KM)" stroke="#3b82f6" fillOpacity={1} fill="url(#colorDistance)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* ECO-DRIVING TIPS FOR CARDBOARD BOX LOGISTICS */}
-            <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 space-y-3">
-              <div className="flex items-center gap-2 text-amber-400">
-                <Sparkles className="w-5 h-5" />
-                <h3 className="text-sm font-bold text-white">Panduan Penghematan BBM AKK</h3>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Logistik kemasan karton box memiliki karakteristik volume besar dengan berat terukur. Praktik hemat BBM:
-              </p>
-
-              <div className="space-y-2 text-xs">
-                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-start gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 text-[10px] font-bold">1</div>
-                  <span className="text-slate-300"><strong>Aerodinamika Terpal:</strong> Pastikan terpal bak wingbox/engkel tertutup kencang dan rata untuk mengurangi hambatan angin di jalan tol.</span>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-start gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 text-[10px] font-bold">2</div>
-                  <span className="text-slate-300"><strong>Tekanan Angin Ban:</strong> Ban kempes 2 PSI meningkatkan konsumsi BBM hingga 3%. Periksa mingguan di pangkalan Banyuwangi.</span>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-start gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 text-[10px] font-bold">3</div>
-                  <span className="text-slate-300"><strong>Matikan Mesin Saat Antre:</strong> Idling mesin &gt; 15 menit saat antre muat membuang rata-rata 1.2 liter solar sia-sia.</span>
-                </div>
-              </div>
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timelineChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorLiters" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorDistance" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
+                  <YAxis stroke="#94a3b8" fontSize={11} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                  <Area type="monotone" dataKey="liters" name="Volume BBM (Liter)" stroke="#f59e0b" fillOpacity={1} fill="url(#colorLiters)" />
+                  <Area type="monotone" dataKey="distance" name="Jarak Tempuh (KM)" stroke="#3b82f6" fillOpacity={1} fill="url(#colorDistance)" />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </div>
@@ -2696,7 +2685,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     value={formFleetId}
                     onChange={(e) => handleFleetSelection(e.target.value)}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
                   >
                     <option value="">-- Pilih Armada --</option>
                     {fleets.map(f => (
@@ -2711,14 +2700,24 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Nama Driver <span className="text-rose-400">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={formDriverName}
-                    onChange={(e) => setFormDriverName(e.target.value)}
-                    placeholder="Nama Supir"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormDriverName(val);
+                      const matched = driverDropdownOptions.find(d => d.name === val);
+                      if (matched) setFormDriverId(matched.id);
+                    }}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  />
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="">-- Pilih Nama Driver --</option>
+                    {driverDropdownOptions.map(d => (
+                      <option key={d.id} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -2743,13 +2742,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <select
                     value={formFuelType}
                     onChange={(e) => handleFuelTypeChange(e.target.value as FuelType)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
                   >
-                    <option value="BioSolar">BioSolar (Rp 6.800/L)</option>
-                    <option value="Dexlite">Dexlite (Rp 14.500/L)</option>
-                    <option value="Pertamina Dex">Pertamina Dex</option>
-                    <option value="Pertalite">Pertalite</option>
-                    <option value="Pertamax">Pertamax</option>
+                    <option value="BioSolar">Solar</option>
                   </select>
                 </div>
 
@@ -2839,21 +2834,18 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Lokasi SPBU
+                    Lokasi SPBU <span className="text-rose-400">*</span>
                   </label>
-                  <input
-                    type="text"
-                    list="stations-list"
+                  <select
                     value={formGasStation}
                     onChange={(e) => setFormGasStation(e.target.value)}
-                    placeholder="Nama / Lokasi SPBU"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  />
-                  <datalist id="stations-list">
-                    {COMMON_GAS_STATIONS.map((s, idx) => (
-                      <option key={idx} value={s} />
-                    ))}
-                  </datalist>
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="SPBU Farly">Farly</option>
+                    <option value="SPBU Gajah Mada">Gajah Mada</option>
+                    <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
+                  </select>
                 </div>
 
                 <div>
@@ -2870,59 +2862,17 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Rute Perjalanan / Pengiriman
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Contoh: Banyuwangi DC -> Surabaya Hub Rungkut"
-                    value={formRouteTrip}
-                    onChange={(e) => setFormRouteTrip(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Estimasi Beban Muatan (Ton)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    placeholder="Contoh: 5.5"
-                    value={formCargoLoadTon}
-                    onChange={(e) => setFormCargoLoadTon(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Catatan Kondisi Jalan / Kendaraan
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Catatan hambatan macet, cuaca, tanjakan, atau kendala mesin..."
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:border-amber-500"
-                />
-              </div>
-
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition"
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
                 >
                   Simpan Catatan BBM
                 </button>

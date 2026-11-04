@@ -941,87 +941,34 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
           {/* Sub-Tabs & Primary CTA */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-              {!isCrewsMode ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('fleets')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'fleets'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Truck className="w-3.5 h-3.5" />
-                    <span>Unit ({fleets.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('fuel')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'fuel'
-                        ? 'bg-amber-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Fuel className="w-3.5 h-3.5" />
-                    <span>BBM</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('spareparts')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'spareparts'
-                        ? 'bg-amber-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Wrench className="w-3.5 h-3.5" />
-                    <span>Sparepart</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('forms')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'forms'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Formulir</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('crews')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'crews'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Daftar Kru ({visibleCrewsForRole.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('history')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'history'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <History className="w-3.5 h-3.5" />
-                    <span>History Kirim &amp; SLA</span>
-                  </button>
-                </>
-              )}
-            </div>
+            {isCrewsMode && (
+              <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('crews')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'crews'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Daftar Kru ({visibleCrewsForRole.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('history')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'history'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>History Kirim &amp; SLA</span>
+                </button>
+              </div>
+            )}
 
             {!isCrewsMode ? (
               <button

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AkkLogo } from './AkkLogo';
+import { ExifMetadataBadge, createExifMetadataFromDate } from '../utils/exifMetadata';
 import {
   Truck,
   MapPin,
@@ -2028,7 +2029,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin)
   const standbyPortalInfo = useMemo(() => {
-    const matchSamePerson = (nameA: string, nameB: string): boolean => {
+    const matchSamePerson = (nameA?: string, nameB?: string): boolean => {
       const a = (nameA || '').trim().toLowerCase();
       const b = (nameB || '').trim().toLowerCase();
       if (!a || !b || a === '-' || b === '-') return false;
@@ -2091,19 +2092,57 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         );
       });
 
-    // Tentukan daftar pengiriman pada tanggal aktif
-    const allStoreSchedules = logisticsStore.getSchedules();
-    const targetDateIso = dateFilterStart || new Date().toISOString().slice(0, 10);
-    let daySchedules = allStoreSchedules.filter(s => (s.departureDate || '').slice(0, 10) === targetDateIso);
-    if (daySchedules.length === 0 && allStoreSchedules.length > 0) {
-      // Gunakan tanggal jadwal terdekat yang aktif di sistem
-      const firstDate = (allStoreSchedules[0].departureDate || '').slice(0, 10);
-      if (firstDate) {
-        daySchedules = allStoreSchedules.filter(s => (s.departureDate || '').slice(0, 10) === firstDate);
-      }
+    // Pastikan kru yang sedang login selalu masuk ke dalam pool
+    const loggedInCrewName = (portalDisplayName || currentDriver?.name || currentUser?.fullName || '').trim();
+    if (loggedInCrewName) {
+      addPoolMember(
+        currentDriver?.id || currentUser?.id || 'crew-self',
+        loggedInCrewName,
+        isUserHelperRole ? 'Helper' : 'Driver',
+        currentDriver?.phone || currentUser?.phone || '-',
+        isUserHelperRole ? 'SIM A' : 'SIM B2 Umum'
+      );
     }
 
-    // Gunakan jadwal asli (daySchedules) agar kru utama seperti Budiono tetap terjaga di daftar terjadwal dan Zainal tetap tercatat di Kru Free
+    // Tentukan daftar pengiriman pada tanggal aktif (menggunakan tanggal lokal WIB, bukan UTC)
+    const nowLocal = new Date();
+    const todayLocalIso = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const targetDateIso = dateFilterStart || todayLocalIso;
+
+    const allStoreSchedules = logisticsStore.getSchedules();
+    let daySchedules = allStoreSchedules.filter(s => {
+      const depIso = (s.departureDate || '').slice(0, 10);
+      const retIso = (s.returnDate || s.deliveryDate || '').slice(0, 10);
+      return depIso === targetDateIso || retIso === targetDateIso;
+    });
+
+    // Jika snapshot belum tersedia atau berbeda tanggal, coba baca dari cache kalender minggu admin (akk_admin_schedule_weeks_cache)
+    let adminDayPengiriman: any[] = [];
+    try {
+      const targetDayNum = Number(targetDateIso.slice(8, 10));
+      const rawWeeks = localStorage.getItem('akk_admin_schedule_weeks_cache');
+      if (rawWeeks) {
+        const parsedWeeks = JSON.parse(rawWeeks);
+        if (Array.isArray(parsedWeeks)) {
+          for (const w of parsedWeeks) {
+            const matchedDay = (w?.days || []).find((d: any) => Number(d?.dayNumber) === targetDayNum);
+            if (matchedDay && Array.isArray(matchedDay.pengiriman) && matchedDay.pengiriman.length > 0) {
+              adminDayPengiriman = matchedDay.pengiriman;
+              break;
+            }
+          }
+        }
+      }
+    } catch {}
+
+    const rawSnapPengiriman =
+      Array.isArray(snapshot?.pengiriman) &&
+      snapshot.pengiriman.length > 0 &&
+      (!snapshot.dateIso || snapshot.dateIso === targetDateIso || Number(snapshot.dayNumber) === Number(targetDateIso.slice(8, 10)))
+        ? snapshot.pengiriman
+        : adminDayPengiriman;
+
+    // Gunakan jadwal pada hari target (daySchedules atau rawSnapPengiriman)
     const snapshotPengiriman: Array<{
       id?: string;
       driver: string;
@@ -2126,9 +2165,72 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           backupPosition: s.backupPosition,
           backupTargetName: s.backupTargetName
         }))
-      : Array.isArray(snapshot?.pengiriman) && snapshot.pengiriman.length > 0
-      ? snapshot.pengiriman
-      : [];
+      : rawSnapPengiriman;
+
+    // Jika daySchedules di store kosong namun ada snapshotPengiriman hari ini, bentuk daftar jadwal hari ini agar dropdown Rute Area di kartu Stand By selalu terisi
+    if (daySchedules.length === 0 && snapshotPengiriman.length > 0) {
+      const allFleets = logisticsStore.getFleets();
+      const allCrewsList = logisticsStore.getCrews();
+      daySchedules = snapshotPengiriman.map((p, idx) => {
+        const matchedFleet =
+          allFleets.find(f => f.initialCode === p.armada || f.plateNumber === p.armada) || allFleets[0];
+        const matchedDrv = allCrewsList.find(c => matchSamePerson(c.name, p.driver)) || {
+          id: `drv-snap-${idx}`,
+          name: p.driver || '-',
+          phone: '-',
+          role: 'Driver Utama',
+          licenseNumber: '-',
+          licenseType: 'SIM B1/B2 Umum',
+          status: 'on-duty' as const,
+          tripsCompleted: 50,
+          rating: 4.8
+        };
+        const matchedHlp1 = p.helper && p.helper !== '-'
+          ? allCrewsList.find(c => matchSamePerson(c.name, p.helper)) || {
+              id: `hlp1-snap-${idx}`,
+              name: p.helper,
+              phone: '-',
+              role: 'Kernet / Helper',
+              licenseNumber: '-',
+              licenseType: 'SIM A',
+              status: 'on-duty' as const,
+              tripsCompleted: 40,
+              rating: 4.8
+            }
+          : undefined;
+        const matchedHlp2 = p.helper2 && p.helper2 !== '-'
+          ? allCrewsList.find(c => matchSamePerson(c.name, p.helper2)) || {
+              id: `hlp2-snap-${idx}`,
+              name: p.helper2,
+              phone: '-',
+              role: 'Kernet / Helper',
+              licenseNumber: '-',
+              licenseType: 'SIM A',
+              status: 'on-duty' as const,
+              tripsCompleted: 40,
+              rating: 4.8
+            }
+          : undefined;
+        return {
+          id: p.id || `SCH-SNAP-${targetDateIso}-${idx}`,
+          areaName: p.area || 'Area Kirim',
+          fleetId: matchedFleet?.id || 'flt-1',
+          fleet: matchedFleet,
+          crewId: matchedDrv.id,
+          crew: matchedDrv,
+          crewHelperId: matchedHlp1?.id,
+          crewHelper: matchedHlp1,
+          crewHelper2Id: matchedHlp2?.id,
+          crewHelper2: matchedHlp2,
+          backupCrewName: p.backupCrewName,
+          backupPosition: p.backupPosition,
+          backupTargetName: p.backupTargetName,
+          departureDate: `${targetDateIso}T07:30:00`,
+          returnDate: `${targetDateIso}T16:00:00`,
+          status: 'scheduled' as ShipmentStatus
+        } as Schedule;
+      });
+    }
 
     snapshotPengiriman.forEach((p, idx) => {
       if (p.driver && p.driver !== '-') addPoolMember(`snap-d-${idx}`, p.driver, 'Driver');
@@ -2149,23 +2251,33 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       licenseType: string;
     }> = [];
 
+    // Hanya cek jadwal pada HARI INI (targetDateIso) atau pengiriman yang sedang berjalan ('in_transit' | 'picked_up'), BUKAN histori 'delivered' masa lalu!
+    const activeTodayDeliveries = deliveries.filter(d => {
+      if (d.status === 'delivered') return false;
+      const dDate = (d.departureDate || d.returnDate || d.deliveryDate || '').slice(0, 10);
+      return dDate === targetDateIso || ['in_transit', 'picked_up', 'delayed'].includes(d.status);
+    });
+
     pool.forEach(member => {
-      const isScheduled = snapshotPengiriman.some(p => {
-        if (matchSamePerson(p.driver, member.name)) return true;
-        if ((p.helper || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
-        if ((p.helper2 || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
-        return false;
-      }) || deliveries.some(d => {
-        if (d.crew && matchSamePerson(d.crew.name, member.name)) return true;
-        if (d.crewHelper && matchSamePerson(d.crewHelper.name, member.name)) return true;
-        if (d.crewHelper2 && matchSamePerson(d.crewHelper2.name, member.name)) return true;
-        return false;
-      }) || daySchedules.some(s => {
-        if (s.crew && matchSamePerson(s.crew.name, member.name)) return true;
-        if (s.crewHelper && matchSamePerson(s.crewHelper.name, member.name)) return true;
-        if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, member.name)) return true;
-        return false;
-      });
+      const isScheduled =
+        snapshotPengiriman.some(p => {
+          if (matchSamePerson(p.driver, member.name)) return true;
+          if ((p.helper || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
+          if ((p.helper2 || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), member.name))) return true;
+          return false;
+        }) ||
+        activeTodayDeliveries.some(d => {
+          if (d.crew && matchSamePerson(d.crew.name, member.name)) return true;
+          if (d.crewHelper && matchSamePerson(d.crewHelper.name, member.name)) return true;
+          if (d.crewHelper2 && matchSamePerson(d.crewHelper2.name, member.name)) return true;
+          return false;
+        }) ||
+        daySchedules.some(s => {
+          if (s.crew && matchSamePerson(s.crew.name, member.name)) return true;
+          if (s.crewHelper && matchSamePerson(s.crewHelper.name, member.name)) return true;
+          if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, member.name)) return true;
+          return false;
+        });
 
       if (isScheduled) {
         scheduledNames.push(member.name);
@@ -2177,26 +2289,49 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const activeCrewFilterName =
       canManageAllPortalSchedules && spvCrewFilter !== 'all'
         ? spvCrewFilter
-        : portalDisplayName || currentDriver?.name || '';
+        : portalDisplayName || currentDriver?.name || currentUser?.fullName || '';
 
-    const hasAssignedSchedule = deliveries.length > 0 || daySchedules.some(s => {
-      if (!activeCrewFilterName) return false;
-      if (s.crew && matchSamePerson(s.crew.name, activeCrewFilterName)) return true;
-      if (s.crewHelper && matchSamePerson(s.crewHelper.name, activeCrewFilterName)) return true;
-      if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, activeCrewFilterName)) return true;
-      return false;
-    });
+    const hasAssignedScheduleToday =
+      activeTodayDeliveries.some(d => {
+        if (!activeCrewFilterName) return false;
+        if (d.crew && matchSamePerson(d.crew.name, activeCrewFilterName)) return true;
+        if (d.crewHelper && matchSamePerson(d.crewHelper.name, activeCrewFilterName)) return true;
+        if (d.crewHelper2 && matchSamePerson(d.crewHelper2.name, activeCrewFilterName)) return true;
+        return false;
+      }) ||
+      daySchedules.some(s => {
+        if (!activeCrewFilterName) return false;
+        if (s.crew && matchSamePerson(s.crew.name, activeCrewFilterName)) return true;
+        if (s.crewHelper && matchSamePerson(s.crewHelper.name, activeCrewFilterName)) return true;
+        if (s.crewHelper2 && matchSamePerson(s.crewHelper2.name, activeCrewFilterName)) return true;
+        return false;
+      }) ||
+      snapshotPengiriman.some(p => {
+        if (!activeCrewFilterName) return false;
+        if (matchSamePerson(p.driver, activeCrewFilterName)) return true;
+        if ((p.helper || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), activeCrewFilterName))) return true;
+        if ((p.helper2 || '').split(/[,&/]+/).some(h => matchSamePerson(h.trim(), activeCrewFilterName))) return true;
+        return false;
+      });
 
     const isCurrentPortalUserFreeStandby = Boolean(
-      !hasAssignedSchedule &&
+      !hasAssignedScheduleToday &&
       activeCrewFilterName &&
-      freeStandbyCrews.some(fc => matchSamePerson(fc.name, activeCrewFilterName))
+      (freeStandbyCrews.some(fc => matchSamePerson(fc.name, activeCrewFilterName)) || !scheduledNames.some(sn => matchSamePerson(sn, activeCrewFilterName)))
     );
 
-    const activeBackupSchedule = daySchedules.find(s =>
-      s.backupCrewName &&
-      (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
-    ) || null;
+    const activeBackupSchedule =
+      daySchedules.find(
+        s =>
+          s.backupCrewName &&
+          (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
+      ) ||
+      activeTodayDeliveries.find(
+        s =>
+          s.backupCrewName &&
+          (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
+      ) ||
+      null;
 
     const activeDateLabel =
       snapshot?.dayName && snapshot?.dateString
@@ -2221,6 +2356,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     crews,
     portalDisplayName,
     currentDriver?.name,
+    currentUser?.fullName,
+    isUserHelperRole,
     spvCrewFilter,
     canManageAllPortalSchedules,
     dateFilterStart,
@@ -2241,6 +2378,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const allSchedules = logisticsStore.getSchedules();
     const targetSch =
       allSchedules.find(s => s.id === standbyReplaceForm.targetScheduleId) ||
+      standbyPortalInfo.daySchedules.find(s => s.id === standbyReplaceForm.targetScheduleId) ||
       standbyPortalInfo.daySchedules[0] ||
       allSchedules[0];
 
@@ -2304,7 +2442,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         isManuallyEdited: true
       };
 
-      logisticsStore.updateSchedule(targetSch.id, patch);
+      if (allSchedules.some(s => s.id === targetSch.id)) {
+        logisticsStore.updateSchedule(targetSch.id, patch);
+      } else {
+        logisticsStore.addSchedule({
+          ...targetSch,
+          ...patch
+        });
+      }
     }
 
     // Update snapshot & cached admin weeks in localStorage so Jadwal & Penugasan Admin (kolom BACK UP / MENGGANTIKAN & KRU FREE) langsung tersinkronisasi
@@ -4086,34 +4231,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
-            {/* PANEL JADWAL FREE • STAND BY GUDANG (Hanya tampil jika Kru BELUM memiliki jadwal rute kiriman aktif) */}
-            {activeTab === 'active' &&
-              filteredDeliveries.length === 0 &&
-              deliveries.length === 0 &&
-              standbyPortalInfo.isCurrentPortalUserFreeStandby &&
-              (!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
-                <div className="bg-white dark:bg-slate-900 border border-amber-500/50 rounded-2xl p-3.5 shadow-sm space-y-3">
+            {/* PANEL JADWAL FREE • STAND BY GUDANG (Tampil untuk Kru yang Stand By di Gudang hari ini maupun yang sedang Menggantikan Kru Lain) */}
+            {(activeTab === 'active' || activeTab === 'scheduled' || activeTab === 'all') &&
+              (standbyPortalInfo.isCurrentPortalUserFreeStandby || Boolean(standbyPortalInfo.activeBackupSchedule)) && (
+                <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/60 rounded-2xl p-4 shadow-md space-y-3">
                   <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0">
-                        <Building2 className="w-4 h-4" />
+                      <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
+                        <Building2 className="w-5 h-5" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[11px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
-                            JADWAL FREE • STAND BY GUDANG
+                          <span className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
+                            JADWAL HARI INI: STAND BY GUDANG DC
                           </span>
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[9px] font-extrabold">
-                            ● Stand By
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-500/30">
+                            {standbyPortalInfo.activeBackupSchedule ? '● Aktif Menggantikan Kru' : '● Stand By di Gudang'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
-                          {standbyPortalInfo.activeDateLabel} • Stand By di Gudang &amp; Siap Menggantikan Kru Area Lain
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                          {standbyPortalInfo.activeDateLabel} • Kru Cadangan Siap Menggantikan Kru Kiriman Berhalangan
                         </p>
                       </div>
                     </div>
 
-                    {standbyPortalInfo.activeBackupSchedule && (
+                    {standbyPortalInfo.activeBackupSchedule && standbyReplaceForm.isOpen && (
                       <button
                         type="button"
                         onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
@@ -4124,64 +4266,115 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     )}
                   </div>
 
-                  {/* Form Simpel: Hanya Posisi Kru yang Digantikan & Pilih Rute Area Kirim */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                        Posisi Kru yang Digantikan
-                      </label>
-                      <select
-                        value={standbyReplaceForm.replacePosition}
-                        onChange={(e) =>
-                          setStandbyReplaceForm(prev => ({
-                            ...prev,
-                            replacePosition: e.target.value as 'driver' | 'helper' | 'helper2'
-                          }))
-                        }
-                        className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
-                      >
-                        <option value="driver">Driver Utama</option>
-                        <option value="helper">Helper 1</option>
-                        <option value="helper2">Helper 2</option>
-                      </select>
+                  {/* Ringkasan Status Saat Kru Sedang Menggantikan Orang Lain */}
+                  {standbyPortalInfo.activeBackupSchedule && (
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
+                            STATUS PENGGANTIAN KRU HARI H
+                          </span>
+                          <p className="text-xs font-extrabold text-slate-900 dark:text-white mt-0.5">
+                            Menggantikan{' '}
+                            <span className="text-amber-600 dark:text-amber-400">
+                              {standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper'
+                                ? 'Helper 1'
+                                : standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper2'
+                                ? 'Helper 2'
+                                : 'Driver Utama'}{' '}
+                              ({standbyPortalInfo.activeBackupSchedule.backupTargetName || '-'})
+                            </span>
+                          </p>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                            Rute Area Kirim:{' '}
+                            <strong className="text-emerald-600 dark:text-emerald-400">
+                              {standbyPortalInfo.activeBackupSchedule.areaName ||
+                                standbyPortalInfo.activeBackupSchedule.store?.storeName ||
+                                '-'}
+                            </strong>{' '}
+                            • Armada:{' '}
+                            <strong>
+                              {standbyPortalInfo.activeBackupSchedule.fleet?.initialCode ||
+                                standbyPortalInfo.activeBackupSchedule.fleet?.plateNumber ||
+                                '-'}
+                            </strong>
+                          </p>
+                        </div>
+                        {!standbyReplaceForm.isOpen && (
+                          <button
+                            type="button"
+                            onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: true }))}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black transition cursor-pointer shrink-0"
+                          >
+                            Ubah Rute Pengganti
+                          </button>
+                        )}
+                      </div>
                     </div>
+                  )}
 
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                        Pilih Rute Area Kirim
-                      </label>
-                      <select
-                        value={standbyReplaceForm.targetScheduleId || standbyPortalInfo.daySchedules[0]?.id || ''}
-                        onChange={(e) =>
-                          setStandbyReplaceForm(prev => ({ ...prev, targetScheduleId: e.target.value }))
-                        }
-                        className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
+                  {/* Form Pilih Rute & Posisi Kru yang Digantikan */}
+                  {(!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
+                            Posisi Kru yang Digantikan
+                          </label>
+                          <select
+                            value={standbyReplaceForm.replacePosition}
+                            onChange={(e) =>
+                              setStandbyReplaceForm(prev => ({
+                                ...prev,
+                                replacePosition: e.target.value as 'driver' | 'helper' | 'helper2'
+                              }))
+                            }
+                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            <option value="driver">Driver Utama</option>
+                            <option value="helper">Helper 1</option>
+                            <option value="helper2">Helper 2</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
+                            Pilih Rute Area Kirim (Menggantikan Orang Lain)
+                          </label>
+                          <select
+                            value={standbyReplaceForm.targetScheduleId || standbyPortalInfo.daySchedules[0]?.id || ''}
+                            onChange={(e) =>
+                              setStandbyReplaceForm(prev => ({ ...prev, targetScheduleId: e.target.value }))
+                            }
+                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            {standbyPortalInfo.daySchedules.map((sch, sIdx) => {
+                              const targetPerson =
+                                standbyReplaceForm.replacePosition === 'driver'
+                                  ? sch.crew?.name || '-'
+                                  : standbyReplaceForm.replacePosition === 'helper'
+                                  ? sch.crewHelper?.name || '-'
+                                  : sch.crewHelper2?.name || '-';
+                              return (
+                                <option key={sch.id} value={sch.id}>
+                                  #{sIdx + 1} {sch.areaName || sch.store?.storeName} — ({targetPerson})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleConfirmStandbyReplaceFromPortal}
+                        className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                       >
-                        {standbyPortalInfo.daySchedules.map((sch, sIdx) => {
-                          const targetPerson =
-                            standbyReplaceForm.replacePosition === 'driver'
-                              ? sch.crew?.name || '-'
-                              : standbyReplaceForm.replacePosition === 'helper'
-                              ? sch.crewHelper?.name || '-'
-                              : sch.crewHelper2?.name || '-';
-                          return (
-                            <option key={sch.id} value={sch.id}>
-                              #{sIdx + 1} {sch.areaName || sch.store?.storeName} — ({targetPerson})
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleConfirmStandbyReplaceFromPortal}
-                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
-                  </button>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -4192,7 +4385,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <span className="text-xs">Memuat tugas pengiriman driver...</span>
               </div>
             ) : filteredDeliveries.length === 0 ? (
-              activeTab === 'active' && standbyPortalInfo.isCurrentPortalUserFreeStandby ? null : (
+              (activeTab === 'active' || activeTab === 'scheduled') &&
+              (standbyPortalInfo.isCurrentPortalUserFreeStandby || Boolean(standbyPortalInfo.activeBackupSchedule)) ? null : (
                 <div className="py-8 text-center bg-slate-900/60 rounded-2xl border border-slate-800/80 p-5 space-y-2">
                   <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto">
                     <Calendar className="w-5 h-5" />

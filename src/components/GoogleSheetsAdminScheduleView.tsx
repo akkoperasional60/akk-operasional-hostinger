@@ -1281,9 +1281,26 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [importYear, setImportYear] = useState<string>('2026');
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [, setStoreRevision] = useState<number>(0);
+
+  useEffect(() => {
+    void logisticsStore.refreshUsersFromHostinger();
+    void logisticsStore.hydrateOperationalDataFromHostinger();
+    const unsub = logisticsStore.subscribe(() => {
+      setStoreRevision(prev => prev + 1);
+    });
+    return unsub;
+  }, []);
 
   const getIntegratedDrivers = () => {
     const allUsers = logisticsStore.getUsers();
+    const allCrews = logisticsStore.getCrews();
+    const inactiveNames = new Set(
+      allUsers
+        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
+        .map(u => (u.fullName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
     const activeDriverUsers = allUsers.filter(
       u => u.role === 'driver' && u.status === 'approved'
     );
@@ -1296,11 +1313,29 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         result.push({ id: u.id, name: clean, hasAccount: true });
       }
     });
+    allCrews.forEach(c => {
+      if (!c || c.status === 'off') return;
+      const roleStr = String(c.role || '').toLowerCase();
+      if (roleStr.includes('helper') || roleStr.includes('kernet')) return;
+      const clean = (c.name || '').trim();
+      const lower = clean.toLowerCase();
+      if (clean && !names.has(lower) && !inactiveNames.has(lower)) {
+        names.add(lower);
+        result.push({ id: c.id, name: clean, hasAccount: true });
+      }
+    });
     return result;
   };
 
   const getIntegratedHelpers = () => {
     const allUsers = logisticsStore.getUsers();
+    const allCrews = logisticsStore.getCrews();
+    const inactiveNames = new Set(
+      allUsers
+        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
+        .map(u => (u.fullName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
     const activeHelperAndDriverUsers = allUsers.filter(
       u => (u.role === 'crew_helper' || u.role === 'driver') && u.status === 'approved'
     );
@@ -1317,6 +1352,23 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (clean && !names.has(clean.toLowerCase())) {
         names.add(clean.toLowerCase());
         result.push({ id: u.id, name: clean, hasAccount: true });
+      }
+    });
+    // Tambahkan kru dari tabel crews jika belum ada di daftar
+    const sortedCrews = [...allCrews].sort((a, b) => {
+      const aHelper = String(a.role || '').toLowerCase().includes('helper') || String(a.role || '').toLowerCase().includes('kernet');
+      const bHelper = String(b.role || '').toLowerCase().includes('helper') || String(b.role || '').toLowerCase().includes('kernet');
+      if (aHelper && !bHelper) return -1;
+      if (!aHelper && bHelper) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sortedCrews.forEach(c => {
+      if (!c || c.status === 'off') return;
+      const clean = (c.name || '').trim();
+      const lower = clean.toLowerCase();
+      if (clean && !names.has(lower) && !inactiveNames.has(lower)) {
+        names.add(lower);
+        result.push({ id: c.id, name: clean, hasAccount: true });
       }
     });
     return result;
@@ -1743,13 +1795,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
     });
 
-    return {
+    const resultBreakdown = {
       totalCrewCount: scheduledCrews.length + freeStandbyCrews.length,
       scheduledCrewCount: scheduledCrews.length,
       freeStandbyCount: freeStandbyCrews.length,
       scheduledCrews,
       freeStandbyCrews
     };
+
+    try {
+      if (dayObj) {
+        const effMo = selectedMonth === -1 ? 0 : selectedMonth;
+        const dateIso = `${selectedYear}-${String(effMo + 1).padStart(2, '0')}-${String(dayObj.dayNumber).padStart(2, '0')}`;
+        localStorage.setItem(
+          'akk_standby_crew_snapshot',
+          JSON.stringify({
+            dateIso,
+            dateString: dayObj.dateString,
+            dayNumber: dayObj.dayNumber,
+            month: effMo,
+            year: selectedYear,
+            freeStandbyCrews,
+            scheduledCrews,
+            pengiriman: pengirimanList
+          })
+        );
+      }
+    } catch {
+      // Ignore storage quota errors
+    }
+
+    return resultBreakdown;
   };
 
   const handleConfirmReplaceAbsentCrew = () => {
@@ -1817,6 +1893,51 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         isManuallyEdited: true
       };
       logisticsStore.updateSchedule(matchedStoreSch.id, patch);
+    } else {
+      const dateIsoStr = `${selectedYear}-${String(effectiveMonth + 1).padStart(2, '0')}-${String(targetDay.dayNumber).padStart(2, '0')}`;
+      const matchedFleet =
+        logisticsStore.getFleets().find(f => f.initialCode === targetTrip.armada || f.plateNumber === targetTrip.armada) ||
+        logisticsStore.getFleets()[0];
+      const matchedDriverObj = allCrews.find(c => isSameCrewPerson(c.name, targetTrip.driver)) || matchedStandbyCrewObj;
+      const matchedHelperObj = targetTrip.helper
+        ? allCrews.find(c => isSameCrewPerson(c.name, targetTrip.helper))
+        : undefined;
+      const matchedHelper2Obj = targetTrip.helper2
+        ? allCrews.find(c => isSameCrewPerson(c.name, targetTrip.helper2 ?? ''))
+        : undefined;
+      const stores = logisticsStore.getStores();
+      const matchedStore =
+        stores.find(st => st.storeName.toLowerCase() === standardizeAreaName(targetTrip.area).toLowerCase()) ||
+        stores[0];
+
+      logisticsStore.addSchedule({
+        trackingNumber: `SJ-${Date.now().toString().slice(-6)}`,
+        areaName: standardizeAreaName(targetTrip.area),
+        originName: 'Gudang Utama AKK Banyuwangi (Rogojampi)',
+        originCoords: [-8.3168, 114.2908],
+        isInterIsland: /denpasar|singaraja|tabanan|gianyar|badung|klungkung|karangasem|bangli|jembrana|negara|lombok|mataram|bali/i.test(targetTrip.area),
+        storeId: matchedStore?.id || 'str-1',
+        store: matchedStore,
+        fleetId: matchedFleet?.id || 'flt-1',
+        fleet: matchedFleet,
+        crewId: matchedDriverObj.id,
+        crew: matchedDriverObj,
+        crewHelperId: matchedHelperObj?.id,
+        crewHelper: matchedHelperObj,
+        crewHelper2Id: matchedHelper2Obj?.id,
+        crewHelper2: matchedHelper2Obj,
+        backupCrewId: matchedStandbyCrewObj.id,
+        backupCrewName: standbyCrewName,
+        backupPosition: replacePosition,
+        backupTargetName: previousCrewName,
+        cargoDescription: 'Karton Box Pengiriman AKK',
+        cargoWeightTon: 1.2,
+        departureDate: `${dateIsoStr}T07:30:00`,
+        returnDate: `${dateIsoStr}T16:00:00`,
+        estimatedArrival: '16:00 WIB',
+        status: 'scheduled',
+        isManuallyEdited: true
+      });
     }
 
     // Update weeks state while keeping original crew in driver/helper columns
@@ -1837,6 +1958,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
     updateWeeks(newWeeks);
     logisticsStore.syncSchedulesToCrewHistory();
+    void persistSchedulesToDatabase(logisticsStore.getSchedules());
     logisticsStore.addScheduleChangeLog({
       fileName: `Penggantian Kru Hari H (${dateString})`,
       actionType: 'manual_edit',
@@ -5273,9 +5395,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Modal Edit / Tambah Ritase Pengiriman */}
       {editingTripModal && editingTripModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 my-6">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-20 sm:pt-24 pb-6 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center border border-amber-500/30">
                   <Edit className="w-5 h-5" />
@@ -5299,7 +5421,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
 
-            <div className="space-y-3.5 text-xs">
+            <div className="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
               <CrewCustomSelectDropdown
                 label="Driver / Pengemudi *"
                 value={editingTripModal.driver}
@@ -5337,43 +5459,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Kirim Area / Tujuan ({OFFICIAL_DESTINATION_AREAS.length} Area Resmi)
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
-                  {OFFICIAL_DESTINATION_AREAS.map(areaOpt => {
-                    const isSel = editingTripModal.area.toUpperCase() === areaOpt.toUpperCase();
-                    return (
-                      <button
-                        key={areaOpt}
-                        type="button"
-                        onClick={() => setEditingTripModal({ ...editingTripModal, area: areaOpt })}
-                        className={`px-2.5 py-1.5 rounded-lg text-left text-xs font-bold transition cursor-pointer flex items-center justify-between border ${
-                          isSel
-                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
-                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50'
-                        }`}
-                      >
-                        <span className="truncate">{areaOpt}</span>
-                        {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Cabang Operasional *</span>
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1.5">
+                  Kirim Area / Tujuan ({OFFICIAL_DESTINATION_AREAS.length} Area Resmi) *
                 </label>
                 <select
-                  value={editingTripModal.branchId || 'cab-banyuwangi'}
-                  onChange={(e) => setEditingTripModal({ ...editingTripModal, branchId: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer mb-3"
+                  value={editingTripModal.area}
+                  onChange={(e) => setEditingTripModal({ ...editingTripModal, area: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
+                  <option value="">-- Pilih Area Tujuan --</option>
+                  {OFFICIAL_DESTINATION_AREAS.map(areaOpt => (
+                    <option key={areaOpt} value={areaOpt}>
+                      {areaOpt}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -5459,22 +5557,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   </div>
                 )}
               </div>
-
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Target / Catatan PO (Opsional)
-                </label>
-                <input
-                  type="text"
-                  value={editingTripModal.target}
-                  onChange={(e) => setEditingTripModal({ ...editingTripModal, target: e.target.value })}
-                  placeholder="Gudang Pusat AKK Banyuwangi DC"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-blue-600"
-                />
-              </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+            <div className="pt-3 mt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setEditingTripModal(null)}
@@ -5497,12 +5582,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}
       {isUploadConfigModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-xl w-full shadow-2xl space-y-5 my-4">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-20 sm:pt-24 pb-6 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 max-w-xl w-full shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden">
+            {/* Modal Header (Sticky at Top so always visible at 80%-150% zoom) */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3.5 mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm shrink-0">
                   <Plus className="w-5 h-5" />
                 </div>
                 <div>
@@ -5514,30 +5599,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setIsUploadConfigModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Form Body */}
-            <div className="space-y-4 text-xs">
+            {/* Form Body (Scrollable inside modal card) */}
+            <div className="space-y-4 text-xs flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Cabang Asal Pengiriman *</span>
-                  </label>
-                  <select
-                    value={manualScheduleForm.branchId}
-                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, branchId: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
-                    ))}
-                  </select>
-                </div>
                 <div className="w-full">
                   <ModernDatePicker
                     label="Tanggal Kirim *"
@@ -5898,7 +5968,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-end gap-2.5 pt-3 mt-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsUploadConfigModalOpen(false)}

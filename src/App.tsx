@@ -36,7 +36,7 @@ import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
 import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, ChevronDown, Calendar, Bell, Smartphone, Lock, Building2 } from 'lucide-react';
 import { useToast } from './context/ToastContext';
-import { canAccess, getDefaultTabForRole } from './utils/rbac';
+import { canAccess, getDefaultTabForRole, getFirstAccessibleTabForUser } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 
@@ -187,7 +187,7 @@ export default function App() {
         setCurrentTab(requestedTab);
         return;
       }
-      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      const defaultTab = getFirstAccessibleTabForUser(currentUser) as NavTab;
       if (currentTab !== defaultTab) {
         setCurrentTab(defaultTab);
       }
@@ -198,7 +198,7 @@ export default function App() {
     const isAdminTabBlocked = currentTab === 'users' && !isAdmin(currentUser) && !canAccess(currentUser, 'users');
 
     if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
-      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      const defaultTab = getFirstAccessibleTabForUser(currentUser) as NavTab;
       if (currentTab !== defaultTab) {
         setCurrentTab(defaultTab);
       }
@@ -593,6 +593,20 @@ export default function App() {
           {currentTab === 'sales_loading_duration' && (
             <SalesAdminHub
               activeSubTab="loading_duration"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_invoice_so' && (
+            <SalesAdminHub
+              activeSubTab="invoice_so"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_rfid_scanner' && (
+            <SalesAdminHub
+              activeSubTab="rfid_scanner"
               onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
             />
           )}

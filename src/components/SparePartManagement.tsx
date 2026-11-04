@@ -139,7 +139,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   };
 
   // Open Log Usage for a specific fleet
-  const handleOpenLogForFleet = (fleet: Fleet, specificCategory?: SparePartCategory) => {
+  const handleOpenLogForFleet = (fleet: Fleet, specificCategory?: SparePartCategory, tirePositionLabel?: string) => {
     const cat = specificCategory || 'oli';
     const matchedParts = spareParts.filter(p => p.category === cat);
     const firstPart = matchedParts[0];
@@ -158,6 +158,8 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     const d = new Date();
     d.setMonth(d.getMonth() + targetMonths);
 
+    const componentDesc = tirePositionLabel || (cat === 'ban' ? 'Ban Armada Depan Kanan' : cat);
+
     setUsageForm({
       fleetId: fleet.id,
       category: cat,
@@ -169,7 +171,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       nextReplacementDate: d.toISOString().substring(0, 10),
       mechanicOrWorkshop: 'Mekanik Internal AKK',
       totalCost: firstPart ? firstPart.costPerUnit : 0,
-      notes: `Penggantian rutin ${cat} untuk armada ${fleet.initialCode || fleet.plateNumber}`
+      notes: `Penggantian rutin ${componentDesc} untuk armada ${fleet.initialCode || fleet.plateNumber}`
     });
     setIsLogUsageOpen(true);
   };
@@ -374,16 +376,6 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
               <Plus className="w-4 h-4 text-emerald-400" />
               <span>Tambah Master Part</span>
             </button>
-
-            {onNavigateToFleets && (
-              <button
-                onClick={onNavigateToFleets}
-                className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Truck className="w-4 h-4 text-blue-400" />
-                <span>Lihat Data Armada</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -640,39 +632,63 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                         </button>
                       </div>
 
-                      {/* BAN */}
-                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
-                            <Disc className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span>Ban Armada</span>
-                              <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded font-semibold border ${
-                                  status.tire.status === 'urgent'
-                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                    : status.tire.status === 'warning'
-                                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                }`}
-                              >
-                                {status.tire.label}
-                              </span>
+                      {/* BAN ARMADA (RINGKAS 2x2 GRID: DEPAN KANAN, DEPAN KIRI, BELAKANG KANAN, BELAKANG KIRI) */}
+                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
+                              <Disc className="w-3.5 h-3.5" />
                             </div>
-                            <div className="text-[10px] text-slate-400">
-                              Terakhir: {status.tire.lastDate} {status.tire.lastKm > 0 && `(${status.tire.lastKm.toLocaleString('id-ID')} KM)`}
+                            <div>
+                              <div className="text-xs font-bold text-white leading-tight">Ban Armada (4 Posisi)</div>
+                              <div className="text-[10px] text-slate-400">Klik posisi ban untuk catat penggantian</div>
                             </div>
                           </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                            4 Roda
+                          </span>
                         </div>
-                        <button
-                          onClick={() => handleOpenLogForFleet(fleet, 'ban')}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 text-[10px] font-bold transition cursor-pointer"
-                          title="Catat Ganti Ban"
-                        >
-                          Ganti
-                        </button>
+
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { data: status.tireFrontRight, shortName: 'Depan Kanan' },
+                            { data: status.tireFrontLeft, shortName: 'Depan Kiri' },
+                            { data: status.tireRearRight, shortName: 'Belakang Kanan' },
+                            { data: status.tireRearLeft, shortName: 'Belakang Kiri' }
+                          ].map(({ data: tirePos, shortName }) => (
+                            <div
+                              key={tirePos.positionLabel}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/90 flex items-center justify-between gap-1.5"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                      tirePos.status === 'urgent'
+                                        ? 'bg-rose-400'
+                                        : tirePos.status === 'warning'
+                                        ? 'bg-amber-400'
+                                        : 'bg-emerald-400'
+                                    }`}
+                                  />
+                                  <span className="text-[11px] font-bold text-white truncate">
+                                    {shortName}
+                                  </span>
+                                </div>
+                                <div className="text-[9px] text-slate-400 truncate pl-2.5">
+                                  {tirePos.lastDate !== '-' ? tirePos.lastDate : tirePos.label}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleOpenLogForFleet(fleet, 'ban', tirePos.positionLabel)}
+                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 text-[9px] font-bold transition cursor-pointer shrink-0"
+                                title={`Catat Ganti ${tirePos.positionLabel}`}
+                              >
+                                Ganti
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       {/* AKI */}
@@ -1129,6 +1145,42 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                   />
                 </div>
               </div>
+
+              {usageForm.category === 'ban' && (
+                <div>
+                  <label className="text-slate-300 block mb-1 font-semibold">Posisi Ban Armada:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      'Ban Armada Depan Kanan',
+                      'Ban Armada Depan Kiri',
+                      'Ban Armada Belakang Kanan',
+                      'Ban Armada Belakang Kiri'
+                    ].map(pos => {
+                      const isSelected = usageForm.notes.toLowerCase().includes(pos.toLowerCase());
+                      return (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => {
+                            const f = fleets.find(fl => fl.id === usageForm.fleetId);
+                            setUsageForm({
+                              ...usageForm,
+                              notes: `Penggantian rutin ${pos} untuk armada ${f?.initialCode || f?.plateNumber || ''}`
+                            });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border text-left transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {pos}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Pilih Sparepart dari Master Inventaris */}
               <div>

@@ -1,14 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckCircle2,
-  Clock,
   Plus,
   Search,
-  Filter,
   Layers,
-  Calendar,
-  User,
-  AlertCircle
+  Check,
+  CalendarCheck,
+  Sparkles
 } from 'lucide-react';
 import {
   AreaChart,
@@ -20,7 +18,8 @@ import {
 } from 'recharts';
 import {
   SalesHeaderFilter,
-  SalesTopTab
+  SalesTopTab,
+  useSalesAdminUsers
 } from './SalesHeaderFilter';
 import { logisticsStore } from '../../services/store';
 import { AdminActivity } from '../../types';
@@ -44,6 +43,17 @@ interface ChecklistRow {
   name: string;
   days: boolean[];
 }
+
+const DEFAULT_CHECKLIST_JOBS = [
+  'Cek Eceran',
+  'Cek Faktur Kuning',
+  'Cek Faktur Toko',
+  'Cek Surat Jalan Toko',
+  'Input Retur Toko',
+  'HP Telkomsel',
+  'Membuat Pesanan Penjualan & Faktur (1)',
+  'Data Rekap'
+];
 
 const INITIAL_TASK_STATUSES: TaskStatusRow[] = [
   {
@@ -80,42 +90,63 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
   onNavigateSubTab,
   adminOptions
 }) => {
+  const salesAdminUsers = useSalesAdminUsers();
+  const salesAdminNames = useMemo(() => {
+    const names = salesAdminUsers
+      .map(u => (u.fullName || '').trim().toUpperCase())
+      .filter(Boolean);
+    return names.length > 0 ? Array.from(new Set(names)) : ['ADMIN PENJUALAN'];
+  }, [salesAdminUsers]);
+
   const [selectedAdmin, setSelectedAdmin] = useState('SEMUA ADMIN');
   const [selectedMonth, setSelectedMonth] = useState('Agustus');
   const [selectedYear, setSelectedYear] = useState('2026');
+  const [saveToastMsg, setSaveToastMsg] = useState<string | null>(null);
+
   const [checklistRows, setChecklistRows] = useState<ChecklistRow[]>(() => {
     const jobdeskConfig = JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}');
-    const jobsForAdmin = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin] || [];
+    const configuredJobs = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
+    const jobsForAdmin = Array.isArray(configuredJobs) && configuredJobs.length > 0
+      ? configuredJobs
+      : DEFAULT_CHECKLIST_JOBS;
     const history = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
     const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
     const existingPeriod = history.find((h: any) => h.key === periodKey);
 
-    if (existingPeriod) return existingPeriod.rows;
+    if (existingPeriod && Array.isArray(existingPeriod.rows) && existingPeriod.rows.length > 0) {
+      return existingPeriod.rows;
+    }
 
     return jobsForAdmin.map((job: string, index: number) => ({
-        id: String(index + 1),
-        name: job,
-        days: Array(30).fill(false)
+      id: String(index + 1),
+      name: job,
+      days: Array(30).fill(false)
     }));
   });
 
   useEffect(() => {
     const jobdeskConfig = JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}');
-    const jobsForAdmin = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin] || [];
+    const configuredJobs = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
+    const jobsForAdmin = Array.isArray(configuredJobs) && configuredJobs.length > 0
+      ? configuredJobs
+      : DEFAULT_CHECKLIST_JOBS;
     const history = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
     const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
     const existingPeriod = history.find((h: any) => h.key === periodKey);
 
-    if (existingPeriod) {
-        setChecklistRows(existingPeriod.rows);
+    if (existingPeriod && Array.isArray(existingPeriod.rows) && existingPeriod.rows.length > 0) {
+      setChecklistRows(existingPeriod.rows);
     } else {
-        setChecklistRows(jobsForAdmin.map((job: string, index: number) => ({
-            id: String(index + 1),
-            name: job,
-            days: Array(30).fill(false)
-        })));
+      setChecklistRows(
+        jobsForAdmin.map((job: string, index: number) => ({
+          id: String(index + 1),
+          name: job,
+          days: Array(30).fill(false)
+        }))
+      );
     }
   }, [selectedAdmin, selectedMonth, selectedYear]);
+
   const [taskStatuses, setTaskStatuses] = useState<TaskStatusRow[]>(() => {
     const saved = localStorage.getItem('akk_task_status_v1');
     return saved ? JSON.parse(saved) : INITIAL_TASK_STATUSES;
@@ -129,11 +160,17 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // New activity form
-  const [newAdmin, setNewAdmin] = useState('ISTI');
+  const [newAdmin, setNewAdmin] = useState(() => salesAdminNames[0] || 'ADMIN PENJUALAN');
   const [newActionType, setNewActionType] = useState<AdminActivity['actionType']>('Input PO');
   const [newClient, setNewClient] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newDuration, setNewDuration] = useState(25);
+
+  useEffect(() => {
+    if (salesAdminNames.length > 0 && !salesAdminNames.includes(newAdmin)) {
+      setNewAdmin(salesAdminNames[0]);
+    }
+  }, [salesAdminNames, newAdmin]);
 
   useEffect(() => {
     localStorage.setItem('akk_daily_checklist_v1', JSON.stringify(checklistRows));
@@ -174,12 +211,31 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
     }
   };
 
+  const handleSavePeriod = () => {
+    const history = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
+    const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
+
+    const filteredHistory = history.filter((h: any) => h.key !== periodKey);
+    filteredHistory.push({
+      key: periodKey,
+      admin: selectedAdmin,
+      month: selectedMonth,
+      year: selectedYear,
+      rows: checklistRows,
+      savedAt: new Date().toISOString()
+    });
+
+    localStorage.setItem('akk_checklist_history', JSON.stringify(filteredHistory));
+    setSaveToastMsg(`Data checklist ${selectedAdmin} (${selectedMonth} ${selectedYear}) berhasil disimpan!`);
+    setTimeout(() => setSaveToastMsg(null), 3000);
+  };
+
   // Metrics
   const totalChecksChecked = checklistRows.reduce(
     (sum, r) => sum + r.days.filter(Boolean).length,
     0
   );
-  const totalPossibleChecks = checklistRows.length * 12;
+  const totalPossibleChecks = checklistRows.length * 30;
   const achievementRate = totalPossibleChecks > 0
     ? Math.round((totalChecksChecked / totalPossibleChecks) * 100)
     : 0;
@@ -217,7 +273,7 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
         onMonthChange={setSelectedMonth}
         selectedYear={selectedYear}
         onYearChange={setSelectedYear}
-        jadwalInputCount={0}
+        jadwalInputCount={checklistRows.length}
         pencapaianPercent={achievementRate}
         periodeLabel={`${selectedMonth.slice(0, 3)} ${selectedYear}`}
         adminOptions={adminOptions}
@@ -225,61 +281,77 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
 
       {activeViewMode === 'checklist' ? (
         <div className="space-y-6">
-          {/* SECTION 1: AKTIVITAS & JOBDESK HARIAN ADMIN (CHECKLIST TANGGAL) */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
-            {/* Dark Blue Banner Header matching Screenshot 2 */}
-            <div className="bg-[#1e3a8a] px-5 py-3.5 flex items-center justify-between">
-              <h2 className="text-xs sm:text-sm font-bold text-white tracking-wide uppercase">
-                1. AKTIVITAS & JOBDESK HARIAN ADMIN (CHECKLIST TANGGAL)
-              </h2>
-              <div className="flex items-center gap-2">
+          {/* SECTION 1: AKTIVITAS & JOBDESK HARIAN ADMIN (CHECKLIST TANGGAL) - Refreshed Color Tone */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            {/* Clean High-Contrast Header Banner */}
+            <div className="bg-indigo-600 text-white px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                  <CalendarCheck className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xs sm:text-sm font-bold text-white tracking-wide uppercase">
+                    1. Aktivitas &amp; Jobdesk Harian Admin (Checklist Tanggal)
+                  </h2>
+                  <p className="text-[11px] text-indigo-100">
+                    Monitoring realisasi pengerjaan jobdesk harian tanggal T1 s/d T30
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => {
-                    const history = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
-                    const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
-                    
-                    const filteredHistory = history.filter((h: any) => h.key !== periodKey);
-                    filteredHistory.push({
-                      key: periodKey,
-                      admin: selectedAdmin,
-                      month: selectedMonth,
-                      year: selectedYear,
-                      rows: checklistRows,
-                      savedAt: new Date().toISOString()
-                    });
-                    
-                    localStorage.setItem('akk_checklist_history', JSON.stringify(filteredHistory));
-                    alert(`Data untuk ${selectedAdmin} (${selectedMonth} ${selectedYear}) berhasil disimpan sebagai riwayat!`);
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1 rounded-lg transition"
+                  onClick={handleSavePeriod}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
                 >
-                  Simpan Periode Ini
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Simpan Periode Ini</span>
                 </button>
-                <span className="text-[11px] font-semibold text-blue-100 bg-blue-950/60 border border-blue-700/50 px-3 py-1 rounded-full">
+                <span className="text-[11px] font-semibold text-white bg-indigo-700 border border-indigo-400/40 px-3 py-1.5 rounded-lg">
                   Pengguna: {selectedAdmin === 'SEMUA ADMIN' ? 'ALL' : selectedAdmin} ({selectedMonth} {selectedYear})
                 </span>
               </div>
             </div>
 
-            {/* Wave Chart Visualization */}
-            <div className="h-28 p-4 bg-slate-50 border-b border-slate-200">
+            {saveToastMsg && (
+              <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800/60 px-5 py-2.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{saveToastMsg}</span>
+              </div>
+            )}
+
+            {/* Wave Chart Visualization with Clean Indigo/Emerald Tone */}
+            <div className="h-32 p-4 bg-slate-50/70 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={Array.from({ length: 30 }, (_, i) => ({
-                  day: i + 1,
-                  total: checklistRows.reduce((sum, r) => sum + (r.days[i] ? 1 : 0), 0)
-                }))}>
+                <AreaChart
+                  data={Array.from({ length: 30 }, (_, i) => ({
+                    day: `T${i + 1}`,
+                    total: checklistRows.reduce((sum, r) => sum + (r.days[i] ? 1 : 0), 0)
+                  }))}
+                >
+                  <defs>
+                    <linearGradient id="checklistAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.28} />
+                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0.03} />
+                    </linearGradient>
+                  </defs>
                   <Area
                     type="monotone"
                     dataKey="total"
-                    stroke="#1e3a8a"
-                    fill="#bfdbfe"
-                    strokeWidth={2}
+                    stroke="#4f46e5"
+                    fill="url(#checklistAreaGrad)"
+                    strokeWidth={2.5}
                   />
                   <XAxis dataKey="day" hide />
                   <YAxis hide />
                   <Tooltip
-                    contentStyle={{ borderRadius: '12px', fontSize: '10px' }}
-                    labelFormatter={(label) => `Tanggal: ${label}`}
+                    contentStyle={{
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      border: '1px solid #e2e8f0'
+                    }}
+                    formatter={(value: any) => [`${value} Jobdesk Selesai`, 'Realisasi']}
+                    labelFormatter={label => `Tanggal: ${label}`}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -290,59 +362,73 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
               <table className="w-full text-xs">
                 <thead>
                   {/* Daily Percentages Row */}
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <td className="py-2 px-4 text-left font-bold text-slate-500"></td>
-                    <td className="py-2 px-3 text-center font-bold text-slate-500 border-r border-slate-200"></td>
+                  <tr className="bg-slate-50/90 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+                    <td className="py-2 px-4 text-left font-bold text-[10px] uppercase tracking-wider text-slate-400">
+                      Realisasi Harian
+                    </td>
+                    <td className="py-2 px-3 text-center font-bold text-[10px] text-indigo-600 dark:text-indigo-400 border-r border-slate-200 dark:border-slate-800 font-mono tabular-nums">
+                      {achievementRate}%
+                    </td>
                     {Array.from({ length: 30 }, (_, i) => {
                       const dayChecks = checklistRows.reduce((sum, r) => sum + (r.days[i] ? 1 : 0), 0);
                       const percent = checklistRows.length > 0 ? Math.round((dayChecks / checklistRows.length) * 100) : 0;
-                      const colorClass = percent < 30 ? 'text-emerald-600' : percent <= 60 ? 'text-amber-600' : 'text-rose-600';
+                      const colorClass =
+                        percent >= 70
+                          ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20'
+                          : percent > 0
+                          ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50/40 dark:bg-indigo-950/20'
+                          : 'text-slate-400 dark:text-slate-500';
                       return (
-                        <td key={'activity-day-' + i} className={`py-1 text-center font-bold text-[10px] border-r border-slate-100 ${colorClass}`}>
+                        <td
+                          key={'activity-day-' + i}
+                          className={`py-1.5 text-center font-bold text-[10px] border-r border-slate-100 dark:border-slate-800/80 font-mono tabular-nums ${colorClass}`}
+                        >
                           {percent}%
                         </td>
                       );
                     })}
                   </tr>
                   {/* Header Row: Dates */}
-                  <tr className="border-b border-slate-200 text-slate-700 font-bold">
-                    <th className="py-3 px-4 text-left bg-blue-100/70 text-slate-800 font-extrabold w-48">
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 font-bold bg-slate-100/70 dark:bg-slate-800/70">
+                    <th className="py-3 px-4 text-left bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-extrabold min-w-52 border-r border-slate-200 dark:border-slate-800">
                       JOBDESK ADMIN
                     </th>
-                    <th className="py-3 px-3 text-center bg-slate-50 font-extrabold w-16 border-r border-slate-200">
+                    <th className="py-3 px-3 text-center bg-slate-100/90 dark:bg-slate-800 font-extrabold w-16 border-r border-slate-200 dark:border-slate-800">
                       TOTAL
                     </th>
                     {Array.from({ length: 30 }, (_, i) => i + 1).map(day => (
                       <th
                         key={day}
-                        className="py-3 px-2 text-center text-slate-700 font-bold border-r border-slate-100 last:border-r-0 min-w-8"
+                        className="py-3 px-2 text-center text-slate-700 dark:text-slate-300 font-bold border-r border-slate-200/70 dark:border-slate-800 last:border-r-0 min-w-9 font-mono tabular-nums"
                       >
                         T{day}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
                   {checklistRows.map(row => {
                     const rowTotal = row.days.filter(Boolean).length;
                     return (
-                      <tr key={row.id} className="hover:bg-slate-50/70 transition">
-                        <td className="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">
+                      <tr key={row.id} className="hover:bg-indigo-50/30 dark:hover:bg-slate-800/50 transition">
+                        <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap border-r border-slate-100 dark:border-slate-800">
                           {row.name}
                         </td>
-                        <td className="py-3 px-3 text-center font-bold text-slate-700 bg-slate-50/50 border-r border-slate-200">
+                        <td className="py-3 px-3 text-center font-extrabold text-indigo-700 dark:text-indigo-300 bg-indigo-50/30 dark:bg-indigo-950/20 border-r border-slate-200 dark:border-slate-800 font-mono tabular-nums">
                           {rowTotal}
                         </td>
                         {row.days.slice(0, 30).map((checked: boolean, idx: number) => (
                           <td
                             key={idx}
-                            className="py-3 px-2 text-center border-r border-slate-100 last:border-r-0"
+                            className={`py-2.5 px-2 text-center border-r border-slate-100 dark:border-slate-800/60 last:border-r-0 ${
+                              checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                            }`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => handleToggleDay(row.id, idx)}
-                              className="w-4 h-4 rounded-md border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+                              className="w-4 h-4 rounded-md border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
                             />
                           </td>
                         ))}
@@ -354,19 +440,19 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
             </div>
           </div>
 
-          {/* SECTION 2: STATUS TUGAS HARIAN ADMIN matching Screenshot 2 */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          {/* SECTION 2: STATUS TUGAS HARIAN ADMIN */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">Status Tugas Harian Admin</h3>
-                  <p className="text-xs text-slate-400">Monitoring status pengerjaan checklist admin</p>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Status Tugas Harian Admin</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Monitoring status pengerjaan checklist admin penjualan</p>
                 </div>
               </div>
-              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+              <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-3 py-1 rounded-lg border border-indigo-200/70 dark:border-indigo-800/60 font-mono tabular-nums">
                 {taskStatuses.length} Tugas Total
               </span>
             </div>
@@ -375,33 +461,33 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
             <div className="overflow-x-auto mt-2">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 uppercase text-[10px] tracking-wider font-semibold">
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider font-bold">
                     <th className="py-3 px-2">NAMA TUGAS / CHECKLIST</th>
                     <th className="py-3 px-2">ADMIN PIC</th>
                     <th className="py-3 px-2">JAM TARGET</th>
                     <th className="py-3 px-2">STATUS</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {taskStatuses.map(item => (
-                    <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                      <td className="py-3.5 px-2 font-medium text-slate-800">
+                    <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition">
+                      <td className="py-3.5 px-2 font-semibold text-slate-800 dark:text-slate-200">
                         {item.taskName}
                       </td>
-                      <td className="py-3.5 px-2 font-bold text-blue-600">
+                      <td className="py-3.5 px-2 font-bold text-indigo-600 dark:text-indigo-400">
                         {item.adminPic}
                       </td>
-                      <td className="py-3.5 px-2 text-slate-600">
+                      <td className="py-3.5 px-2 text-slate-600 dark:text-slate-400 font-mono tabular-nums">
                         {item.targetTime}
                       </td>
                       <td className="py-3.5 px-2">
                         <span
-                          className={`inline-block px-3 py-1 rounded-full font-bold text-[11px] ${
+                          className={`inline-block px-2.5 py-1 rounded-md font-bold text-[11px] ${
                             item.status === 'Selesai'
-                              ? 'bg-emerald-100 text-emerald-800'
+                              ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
                               : item.status === 'Proses'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-slate-100 text-slate-600'
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                           }`}
                         >
                           {item.status}
@@ -418,14 +504,14 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
         /* AKTIVITAS VIEW (SEMUA) - Log & Record View */
         <div className="space-y-6">
           {/* Jobdesks for Selected Admin */}
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 shadow-xs">
-            <h4 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <Layers className="w-4 h-4" />
-              Tugas Jobdesk Anda: {selectedAdmin === 'SEMUA ADMIN' ? 'Semua' : selectedAdmin}
+          <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-5 shadow-xs">
+            <h4 className="text-sm font-bold text-indigo-950 dark:text-indigo-200 mb-3 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              Tugas Jobdesk Anda: {selectedAdmin === 'SEMUA ADMIN' ? 'Semua Admin' : selectedAdmin}
             </h4>
             <div className="flex flex-wrap gap-2">
-              {(JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}')[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin] || []).map((job: string) => (
-                <span key={job} className="bg-blue-100 text-blue-800 text-xs font-semibold px-3 py-1 rounded-full border border-blue-200">
+              {(JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}')[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin] || DEFAULT_CHECKLIST_JOBS).map((job: string) => (
+                <span key={job} className="bg-white dark:bg-slate-900 text-indigo-800 dark:text-indigo-300 text-xs font-semibold px-3 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800">
                   {job}
                 </span>
               ))}
@@ -433,15 +519,15 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
           </div>
 
           {/* Activities Log */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Seluruh Log Aktivitas Admin</h3>
-                <p className="text-xs text-slate-400">Daftar riwayat aktivitas harian seluruh staf admin penjualan</p>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Seluruh Log Aktivitas Admin</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Daftar riwayat aktivitas harian seluruh staf admin penjualan</p>
               </div>
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer self-start sm:self-auto"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer self-start sm:self-auto"
               >
                 <Plus className="w-4 h-4" />
                 <span>Input Aktivitas Baru</span>
@@ -455,14 +541,14 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
                 placeholder="Cari aktivitas, klien, atau nama admin..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 uppercase text-[10px] tracking-wider font-semibold">
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider font-semibold">
                     <th className="py-2.5 px-2">ADMIN</th>
                     <th className="py-2.5 px-2">JENIS TUGAS</th>
                     <th className="py-2.5 px-2">KLIEN / TOKO</th>
@@ -471,7 +557,7 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
                     <th className="py-2.5 px-2">CATATAN</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {activities
                     .filter(
                       a =>
@@ -480,13 +566,13 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
                         a.notes.toLowerCase().includes(searchTerm.toLowerCase())
                     )
                     .map(act => (
-                      <tr key={act.id} className="hover:bg-slate-50/70 transition">
-                        <td className="py-3 px-2 font-bold text-slate-800">{act.adminName}</td>
-                        <td className="py-3 px-2 font-medium text-slate-700">{act.actionType}</td>
-                        <td className="py-3 px-2 text-slate-600">{act.clientName}</td>
-                        <td className="py-3 px-2 text-slate-600">{act.durationMinutes} mnt</td>
+                      <tr key={act.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition">
+                        <td className="py-3 px-2 font-bold text-slate-800 dark:text-slate-200">{act.adminName}</td>
+                        <td className="py-3 px-2 font-medium text-slate-700 dark:text-slate-300">{act.actionType}</td>
+                        <td className="py-3 px-2 text-slate-600 dark:text-slate-400">{act.clientName}</td>
+                        <td className="py-3 px-2 text-slate-600 dark:text-slate-400 font-mono tabular-nums">{act.durationMinutes} mnt</td>
                         <td className="py-3 px-2">
-                          <span className="inline-block px-2.5 py-0.5 rounded-full font-semibold text-[11px] bg-blue-100 text-blue-800">
+                          <span className="inline-block px-2.5 py-0.5 rounded-md font-semibold text-[11px] bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300">
                             {act.status}
                           </span>
                         </td>
@@ -506,17 +592,19 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
       {/* Modal Add Activity */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-4">Input Aktivitas Admin</h3>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">Input Aktivitas Admin</h3>
             <form onSubmit={handleAddActivity} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Nama Admin</label>
+                <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-1">
+                  Nama Admin (Adm. Penjualan)
+                </label>
                 <select
                   value={newAdmin}
                   onChange={e => setNewAdmin(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-semibold"
                 >
-                  {['ISTI', 'IZZUL', 'SHOIM', 'FATA', 'BINTANG', 'BAYU'].map(name => (
+                  {salesAdminNames.map(name => (
                     <option key={name} value={name}>
                       {name}
                     </option>
@@ -525,11 +613,11 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
               </div>
 
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Jenis Aktivitas</label>
+                <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-1">Jenis Aktivitas</label>
                 <select
                   value={newActionType}
                   onChange={e => setNewActionType(e.target.value as AdminActivity['actionType'])}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
                 >
                   <option value="Input PO">Input PO</option>
                   <option value="Follow Up Pembayaran">Follow Up Pembayaran</option>
@@ -541,50 +629,50 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
               </div>
 
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Nama Klien / Toko Retail</label>
+                <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-1">Nama Klien / Toko Retail</label>
                 <input
                   type="text"
                   required
                   placeholder="cth. PT Indomarco Prismatama DC Banyuwangi"
                   value={newClient}
                   onChange={e => setNewClient(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Durasi (Menit)</label>
+                <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-1">Durasi (Menit)</label>
                 <input
                   type="number"
                   min="1"
                   value={newDuration}
                   onChange={e => setNewDuration(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono tabular-nums"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Catatan</label>
+                <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-1">Catatan</label>
                 <textarea
                   rows={2}
                   placeholder="Detail pengerjaan..."
                   value={newNotes}
                   onChange={e => setNewNotes(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-medium"
+                  className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-medium"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-xs"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-xs"
                 >
                   Simpan Aktivitas
                 </button>

@@ -460,7 +460,10 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
       center: CENTRAL_WAREHOUSE.coordinates,
       zoom: 9,
       zoomControl: false,
-      attributionControl: true
+      attributionControl: true,
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false
     });
 
     // Custom Zoom Control top-right
@@ -484,13 +487,19 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
 
     // Trigger invalidateSize after render to eliminate tile gaps
     const timer = setTimeout(() => {
-      map.invalidateSize();
+      if ((map as any)._mapPane) {
+        map.invalidateSize({ animate: false });
+      }
     }, 250);
 
     return () => {
       clearTimeout(timer);
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.stop();
+          mapInstanceRef.current.off();
+          mapInstanceRef.current.remove();
+        } catch {}
         mapInstanceRef.current = null;
       }
     };
@@ -608,8 +617,8 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
       });
 
       // Fit map to show all destinations
-      if (bounds.length > 1) {
-        map.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 12 });
+      if (bounds.length > 1 && (map as any)._mapPane) {
+        map.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 12, animate: false });
       }
 
     } else if (selectedRoute) {
@@ -760,11 +769,11 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
       layerGroup.addLayer(destMarker);
 
       // Auto-Fit Map to Selected Route Bounds smoothly
-      if (bounds.length > 1) {
-        map.flyToBounds(L.latLngBounds(bounds), {
+      if (bounds.length > 1 && (map as any)._mapPane) {
+        map.fitBounds(L.latLngBounds(bounds), {
           padding: [70, 70],
           maxZoom: 13,
-          duration: 1.2
+          animate: false
         });
       }
     }
@@ -772,17 +781,17 @@ export const ScheduleRouteMap: React.FC<ScheduleRouteMapProps> = ({
 
   // Recenter to Central Warehouse DC
   const handleRecenterToWarehouse = () => {
-    if (!mapInstanceRef.current) return;
-    mapInstanceRef.current.flyTo(CENTRAL_WAREHOUSE.coordinates, 12, { duration: 1.0 });
+    if (!mapInstanceRef.current || !(mapInstanceRef.current as any)._mapPane) return;
+    mapInstanceRef.current.setView(CENTRAL_WAREHOUSE.coordinates, 12, { animate: false });
   };
 
   // Fit current route bounds
   const handleFitRouteBounds = () => {
-    if (!mapInstanceRef.current || !selectedRoute) return;
-    mapInstanceRef.current.flyToBounds(L.latLngBounds(selectedRoute.waypoints), {
+    if (!mapInstanceRef.current || !(mapInstanceRef.current as any)._mapPane || !selectedRoute) return;
+    mapInstanceRef.current.fitBounds(L.latLngBounds(selectedRoute.waypoints), {
       padding: [70, 70],
       maxZoom: 13,
-      duration: 1.0
+      animate: false
     });
   };
 

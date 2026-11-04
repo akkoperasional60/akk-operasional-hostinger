@@ -24,6 +24,13 @@ import {
 } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { useToast } from '../context/ToastContext';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
 
 interface DriverVehicleChecklistModalProps {
   isOpen: boolean;
@@ -90,10 +97,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(initialChecklist?.photoEvidenceUrl || null);
+  const [photoExifMap, setPhotoExifMap] = useState<Record<string, ExifTimestampMetadata>>({});
   const cameraInputRef = React.useRef<HTMLInputElement>(null);
   const odometerRef = React.useRef<HTMLInputElement>(null);
 
   // Built-in Live WebRTC Camera State (Direct Camera Access instead of file import)
+  // cameraTarget: 'evidence' for main odometer/armada photo, or item.id for 'Foto Oli Mesin & Air Radiator' / 'Foto Minyak Rem'
+  const [cameraTarget, setCameraTarget] = useState<'evidence' | string>('evidence');
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState<boolean>(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
@@ -114,7 +124,11 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     setIsLiveCameraOpen(false);
   }, [cameraStream]);
 
-  const startLiveCamera = async (mode: 'environment' | 'user' = cameraFacingMode) => {
+  const startLiveCamera = async (
+    mode: 'environment' | 'user' = cameraFacingMode,
+    target: 'evidence' | string = cameraTarget
+  ) => {
+    setCameraTarget(target);
     setLiveCameraError(null);
     setIsLiveCameraOpen(true);
     if (cameraStream) {
@@ -156,13 +170,43 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       liveVideoRef.current.muted = true;
       liveVideoRef.current.play().catch(() => {});
     }
-  }, [isLiveCameraOpen, cameraStream]);
+  }, [isLiveCameraOpen, cameraStream, cameraTarget]);
 
   React.useEffect(() => {
     if (!isOpen) {
       stopLiveCamera();
     }
   }, [isOpen, stopLiveCamera]);
+
+  const applyCapturedDataUrl = (
+    dataUrl: string,
+    target: 'evidence' | string,
+    exifMeta?: ExifTimestampMetadata
+  ) => {
+    const resolvedExif = exifMeta || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    setPhotoExifMap(prev => ({ ...prev, [target]: resolvedExif }));
+    if (target === 'evidence') {
+      setPhotoUrl(dataUrl);
+    } else {
+      setChecklist(prev => {
+        const updatedItems = prev.items.map(item =>
+          item.id === target ? { ...item, photoUrl: dataUrl, status: 'ok' as const } : item
+        );
+        const { overallStatus, passedCount, issueCount } = driverChecklistService.calculateStatus(updatedItems);
+        return {
+          ...prev,
+          items: updatedItems,
+          overallStatus,
+          passedCount,
+          issueCount
+        };
+      });
+      if (!photoUrl) {
+        setPhotoUrl(dataUrl);
+        setPhotoExifMap(prev => ({ ...prev, evidence: resolvedExif }));
+      }
+    }
+  };
 
   const captureFromLiveVideo = () => {
     if (!liveVideoRef.current) return;
@@ -184,6 +228,12 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
+    const exifMeta = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
+
+    const targetItem = cameraTarget !== 'evidence' ? checklist.items.find(i => i.id === cameraTarget) : null;
+    const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
+
     // Watermark
     ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
     ctx.fillRect(0, 620, 1280, 100);
@@ -191,50 +241,107 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     ctx.fillRect(0, 620, 1280, 3);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 20px system-ui, sans-serif';
-    ctx.fillText(`INSPEKSI ARMADA: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
+    ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
     ctx.fillStyle = '#f59e0b';
     ctx.font = 'bold 16px monospace';
-    ctx.fillText(`WAKTU: ${new Date().toLocaleString('id-ID')} WIB | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`, 20, 690);
+    ctx.fillText(
+      `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
+      20,
+      690
+    );
 
-    setPhotoUrl(canvas.toDataURL('image/jpeg', 0.85));
+    applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), cameraTarget, exifMeta);
     stopLiveCamera();
   };
 
   const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1280;
-        canvas.height = 720;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, 1280, 720);
-        // Watermark
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-        ctx.fillRect(0, 620, 1280, 100);
-        ctx.fillStyle = '#06b6d4';
-        ctx.fillRect(0, 620, 1280, 3);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.fillText(`INSPEKSI ARMADA: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = 'bold 16px monospace';
-        ctx.fillText(`WAKTU: ${new Date().toLocaleString('id-ID')} WIB | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`, 20, 690);
+    const activeTarget = cameraTarget;
+    const targetItem = activeTarget !== 'evidence' ? checklist.items.find(i => i.id === activeTarget) : null;
+    const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
+    extractExifFromFile(file).then(exifMeta => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(img, 0, 0, 1280, 720);
+          drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
+          // Watermark
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+          ctx.fillRect(0, 620, 1280, 100);
+          ctx.fillStyle = '#06b6d4';
+          ctx.fillRect(0, 620, 1280, 3);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px system-ui, sans-serif';
+          ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
+          ctx.fillStyle = '#f59e0b';
+          ctx.font = 'bold 16px monospace';
+          ctx.fillText(
+            `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
+            20,
+            690
+          );
 
-        setPhotoUrl(canvas.toDataURL('image/jpeg', 0.85));
-        stopLiveCamera();
+          applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), activeTarget, exifMeta);
+          stopLiveCamera();
+        };
+        img.src = reader.result as string;
       };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
   };
 
-  // Sync state when initialChecklist or driver changes
+  const wasOpenRef = React.useRef<boolean>(false);
+  const lastInitIdRef = React.useRef<string>('');
+  const DRAFT_KEY = 'akk_checklist_modal_draft_v1';
+
+  // Sync state ONLY when modal opens from closed state or when initialChecklist ID explicitly changes
   React.useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    const currentInitId = initialChecklist?.id || 'fresh';
+    if (wasOpenRef.current && lastInitIdRef.current === currentInitId) {
+      // Update metadata fields (driverId, driverName, fleetId, plateNumber) without wiping user's odometer/photos/items
+      setChecklist(prev => ({
+        ...prev,
+        driverId: driverId || prev.driverId,
+        driverName: driverName || prev.driverName,
+        fleetId: fleetId || prev.fleetId,
+        plateNumber: plateNumber || prev.plateNumber,
+        vehicleType: vehicleType || prev.vehicleType
+      }));
+      return;
+    }
+
+    wasOpenRef.current = true;
+    lastInitIdRef.current = currentInitId;
+
+    // Check if there is a recent in-progress draft in sessionStorage (e.g., if Android WebView reloaded during camera capture)
+    try {
+      const rawDraft = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(DRAFT_KEY) : null;
+      if (rawDraft) {
+        const draft = JSON.parse(rawDraft);
+        if (draft && draft.checklist && (draft.plateNumber === plateNumber || draft.driverId === driverId)) {
+          setChecklist(draft.checklist);
+          setNotes(draft.notes || '');
+          setOdometerInput(draft.odometerInput || '');
+          setFuelPercent(draft.fuelPercent || 80);
+          setInspectionType(draft.inspectionType || defaultInspectionType || 'pre_trip');
+          setPhotoUrl(draft.photoUrl || null);
+          return;
+        }
+      }
+    } catch {}
+
     if (initialChecklist) {
       const syncedItems = driverChecklistService.syncItemsWithStandard(initialChecklist.items);
       const { overallStatus, passedCount, issueCount } = driverChecklistService.calculateStatus(syncedItems);
@@ -267,7 +374,29 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       setInspectionType(allowedType);
       setPhotoUrl(null);
     }
-  }, [initialChecklist, driverId, fleetId, plateNumber, vehicleType, driverName, defaultInspectionType, canSelectPostTrip]);
+  }, [isOpen, initialChecklist, driverId, fleetId, plateNumber, vehicleType, driverName, defaultInspectionType, canSelectPostTrip]);
+
+  // Persist draft in sessionStorage while modal is open so native camera reloads don't lose progress
+  React.useEffect(() => {
+    if (!isOpen) return;
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({
+            driverId,
+            plateNumber,
+            checklist,
+            notes,
+            odometerInput,
+            fuelPercent,
+            inspectionType,
+            photoUrl
+          })
+        );
+      }
+    } catch {}
+  }, [isOpen, driverId, plateNumber, checklist, notes, odometerInput, fuelPercent, inspectionType, photoUrl]);
 
   if (!isOpen) return null;
 
@@ -348,6 +477,11 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       setNotes('');
       setOdometerInput('');
       setPhotoUrl(null);
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem(DRAFT_KEY);
+        }
+      } catch {}
       if (cameraInputRef.current) {
         cameraInputRef.current.value = '';
       }
@@ -360,17 +494,95 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
 
   const categories: { key: ChecklistItemCategory | 'all'; label: string }[] = [
     { key: 'all', label: `Semua (${checklist.items.length})` },
-    { key: 'mesin_fluida', label: 'Mesin & Oli' },
-    { key: 'rem_roda', label: 'Rem & Roda' },
-    { key: 'lampu_listrik', label: 'Lampu & Kelistrikan' },
-    { key: 'fisik_dokumen', label: 'Dokumen & Bodi' },
-    { key: 'darurat_k3', label: 'Darurat & K3' }
+    { key: 'mesin_fluida', label: 'Oli & Radiator' },
+    { key: 'lampu_listrik', label: 'Air Accu' },
+    { key: 'rem_roda', label: 'Rem & Ban' },
+    { key: 'fisik_dokumen', label: 'Kabin & Inventaris' }
   ];
 
   const filteredItems = checklist.items.filter(item => {
     if (activeCategory === 'all') return true;
     return item.category === activeCategory;
   });
+
+  const renderInlineCameraBox = (targetId: 'evidence' | string, buttonTitle: string) => (
+    <div className="rounded-xl overflow-hidden border border-cyan-500/50 bg-slate-950 space-y-2 p-2.5 mt-2">
+      <div className="flex items-center justify-between text-[11px] font-bold text-slate-200 px-1">
+        <span className="flex items-center gap-1.5">
+          <Camera className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+          <span>Kamera Langsung Aktif ({plateNumber})</span>
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              const nextMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
+              setCameraFacingMode(nextMode);
+              startLiveCamera(nextMode, targetId);
+            }}
+            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>Balik Kamera</span>
+          </button>
+          <button
+            type="button"
+            onClick={stopLiveCamera}
+            className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-bold cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+
+      {liveCameraError ? (
+        <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/40 text-center space-y-2">
+          <p className="text-[11px] text-amber-300 font-semibold">{liveCameraError}</p>
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => startLiveCamera(cameraFacingMode, targetId)}
+              className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] cursor-pointer"
+            >
+              Coba Buka Kamera Lagi
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCameraTarget(targetId);
+                cameraInputRef.current?.click();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] border border-slate-700 cursor-pointer"
+            >
+              Buka Kamera Bawaan HP
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center">
+            <video
+              ref={liveVideoRef}
+              playsInline
+              muted
+              autoPlay
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={captureFromLiveVideo}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 transition"
+            >
+              <Camera className="w-4 h-4" />
+              <span>{buttonTitle}</span>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
@@ -524,71 +736,131 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
 
           {/* Checklist Items List */}
           <div className="space-y-2">
-            {filteredItems.map(item => (
-              <div
-                key={item.id}
-                className={`p-3 rounded-xl border transition ${
-                  item.status === 'issue'
-                    ? 'bg-rose-950/20 border-rose-500/40'
-                    : item.status === 'ok'
-                    ? 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
-                    : 'bg-slate-950 border-slate-800/40 text-slate-500'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-0.5 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-200 text-xs">{item.name}</span>
+            {filteredItems.map(item => {
+              const isPhotoItem = item.name.toLowerCase().startsWith('foto ');
+              return (
+                <div
+                  key={item.id}
+                  className={`p-3 rounded-xl border transition ${
+                    item.status === 'issue'
+                      ? 'bg-rose-950/20 border-rose-500/40'
+                      : item.status === 'ok'
+                      ? 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
+                      : 'bg-slate-950 border-slate-800/40 text-slate-500'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {isPhotoItem && <Camera className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                        <span className="font-bold text-slate-200 text-xs">{item.name}</span>
+                        {isPhotoItem && item.photoUrl && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">
+                            Foto Tersimpan
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">{item.description}</p>
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">{item.description}</p>
+
+                    {/* 2-State Toggle Button Group */}
+                    <div className="flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-800 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleItemStatusChange(item.id, 'ok')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center gap-1 ${
+                          item.status === 'ok'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>OK</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleItemStatusChange(item.id, 'issue')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center gap-1 ${
+                          item.status === 'issue'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-rose-400'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>Ada Kendala</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 3-State Toggle Button Group */}
-                  <div className="flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-800 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleItemStatusChange(item.id, 'ok')}
-                      className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center gap-1 ${
-                        item.status === 'ok'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      <Check className="w-3 h-3" />
-                      <span>OK</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleItemStatusChange(item.id, 'issue')}
-                      className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center gap-1 ${
-                        item.status === 'issue'
-                          ? 'bg-rose-600 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-rose-400'
-                      }`}
-                    >
-                      <AlertTriangle className="w-3 h-3" />
-                      <span>Ada Kendala</span>
-                    </button>
-                  </div>
+                  {/* Inline Direct Camera Capture for 'Foto Oli Mesin & Air Radiator' and 'Foto Minyak Rem' */}
+                  {isPhotoItem && (
+                    <div className="mt-2 pt-2 border-t border-slate-800/80">
+                      {isLiveCameraOpen && cameraTarget === item.id ? (
+                        renderInlineCameraBox(item.id, `Jepret ${item.name} Sekarang`)
+                      ) : item.photoUrl ? (
+                        <div className="relative rounded-xl overflow-hidden border border-cyan-500/40 bg-slate-900">
+                          <img
+                            src={item.photoUrl}
+                            alt={item.name}
+                            className="w-full max-h-40 object-cover"
+                          />
+                          <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startLiveCamera('environment', item.id)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/40 cursor-pointer hover:bg-slate-900"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>Foto Ulang</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = checklist.items.map(i =>
+                                  i.id === item.id ? { ...i, photoUrl: undefined } : i
+                                );
+                                setChecklist({ ...checklist, items: updated });
+                              }}
+                              className="px-2 py-1 rounded-lg bg-rose-950/90 text-rose-300 font-bold text-[10px] border border-rose-500/40 cursor-pointer hover:bg-rose-900"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                          <div className="p-2 bg-slate-950 border-t border-slate-800">
+                            <ExifMetadataBadge exif={photoExifMap[item.id]} compact />
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startLiveCamera('environment', item.id)}
+                          className="w-full py-2 px-3 rounded-xl border border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-900/70 hover:bg-slate-900 text-cyan-300 hover:text-cyan-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Buka Kamera &amp; Ambil {item.name}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* If issue: Optional input for note */}
+                  {item.status === 'issue' && (
+                    <div className="mt-2 pt-2 border-t border-rose-500/20">
+                      <input
+                        type="text"
+                        placeholder="Jelaskan temuan kendala fisik / mekanis..."
+                        value={item.note || ''}
+                        onChange={(e) => {
+                          const updated = checklist.items.map(i => i.id === item.id ? { ...i, note: e.target.value } : i);
+                          setChecklist({ ...checklist, items: updated });
+                        }}
+                        className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-2.5 py-1.5 text-[10px] text-rose-200 placeholder-rose-400/50 focus:outline-none"
+                      />
+                    </div>
+                  )}
                 </div>
-
-                {/* If issue: Optional input for note */}
-                {item.status === 'issue' && (
-                  <div className="mt-2 pt-2 border-t border-rose-500/20">
-                    <input
-                      type="text"
-                      placeholder="Jelaskan temuan kendala fisik / mekanis..."
-                      value={item.note || ''}
-                      onChange={(e) => {
-                        const updated = checklist.items.map(i => i.id === item.id ? { ...i, note: e.target.value } : i);
-                        setChecklist({ ...checklist, items: updated });
-                      }}
-                      className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-2.5 py-1.5 text-[10px] text-rose-200 placeholder-rose-400/50 focus:outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* General Notes */}
@@ -632,96 +904,27 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               className="hidden"
             />
 
-            {isLiveCameraOpen ? (
-              <div className="rounded-xl overflow-hidden border border-cyan-500/50 bg-slate-950 space-y-2 p-2.5">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-200 px-1">
-                  <span className="flex items-center gap-1.5">
-                    <Camera className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                    <span>Kamera Langsung Aktif ({plateNumber})</span>
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
-                        setCameraFacingMode(nextMode);
-                        startLiveCamera(nextMode);
-                      }}
-                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Balik Kamera</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={stopLiveCamera}
-                      className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-bold cursor-pointer"
-                    >
-                      Tutup
-                    </button>
-                  </div>
-                </div>
-
-                {liveCameraError ? (
-                  <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/40 text-center space-y-2">
-                    <p className="text-[11px] text-amber-300 font-semibold">{liveCameraError}</p>
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startLiveCamera(cameraFacingMode)}
-                        className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] cursor-pointer"
-                      >
-                        Coba Buka Kamera Lagi
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cameraInputRef.current?.click()}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] border border-slate-700 cursor-pointer"
-                      >
-                        Buka Kamera Bawaan HP
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center">
-                      <video
-                        ref={liveVideoRef}
-                        playsInline
-                        muted
-                        autoPlay
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={captureFromLiveVideo}
-                        className="flex-1 py-2.5 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 transition"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>Jepret Foto Armada / Odometer Sekarang</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+            {isLiveCameraOpen && cameraTarget === 'evidence' ? (
+              renderInlineCameraBox('evidence', 'Jepret Foto Armada / Odometer Sekarang')
             ) : photoUrl ? (
-              <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
-                <img src={photoUrl} alt="Bukti Checklist" className="w-full max-h-48 object-cover" />
-                <button
-                  type="button"
-                  onClick={() => startLiveCamera('environment')}
-                  className="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-slate-900/90 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/40 cursor-pointer hover:bg-slate-900"
-                >
-                  <Camera className="w-3 h-3" />
-                  <span>Foto Ulang (Kamera Langsung)</span>
-                </button>
+              <div className="space-y-2">
+                <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
+                  <img src={photoUrl} alt="Bukti Checklist" className="w-full max-h-48 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => startLiveCamera('environment', 'evidence')}
+                    className="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-slate-900/90 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/40 cursor-pointer hover:bg-slate-900"
+                  >
+                    <Camera className="w-3 h-3" />
+                    <span>Foto Ulang (Kamera Langsung)</span>
+                  </button>
+                </div>
+                <ExifMetadataBadge exif={photoExifMap.evidence} />
               </div>
             ) : (
               <button
                 type="button"
-                onClick={() => startLiveCamera('environment')}
+                onClick={() => startLiveCamera('environment', 'evidence')}
                 className="w-full py-2.5 px-3 rounded-xl border border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/60 hover:bg-slate-950 text-slate-200 hover:text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
               >
                 <Camera className="w-4 h-4 text-cyan-400" />

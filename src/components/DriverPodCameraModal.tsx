@@ -16,6 +16,13 @@ import {
 import { Schedule } from '../types';
 import { extractCoordinatesFromObject } from '../utils/coordinateParser';
 import { logisticsStore } from '../services/store';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
 
 function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
@@ -53,6 +60,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
   const [hasTorch, setHasTorch] = useState<boolean>(false);
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedExif, setCapturedExif] = useState<ExifTimestampMetadata | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isFlashActive, setIsFlashActive] = useState<boolean>(false);
   const [capturedTimestamp, setCapturedTimestamp] = useState<string>('');
@@ -323,13 +331,17 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     };
   }, [isOpen]);
 
-  // Watermark stamp rendering onto image
+  // Watermark stamp rendering onto image (disertai EXIF Timestamp Metadata Kunci)
   const stampWatermark = (
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    now: Date
+    now: Date,
+    exifInput?: ExifTimestampMetadata
   ) => {
+    const exif = exifInput || createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    drawExifMetadataOnCanvas(ctx, width, height, exif);
+
     const bannerHeight = Math.max(90, Math.floor(height * 0.16));
     const bannerY = height - bannerHeight;
 
@@ -344,22 +356,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     ctx.fillStyle = '#06b6d4'; // Cyan accent
     ctx.fillRect(0, bannerY, width, 3);
 
-    // Text formatting
-    const formattedDate = now.toLocaleDateString('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-    const formattedTime = now.toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }) + ' WIB';
-
     const storeName = delivery?.store?.storeName || 'Penerima Konsinyasi';
     const storeCity = delivery?.store?.city || 'Jawa Timur';
-    const trackingNo = delivery?.trackingNumber || 'PO-LOGISTICS';
     const cargoDesc = delivery?.cargoDescription || 'Karton Box AKK';
 
     const fontSizeTitle = Math.max(12, Math.floor(width * 0.024));
@@ -382,10 +380,14 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     ctx.font = `normal ${fontSizeBody}px system-ui, sans-serif`;
     ctx.fillText(`Muatan: ${cargoDesc} | Status: Serah Terima Selesai`, 16, bannerY + 14 + fontSizeTitle + fontSizeBody);
 
-    // Timestamp & Geotag
+    // Timestamp & EXIF Geotag
     ctx.fillStyle = '#f59e0b';
     ctx.font = `bold ${fontSizeBody}px monospace`;
-    ctx.fillText(`🕒 ${formattedDate}, ${formattedTime} | 📍 Dokumentasi Pengiriman Selesai`, 16, bannerY + 16 + fontSizeTitle + (fontSizeBody * 2));
+    ctx.fillText(
+      `🕒 EXIF DateTimeOriginal: ${exif.DateTimeOriginal}.${exif.SubSecTimeOriginal} (${exif.OffsetTimeOriginal}) | 📍 POD Terverifikasi`,
+      16,
+      bannerY + 16 + fontSizeTitle + (fontSizeBody * 2)
+    );
   };
 
   // Capture photo from live video element (with automated dimension scaling and compression for database storage efficiency)
@@ -430,11 +432,13 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     }
 
     const now = new Date();
-    stampWatermark(ctx, w, h, now);
+    const exifMeta = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    stampWatermark(ctx, w, h, now, exifMeta);
 
     // Compressed JPEG quality 0.72 (reduces file size by ~70-80% without losing watermark legibility)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
     setCapturedImage(dataUrl);
+    setCapturedExif(exifMeta);
     setCapturedTimestamp(now.toISOString());
     stopCamera();
   };
@@ -509,10 +513,12 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
     // Watermark
     const now = new Date();
-    stampWatermark(ctx, 1024, 576, now);
+    const simExif = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    stampWatermark(ctx, 1024, 576, now, simExif);
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
     setCapturedImage(dataUrl);
+    setCapturedExif(simExif);
     setCapturedTimestamp(now.toISOString());
     setIsProcessing(false);
     stopCamera();
@@ -531,53 +537,57 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     }
   };
 
-  // Fallback: handle file input / native camera capture with compression
+  // Fallback: handle file input / native camera capture with compression & EXIF extraction
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsProcessing(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        // Limit max dimension to 1024px for database storage efficiency
-        const maxDim = 1024;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+    extractExifFromFile(file).then(exifMeta => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Limit max dimension to 1024px for database storage efficiency
+          const maxDim = 1024;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
           }
-        }
-        canvas.width = w;
-        canvas.height = h;
+          canvas.width = w;
+          canvas.height = h;
 
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, w, h);
-          const now = new Date();
-          stampWatermark(ctx, w, h, now);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-          setCapturedImage(dataUrl);
-          setCapturedTimestamp(now.toISOString());
-          stopCamera();
-        }
-        setIsProcessing(false);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const now = new Date();
+            stampWatermark(ctx, w, h, now, exifMeta);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+            setCapturedImage(dataUrl);
+            setCapturedExif(exifMeta);
+            setCapturedTimestamp(now.toISOString());
+            stopCamera();
+          }
+          setIsProcessing(false);
+        };
+        img.src = reader.result as string;
       };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
   };
 
   // Retake photo
   const handleRetake = () => {
     setCapturedImage(null);
+    setCapturedExif(null);
     setCapturedTimestamp('');
     startCamera(facingMode);
   };
@@ -661,14 +671,17 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
               alt="Bukti Foto POD Full Screen"
               className="w-full h-full object-contain rounded-xl"
             />
-            <div className="absolute top-3 left-4 right-4 bg-slate-900/95 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/50 flex items-center justify-between text-xs shadow-lg">
-              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                <Check className="w-4 h-4 shrink-0" />
-                <span className="font-bold text-slate-900 dark:text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel GPS Aktif</span>
+            <div className="absolute top-3 left-4 right-4 bg-slate-900/95 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/50 space-y-2 text-xs shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span className="font-bold text-slate-900 dark:text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel EXIF + GPS Aktif</span>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                  {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                </span>
               </div>
-              <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300">
-                {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-              </span>
+              <ExifMetadataBadge exif={capturedExif} compact />
             </div>
           </div>
         ) : (

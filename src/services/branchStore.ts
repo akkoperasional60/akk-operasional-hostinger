@@ -406,15 +406,31 @@ class BranchStoreService {
   public getUserBranchPermissions(
     userId: string,
     role: UserRole,
-    existingUserModules?: UserPermissions['modules']
+    existingUserModules?: UserPermissions['modules'],
+    serverBranchPerms?: UserPermissions['branchPermissions']
   ): Record<string, UserBranchPermissionEntry> {
-    const savedForUser = this.userBranchPerms[userId] || {};
+    const savedForUser = serverBranchPerms || this.userBranchPerms[userId] || {};
     const result: Record<string, UserBranchPermissionEntry> = {};
     const roleDefaults = getDefaultPermissionsForRole(role);
 
     this.getBranches().forEach(branch => {
       if (savedForUser[branch.id]) {
-        result[branch.id] = JSON.parse(JSON.stringify(savedForUser[branch.id]));
+        const cloned = JSON.parse(JSON.stringify(savedForUser[branch.id])) as UserBranchPermissionEntry;
+        // Ensure any newly added module or submenu keys exist on cloned.modules
+        Object.keys(roleDefaults).forEach(modId => {
+          if (!cloned.modules[modId]) {
+            cloned.modules[modId] = JSON.parse(JSON.stringify(existingUserModules?.[modId] || roleDefaults[modId]));
+          } else {
+            Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(subId => {
+              if (cloned.modules[modId].subMenus[subId] === undefined) {
+                cloned.modules[modId].subMenus[subId] =
+                  existingUserModules?.[modId]?.subMenus?.[subId] ??
+                  (cloned.modules[modId].enabled ? (roleDefaults[modId]?.subMenus?.[subId] || 'none') : 'none');
+              }
+            });
+          }
+        });
+        result[branch.id] = cloned;
       } else {
         // Default: Nusantara (Banyuwangi) is enabled by default for existing AKK staff,
         // Super Admin gets all branches enabled
@@ -423,7 +439,7 @@ class BranchStoreService {
 
         Object.keys(roleDefaults).forEach(modId => {
           if (isDefaultEnabled) {
-            const sourceMod = existingUserModules?.[modId] || roleDefaults[modId];
+            const sourceMod = existingUserModules?.[modId] !== undefined ? existingUserModules[modId] : roleDefaults[modId];
             baseModules[modId] = JSON.parse(JSON.stringify(sourceMod));
           } else {
             const emptySubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
@@ -466,7 +482,12 @@ class BranchStoreService {
   ): boolean {
     if (!user) return true;
     if (user.role === 'super_admin') return true;
-    const perms = this.getUserBranchPermissions(user.id, user.role, user.permissions?.modules);
+    const perms = this.getUserBranchPermissions(
+      user.id,
+      user.role,
+      user.permissions?.modules,
+      user.permissions?.branchPermissions
+    );
     return Boolean(perms[branchId]?.enabled);
   }
 

@@ -818,12 +818,14 @@ async function startServer() {
     res.json({ success: true, message: 'Logged out successfully' });
   });
 
-  // User Management is persisted in Hostinger MySQL and restricted to Super Admin.
-  app.get('/api/users', requireSuperAdmin, async (_req, res) => {
+  // User Management is persisted in Hostinger MySQL; authenticated users can read sanitized user profiles for schedule/crew assignment.
+  app.get('/api/users', requireAuth, async (req: any, res) => {
     try {
       await ensureBootstrapAdmin();
       const rows = await mysqlQuery<any[]>(`SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users ORDER BY created_at DESC, full_name ASC`);
-      return res.json({ success: true, source: 'hostinger_mysql', data: rows.map(publicUser) });
+      const isSuper = req.authUser?.role === 'super_admin';
+      const filteredRows = isSuper ? rows : rows.filter((r: any) => r.status !== 'rejected');
+      return res.json({ success: true, source: 'hostinger_mysql', data: filteredRows.map(publicUser) });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca pengguna' });
     }
@@ -1747,8 +1749,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         });
       }
 
-      // Production Hostinger: bypass checklist wajib sesi Super Admin yang valid.
-      // Preview AI Studio tetap memakai alur preview_memory di atas agar tampilan/fitur preview tidak berubah.
+      // Validasi hak akses akun di database
       const authUser = await getSessionUser(req);
       const authRole = String(authUser?.role || '').toLowerCase();
       if (!authUser || authRole !== 'super_admin') {
@@ -1973,14 +1974,36 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // REST API for Crews - Hostinger MySQL is the single source of truth
+  // REST API for Crews - Hostinger MySQL is the single source of truth (merged with approved driver/crew_helper accounts in users table)
   app.get("/api/crews", requireAuth, async (_req, res) => {
     try {
-      const mysqlCrews = await mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC");
+      const [mysqlCrews, mysqlCrewUsers] = await Promise.all([
+        mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC"),
+        mysqlQuery<any[]>("SELECT id, full_name, phone, role, status FROM users WHERE role IN ('driver', 'crew_helper') AND status = 'approved' ORDER BY full_name ASC").catch(() => [])
+      ]);
       const mapped = mysqlCrews.map(c => mergePayload(c.payload_json, {
         id: c.id, name: c.name, phone: c.phone, role: c.role, licenseNumber: c.license_number,
         licenseType: c.license_type, status: c.status, tripsCompleted: Number(c.trips_completed || 0), rating: Number(c.rating || 5)
       }));
+      const seenNames = new Set(mapped.map((c: any) => String(c.name || '').trim().toLowerCase()).filter(Boolean));
+      for (const u of mysqlCrewUsers) {
+        const cleanName = String(u.full_name || '').trim();
+        if (!cleanName) continue;
+        const lower = cleanName.toLowerCase();
+        if (seenNames.has(lower)) continue;
+        seenNames.add(lower);
+        mapped.push({
+          id: `crw-${u.id}`,
+          name: cleanName,
+          phone: u.phone || '-',
+          role: u.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
+          licenseNumber: '-',
+          licenseType: u.role === 'crew_helper' ? 'SIM A' : 'SIM B1 Umum',
+          status: 'available',
+          tripsCompleted: 0,
+          rating: 5
+        });
+      }
       return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca kru dari Hostinger MySQL' });
@@ -2475,9 +2498,24 @@ Tugas Anda:
       console.error('[Startup Production] Build frontend (dist/index.html) tidak ditemukan. Jalankan "npm run build" sebelum memulai server production.');
       process.exit(1);
     }
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html') || filePath.endsWith('version.json')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        }
+      })
+    );
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(indexHtmlPath, (err) => {
         if (err && !res.headersSent) {
           console.error("Error sending index.html:", err);

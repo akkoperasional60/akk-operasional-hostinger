@@ -22,8 +22,16 @@ export interface DriverHelperReport {
   verifiedBy?: string;
   verifiedAt?: string;
   // Data Pengisian BBM (Solar) di Farly / Gajah Mada
-  fuelLocation?: 'Farly' | 'Gajah Mada' | string;
+  fuelLocation?: 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)' | string;
   fuelLiters?: string;
+  exifMetadata?: {
+    DateTimeOriginal: string;
+    DateTimeDigitized: string;
+    OffsetTimeOriginal: string;
+    OffsetTime: string;
+    SubSecTimeOriginal: string;
+    source?: 'EXIF_BINARY' | 'CAMERA_CAPTURE_SENSOR';
+  };
   // Data Presensi Check-In & Check-Out Terpadu + PIN Keamanan
   shiftId?: string;
   checkinTimeFormatted?: string;

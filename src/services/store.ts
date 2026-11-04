@@ -1900,6 +1900,26 @@ class LogisticsStore {
       syncedCrews.push(crewItem);
     }
 
+    // Preserve active crews loaded from /api/crews that are not already in syncedCrews
+    // (unless explicitly marked inactive/rejected in this.users)
+    const inactiveOrRejectedNames = new Set(
+      this.users
+        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
+        .map(u => (u.fullName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    for (const c of (this.crews || [])) {
+      if (!c || !c.name) continue;
+      const cleanName = c.name.trim();
+      if (!cleanName) continue;
+      const lowerName = cleanName.toLowerCase();
+      if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
+      if (!isCurrentSuperAdmin && (c.status === 'off' || inactiveOrRejectedNames.has(lowerName))) continue;
+      seenNames.add(lowerName);
+      syncedCrews.push(c);
+    }
+
     return syncedCrews;
   }
 
@@ -3082,7 +3102,7 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser({ ...user, password: undefined } as UserProfile);
       void this.hydrateOperationalDataFromHostinger();
-      if (user.role === 'super_admin') await this.refreshUsersFromHostinger();
+      await this.refreshUsersFromHostinger();
       return user;
     } catch (err: any) {
       const previewFallback = this.tryPreviewLoginFallback(identifier, password);
@@ -3249,7 +3269,7 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser(user);
       void this.hydrateOperationalDataFromHostinger();
-      if (user.role === 'super_admin') void this.refreshUsersFromHostinger();
+      void this.refreshUsersFromHostinger();
       return true;
     } catch (err) {
       const candidateUser = this.resolveLocalCandidateUser();

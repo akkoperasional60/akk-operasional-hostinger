@@ -11,6 +11,15 @@ export interface UserPermissions {
     enabled: boolean;
     subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
   }>;
+  branchPermissions?: Record<string, {
+    branchId: string;
+    enabled: boolean;
+    allAccess: boolean;
+    modules: Record<string, {
+      enabled: boolean;
+      subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
+    }>;
+  }>;
 }
 
 export interface UserProfile {

@@ -228,7 +228,10 @@ export const FleetMiniMapPreview: React.FC<FleetMiniMapPreviewProps> = ({
         attributionControl: false,
         scrollWheelZoom: false,
         dragging: true,
-        doubleClickZoom: false
+        doubleClickZoom: false,
+        zoomAnimation: false,
+        fadeAnimation: false,
+        markerZoomAnimation: false
       });
 
       mapInstanceRef.current = map;
@@ -336,22 +339,29 @@ export const FleetMiniMapPreview: React.FC<FleetMiniMapPreviewProps> = ({
       if (routeData.destCoords) allPoints.push(routeData.destCoords);
 
       const bounds = L.latLngBounds(allPoints);
-      map.fitBounds(bounds, {
-        padding: [22, 22],
-        maxZoom: 13
-      });
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, {
+          padding: [22, 22],
+          maxZoom: 13,
+          animate: false
+        });
+      }
 
       // Handle resize invalidation
       const timer = setTimeout(() => {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
+        if (mapInstanceRef.current && (mapInstanceRef.current as any)._mapPane) {
+          mapInstanceRef.current.invalidateSize({ animate: false });
         }
       }, 250);
 
       return () => {
         clearTimeout(timer);
         if (mapInstanceRef.current) {
-          mapInstanceRef.current.remove();
+          try {
+            mapInstanceRef.current.stop();
+            mapInstanceRef.current.off();
+            mapInstanceRef.current.remove();
+          } catch {}
           mapInstanceRef.current = null;
         }
       };
@@ -363,25 +373,30 @@ export const FleetMiniMapPreview: React.FC<FleetMiniMapPreviewProps> = ({
   // Trigger map invalidate size on tab/window visibility
   const handleRecenter = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (mapInstanceRef.current) {
+    if (mapInstanceRef.current && (mapInstanceRef.current as any)._mapPane) {
       const allPoints: L.LatLngExpression[] = [routeData.originCoords, routeData.liveCoords];
       if (routeData.destCoords) allPoints.push(routeData.destCoords);
       mapInstanceRef.current.fitBounds(L.latLngBounds(allPoints), {
         padding: [20, 20],
-        maxZoom: 13
+        maxZoom: 13,
+        animate: false
       });
-      mapInstanceRef.current.invalidateSize();
+      mapInstanceRef.current.invalidateSize({ animate: false });
     }
   };
 
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (mapInstanceRef.current) mapInstanceRef.current.zoomIn();
+    if (mapInstanceRef.current && (mapInstanceRef.current as any)._mapPane) {
+      mapInstanceRef.current.zoomIn(1, { animate: false });
+    }
   };
 
   const handleZoomOut = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (mapInstanceRef.current) mapInstanceRef.current.zoomOut();
+    if (mapInstanceRef.current && (mapInstanceRef.current as any)._mapPane) {
+      mapInstanceRef.current.zoomOut(1, { animate: false });
+    }
   };
 
   return (

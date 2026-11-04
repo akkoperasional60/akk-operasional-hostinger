@@ -40,6 +40,8 @@ const MODULE_DEFINITIONS = [
       { id: 'aktivitas_harian', name: 'Aktivitas Harian Admin' },
       { id: 'jadwal_admin', name: 'Jadwal Admin & Produksi' },
       { id: 'durasi_muat', name: 'Durasi Muat Admin' },
+      { id: 'input_faktur_so', name: 'Input Faktur / Sales Order (SO)' },
+      { id: 'aplikasi_rfid_muat', name: 'Aplikasi Scan & Foto Muat (RFID)' },
       { id: 'matriks_skil', name: 'Matriks Skill Admin' },
       { id: 'pengaturan_sop', name: 'Pengaturan SOP & Jobdesk' },
       { id: 'data_kpi', name: 'Data KPI & Omset Penjualan' }
@@ -194,12 +196,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  // Change Password Modal State
+  // Change Password Modal State (locked to explicit target user so it never switches to Super Admin)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordTargetUser, setPasswordTargetUser] = useState<UserProfile | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const openPasswordModalForUser = (targetUser: UserProfile) => {
+    setPasswordTargetUser(targetUser);
+    setSelectedUserId(targetUser.id);
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+    // Clear searchQuery if browser autofill previously injected currentUser's email
+    if (
+      searchQuery &&
+      currentUser?.email &&
+      searchQuery.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
+    ) {
+      setSearchQuery('');
+    }
+    setIsPasswordModalOpen(true);
+  };
+
+  const closePasswordModal = () => {
+    setIsPasswordModalOpen(false);
+    setPasswordTargetUser(null);
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+  };
 
   // View Password per user account state
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
@@ -341,12 +371,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     if (selectedUser) {
       const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
-      const isLogisticsLead =
-        selectedUser.role === 'spv_logistik' ||
-        selectedUser.role === 'operasional' ||
-        selectedUser.role === 'pengiriman' ||
-        selectedUser.role === 'dispatcher';
-
       const isCrewRole = selectedUser.role === 'driver' || selectedUser.role === 'crew_helper';
 
       MODULE_DEFINITIONS.forEach(mod => {
@@ -359,28 +383,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           .filter(([, v]) => v === 'full_access' || v === 'read_only')
           .map(([k]) => k);
         const savedActiveCount = savedActiveKeys.length;
-        const shouldUseRoleDefaultForLogistics =
-          mod.id === 'logistics' && isLogisticsLead && savedActiveCount <= 1;
         const isLegacyCrewDefault =
           mod.id === 'logistics' &&
           isCrewRole &&
+          !selectedUser.permissions?.branchPermissions &&
           savedActiveCount === 2 &&
           savedActiveKeys.includes('portal_driver') &&
           savedActiveKeys.includes('monitoring_sla');
 
         mod.subMenus.forEach(sub => {
-          if (shouldUseRoleDefaultForLogistics) {
-            subMenuPerms[sub.id] = defaultMod?.subMenus?.[sub.id] || 'full_access';
-          } else if (isLegacyCrewDefault) {
+          if (isLegacyCrewDefault) {
             subMenuPerms[sub.id] = sub.id === 'portal_driver' ? 'full_access' : 'none';
           } else {
             const savedVal = userMod?.subMenus?.[sub.id];
             subMenuPerms[sub.id] = savedVal !== undefined ? savedVal : (defaultMod?.subMenus?.[sub.id] || 'none');
           }
         });
-        const isEnabled = shouldUseRoleDefaultForLogistics
-          ? true
-          : userMod !== undefined
+        const isEnabled = userMod !== undefined
           ? userMod.enabled
           : (defaultMod ? defaultMod.enabled : false);
         initialPerms[mod.id] = {
@@ -392,7 +411,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       const loadedBranchPerms = branchStore.getUserBranchPermissions(
         selectedUser.id,
         selectedUser.role,
-        initialPerms
+        initialPerms,
+        selectedUser.permissions?.branchPermissions
       );
       setBranchPermissions(loadedBranchPerms);
       setEditingPermissions(initialPerms);
@@ -460,7 +480,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -506,7 +526,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -554,7 +574,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -606,7 +626,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -622,7 +642,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
     const mergedModules = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
     const updatedPermissions: UserPermissions = {
-      modules: mergedModules
+      modules: mergedModules,
+      branchPermissions
     };
 
     branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
@@ -647,6 +668,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('User Sumber Kosong', 'User sumber tidak memiliki konfigurasi akses khusus.', 'warning');
       return;
     }
+    const copiedBranchPerms = branchStore.getUserBranchPermissions(
+      sourceUser.id,
+      sourceUser.role,
+      sourceUser.permissions.modules,
+      sourceUser.permissions.branchPermissions
+    );
+    setBranchPermissions(JSON.parse(JSON.stringify(copiedBranchPerms)));
     setEditingPermissions(JSON.parse(JSON.stringify(sourceUser.permissions.modules)));
     setIsCopyModalOpen(false);
     setSourceUserIdForCopy('');
@@ -654,7 +682,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   };
 
   const handleChangePassword = async () => {
-    if (!selectedUser) return;
+    const target = passwordTargetUser || selectedUser;
+    if (!target) return;
     if (!newPasswordInput || newPasswordInput.length < 8) {
       showNotification('Password Tidak Valid', 'Password baru minimal harus 8 karakter.', 'warning');
       return;
@@ -663,16 +692,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('Password Tidak Cocok', 'Konfirmasi password tidak cocok dengan password baru. Harap periksa kembali kedua input.', 'error');
       return;
     }
-    const success = await logisticsStore.resetUserPassword(selectedUser.id, newPasswordInput);
+    const success = await logisticsStore.resetUserPassword(target.id, newPasswordInput);
     if (success) {
-      showNotification('Password Berhasil Diubah', `Password baru untuk akun "${selectedUser.fullName}" berhasil disimpan ke database.`, 'success');
-      setSaveSuccessMessage(`Password akun "${selectedUser.fullName}" berhasil diubah.`);
+      showNotification('Password Berhasil Diubah', `Password baru untuk akun "${target.fullName}" (${target.email}) berhasil disimpan ke database.`, 'success');
+      setSaveSuccessMessage(`Password akun "${target.fullName}" berhasil diubah.`);
       setTimeout(() => setSaveSuccessMessage(null), 4000);
-      setIsPasswordModalOpen(false);
-      setNewPasswordInput('');
-      setConfirmPasswordInput('');
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
+      closePasswordModal();
     }
   };
 
@@ -889,10 +914,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     return matchesStatus && matchesDept && matchesQuery;
   });
 
-  // Auto-select first matching user if current selected user is filtered out
+  // Auto-select first matching user if current selected user is filtered out (only when no modal is open)
   useEffect(() => {
     if (!isSuperAdmin && statusFilter === 'inactive') {
       setStatusFilter('all');
+    }
+    if (isPasswordModalOpen || Boolean(editingUser) || isDeleteModalOpen || isCopyModalOpen) {
+      return;
     }
     if (filteredUsers.length > 0) {
       const isSelectedPresent = filteredUsers.some(u => u.id === selectedUserId);
@@ -900,7 +928,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         setSelectedUserId(filteredUsers[0].id);
       }
     }
-  }, [departmentFilter, statusFilter, searchQuery, isSuperAdmin, visibleUsersForRole.length]);
+  }, [departmentFilter, statusFilter, searchQuery, isSuperAdmin, visibleUsersForRole.length, isPasswordModalOpen, editingUser, isDeleteModalOpen, isCopyModalOpen]);
 
   const activeDeptOption = DEPARTMENT_FILTER_OPTIONS.find(opt => opt.id === departmentFilter);
 
@@ -1030,14 +1058,38 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           </div>
 
           <div className="relative flex-1 sm:w-64">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
             <input
-              type="text"
+              type="search"
+              name="akk_user_directory_search_filter"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               placeholder="Cari nama, email, divisi..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              onChange={(e) => {
+                // Ignore background browser credential autofill when input is not focused
+                if (document.activeElement !== e.currentTarget && e.target.value.includes('@')) {
+                  return;
+                }
+                setSearchQuery(e.target.value);
+              }}
+              className="w-full pl-9 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                title="Bersihkan pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1307,7 +1359,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   {isSuperAdmin && (
                     <button
                       type="button"
-                      onClick={() => setIsPasswordModalOpen(true)}
+                      onClick={() => openPasswordModalForUser(selectedUser)}
                       className="px-3.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer self-end sm:self-auto"
                     >
                       <Lock className="w-3.5 h-3.5" />
@@ -1713,7 +1765,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                         <>
                           <button
                             type="button"
-                            onClick={() => setIsPasswordModalOpen(true)}
+                            onClick={() => openPasswordModalForUser(selectedUser)}
                             className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-slate-700 text-xs shadow-xs"
                             title="Ubah password akun apabila user lupa password"
                           >
@@ -1799,24 +1851,46 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       )}
 
       {/* ================= CHANGE PASSWORD SUB-MODAL ================= */}
-      {isPasswordModalOpen && (
+      {isPasswordModalOpen && (passwordTargetUser || selectedUser) && (
         <div className="fixed inset-0 z-60 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+          <form
+            autoComplete="off"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleChangePassword();
+            }}
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl"
+          >
+            {/* Hidden trap field so browser password managers never autofill the page search bar */}
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value={(passwordTargetUser || selectedUser)?.email || ''}
+              readOnly
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+            />
+
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h4 className="font-bold text-white text-sm flex items-center gap-2">
                 <Key className="w-4 h-4 text-amber-400" />
-                <span>Ubah Password Akun: {selectedUser?.fullName}</span>
+                <span>Ubah Password Akun: {(passwordTargetUser || selectedUser)?.fullName}</span>
               </h4>
               <button
-                onClick={() => { setIsPasswordModalOpen(false); setNewPasswordInput(''); setConfirmPasswordInput(''); }}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                type="button"
+                onClick={closePasswordModal}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-400">
-              Masukkan password baru untuk akun ini (digunakan apabila user lupa password).
-            </p>
+            <div className="text-xs text-slate-400 space-y-1">
+              <p>
+                Masukkan password baru untuk akun <strong className="text-white">{(passwordTargetUser || selectedUser)?.fullName}</strong> (<span className="text-amber-400">{(passwordTargetUser || selectedUser)?.email}</span>).
+              </p>
+            </div>
 
             <div className="space-y-3">
               <div>
@@ -1826,7 +1900,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <div className="relative">
                   <input
                     type={showNewPassword ? 'text' : 'password'}
-                    placeholder="Minimal 6 karakter"
+                    name="akk_reset_new_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    placeholder="Minimal 8 karakter"
                     value={newPasswordInput}
                     onChange={(e) => setNewPasswordInput(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white pr-9 focus:outline-none focus:border-amber-500"
@@ -1849,6 +1927,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
+                    name="akk_reset_confirm_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     placeholder="Ketik ulang password baru"
                     value={confirmPasswordInput}
                     onChange={(e) => setConfirmPasswordInput(e.target.value)}
@@ -1892,21 +1974,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => { setIsPasswordModalOpen(false); setNewPasswordInput(''); setConfirmPasswordInput(''); }}
+                onClick={closePasswordModal}
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition cursor-pointer"
               >
                 Batal
               </button>
               <button
-                type="button"
-                onClick={handleChangePassword}
+                type="submit"
                 disabled={!newPasswordInput || newPasswordInput.length < 8 || newPasswordInput !== confirmPasswordInput}
                 className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold text-xs transition cursor-pointer shadow-md shadow-amber-500/20 active:scale-95 disabled:cursor-not-allowed"
               >
                 Simpan Password Baru
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 

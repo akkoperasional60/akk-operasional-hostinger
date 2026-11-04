@@ -44,7 +44,8 @@ import {
   ArrowUpFromLine,
   ClipboardCheck,
   Map as MapIcon,
-  Clock
+  Clock,
+  QrCode
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -71,6 +72,8 @@ export type NavTab =
   | 'sales_activities'
   | 'sales_schedules'
   | 'sales_loading_duration'
+  | 'sales_invoice_so'
+  | 'sales_rfid_scanner'
   | 'sales_skill_matrix'
   | 'sales_jobdesk'
   | 'sales_kpi'
@@ -318,7 +321,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       shortLabel: 'Overview',
       icon: <LayoutDashboard className="w-5 h-5" />,
       defaultTab: 'dashboard',
-      checkAccess: (user) => canAccess(user, 'dashboard') || canAccess(user, 'logistics', 'dashboard_logistik'),
+      checkAccess: (user) => canAccess(user, 'dashboard'),
       groups: [
         {
           items: [
@@ -348,7 +351,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
         canAccess(user, 'logistics', 'monitoring_sla') ||
         canAccess(user, 'logistics', 'dashboard_logistik') ||
         canAccess(user, 'logistics', 'rencana_rute') ||
-        canAccess(user, 'logistics', 'armada_ceklis'),
+        canAccess(user, 'logistics', 'armada_ceklis') ||
+        canAccess(user, 'logistics', 'live_map'),
       groups: [
         {
           groupTitle: 'Dashboard & Analitik Logistik',
@@ -540,7 +544,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
         canAccess(user, 'sales_admin', 'aktivitas_harian') ||
         canAccess(user, 'sales_admin', 'jadwal_admin') ||
         canAccess(user, 'sales_admin', 'durasi_muat') ||
+        canAccess(user, 'sales_admin', 'input_faktur_so') ||
+        canAccess(user, 'sales_admin', 'aplikasi_rfid_muat') ||
         canAccess(user, 'sales_admin', 'matriks_skil') ||
+        canAccess(user, 'sales_admin', 'pengaturan_sop') ||
         canAccess(user, 'sales_admin', 'data_kpi'),
       groups: [
         {
@@ -569,6 +576,33 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Durasi & Kecepatan Muat',
               icon: <Timer className="w-4 h-4 text-amber-500" />,
               description: 'Pencatatan SLA proses pemuatan barang'
+            }
+          ]
+        },
+        {
+          groupTitle: 'Pengeluaran Barang & RFID Muat',
+          items: [
+            {
+              tab: 'sales_invoice_so',
+              label: 'Input Faktur / Sales Order (SO)',
+              icon: <FileText className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  Order Muat
+                </span>
+              ),
+              description: 'Input faktur & daftar item barang muatan armada box'
+            },
+            {
+              tab: 'sales_rfid_scanner',
+              label: 'Aplikasi Scan & Foto Muat (RFID)',
+              icon: <QrCode className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  RFID App
+                </span>
+              ),
+              description: 'Foto item sesuai faktur, deteksi barang sisa & warning lebih muat'
             }
           ]
         },
@@ -628,8 +662,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) =>
         canAccess(user, 'purchasing', 'permintaan_pembelian') ||
         canAccess(user, 'purchasing', 'po_vendor') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'purchasing', 'evaluasi_harga'),
       groups: [
         {
           groupTitle: 'Admin Pembelian (PO)',
@@ -664,9 +697,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) =>
         canAccess(user, 'marketing', 'kampanye') ||
         canAccess(user, 'marketing', 'leads_pipeline') ||
-        canAccess(user, 'customer_map') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'marketing', 'laporan_kunjungan'),
       groups: [
         {
           groupTitle: 'Pemasaran & Pemetaan Wilayah',
@@ -701,9 +732,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       defaultTab: 'finance_dashboard',
       checkAccess: (user) =>
         canAccess(user, 'finance_tax', 'kas_bank') ||
-        canAccess(user, 'finance_dashboard') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'finance_tax', 'faktur_pajak') ||
+        canAccess(user, 'finance_tax', 'rekonsiliasi') ||
+        canAccess(user, 'finance_tax', 'laba_rugi') ||
+        canAccess(user, 'finance_dashboard'),
       groups: [
         {
           groupTitle: 'Keuangan & Perpajakan',
@@ -725,8 +757,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       icon: <Users className="w-5 h-5" />,
       checkAccess: (user) =>
         canAccess(user, 'hr', 'hr_data_karyawan') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'hr', 'hr_gaji_kpi'),
       groups: [
         {
           groupTitle: 'Personalia & Presensi',
@@ -748,8 +779,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       icon: <ShieldAlert className="w-5 h-5" />,
       checkAccess: (user) =>
         canAccess(user, 'hr', 'ga_security') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'hr', 'ga_hk') ||
+        canAccess(user, 'hr', 'ga_aset'),
       groups: [
         {
           groupTitle: 'General Affair (GA)',
@@ -783,8 +814,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       icon: <Award className="w-5 h-5" />,
       checkAccess: (user) =>
         canAccess(user, 'hr', 'td_video_training') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'hr', 'td_training_karyawan'),
       groups: [
         {
           groupTitle: 'Pelatihan & SOP',
@@ -817,9 +847,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       ) : undefined,
       checkAccess: (user) =>
         canAccess(user, 'sistem_pengguna', 'daftar_pengguna') ||
+        canAccess(user, 'sistem_pengguna', 'manajemen_hak_akses') ||
         canAccess(user, 'sistem_pengguna', 'log_aktivitas_sistem') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'sistem_pengguna', 'persetujuan_akun'),
       groups: [
         {
           groupTitle: 'Organisasi & Hak Akses',

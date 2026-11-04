@@ -25,6 +25,13 @@ import { driverReportService, DriverHelperReport } from '../services/driverRepor
 import { driverWaybillService } from '../services/driverWaybillService';
 import { logisticsStore } from '../services/store';
 import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
 
 export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'isi_bbm';
 
@@ -71,17 +78,19 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
   const [photoList, setPhotoList] = useState<string[]>([]);
+  const [photoExifList, setPhotoExifList] = useState<ExifTimestampMetadata[]>([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState<number>(0);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [isFullPhotoPreviewOpen, setIsFullPhotoPreviewOpen] = useState<boolean>(false);
 
   const photoDataUrl = photoList[activePhotoIndex] || photoList[0] || null;
+  const activePhotoExif = photoExifList[activePhotoIndex] || photoExifList[0] || null;
 
   // State Fitur Antri di Customer & Absen Setiap Kiriman ke Pelanggan
   const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
   const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
   const [customerNameInput, setCustomerNameInput] = useState<string>('');
-  const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada'>('Farly');
+  const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('Farly');
   const [fuelLiters, setFuelLiters] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [simulatedExtraMin, setSimulatedExtraMin] = useState<number>(0);
@@ -117,12 +126,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addPhotoToList = (stampedUrl: string) => {
+  const addPhotoToList = (stampedUrl: string, exifMeta?: ExifTimestampMetadata) => {
+    const resolvedExif = exifMeta || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
     setPhotoList(prev => {
       const next = [...prev, stampedUrl];
       setActivePhotoIndex(next.length - 1);
       return next;
     });
+    setPhotoExifList(prev => [...prev, resolvedExif]);
     setValidationError(null);
   };
 
@@ -132,12 +143,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       setActivePhotoIndex(curr => Math.max(0, Math.min(curr, next.length - 1)));
       return next;
     });
+    setPhotoExifList(prev => prev.filter((_, i) => i !== idx));
   };
 
   // Reset seluruh field input agar data yang sudah terkirim tidak pernah nyantol
   const resetFormFields = () => {
     setNotes('');
     setPhotoList([]);
+    setPhotoExifList([]);
     setActivePhotoIndex(0);
     setCustomerOutletInput('');
     setCustomerNameInput('');
@@ -416,12 +429,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     });
   }, [category, customerNameInput, fuelLocation, customerOutletInput, currentAreaName, hasLiveGpsFix, driverLat, driverLng]);
 
-  // Watermark stamper helper
-  const applyWatermarkToCanvas = (canvas: HTMLCanvasElement): string => {
+  // Watermark stamper helper (disertai EXIF Tag Metadata Kunci: DateTimeOriginal, DateTimeDigitized, OffsetTimeOriginal, SubSecTimeOriginal)
+  const applyWatermarkToCanvas = (canvas: HTMLCanvasElement, exifInput?: ExifTimestampMetadata): string => {
+    const exif = exifInput || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
     const ctx = canvas.getContext('2d');
     if (!ctx) return canvas.toDataURL('image/jpeg', 0.72);
     const w = canvas.width;
     const h = canvas.height;
+
+    drawExifMetadataOnCanvas(ctx, w, h, exif);
 
     const bannerHeight = Math.max(85, Math.floor(h * 0.17));
     const bannerY = h - bannerHeight;
@@ -459,21 +475,20 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       category === 'istirahat' && customerNameInput.trim()
         ? `Pelanggan: ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})`
         : category === 'isi_bbm'
-        ? `Lokasi BBM: SPBU ${fuelLocation}`
+        ? `Lokasi BBM: ${fuelLocation}`
         : `Area: ${currentAreaName}`;
     ctx.fillText(`${targetCustomerLabel} | Driver: ${driverName} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
 
-    const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
     ctx.fillStyle = '#cbd5e1';
     ctx.font = `bold ${fontSize - 2}px monospace`;
     ctx.fillText(
-      `🕒 ${nowStr} | 📍 GPS: ${effectivePreciseGps.latitude.toFixed(6)}, ${effectivePreciseGps.longitude.toFixed(6)}`,
+      `🕒 EXIF DateTimeOriginal: ${exif.DateTimeOriginal}.${exif.SubSecTimeOriginal} (${exif.OffsetTimeOriginal}) | 📍 GPS: ${effectivePreciseGps.latitude.toFixed(6)}, ${effectivePreciseGps.longitude.toFixed(6)}`,
       16,
       bannerY + 14 + (fontSize * 2)
     );
 
     const stampedUrl = canvas.toDataURL('image/jpeg', 0.72);
-    addPhotoToList(stampedUrl);
+    addPhotoToList(stampedUrl, exif);
     return stampedUrl;
   };
 
@@ -505,7 +520,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     setCameraCaptureFlash(true);
     setTimeout(() => setCameraCaptureFlash(false), 180);
 
-    applyWatermarkToCanvas(canvas);
+    const captureExif = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    applyWatermarkToCanvas(canvas, captureExif);
     if (closeAfterCapture) {
       stopLiveCamera();
     }
@@ -520,39 +536,41 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     let processedCount = 0;
 
     fileArray.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const maxDim = 960;
-          let w = img.width;
-          let h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
-            } else {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
+      extractExifFromFile(file).then(exifMeta => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const maxDim = 960;
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
             }
-          }
-          canvas.width = w;
-          canvas.height = h;
+            canvas.width = w;
+            canvas.height = h;
 
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, w, h);
-            applyWatermarkToCanvas(canvas);
-          }
-          processedCount += 1;
-          if (processedCount >= fileArray.length) {
-            setIsCapturing(false);
-          }
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              applyWatermarkToCanvas(canvas, exifMeta);
+            }
+            processedCount += 1;
+            if (processedCount >= fileArray.length) {
+              setIsCapturing(false);
+            }
+          };
+          img.src = reader.result as string;
         };
-        img.src = reader.result as string;
-      };
-      reader.readAsDataURL(file);
+        reader.readAsDataURL(file);
+      });
     });
 
     e.target.value = '';
@@ -640,6 +658,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const finalLng = effectivePreciseGps.longitude;
     const finalGmapsUrl = effectivePreciseGps.gmapsUrl;
 
+    const primaryExif = photoExifList[0] || createExifMetadataFromDate();
+
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
       driverName: driverName,
@@ -648,6 +668,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
       customerOutletName: submittedCustomer,
       fuelLocation: category === 'isi_bbm' ? fuelLocation : undefined,
+      exifMetadata: primaryExif,
       deliveryId: activeDelivery?.id,
       notes: submittedNotes,
       photoUrl: submittedPhoto,
@@ -1027,41 +1048,24 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       Pengisian BBM (Solar) Armada
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      Pilih lokasi pengisian BBM (Farly / Gajah Mada) dan unggah foto bukti pengisian solar
+                      Pilih lokasi pengisian BBM (Farly / Gajah Mada / SPBU Lain) dan unggah foto bukti pengisian solar
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
                     Pilih Lokasi Pengisian BBM (Solar) *
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFuelLocation('Farly')}
-                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                        fuelLocation === 'Farly'
-                          ? 'bg-amber-600/25 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <MapPin className="w-3.5 h-3.5 shrink-0" />
-                      <span>Farly</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFuelLocation('Gajah Mada')}
-                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                        fuelLocation === 'Gajah Mada'
-                          ? 'bg-amber-600/25 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <MapPin className="w-3.5 h-3.5 shrink-0" />
-                      <span>Gajah Mada</span>
-                    </button>
-                  </div>
+                  <select
+                    value={fuelLocation}
+                    onChange={(e) => setFuelLocation(e.target.value as 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)')}
+                    className="w-full rounded-xl bg-slate-900 border border-amber-500/50 px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
+                  >
+                    <option value="Farly">Farly</option>
+                    <option value="Gajah Mada">Gajah Mada</option>
+                    <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
+                  </select>
                 </div>
               </div>
             )}
@@ -1271,6 +1275,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       <span>Perbesar</span>
                     </button>
                   </div>
+
+                  {/* EXIF Tag Metadata Kunci (Tanggal & Waktu) */}
+                  <ExifMetadataBadge exif={activePhotoExif} />
 
                   {/* Galeri Thumbnail Semua Foto (Menampilkan 1 atau Lebih dari 1 Foto) */}
                   <div className="space-y-1.5">
