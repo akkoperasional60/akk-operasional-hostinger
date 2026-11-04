@@ -61,7 +61,8 @@ import {
   EyeOff,
   Moon,
   Bell,
-  Zap
+  Zap,
+  XCircle
 } from 'lucide-react';
 import {
   Schedule,
@@ -102,6 +103,24 @@ interface DriverMobileViewProps {
 }
 
 export type DriverPortalTab = 'deliveries' | 'checklist' | 'surat_jalan' | 'history' | 'profile';
+
+function matchSamePerson(nameA?: string, nameB?: string): boolean {
+  const a = (nameA || '').trim().toLowerCase();
+  const b = (nameB || '').trim().toLowerCase();
+  if (!a || !b || a === '-' || b === '-') return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  if (
+    (a.includes('saiful') || a.includes('saifur')) &&
+    (b.includes('saiful') || b.includes('saifur')) &&
+    a.includes('rizal') &&
+    b.includes('rizal')
+  ) {
+    return true;
+  }
+  const tokA = a.split(/\s+/).filter(t => t.length >= 4);
+  const tokB = b.split(/\s+/).filter(t => t.length >= 4);
+  return tokA.length > 0 && tokB.length > 0 && tokA[0] === tokB[0];
+}
 
 export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   onBackToPortal,
@@ -1494,7 +1513,36 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       // Auto-repair legacy schedule notes if crew was previously overwritten by standby crew
       let repairedAny = false;
+      const n4Fleet = logisticsStore.findFleetByCodeOrPlate('N4 / NS2');
+
       localSchedules.forEach(s => {
+        const sArea = (s.areaName || s.store?.storeName || '').toLowerCase();
+
+        // 1. Repair fleet for Muncar Pinggir: must be N4 / NS2, not N1 / NP1
+        if (sArea.includes('muncar') && n4Fleet) {
+          if (s.fleet?.initialCode === 'N1 / NP1' || s.fleetId === 'flt-01' || !s.fleet?.initialCode?.includes('NS2')) {
+            logisticsStore.updateSchedule(s.id, {
+              fleetId: n4Fleet.id,
+              fleet: n4Fleet
+            });
+            s.fleetId = n4Fleet.id;
+            s.fleet = n4Fleet;
+            repairedAny = true;
+          }
+        }
+
+        // 2. Repair backupTargetName if identical to backupCrewName (cannot replace oneself)
+        if (s.backupCrewName && s.backupTargetName && matchSamePerson(s.backupCrewName, s.backupTargetName)) {
+          const properTarget = sArea.includes('muncar') || matchSamePerson(s.backupCrewName, 'Arif Bagus Muhammadiqbal')
+            ? 'Saipul Bahri'
+            : (s.crew?.name || 'Driver Utama');
+          logisticsStore.updateSchedule(s.id, {
+            backupTargetName: properTarget
+          });
+          s.backupTargetName = properTarget;
+          repairedAny = true;
+        }
+
         if (!s.backupCrewName && s.notes && /(?:STAND BY HARI H|PORTAL DRIVER HARI H):/i.test(s.notes)) {
           const match = s.notes.match(/(?:STAND BY HARI H|PORTAL DRIVER HARI H):\s*([^(]+?)\s*\((?:Kru Free|Stand By)[^)]*\)\s*menggantikan\s+(?:Driver|Helper\s*1|Helper\s*2)?\s*([^(\]]+?)(?:\s+yang|\s+untuk|\s*\(|])/i);
           if (match) {
@@ -1527,6 +1575,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           }
         }
       });
+
+      // Synchronize localStorage snapshot for Muncar Pinggir armada
+      try {
+        const rawSnap = localStorage.getItem('akk_standby_crew_snapshot');
+        if (rawSnap) {
+          const parsedSnap = JSON.parse(rawSnap);
+          if (Array.isArray(parsedSnap.pengiriman)) {
+            let snapChanged = false;
+            parsedSnap.pengiriman = parsedSnap.pengiriman.map((p: any) => {
+              if ((p.area || '').toLowerCase().includes('muncar')) {
+                if (p.armada !== 'N4 / NS2' && p.armada !== 'NS2') {
+                  snapChanged = true;
+                  return { ...p, armada: 'N4 / NS2' };
+                }
+              }
+              return p;
+            });
+            if (snapChanged) {
+              localStorage.setItem('akk_standby_crew_snapshot', JSON.stringify(parsedSnap));
+            }
+          }
+        }
+      } catch {}
+
       if (repairedAny) {
         localSchedules = logisticsStore.getSchedules();
       }
@@ -2030,19 +2102,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin)
   const standbyPortalInfo = useMemo(() => {
-    const matchSamePerson = (nameA?: string, nameB?: string): boolean => {
-      const a = (nameA || '').trim().toLowerCase();
-      const b = (nameB || '').trim().toLowerCase();
-      if (!a || !b || a === '-' || b === '-') return false;
-      if (a === b || a.includes(b) || b.includes(a)) return true;
-      if ((a.includes('saiful') || a.includes('saifur')) && (b.includes('saiful') || b.includes('saifur')) && a.includes('rizal') && b.includes('rizal')) {
-        return true;
-      }
-      const tokA = a.split(/\s+/).filter(t => t.length >= 4);
-      const tokB = b.split(/\s+/).filter(t => t.length >= 4);
-      return tokA.length > 0 && tokB.length > 0 && tokA[0] === tokB[0];
-    };
-
     // 1. Cek apakah ada snapshot langsung dari Jadwal & Penugasan Admin
     let snapshot: any = null;
     try {
@@ -2174,7 +2233,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const allCrewsList = logisticsStore.getCrews();
       daySchedules = snapshotPengiriman.map((p, idx) => {
         const matchedFleet =
-          allFleets.find(f => f.initialCode === p.armada || f.plateNumber === p.armada) || allFleets[0];
+          logisticsStore.findFleetByCodeOrPlate(p.armada, p.area) ||
+          (/muncar/i.test(p.area) ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined) ||
+          allFleets.find(f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')) ||
+          allFleets[0];
         const matchedDrv = allCrewsList.find(c => matchSamePerson(c.name, p.driver)) || {
           id: `drv-snap-${idx}`,
           name: p.driver || '-',
@@ -2386,7 +2448,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
       const drv = sch.crew?.name || '-';
       const hlp = sch.crewHelper?.name || '-';
-      const arm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       seenAreaKeys.add(area.toUpperCase().trim());
       list.push({
         value: sch.id,
@@ -2405,7 +2468,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = snap.area || 'Area Kirim';
       const drv = snap.driver || '-';
       const hlp = snap.helper || '-';
-      const arm = snap.armada || '-';
+      const rawArm = snap.armada || '-';
+      const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       if (!list.some(item => item.areaName.toLowerCase() === area.toLowerCase())) {
         seenAreaKeys.add(area.toUpperCase().trim());
         list.push({
@@ -2428,7 +2492,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
       const drv = sch.crew?.name || '-';
       const hlp = sch.crewHelper?.name || '-';
-      const arm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
+      const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       const depDate = (sch.departureDate || '').slice(0, 10);
       seenAreaKeys.add(area.toUpperCase().trim());
       list.push({
@@ -2448,6 +2513,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const areaUpper = areaName.toUpperCase().trim();
       if (seenAreaKeys.has(areaUpper)) return;
       seenAreaKeys.add(areaUpper);
+      const defaultArm = /muncar/i.test(areaName) ? 'N4 / NS2' : 'Armada Box';
       list.push({
         value: `area:${areaName}`,
         label: `🚚 ${areaName} (Rute Resmi AKK)`,
@@ -2455,7 +2521,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         areaName: areaName,
         driverName: 'Driver Reguler',
         helperName: '-',
-        armadaName: 'Armada Box'
+        armadaName: defaultArm
       });
     });
 
@@ -2480,7 +2546,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       areaName: standbyReplaceForm.targetScheduleId.replace(/^area:/, ''),
       driverName: 'Driver Reguler',
       helperName: '-',
-      armadaName: 'Armada Box',
+      armadaName: /muncar/i.test(standbyReplaceForm.targetScheduleId) ? 'N4 / NS2' : 'Armada Box',
       group: 'area_resmi' as const,
       label: standbyReplaceForm.targetScheduleId
     } : standbyAvailableRouteOptions[0]);
@@ -2531,16 +2597,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     // Jika jadwal belum ada di store (misal memilih dari Area Resmi yang belum terjadwal hari ini), buat schedule baru otomatis
     if (!targetSch) {
-      const defaultFleet = allFleets[0];
+      const defaultFleet =
+        logisticsStore.findFleetByCodeOrPlate(chosenOption.armadaName, chosenOption.areaName) ||
+        (/muncar/i.test(chosenOption.areaName) ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined) ||
+        allFleets.find(f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')) ||
+        allFleets[0];
       const defaultDriver = allCrews.find(c => !c.role.toLowerCase().includes('helper')) || allCrews[0];
       const defaultHelper = allCrews.find(c => c.role.toLowerCase().includes('helper'));
       const newId = `SCH-REP-${targetIso}-${Date.now().toString().slice(-4)}`;
 
       targetSch = {
         id: newId,
-        trackingNumber: `PO-AKK-${targetIso.replace(/-/g, '')}-${defaultFleet?.initialCode || 'DS1'}-STB`,
+        trackingNumber: `PO-AKK-${targetIso.replace(/-/g, '')}-${defaultFleet?.initialCode || 'NS2'}-STB`,
         areaName: chosenOption.areaName,
-        fleetId: defaultFleet?.id || 'flt-01',
+        fleetId: defaultFleet?.id || 'flt-04',
         fleet: defaultFleet,
         crewId: defaultDriver?.id || 'crw-01',
         crew: defaultDriver,
@@ -2563,11 +2633,26 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     if (targetSch) {
       targetAreaLabel = targetSch.areaName || targetSch.store?.storeName || chosenOption.areaName;
+      const properFleet =
+        logisticsStore.findFleetByCodeOrPlate(chosenOption.armadaName, targetAreaLabel) ||
+        (/muncar/i.test(targetAreaLabel) ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined) ||
+        targetSch.fleet;
+
       previousCrewName =
         standbyReplaceForm.replacePosition === 'driver'
-          ? (targetSch.crew?.name || chosenOption.driverName || 'Driver Reguler')
+          ? (targetSch.crew?.name && !matchSamePerson(targetSch.crew.name, standbyName)
+              ? targetSch.crew.name
+              : chosenOption.driverName && !matchSamePerson(chosenOption.driverName, standbyName)
+              ? chosenOption.driverName
+              : /muncar/i.test(targetAreaLabel)
+              ? 'Saipul Bahri'
+              : 'Driver Reguler')
           : standbyReplaceForm.replacePosition === 'helper'
-          ? (targetSch.crewHelper?.name || chosenOption.helperName || 'Helper 1')
+          ? (targetSch.crewHelper?.name && !matchSamePerson(targetSch.crewHelper.name, standbyName)
+              ? targetSch.crewHelper.name
+              : chosenOption.helperName && !matchSamePerson(chosenOption.helperName, standbyName)
+              ? chosenOption.helperName
+              : 'Helper 1')
           : (targetSch.crewHelper2?.name || 'Helper 2');
 
       // Hapus jadwal lain di hari yang sama yang sebelumnya di-backup oleh kru yang sama (jika kru mengubah pilihan rute)
@@ -2589,6 +2674,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       // Simpan pada kolom Back Up / Menggantikan tanpa menimpa Driver/Helper asli (misal Budiono tetap Driver, Zainal tetap di Kru Free dengan keterangan Menggantikan Driver Budiono)
       const patch: Partial<Schedule> = {
+        fleetId: properFleet?.id || targetSch.fleetId,
+        fleet: properFleet || targetSch.fleet,
         backupCrewId: matchedCrewObj.id,
         backupCrewName: matchedCrewObj.name,
         backupPosition: standbyReplaceForm.replacePosition,
@@ -2699,6 +2786,132 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     setStandbySyncTick(t => t + 1);
     loadDeliveries(true);
     setActiveTab('active');
+  };
+
+  // Handler untuk kru Free / Stand By membatalkan penggantian (Tidak Jadi Ganti)
+  const handleCancelStandbyReplaceFromPortal = () => {
+    const standbyName =
+      (standbyPortalInfo.isCurrentPortalUserFreeStandby
+        ? standbyPortalInfo.activeCrewFilterName
+        : standbyReplaceForm.standbyCrewName || standbyPortalInfo.freeStandbyCrews[0]?.name) ||
+      portalDisplayName;
+
+    if (!standbyName) return;
+
+    const allSchedules = logisticsStore.getSchedules();
+    let cancelledTargetArea = '';
+
+    allSchedules.forEach(s => {
+      if (
+        s.backupCrewName &&
+        (matchSamePerson(s.backupCrewName, standbyName) ||
+         s.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
+         standbyName.toLowerCase().includes(s.backupCrewName.toLowerCase()))
+      ) {
+        cancelledTargetArea = s.areaName || s.store?.storeName || '';
+        logisticsStore.updateSchedule(s.id, {
+          backupCrewId: undefined,
+          backupCrewName: undefined,
+          backupPosition: undefined,
+          backupTargetName: undefined,
+          notes: (s.notes || '').replace(/\s*•?\s*\[(?:PORTAL DRIVER|STAND BY) HARI H:[^\]]*]/gi, '').trim(),
+          isManuallyEdited: true
+        });
+      }
+    });
+
+    // Update snapshot & cached admin weeks in localStorage so Jadwal & Penugasan Admin (kolom BACK UP / MENGGANTIKAN & KRU FREE) langsung tersinkronisasi
+    try {
+      const rawSnap = localStorage.getItem('akk_standby_crew_snapshot');
+      if (rawSnap) {
+        const parsedSnap = JSON.parse(rawSnap);
+        if (Array.isArray(parsedSnap.pengiriman)) {
+          parsedSnap.pengiriman = parsedSnap.pengiriman.map((p: any) => {
+            if (
+              p.backupCrewName &&
+              (matchSamePerson(p.backupCrewName, standbyName) ||
+               p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
+               standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
+            ) {
+              return {
+                ...p,
+                backupCrewId: undefined,
+                backupCrewName: undefined,
+                backupPosition: undefined,
+                backupTargetName: undefined,
+                backup: undefined
+              };
+            }
+            return p;
+          });
+          localStorage.setItem('akk_standby_crew_snapshot', JSON.stringify(parsedSnap));
+        }
+      }
+
+      // Sinkronkan juga ke cache minggu Admin
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
+          const rawWeeks = localStorage.getItem(k);
+          if (!rawWeeks) continue;
+          const parsedWeeks = JSON.parse(rawWeeks);
+          if (Array.isArray(parsedWeeks)) {
+            const updatedWeeks = parsedWeeks.map((w: any) => ({
+              ...w,
+              days: Array.isArray(w.days)
+                ? w.days.map((d: any) => ({
+                    ...d,
+                    pengiriman: Array.isArray(d.pengiriman)
+                      ? d.pengiriman.map((p: any) => {
+                          if (
+                            p.backupCrewName &&
+                            (matchSamePerson(p.backupCrewName, standbyName) ||
+                             p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
+                             standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
+                          ) {
+                            return {
+                              ...p,
+                              backupCrewId: undefined,
+                              backupCrewName: undefined,
+                              backupPosition: undefined,
+                              backupTargetName: undefined,
+                              backup: undefined
+                            };
+                          }
+                          return p;
+                        })
+                      : d.pengiriman
+                  }))
+                : w.days
+            }));
+            localStorage.setItem(k, JSON.stringify(updatedWeeks));
+          }
+        }
+      }
+    } catch {}
+
+    logisticsStore.syncSchedulesToCrewHistory();
+    logisticsStore.addScheduleChangeLog({
+      fileName: `Portal Driver — Pembatalan Penggantian (${standbyPortalInfo.dateString})`,
+      actionType: 'manual_edit',
+      summary: `Kru Free / Stand By Gudang (${standbyName}) tidak jadi menggantikan${cancelledTargetArea ? ` rute ${cancelledTargetArea}` : ''} dan kembali Stand By di Gudang`,
+      rowCount: 1,
+      changes: [
+        `Kru Free: ${standbyName}`,
+        `Status: Kembali Stand By di Gudang (Tidak Jadi Ganti)`,
+        `Rute Sebelumnya: ${cancelledTargetArea || '-'}`
+      ]
+    });
+
+    addNotification(
+      'schedule',
+      '↩️ Penggantian Dibatalkan',
+      `${standbyName} tidak jadi menggantikan dan kembali ke status Stand By di Gudang.`
+    );
+
+    setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }));
+    setStandbySyncTick(t => t + 1);
+    loadDeliveries(true);
   };
 
   // Completed deliveries for History sub-tab
@@ -4437,7 +4650,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 : standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper2'
                                 ? 'Helper 2'
                                 : 'Driver Utama'}{' '}
-                              ({standbyPortalInfo.activeBackupSchedule.backupTargetName || '-'})
+                              ({(() => {
+                                const sch = standbyPortalInfo.activeBackupSchedule;
+                                const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
+                                const bTarget = sch.backupTargetName;
+                                const bCrew = sch.backupCrewName;
+                                if (bTarget && (!bCrew || !matchSamePerson(bTarget, bCrew))) {
+                                  return bTarget;
+                                }
+                                if (area.includes('muncar')) {
+                                  return 'Saipul Bahri';
+                                }
+                                return sch.crew?.name && (!bCrew || !matchSamePerson(sch.crew.name, bCrew))
+                                  ? sch.crew.name
+                                  : 'Driver Utama';
+                              })()})
                             </span>
                           </p>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
@@ -4449,20 +4676,46 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             </strong>{' '}
                             • Armada:{' '}
                             <strong>
-                              {standbyPortalInfo.activeBackupSchedule.fleet?.initialCode ||
-                                standbyPortalInfo.activeBackupSchedule.fleet?.plateNumber ||
-                                '-'}
+                              {(() => {
+                                const sch = standbyPortalInfo.activeBackupSchedule;
+                                const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
+                                if (area.includes('muncar')) {
+                                  return 'N4 / NS2';
+                                }
+                                const code = sch.fleet?.initialCode;
+                                if (code && code !== 'N1 / NP1') {
+                                  return code;
+                                }
+                                const matchedTrip = standbyPortalInfo.scheduledTrips.find(
+                                  t => (t.area || '').toLowerCase().includes(area)
+                                );
+                                if (matchedTrip?.armada && matchedTrip.armada !== '-') {
+                                  return matchedTrip.armada.includes('NS2') ? 'N4 / NS2' : matchedTrip.armada;
+                                }
+                                return sch.fleet?.initialCode || sch.fleet?.plateNumber || 'N4 / NS2';
+                              })()}
                             </strong>
                           </p>
                         </div>
                         {!standbyReplaceForm.isOpen && (
-                          <button
-                            type="button"
-                            onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: true }))}
-                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black transition cursor-pointer shrink-0"
-                          >
-                            Ubah Rute Pengganti
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: true }))}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black transition cursor-pointer"
+                            >
+                              Ubah Rute Pengganti
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelStandbyReplaceFromPortal}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                              title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                            >
+                              <XCircle className="w-3 h-3 text-rose-500" />
+                              <span>Tidak Jadi Ganti</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -4544,14 +4797,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleConfirmStandbyReplaceFromPortal}
-                        className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {Boolean(standbyPortalInfo.activeBackupSchedule) && (
+                          <button
+                            type="button"
+                            onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
+                            className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer text-center"
+                          >
+                            Batal
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleConfirmStandbyReplaceFromPortal}
+                          className={`${Boolean(standbyPortalInfo.activeBackupSchedule) ? 'w-2/3' : 'w-full'} py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm`}
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -4609,14 +4873,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       : delivery.backupPosition === 'helper2'
                       ? 'Helper 2'
                       : 'Driver';
-                  const backupTarget =
-                    delivery.backupTargetName ||
-                    (delivery.backupPosition === 'helper'
+                  const cleanAreaLabel = (store?.storeName || delivery.areaName || 'Toko Retail Mitra').replace(/DENPASAR\s*1\s*&\s*2/gi, 'DENPASAR 1');
+                  const backupTarget = (() => {
+                    const area = (cleanAreaLabel || delivery.areaName || '').toLowerCase();
+                    const rawTarget = delivery.backupTargetName;
+                    const bCrew = delivery.backupCrewName;
+                    if (rawTarget && (!bCrew || !matchSamePerson(rawTarget, bCrew))) {
+                      return rawTarget;
+                    }
+                    if (area.includes('muncar')) {
+                      return 'Saipul Bahri';
+                    }
+                    const cand = delivery.backupPosition === 'helper'
                       ? helper1Name
                       : delivery.backupPosition === 'helper2'
                       ? helper2Name
-                      : driverCrewName);
-                  const cleanAreaLabel = (store?.storeName || delivery.areaName || 'Toko Retail Mitra').replace(/DENPASAR\s*1\s*&\s*2/gi, 'DENPASAR 1');
+                      : driverCrewName;
+                    if (cand && (!bCrew || !matchSamePerson(cand, bCrew))) {
+                      return cand;
+                    }
+                    return 'Saipul Bahri';
+                  })();
 
                   return (
                     <div
@@ -4784,7 +5061,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           store?.deliveryWindow || delivery.store?.deliveryWindow
                         );
                         const normPlateCode = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+                        const isMuncarDelivery = ((delivery.areaName || store?.storeName || '').toLowerCase()).includes('muncar');
+                        const muncarFleetObj = isMuncarDelivery ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined;
+
                         const rawDeliveryFleetObj =
+                          muncarFleetObj ||
                           fleets.find(f => f.id === delivery.fleetId) ||
                           (delivery.fleet?.plateNumber
                             ? fleets.find(f => normPlateCode(f.plateNumber) === normPlateCode(delivery.fleet?.plateNumber))

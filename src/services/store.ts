@@ -1837,6 +1837,44 @@ class LogisticsStore {
     return this.cachedFleets;
   }
 
+  public findFleetByCodeOrPlate(codeOrPlate?: string | null, areaName?: string): Fleet | undefined {
+    const all = this.getFleets();
+    const normArea = (areaName || '').trim().toLowerCase();
+
+    // 1. Priority: Muncar Pinggir / Muncar Retail official fleet is N4 / NS2
+    if (normArea.includes('muncar')) {
+      const muncarFleet = all.find(
+        f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')
+      );
+      if (muncarFleet) return muncarFleet;
+    }
+
+    if (!codeOrPlate) return undefined;
+    const cleanStr = String(codeOrPlate).trim();
+
+    // 2. Canonical resolver
+    const canonical = resolveCanonicalFleetMeta(cleanStr);
+    if (canonical) {
+      const matchInStore = all.find(f => f.id === canonical.id || f.plateNumber === canonical.plateNumber);
+      return matchInStore || canonical;
+    }
+
+    // 3. Normalized comparison
+    const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+    const clean = norm(cleanStr);
+
+    return all.find(f => {
+      if (f.id.toLowerCase() === cleanStr.toLowerCase()) return true;
+      if (norm(f.plateNumber) === clean) return true;
+      if (norm(f.initialCode || '') === clean) return true;
+      if (f.initialCode) {
+        const parts = f.initialCode.split(/[/]+/).map(p => norm(p));
+        if (parts.includes(clean)) return true;
+      }
+      return false;
+    });
+  }
+
   public setFleets(fleets: Fleet[]): void {
     const validFleets = fleets
       .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))

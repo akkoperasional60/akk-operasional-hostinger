@@ -487,19 +487,39 @@ export function resolveCanonicalFleetMeta(
   const rawPlate = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.plateNumber || '');
   const rawInit = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.initialCode || '');
 
-  const cleanPlate = rawPlate.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+  const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+  const cleanPlate = norm(rawPlate);
   const cleanId = rawId.trim().toLowerCase();
-  const cleanInit = rawInit.trim().toUpperCase();
+  const cleanInit = norm(rawInit);
+  const rawStr = typeof fleetOrPlate === 'string' ? norm(fleetOrPlate) : '';
+
+  // Direct special tokens for NS2 / N4
+  if (
+    cleanInit === 'NS2' ||
+    cleanInit === 'N4' ||
+    rawStr === 'NS2' ||
+    rawStr === 'N4' ||
+    rawStr.includes('NS2') ||
+    rawStr.includes('N4NS2')
+  ) {
+    const f4 = INITIAL_FLEETS.find(f => f.initialCode === 'N4 / NS2');
+    if (f4) return f4;
+  }
 
   return INITIAL_FLEETS.find(f => {
     if (cleanId && f.id.toLowerCase() === cleanId) return true;
-    const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+    const fPlate = norm(f.plateNumber || '');
     if (cleanPlate && fPlate === cleanPlate) return true;
-    if (cleanInit && f.initialCode) {
-      const fInit = f.initialCode.trim().toUpperCase();
-      if (fInit === cleanInit) return true;
-      const parts = fInit.split('/').map(p => p.trim());
-      if (parts.includes(cleanInit)) return true;
+    if (rawStr && fPlate === rawStr) return true;
+
+    if (f.initialCode) {
+      const fInit = norm(f.initialCode);
+      if (cleanInit && fInit === cleanInit) return true;
+      if (rawStr && fInit === rawStr) return true;
+
+      const parts = f.initialCode.split(/[/]+/).map(p => norm(p));
+      if (cleanInit && parts.includes(cleanInit)) return true;
+      if (rawStr && parts.includes(rawStr)) return true;
     }
     return false;
   });
