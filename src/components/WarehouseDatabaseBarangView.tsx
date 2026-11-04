@@ -16,6 +16,7 @@ import {
   Eye,
   Upload,
   Box,
+  Package,
   Layers,
   Scale,
   ArrowUpDown,
@@ -26,7 +27,10 @@ import {
   List,
   Sparkles,
   RefreshCw,
-  FileText
+  FileText,
+  Camera,
+  Smartphone,
+  Video
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -49,12 +53,42 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [unitFilter, setUnitFilter] = useState('ALL');
   const [volFilter, setVolFilter] = useState<'ALL' | 'has_vol' | 'no_vol'>('ALL');
   const [beratFilter, setBeratFilter] = useState<'ALL' | 'has_berat' | 'no_berat'>('ALL');
+  const [fotoFilter, setFotoFilter] = useState<'ALL' | 'has_photo' | 'no_photo'>('ALL');
   const [sortBy, setSortBy] = useState<string>('default');
   const [tableMode, setTableMode] = useState<'compact' | 'spreadsheet'>('compact');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [jumpPageInput, setJumpPageInput] = useState('');
   const [isSavingImport, setIsSavingImport] = useState(false);
+
+  // Cubication KPI metrics for Database Barang (Spesifikasi, Dimensi & Kubikasi)
+  const cubicationMetrics = useMemo(() => {
+    const totalSku = items.length;
+    let totalVol = 0;
+    let countWithVol = 0;
+    let totalBeratKg = 0;
+
+    items.forEach(item => {
+      const vol = Number(item.volM3) || 0;
+      const berat = Number(item.beratKg) || 0;
+      if (vol > 0) {
+        totalVol += vol;
+        countWithVol++;
+      }
+      if (berat > 0) {
+        totalBeratKg += berat;
+      }
+    });
+
+    const avgKubikasiUnit = countWithVol > 0 ? totalVol / countWithVol : 0;
+
+    return {
+      totalSku,
+      avgKubikasiUnit,
+      totalKubikasiStokM3: totalVol,
+      totalBeratStokKg: totalBeratKg
+    };
+  }, [items]);
 
   // Upload Excel mode with Preview before Save
   const [isUploadExcelOpen, setIsUploadExcelOpen] = useState(false);
@@ -66,6 +100,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   // Modal Tambah / Edit Barang (Template Foto 1)
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<DatabaseBarangRecord | null>(null);
+  const [dokumentasiUrls, setDokumentasiUrls] = useState<string[]>([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number>(0);
 
   // Form states matching Foto 1
   const [noBarang, setNoBarang] = useState('');
@@ -88,6 +124,155 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
   // Toast / Feedback popup
   const [feedbackModal, setFeedbackModal] = useState<{ title: string; message: string } | null>(null);
+
+  // Direct Live Camera & HP Camera capture state
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [cameraTargetItem, setCameraTargetItem] = useState<DatabaseBarangRecord | null>(null);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const nativeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const rowNativeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [activeCameraRowItem, setActiveCameraRowItem] = useState<DatabaseBarangRecord | null>(null);
+
+  const startCamera = async (facing: 'environment' | 'user' = cameraFacingMode) => {
+    setCameraError(null);
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      setCameraStream(null);
+    }
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Fitur live video peramban tidak didukung. Silakan gunakan tombol kamera standar HP.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => console.warn('Video play err:', e));
+      }
+    } catch (err: any) {
+      console.warn('Gagal akses kamera langsung:', err);
+      setCameraError(err.message || 'Tidak dapat mengakses kamera. Pastikan izin kamera telah disetujui di browser HP.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      setCameraStream(null);
+    }
+    setIsCameraModalOpen(false);
+    setCameraTargetItem(null);
+  };
+
+  const toggleCameraFacing = () => {
+    const nextFacing = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    setCameraFacingMode(nextFacing);
+    startCamera(nextFacing);
+  };
+
+  const capturePhotoFromLiveStream = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async blob => {
+      if (!blob) return;
+      const file = new File([blob], `kamera_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      try {
+        const compressed = await compressDocumentationPhoto(file, {
+          maxDimension: 380,
+          targetMaxKb: 14,
+          initialQuality: 0.55
+        });
+
+        if (cameraTargetItem) {
+          const existingUrls = Array.isArray(cameraTargetItem.dokumentasiUrls)
+            ? cameraTargetItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+            : (cameraTargetItem.dokumentasiUrl && !cameraTargetItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [cameraTargetItem.dokumentasiUrl] : []);
+          const updatedUrls = [...existingUrls, compressed.dataUrl];
+          databaseBarangService.upsertItem({
+            ...cameraTargetItem,
+            dokumentasiUrls: updatedUrls,
+            dokumentasiUrl: updatedUrls[0]
+          });
+          setItems(databaseBarangService.getAll());
+          setFeedbackModal({
+            title: 'Foto Kamera HP Disimpan',
+            message: `Foto dokumentasi barang ${cameraTargetItem.noBarang} berhasil diambil dan disimpan langsung!`
+          });
+        } else {
+          setDokumentasiUrls(prev => {
+            const combined = [...prev, compressed.dataUrl];
+            if (!dokumentasiUrl) setDokumentasiUrl(compressed.dataUrl);
+            return combined;
+          });
+        }
+        stopCamera();
+      } catch (e) {
+        console.error('Gagal kompres foto live camera:', e);
+      }
+    }, 'image/jpeg', 0.8);
+  };
+
+  const triggerCameraForRow = (item: DatabaseBarangRecord) => {
+    setActiveCameraRowItem(item);
+    if (rowNativeCameraInputRef.current) {
+      rowNativeCameraInputRef.current.value = '';
+      rowNativeCameraInputRef.current.click();
+    }
+  };
+
+  const handleRowCameraUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !activeCameraRowItem) return;
+    try {
+      const results = await Promise.all(
+        files.map(f =>
+          compressDocumentationPhoto(f, {
+            maxDimension: 380,
+            targetMaxKb: 14,
+            initialQuality: 0.55
+          })
+        )
+      );
+      const newUrls = results.map(r => r.dataUrl);
+      const existingUrls = Array.isArray(activeCameraRowItem.dokumentasiUrls)
+        ? activeCameraRowItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+        : (activeCameraRowItem.dokumentasiUrl && !activeCameraRowItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [activeCameraRowItem.dokumentasiUrl] : []);
+      const updatedUrls = [...existingUrls, ...newUrls];
+
+      databaseBarangService.upsertItem({
+        ...activeCameraRowItem,
+        dokumentasiUrls: updatedUrls,
+        dokumentasiUrl: updatedUrls[0]
+      });
+      setItems(databaseBarangService.getAll());
+      setFeedbackModal({
+        title: 'Foto Kamera HP Berhasil Disimpan',
+        message: `Foto dokumentasi barang ${activeCameraRowItem.noBarang} (${activeCameraRowItem.deskripsiBarang}) berhasil diabadikan langsung dari kamera HP!`
+      });
+    } catch (err) {
+      console.error('Gagal upload foto kamera:', err);
+    } finally {
+      e.target.value = '';
+      setActiveCameraRowItem(null);
+    }
+  };
 
   useEffect(() => {
     databaseBarangService.ensureHydrated().then(loaded => {
@@ -126,6 +311,20 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     return Array.from(set);
   }, [items]);
 
+  const photoStats = useMemo(() => {
+    let withPhoto = 0;
+    let withoutPhoto = 0;
+    items.forEach(i => {
+      const has = Boolean(
+        (i.dokumentasiUrls && i.dokumentasiUrls.length > 0) ||
+        (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml') && i.dokumentasiUrl.trim() !== '')
+      );
+      if (has) withPhoto++;
+      else withoutPhoto++;
+    });
+    return { withPhoto, withoutPhoto, total: items.length };
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const result = items.filter(item => {
@@ -154,7 +353,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         (beratFilter === 'has_berat' && itemBerat > 0) ||
         (beratFilter === 'no_berat' && itemBerat === 0);
 
-      return matchSearch && matchUnit && matchVol && matchBerat;
+      const hasCustomPhoto = Boolean(
+        (item.dokumentasiUrls && item.dokumentasiUrls.length > 0) ||
+        (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== '')
+      );
+      const matchFoto =
+        fotoFilter === 'ALL' ||
+        (fotoFilter === 'has_photo' && hasCustomPhoto) ||
+        (fotoFilter === 'no_photo' && !hasCustomPhoto);
+
+      return matchSearch && matchUnit && matchVol && matchBerat && matchFoto;
     });
 
     // Sort options: Urutan asli file (default), A-Z, Z-A, terkecil ke terbesar, terbesar ke terkecil
@@ -181,7 +389,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
 
     return result;
-  }, [items, searchQuery, unitFilter, volFilter, beratFilter, sortBy]);
+  }, [items, searchQuery, unitFilter, volFilter, beratFilter, fotoFilter, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -234,7 +442,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setTinggiCm(0);
     setVolM3(0);
     setBeratKg(0);
-    setDokumentasiUrl(createDefaultBarangThumbnail(defaultNo, 'Barang Kemasan AKK', 'Pcs'));
+    setDokumentasiUrl('');
+    setDokumentasiUrls([]);
     setIsFormModalOpen(true);
   };
 
@@ -252,21 +461,37 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setTinggiCm(item.tinggiCm || 0);
     setVolM3(item.volM3 || (item.panjangCm > 0 && item.lebarCm > 0 && item.tinggiCm > 0 ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm) : 0));
     setBeratKg(item.beratKg || 0);
-    setDokumentasiUrl(item.dokumentasiUrl || createDefaultBarangThumbnail(item.noBarang, item.deskripsiBarang, item.unit1));
+
+    const validUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    setDokumentasiUrls(validUrls);
+    setDokumentasiUrl(validUrls[0] || '');
     setIsFormModalOpen(true);
   };
 
   const handleModalPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setIsCompressingPhoto(true);
     try {
-      const result = await compressDocumentationPhoto(file, {
-        maxDimension: 320,
-        targetMaxKb: 14,
-        initialQuality: 0.48
+      const results = await Promise.all(
+        files.map(f =>
+          compressDocumentationPhoto(f, {
+            maxDimension: 360,
+            targetMaxKb: 14,
+            initialQuality: 0.5
+          })
+        )
+      );
+      const newUrls = results.map(r => r.dataUrl);
+      setDokumentasiUrls(prev => {
+        const combined = [...prev, ...newUrls];
+        if (!dokumentasiUrl && combined[0]) {
+          setDokumentasiUrl(combined[0]);
+        }
+        return combined;
       });
-      setDokumentasiUrl(result.dataUrl);
     } catch (err) {
       console.error('Gagal kompres foto:', err);
     } finally {
@@ -275,14 +500,19 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
   };
 
+  const handleRemovePhoto = (index: number) => {
+    setDokumentasiUrls(prev => {
+      const updated = prev.filter((_, idx) => idx !== index);
+      setDokumentasiUrl(updated[0] || '');
+      return updated;
+    });
+  };
+
   const handleSaveItemForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!noBarang.trim() || !deskripsiBarang.trim()) return;
 
-    const finalDoc =
-      dokumentasiUrl ||
-      createDefaultBarangThumbnail(noBarang.trim().toUpperCase(), deskripsiBarang.trim(), unit1);
-
+    const primaryDoc = dokumentasiUrls[0] || dokumentasiUrl || '';
     const calculatedVol = volM3 > 0 ? volM3 : calculateVolM3(panjangCm, lebarCm, tinggiCm);
 
     const saved = databaseBarangService.upsertItem({
@@ -301,7 +531,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       tinggiCm: Number(tinggiCm) || 0,
       volM3: Number(calculatedVol),
       beratKg: Number(beratKg) || 0,
-      dokumentasiUrl: finalDoc
+      dokumentasiUrl: primaryDoc,
+      dokumentasiUrls: dokumentasiUrls
     });
 
     const all = databaseBarangService.getAll();
@@ -310,7 +541,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setIsFormModalOpen(false);
     setFeedbackModal({
       title: editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan',
-      message: `Data "${saved.deskripsiBarang}" (${saved.noBarang}) berhasil disimpan sesuai template database barang.`
+      message: `Data "${saved.deskripsiBarang}" (${saved.noBarang}) berhasil disimpan dengan ${dokumentasiUrls.length} foto dokumentasi.`
     });
   };
 
@@ -824,6 +1055,24 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
   return (
     <div className="space-y-4">
+      {/* Hidden Mobile Camera Input Trigger for Direct Row & Modal Capture */}
+      <input
+        ref={nativeCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleModalPhotoUpload}
+        className="hidden"
+      />
+      <input
+        ref={rowNativeCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleRowCameraUpload}
+        className="hidden"
+      />
+
       {/* Top Header Banner */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="space-y-1">
@@ -870,6 +1119,69 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             <Plus className="w-3.5 h-3.5" />
             <span>+ Tambah Barang</span>
           </button>
+        </div>
+      </div>
+
+      {/* KPI Summary Cards: Total SKU Terdaftar, Rata-Rata Kubikasi / Unit, Total Kubikasi Stok Gudang, Total Berat Stok Gudang */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Total SKU Terdaftar
+            </span>
+            <Package className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+            {cubicationMetrics.totalSku.toLocaleString('id-ID')} Barang
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Tersinkronisasi otomatis dengan Database Barang
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Rata-Rata Kubikasi / Unit
+            </span>
+            <Box className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+            {cubicationMetrics.avgKubikasiUnit.toFixed(4)} m&sup3;
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Volume rata-rata per satuan kemasan karton box
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Total Kubikasi Stok Gudang
+            </span>
+            <Layers className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
+            {cubicationMetrics.totalKubikasiStokM3.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m&sup3;
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Akumulasi volume seluruh item database
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Total Berat Stok Gudang
+            </span>
+            <Scale className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
+            {(cubicationMetrics.totalBeratStokKg / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} Ton
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Setara {Math.round(cubicationMetrics.totalBeratStokKg).toLocaleString('id-ID')} Kg total berat barang
+          </p>
         </div>
       </div>
 
@@ -960,7 +1272,30 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
               <option value="no_berat">⚪ Tanpa Berat (0 kg)</option>
             </select>
 
-            {(searchQuery || unitFilter !== 'ALL' || volFilter !== 'ALL' || beratFilter !== 'ALL' || sortBy !== 'default') && (
+            {/* Filter Status Foto Dokumentasi (Baru: Belum Ada Foto vs Sudah Ada) */}
+            <select
+              value={fotoFilter}
+              onChange={e => setFotoFilter(e.target.value as any)}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition ${
+                fotoFilter === 'no_photo'
+                  ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 ring-1 ring-amber-400/30'
+                  : fotoFilter === 'has_photo'
+                  ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-300'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
+              }`}
+            >
+              <option value="ALL">📷 Semua Foto ({items.length})</option>
+              <option value="no_photo">⚠️ Belum Ada Foto ({photoStats.withoutPhoto})</option>
+              <option value="has_photo">✅ Sudah Ada Foto ({photoStats.withPhoto})</option>
+            </select>
+
+            {fotoFilter === 'no_photo' && (
+              <span className="px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-bold flex items-center gap-1">
+                <span>Filter: Belum Ada Foto</span>
+              </span>
+            )}
+
+            {(searchQuery || unitFilter !== 'ALL' || volFilter !== 'ALL' || beratFilter !== 'ALL' || fotoFilter !== 'ALL' || sortBy !== 'default') && (
               <button
                 type="button"
                 onClick={() => {
@@ -968,6 +1303,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                   setUnitFilter('ALL');
                   setVolFilter('ALL');
                   setBeratFilter('ALL');
+                  setFotoFilter('ALL');
                   setSortBy('default');
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold hover:bg-rose-100 transition cursor-pointer flex items-center gap-1"
@@ -1049,53 +1385,53 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           </span>
         </div>
 
-        {/* Tabel Mode Ringkas (Fit on screen, ZERO horizontal scrolling) */}
+        {/* Tabel Mode Ringkas (Fit on screen, ZERO horizontal scrolling, Lebih Rapat & Bersih) */}
         {tableMode === 'compact' ? (
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left border-collapse">
               <thead className="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold text-[11px] border-b border-slate-200 dark:border-slate-800 select-none">
                 <tr>
-                  <th className="py-3 px-3 text-center border-r border-slate-200 dark:border-slate-800 w-12 text-slate-400">#</th>
+                  <th className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 w-10 text-slate-400">#</th>
                   <th
                     onClick={() => setSortBy(prev => prev === 'no_asc' ? 'no_desc' : 'no_asc')}
-                    className="py-3 px-3.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-36"
+                    className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-32"
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <span>No. Barang</span>
                       {sortBy === 'no_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'no_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                     </div>
                   </th>
                   <th
                     onClick={() => setSortBy(prev => prev === 'nama_asc' ? 'nama_desc' : 'nama_asc')}
-                    className="py-3 px-3.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition min-w-[240px]"
+                    className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition min-w-[260px]"
                   >
                     <div className="flex items-center gap-1.5">
-                      <span>Deskripsi Barang</span>
+                      <span>Deskripsi Barang &amp; Foto</span>
                       {sortBy === 'nama_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'nama_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                     </div>
                   </th>
-                  <th className="py-3 px-3.5 border-r border-slate-200 dark:border-slate-800 w-44">
+                  <th className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 w-40">
                     <span>Satuan &amp; Konversi</span>
                   </th>
                   <th
                     onClick={() => setSortBy(prev => prev === 'vol_asc' ? 'vol_desc' : 'vol_asc')}
-                    className="py-3 px-3.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-48"
+                    className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-44"
                   >
-                    <div className="flex items-center gap-1.5">
-                      <span>Dimensi (P&times;L&times;T) &amp; Kubikasi</span>
+                    <div className="flex items-center gap-1">
+                      <span>Dimensi (P&times;L&times;T) &amp; M3</span>
                       {sortBy === 'vol_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'vol_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                     </div>
                   </th>
                   <th
                     onClick={() => setSortBy(prev => prev === 'berat_asc' ? 'berat_desc' : 'berat_asc')}
-                    className="py-3 px-3 text-right border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-24"
+                    className="py-2 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-20"
                   >
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex items-center justify-end gap-1">
                       <span>Berat</span>
                       {sortBy === 'berat_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'berat_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                     </div>
                   </th>
-                  <th className="py-3 px-3.5 text-center w-24">Aksi</th>
+                  <th className="py-2 px-2 text-center w-20">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
@@ -1105,24 +1441,49 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
                     const calculatedVol = item.volM3 > 0 ? item.volM3 : (hasDim ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm) : 0);
 
+                    const photoList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+                      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+                      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+                    const hasCustomPhoto = photoList.length > 0;
+
                     return (
                       <tr key={item.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition">
-                        <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 border-r border-slate-200 dark:border-slate-800">
+                        <td className="py-1.5 px-2 text-center font-mono font-bold text-slate-400 border-r border-slate-200 dark:border-slate-800 text-[11px]">
                           {rowNum}
                         </td>
-                        <td className="py-2.5 px-3.5 border-r border-slate-200 dark:border-slate-800">
-                          <span className="font-mono font-bold text-blue-700 dark:text-blue-400">
+                        <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
+                          <span className="font-bold text-blue-700 dark:text-blue-400 text-xs">
                             {item.noBarang}
                           </span>
                         </td>
-                        <td className="py-2.5 px-3.5 border-r border-slate-200 dark:border-slate-800">
-                          <div className="font-semibold text-slate-900 dark:text-white leading-snug">
-                            {item.deskripsiBarang || item.keteranganBarang}
+                        <td className="py-1.5 px-3 border-r border-slate-200 dark:border-slate-800">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-slate-900 dark:text-white leading-tight">
+                              {item.deskripsiBarang || item.keteranganBarang}
+                            </span>
+                            {hasCustomPhoto ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewDocItem(item);
+                                  setActivePhotoIndex(0);
+                                }}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold hover:bg-blue-100 transition cursor-pointer shrink-0"
+                                title="Klik untuk melihat foto dokumentasi"
+                              >
+                                <Camera className="w-2.5 h-2.5" />
+                                <span>{photoList.length} Foto</span>
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 text-slate-400 text-[9px] font-medium shrink-0">
+                                Tanpa Foto
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3.5 border-r border-slate-200 dark:border-slate-800">
-                          <div className="flex flex-col gap-1 items-start">
-                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-[11px] text-slate-900 dark:text-white">
+                        <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-[10px] text-slate-900 dark:text-white">
                               {item.unit1 || item.satuan || 'Pcs'}
                             </span>
                             {item.unit2 && (
@@ -1132,38 +1493,50 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             )}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3.5 border-r border-slate-200 dark:border-slate-800 font-mono">
+                        <td className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
                           {hasDim || calculatedVol > 0 ? (
-                            <div className="flex flex-col gap-0.5 items-start">
-                              <span className="text-slate-800 dark:text-slate-200 font-medium text-[11px]">
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="text-slate-700 dark:text-slate-300 font-medium text-xs whitespace-nowrap">
                                 {item.panjangCm || 0} &times; {item.lebarCm || 0} &times; {item.tinggiCm || 0} cm
                               </span>
                               {calculatedVol > 0 ? (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 font-bold text-[10px]">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-xs sm:text-[13px] tracking-wide shadow-2xs">
                                   {calculatedVol} M3
                                 </span>
                               ) : (
-                                <span className="text-slate-400 text-[10px]">0 M3</span>
+                                <span className="text-slate-400 text-xs">0 M3</span>
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-400 font-mono">-</span>
+                            <span className="text-slate-400 font-mono text-xs">-</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
+                        <td className="py-1.5 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
                           {item.beratKg > 0 ? (
                             <span className="font-bold text-slate-900 dark:text-white">{item.beratKg} kg</span>
                           ) : (
                             <span className="text-slate-400 font-mono">-</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3.5 text-center">
+                        <td className="py-1.5 px-2 text-center">
                           <div className="inline-flex items-center justify-center gap-1">
-                            {item.dokumentasiUrl && (
+                            {/* Tombol Ambil Foto Langsung dari HP */}
+                            <button
+                              type="button"
+                              onClick={() => triggerCameraForRow(item)}
+                              className="p-1 rounded-md bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition cursor-pointer"
+                              title="Ambil Foto Langsung Kamera HP"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                            </button>
+                            {hasCustomPhoto && (
                               <button
                                 type="button"
-                                onClick={() => setPreviewDocItem(item)}
-                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                                onClick={() => {
+                                  setPreviewDocItem(item);
+                                  setActivePhotoIndex(0);
+                                }}
+                                className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                                 title="Lihat Foto Dokumentasi"
                               >
                                 <Eye className="w-3.5 h-3.5" />
@@ -1172,7 +1545,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             <button
                               type="button"
                               onClick={() => openEditModal(item)}
-                              className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
+                              className="p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
                               title="Edit Data Barang"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
@@ -1180,7 +1553,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             <button
                               type="button"
                               onClick={() => handleDeleteItem(item)}
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                              className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer"
                               title="Hapus Barang"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1295,9 +1668,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                         </td>
                         <td className="py-2.5 px-3 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
                           {item.volM3 > 0 ? (
-                            <span className="font-bold text-blue-700 dark:text-blue-400">{item.volM3}</span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-xs sm:text-[13px] tracking-wide shadow-2xs">
+                              {item.volM3} M3
+                            </span>
                           ) : (
-                            <span className="text-slate-400 font-mono">0</span>
+                            <span className="text-slate-400 font-mono text-xs">0 M3</span>
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
@@ -1309,6 +1684,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                         </td>
                         <td className="py-2.5 px-3.5 text-center">
                           <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => triggerCameraForRow(item)}
+                              className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition cursor-pointer"
+                              title="Ambil Foto Langsung dari Kamera HP"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                            </button>
                             {item.dokumentasiUrl && (
                               <button
                                 type="button"
@@ -1676,32 +2059,100 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 </div>
               </div>
 
-              {/* Seksi 4: Dokumentasi Foto (Opsional di Modal) */}
-              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 flex items-center gap-3">
-                <div className="w-16 h-12 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-900 shrink-0">
-                  {dokumentasiUrl && (
-                    <img
-                      src={dokumentasiUrl}
-                      alt="Thumbnail Barang"
-                      className="w-full h-full object-cover"
-                    />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-800 dark:text-slate-200 text-xs">
-                    Foto Dokumentasi Barang (Opsional)
+              {/* Seksi 4: Dokumentasi Foto (Bisa Kirim Lebih Dari 1 Foto) */}
+              <div className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <div>
+                      <div className="font-black text-slate-900 dark:text-white text-xs">
+                        4. Foto Dokumentasi Barang (Bisa Ambil Langsung dari HP)
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Bisa jepret langsung pakai kamera HP atau pilih dari galeri. Otomatis dikompresi agar hemat memori.
+                      </div>
+                    </div>
                   </div>
-                  <label className="mt-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-[11px] cursor-pointer transition">
-                    <Upload className="w-3 h-3" />
-                    <span>{isCompressingPhoto ? 'Memproses...' : 'Pilih Foto'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleModalPhotoUpload}
-                      className="hidden"
-                    />
-                  </label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Tombol Ambil Kamera HP Langsung */}
+                    <button
+                      type="button"
+                      onClick={() => nativeCameraInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs transition"
+                      title="Buka kamera HP secara langsung untuk memotret barang"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>📸 Ambil Foto Kamera HP</span>
+                    </button>
+                    {/* Tombol Live Viewfinder Layar */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCameraTargetItem(null);
+                        setIsCameraModalOpen(true);
+                        startCamera('environment');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs cursor-pointer transition"
+                      title="Buka jendela bidik kamera live di layar HP / Laptop"
+                    >
+                      <Video className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Live Viewfinder</span>
+                    </button>
+                    {/* Tombol Unggah File / Galeri */}
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-xs transition">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{isCompressingPhoto ? 'Mengompres...' : '📁 Pilih Galeri / File'}</span>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleModalPhotoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
+
+                {dokumentasiUrls.length > 0 ? (
+                  <div className="space-y-2 pt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {dokumentasiUrls.map((url, uIdx) => (
+                        <div
+                          key={uIdx}
+                          className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-900 aspect-4/3"
+                        >
+                          <img
+                            src={url}
+                            alt={`Dokumentasi ${uIdx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
+                            {uIdx === 0 ? 'Foto Utama' : `Foto #${uIdx + 1}`}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePhoto(uIdx)}
+                            className="absolute top-1 right-1 p-1 rounded-md bg-rose-600 text-white hover:bg-rose-500 transition cursor-pointer shadow-sm"
+                            title="Hapus foto ini"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between pt-1">
+                      <span>Total {dokumentasiUrls.length} foto siap disimpan untuk barang ini.</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold text-[10px]">
+                        ✓ Terkompresi Otomatis
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400 space-y-1">
+                    <p className="font-semibold text-slate-600 dark:text-slate-300">Belum ada foto dokumentasi diunggah</p>
+                    <p className="text-[11px]">Klik tombol <strong>+ Tambah / Unggah Foto</strong> untuk melampirkan foto barang kemasan (bisa lebih dari 1 foto).</p>
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
@@ -1724,43 +2175,224 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Lightbox Modal Preview Dokumentasi */}
-      {previewDocItem && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setPreviewDocItem(null)}
-        >
+      {/* Lightbox Modal Preview Dokumentasi (Mendukung Banyak Foto) */}
+      {previewDocItem && (() => {
+        const photos = Array.isArray(previewDocItem.dokumentasiUrls) && previewDocItem.dokumentasiUrls.length > 0
+          ? previewDocItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+          : (previewDocItem.dokumentasiUrl && !previewDocItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [previewDocItem.dokumentasiUrl] : []);
+        const totalPhotos = photos.length;
+        const currentPhotoUrl = photos[activePhotoIndex] || databaseBarangService.getItemThumbnail(previewDocItem);
+
+        return (
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
-            onClick={e => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => {
+              setPreviewDocItem(null);
+              setActivePhotoIndex(0);
+            }}
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="font-mono text-xs font-black text-blue-600 dark:text-blue-400">
-                  {previewDocItem.noBarang} &bull; {previewDocItem.unit1 || previewDocItem.satuan}
+            <div
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-5 space-y-3.5 shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-black text-blue-600 dark:text-blue-400">
+                      {previewDocItem.noBarang}
+                    </span>
+                    {totalPhotos > 1 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                        Foto {activePhotoIndex + 1} dari {totalPhotos}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                    {previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewDocItem(null);
+                    setActivePhotoIndex(0);
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Main Photo Display */}
+              <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-4/3">
+                <img
+                  src={currentPhotoUrl}
+                  alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
+                  className="w-full h-full object-contain"
+                />
+
+                {totalPhotos > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : totalPhotos - 1))}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition cursor-pointer"
+                      title="Foto sebelumnya"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActivePhotoIndex(prev => (prev < totalPhotos - 1 ? prev + 1 : 0))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition cursor-pointer"
+                      title="Foto berikutnya"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Thumbnail Strip if Multiple Photos */}
+              {totalPhotos > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {photos.map((pUrl, pIdx) => (
+                    <button
+                      key={pIdx}
+                      type="button"
+                      onClick={() => setActivePhotoIndex(pIdx)}
+                      className={`relative w-14 h-11 rounded-lg overflow-hidden border-2 shrink-0 transition cursor-pointer ${
+                        activePhotoIndex === pIdx
+                          ? 'border-blue-600 ring-2 ring-blue-500/30'
+                          : 'border-slate-200 dark:border-slate-700 opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={pUrl} alt={`Thumb ${pIdx + 1}`} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="font-medium text-slate-700 dark:text-slate-300">Dimensi: {previewDocItem.panjangCm} &times; {previewDocItem.lebarCm} &times; {previewDocItem.tinggiCm} cm</span>
+                <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-sm tracking-wide shadow-2xs">
+                  VOL: {previewDocItem.volM3} M3
                 </span>
-                <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                  {previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
-                </h4>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Live Camera Viewfinder Modal (Bisa Digunakan Langsung Melalui Kamera HP / Laptop) */}
+      {isCameraModalOpen && (
+        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            {/* Camera Header */}
+            <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-black text-white">
+                    {cameraTargetItem ? `Foto: ${cameraTargetItem.noBarang}` : 'Ambil Foto Dokumentasi Barang'}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Arahkan kamera ke barang lalu tekan tombol jepret
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setPreviewDocItem(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                onClick={stopCamera}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
-              <img
-                src={databaseBarangService.getItemThumbnail(previewDocItem)}
-                alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
-                className="w-full max-h-72 object-contain mx-auto"
-              />
+
+            {/* Video Viewfinder */}
+            <div className="relative bg-black aspect-4/3 flex items-center justify-center overflow-hidden">
+              {cameraError ? (
+                <div className="p-6 text-center space-y-3">
+                  <div className="text-amber-400 text-xs font-bold">{cameraError}</div>
+                  <p className="text-[11px] text-slate-400">
+                    Anda tetap bisa menggunakan tombol kamera bawaan HP di bawah:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopCamera();
+                      if (cameraTargetItem) {
+                        triggerCameraForRow(cameraTargetItem);
+                      } else {
+                        nativeCameraInputRef.current?.click();
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                  >
+                    📸 Buka Kamera Standar HP
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Framing Overlay */}
+                  <div className="absolute inset-4 border-2 border-dashed border-white/40 rounded-xl pointer-events-none flex items-center justify-center">
+                    <span className="text-[10px] font-bold text-white/80 bg-black/50 px-2 py-0.5 rounded-full">
+                      Posisikan Barang di Dalam Kotak
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-              <span>Dimensi: {previewDocItem.panjangCm} x {previewDocItem.lebarCm} x {previewDocItem.tinggiCm} cm</span>
-              <span className="font-bold text-emerald-600">VOL: {previewDocItem.volM3} M3</span>
+
+            {/* Camera Controls Footer */}
+            <div className="p-4 bg-slate-950 flex items-center justify-around gap-4">
+              <button
+                type="button"
+                onClick={toggleCameraFacing}
+                className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
+                title="Putar Kamera (Depan / Belakang)"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </button>
+
+              {/* Shutter Button */}
+              <button
+                type="button"
+                onClick={capturePhotoFromLiveStream}
+                disabled={Boolean(cameraError)}
+                className="p-4 rounded-full bg-white text-slate-950 hover:bg-slate-200 active:scale-95 transition cursor-pointer shadow-lg ring-4 ring-white/30 disabled:opacity-50"
+                title="Jepret Foto"
+              >
+                <div className="w-8 h-8 rounded-full border-2 border-slate-950 flex items-center justify-center">
+                  <Camera className="w-4 h-4" />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  if (cameraTargetItem) {
+                    triggerCameraForRow(cameraTargetItem);
+                  } else {
+                    nativeCameraInputRef.current?.click();
+                  }
+                }}
+                className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer text-xs font-bold"
+                title="Gunakan Aplikasi Kamera HP"
+              >
+                <Smartphone className="w-5 h-5" />
+              </button>
             </div>
           </div>
         </div>

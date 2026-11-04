@@ -26,7 +26,12 @@ import {
   Edit3,
   Download,
   FileSpreadsheet,
-  Lock
+  Lock,
+  BarChart3,
+  PieChart,
+  Activity,
+  Gauge,
+  Boxes
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { logisticsStore } from '../../services/store';
@@ -78,6 +83,7 @@ export interface SalesOrderInvoice {
   customerName: string;
   areaName: string;
   fleetLabel: string;
+  fleetLabels?: string[];
   adminPic: string;
   isLoadingFinished: boolean;
   finishedAt?: string;
@@ -427,6 +433,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     defaultAdmin
   } = useSharedSalesRfidInvoices();
 
+  const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFleet, setFilterFleet] = useState('SEMUA ARMADA');
   const [filterStatus, setFilterStatus] = useState('SEMUA STATUS');
@@ -440,6 +447,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const [customerName, setCustomerName] = useState('');
   const [areaName, setAreaName] = useState<string>('');
   const [fleetLabel, setFleetLabel] = useState(defaultFleet);
+  const [selectedFleets, setSelectedFleets] = useState<string[]>([defaultFleet]);
   const [adminPic, setAdminPic] = useState(defaultAdmin);
   const [notes, setNotes] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -493,7 +501,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setCustomerName('');
     // Kosongkan areaName saat awal agar user wajib memilih Nama Area Kirim terlebih dahulu sebelum upload file
     setAreaName('');
-    setFleetLabel(fleetOptions[0] || defaultFleet);
+    const initialFleet = fleetOptions[0] || defaultFleet;
+    setFleetLabel(initialFleet);
+    setSelectedFleets([initialFleet]);
     setAdminPic(adminNames[0] || defaultAdmin);
     setNotes('');
     setUploadedFileName('');
@@ -512,7 +522,14 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setDate(inv.date);
     setCustomerName(inv.customerName);
     setAreaName(inv.areaName);
-    setFleetLabel(inv.fleetLabel);
+    const parsedFleets =
+      inv.fleetLabels && inv.fleetLabels.length > 0
+        ? inv.fleetLabels
+        : inv.fleetLabel
+        ? inv.fleetLabel.split(' + ').map(s => s.trim()).filter(Boolean)
+        : [fleetOptions[0] || defaultFleet];
+    setSelectedFleets(parsedFleets.length > 0 ? parsedFleets : [fleetOptions[0] || defaultFleet]);
+    setFleetLabel(parsedFleets[0] || fleetOptions[0] || defaultFleet);
     setAdminPic(inv.adminPic);
     setNotes(inv.notes || '');
     setUploadedFileName(`Edit Manual — ${inv.invoiceNumber}`);
@@ -801,6 +818,10 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
       });
     });
 
+    const finalFleets =
+      selectedFleets.length > 0 ? selectedFleets : [fleetLabel || fleetOptions[0] || defaultFleet];
+    const finalFleetLabel = finalFleets.join(' + ');
+
     if (editingInvoiceId) {
       const firstRow = validRows[0];
       saveInvoices(prev =>
@@ -828,14 +849,18 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             date,
             customerName: firstRow.namaPelanggan.trim().toUpperCase(),
             areaName,
-            fleetLabel,
+            fleetLabel: finalFleetLabel,
+            fleetLabels: finalFleets,
             adminPic,
             notes: notes.trim(),
             items: mergedItems
           };
         })
       );
-      showToast(`Faktur ${firstRow.noFaktur} (Area ${areaName}) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi RFID!`, 'success');
+      showToast(
+        `Faktur ${firstRow.noFaktur} (Area ${areaName} • ${finalFleets.length} Armada) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi RFID!`,
+        'success'
+      );
     } else {
       // Kelompokkan baris hasil import berdasarkan No Faktur + Nama Pelanggan
       const groupedMap = new Map<
@@ -866,7 +891,8 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         date,
         customerName: grp.namaPelanggan,
         areaName,
-        fleetLabel,
+        fleetLabel: finalFleetLabel,
+        fleetLabels: finalFleets,
         adminPic,
         isLoadingFinished: false,
         notes: notes.trim() || (uploadedFileName ? `Diimpor dari file: ${uploadedFileName}` : ''),
@@ -888,7 +914,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
       saveInvoices(prev => [...createdInvoices, ...prev]);
       showToast(
-        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Area ${areaName} berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan RFID!`,
+        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Area ${areaName} [${finalFleets.length} Armada] berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan RFID!`,
         'success'
       );
     }
@@ -913,7 +939,12 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         inv.areaName.toLowerCase().includes(q) ||
         inv.items.some(i => i.itemName.toLowerCase().includes(q) || i.skuCode.toLowerCase().includes(q));
 
-      const matchFleet = filterFleet === 'SEMUA ARMADA' || inv.fleetLabel === filterFleet;
+      const matchFleet =
+        filterFleet === 'SEMUA ARMADA' ||
+        inv.fleetLabel === filterFleet ||
+        inv.fleetLabel.includes(filterFleet) ||
+        (inv.fleetLabels && inv.fleetLabels.some(f => f.includes(filterFleet) || filterFleet.includes(f)));
+
       const matchStatus =
         filterStatus === 'SEMUA STATUS' ||
         (filterStatus === 'LEBIH_MUAT' && evalRes.overloadItems.length > 0) ||
@@ -940,6 +971,160 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     return { total, sesuai, kurangAtauSisa, lebihMuat };
   }, [invoices]);
 
+  const dashboardAnalytics = useMemo(() => {
+    let totalInvoices = invoices.length;
+    let totalOrderedQty = 0;
+    let totalLoadedQty = 0;
+    let totalEstimatedVolumeM3 = 0;
+    let totalEstimatedWeightKg = 0;
+
+    const fleetMap = new Map<
+      string,
+      {
+        fleetName: string;
+        invoiceCount: number;
+        totalOrdered: number;
+        totalLoaded: number;
+        volumeM3: number;
+        weightKg: number;
+        areas: Set<string>;
+        invoices: SalesOrderInvoice[];
+      }
+    >();
+
+    const areaMap = new Map<
+      string,
+      {
+        areaName: string;
+        invoiceCount: number;
+        customers: Set<string>;
+        totalOrdered: number;
+        totalLoaded: number;
+        volumeM3: number;
+        weightKg: number;
+        fleets: Set<string>;
+        invoices: SalesOrderInvoice[];
+      }
+    >();
+
+    const unloadedItemsList: Array<{
+      invoice: SalesOrderInvoice;
+      item: SalesOrderItem;
+      remainingQty: number;
+    }> = [];
+
+    const overloadedItemsList: Array<{
+      invoice: SalesOrderInvoice;
+      item: SalesOrderItem;
+      excessQty: number;
+    }> = [];
+
+    invoices.forEach(inv => {
+      const invFleets =
+        inv.fleetLabels && inv.fleetLabels.length > 0
+          ? inv.fleetLabels
+          : inv.fleetLabel
+          ? inv.fleetLabel.split(' + ').map(s => s.trim()).filter(Boolean)
+          : [defaultFleet];
+
+      let invVol = 0;
+      let invWeight = 0;
+
+      inv.items.forEach(it => {
+        totalOrderedQty += it.qtyOrdered;
+        totalLoadedQty += it.qtyLoaded;
+
+        const matchedDb = databaseBarangService.findMatch(it.skuCode, it.itemName);
+        const itemVol = (matchedDb?.volM3 || 0) * it.qtyOrdered;
+        const itemWeight = (matchedDb?.beratKg || 0) * it.qtyOrdered;
+        invVol += itemVol;
+        invWeight += itemWeight;
+
+        if (it.qtyLoaded < it.qtyOrdered) {
+          unloadedItemsList.push({
+            invoice: inv,
+            item: it,
+            remainingQty: it.qtyOrdered - it.qtyLoaded
+          });
+        } else if (it.qtyLoaded > it.qtyOrdered) {
+          overloadedItemsList.push({
+            invoice: inv,
+            item: it,
+            excessQty: it.qtyLoaded - it.qtyOrdered
+          });
+        }
+      });
+
+      totalEstimatedVolumeM3 += invVol;
+      totalEstimatedWeightKg += invWeight;
+
+      invFleets.forEach(fl => {
+        if (!fleetMap.has(fl)) {
+          fleetMap.set(fl, {
+            fleetName: fl,
+            invoiceCount: 0,
+            totalOrdered: 0,
+            totalLoaded: 0,
+            volumeM3: 0,
+            weightKg: 0,
+            areas: new Set<string>(),
+            invoices: []
+          });
+        }
+        const fEntry = fleetMap.get(fl)!;
+        fEntry.invoiceCount++;
+        fEntry.totalOrdered += inv.items.reduce((acc, it) => acc + it.qtyOrdered, 0);
+        fEntry.totalLoaded += inv.items.reduce((acc, it) => acc + it.qtyLoaded, 0);
+        fEntry.volumeM3 += invVol;
+        fEntry.weightKg += invWeight;
+        fEntry.areas.add(inv.areaName);
+        fEntry.invoices.push(inv);
+      });
+
+      if (!areaMap.has(inv.areaName)) {
+        areaMap.set(inv.areaName, {
+          areaName: inv.areaName,
+          invoiceCount: 0,
+          customers: new Set<string>(),
+          totalOrdered: 0,
+          totalLoaded: 0,
+          volumeM3: 0,
+          weightKg: 0,
+          fleets: new Set<string>(),
+          invoices: []
+        });
+      }
+      const aEntry = areaMap.get(inv.areaName)!;
+      aEntry.invoiceCount++;
+      aEntry.customers.add(inv.customerName);
+      aEntry.totalOrdered += inv.items.reduce((acc, it) => acc + it.qtyOrdered, 0);
+      aEntry.totalLoaded += inv.items.reduce((acc, it) => acc + it.qtyLoaded, 0);
+      aEntry.volumeM3 += invVol;
+      aEntry.weightKg += invWeight;
+      invFleets.forEach(fl => aEntry.fleets.add(fl));
+      aEntry.invoices.push(inv);
+    });
+
+    const overallPct =
+      totalOrderedQty > 0 ? Math.min(100, Math.round((totalLoadedQty / totalOrderedQty) * 100)) : 0;
+
+    return {
+      totalInvoices,
+      totalOrderedQty,
+      totalLoadedQty,
+      overallPct,
+      totalEstimatedVolumeM3: Math.round(totalEstimatedVolumeM3 * 1000) / 1000,
+      totalEstimatedWeightKg: Math.round(totalEstimatedWeightKg * 10) / 10,
+      fleetBreakdown: Array.from(fleetMap.values()),
+      areaBreakdown: Array.from(areaMap.values()).map(a => ({
+        ...a,
+        customerCount: a.customers.size
+      })),
+      unloadedItemsList,
+      overloadedItemsList
+    };
+  }, [invoices, dbBarangList, defaultFleet]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner & Direct Bridge to RFID Scanner App */}
@@ -959,13 +1144,41 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center">
+            {/* View Mode Switcher: Antrean & Daftar Faktur vs Dashboard Analitik Muatan */}
+            <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setFakturViewMode('list')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  fakturViewMode === 'list'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>📋 Daftar Faktur</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFakturViewMode('dashboard')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  fakturViewMode === 'dashboard'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>📊 Dashboard Analitik Muatan</span>
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={openCreateModal}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>+ Import File Faktur / Sales Order Baru</span>
+              <span>+ Import File Faktur / SO Baru</span>
             </button>
             <button
               type="button"
@@ -973,10 +1186,10 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                 const firstId = invoices[0]?.id || '';
                 onOpenRfidScannerForInvoice(firstId);
               }}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition cursor-pointer"
             >
               <Camera className="w-4 h-4 text-sky-400" />
-              <span>Buka Aplikasi Scan &amp; Foto (RFID)</span>
+              <span>Buka Aplikasi Scan RFID</span>
               <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
           </div>
@@ -1010,7 +1223,467 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
+      {/* CONDITIONAL: DASHBOARD VIEW VS LIST VIEW */}
+      {fakturViewMode === 'dashboard' ? (
+        <div className="space-y-6">
+          {/* Executive Overview Analytics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">Total Faktur / SO</span>
+                <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                  <FileText className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+                {dashboardAnalytics.totalInvoices} <span className="text-xs font-semibold text-slate-500">Faktur</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Meliputi {dashboardAnalytics.areaBreakdown.length} Rute Area Distribusi
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">Total Kemasan Muatan</span>
+                <span className="p-2 rounded-xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400">
+                  <Boxes className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+                {dashboardAnalytics.totalOrderedQty} <span className="text-xs font-semibold text-slate-500">Kemasan</span>
+              </div>
+              <div className="text-[11px] text-sky-600 dark:text-sky-400 mt-1 font-semibold">
+                Ter-scan: {dashboardAnalytics.totalLoadedQty} Kemasan ({dashboardAnalytics.overallPct}%)
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">Estimasi Kubikasi (VOL)</span>
+                <span className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+                  <Package className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-2">
+                {dashboardAnalytics.totalEstimatedVolumeM3} <span className="text-xs font-semibold text-slate-500">m³</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Kalkulasi otomatis Database Barang
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">Estimasi Berat Muatan</span>
+                <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                  <Truck className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
+                {dashboardAnalytics.totalEstimatedWeightKg} <span className="text-xs font-semibold text-slate-500">kg</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                {(dashboardAnalytics.totalEstimatedWeightKg / 1000).toFixed(2)} Ton muatan siap kirim
+              </div>
+            </div>
+          </div>
+
+          {/* Realization Progress Gauge */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-indigo-500" />
+                  <span>Progres Realisasi Pemuatan Barang (Faktur vs Foto RFID)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Verifikasi visual otomatis melalui kamera RFID gudang saat barang dinaikkan ke armada box.
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                  {dashboardAnalytics.overallPct}%
+                </span>
+                <span className="text-xs text-slate-500 ml-1">
+                  ({dashboardAnalytics.totalLoadedQty} / {dashboardAnalytics.totalOrderedQty} Kemasan)
+                </span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 mt-3 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  dashboardAnalytics.overallPct >= 100
+                    ? 'bg-emerald-500'
+                    : dashboardAnalytics.overallPct >= 50
+                    ? 'bg-indigo-600'
+                    : 'bg-amber-500'
+                }`}
+                style={{ width: `${dashboardAnalytics.overallPct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Armada Box Matrix (Supports Multi-Armada) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-sky-500" />
+                  <span>Kapasitas &amp; Distribusi Armada Box (Mendukung Multi-Armada)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Rekapitulasi alokasi faktur dan muatan pada masing-masing armada box pengiriman.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-sky-600 dark:text-sky-400 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/80 border border-sky-200 dark:border-sky-800">
+                {dashboardAnalytics.fleetBreakdown.length} Armada Ditugaskan
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {dashboardAnalytics.fleetBreakdown.map((fl, fIdx) => {
+                const fleetPct =
+                  fl.totalOrdered > 0 ? Math.min(100, Math.round((fl.totalLoaded / fl.totalOrdered) * 100)) : 0;
+                return (
+                  <div
+                    key={fIdx}
+                    className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-black text-slate-900 dark:text-white">
+                          {fl.fleetName}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {Array.from(fl.areas).join(', ') || 'Area belum diset'}
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                        {fl.invoiceCount} Faktur
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-200/80 dark:border-slate-700/60 text-center">
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-bold">Kemasan</div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white mt-0.5">
+                          {fl.totalLoaded} / {fl.totalOrdered}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-bold">Volume</div>
+                        <div className="text-xs font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                          {fl.volumeM3.toFixed(3)} m³
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase font-bold">Berat</div>
+                        <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          {fl.weightKg.toFixed(1)} kg
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-500">Progress Muat</span>
+                        <span className="font-bold text-slate-900 dark:text-white">{fleetPct}%</span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full ${fleetPct >= 100 ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                          style={{ width: `${fleetPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Area & Destination Distribution Cards */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-500" />
+                  <span>Distribusi Pengiriman per Area / Rute Kirim</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Monitoring pemenuhan order berdasarkan klaster wilayah outlet pelanggan.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800">
+                {dashboardAnalytics.areaBreakdown.length} Area Kirim
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {dashboardAnalytics.areaBreakdown.map((ar, aIdx) => {
+                const areaPct =
+                  ar.totalOrdered > 0 ? Math.min(100, Math.round((ar.totalLoaded / ar.totalOrdered) * 100)) : 0;
+                return (
+                  <div
+                    key={aIdx}
+                    className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-black text-slate-900 dark:text-white uppercase">
+                          {ar.areaName}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {ar.customerCount} Toko Pelanggan • {ar.invoiceCount} Faktur
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                        {areaPct}% Muat
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                      <div className="flex justify-between">
+                        <span>Total Kemasan:</span>
+                        <span className="font-bold">{ar.totalLoaded} / {ar.totalOrdered} Kemasan</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Estimasi Kubikasi:</span>
+                        <span className="font-bold text-amber-600 dark:text-amber-400">{ar.volumeM3.toFixed(3)} m³</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Estimasi Berat:</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">{ar.weightKg.toFixed(1)} kg</span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-200/80 dark:border-slate-700/60">
+                        <span>Armada:</span>
+                        <span className="font-semibold truncate max-w-[170px]" title={Array.from(ar.fleets).join(', ')}>
+                          {Array.from(ar.fleets).map(f => f.split('—')[0].trim()).join(', ')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Discrepancy & Alert Section: Sisa Belum Termuat & Over-Load */}
+          {(dashboardAnalytics.unloadedItemsList.length > 0 || dashboardAnalytics.overloadedItemsList.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Unloaded Items */}
+              {dashboardAnalytics.unloadedItemsList.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-5 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Barang Sisa / Kurang Muat ({dashboardAnalytics.unloadedItemsList.length} Item)</span>
+                    </h4>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                      Perlu Foto Scan
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-60 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="p-2">No Faktur</th>
+                          <th className="p-2">Item Barang</th>
+                          <th className="p-2 text-center">Sisa</th>
+                          <th className="p-2 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {dashboardAnalytics.unloadedItemsList.map((row, rIdx) => (
+                          <tr key={rIdx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                            <td className="p-2 font-mono font-bold text-[11px] text-slate-900 dark:text-white">
+                              {row.invoice.invoiceNumber}
+                            </td>
+                            <td className="p-2">
+                              <div className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={row.item.itemName}>
+                                {row.item.itemName}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{row.invoice.customerName}</div>
+                            </td>
+                            <td className="p-2 text-center font-bold text-amber-600 dark:text-amber-400">
+                              -{row.remainingQty} {row.item.unit}
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => onOpenRfidScannerForInvoice(row.invoice.id)}
+                                className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                Scan RFID
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Overloaded Items */}
+              {dashboardAnalytics.overloadedItemsList.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 border border-rose-500/30 rounded-2xl p-5 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4" />
+                      <span>Warning Lebih Muat Barang ({dashboardAnalytics.overloadedItemsList.length} Item)</span>
+                    </h4>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                      Over-Load!
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-60 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="p-2">No Faktur</th>
+                          <th className="p-2">Item Barang</th>
+                          <th className="p-2 text-center">Kelebihan</th>
+                          <th className="p-2 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {dashboardAnalytics.overloadedItemsList.map((row, rIdx) => (
+                          <tr key={rIdx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                            <td className="p-2 font-mono font-bold text-[11px] text-slate-900 dark:text-white">
+                              {row.invoice.invoiceNumber}
+                            </td>
+                            <td className="p-2">
+                              <div className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={row.item.itemName}>
+                                {row.item.itemName}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{row.invoice.customerName}</div>
+                            </td>
+                            <td className="p-2 text-center font-bold text-rose-600 dark:text-rose-400">
+                              +{row.excessQty} {row.item.unit}
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => onOpenRfidScannerForInvoice(row.invoice.id)}
+                                className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                Koreksi
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Quick Recap Table in Dashboard */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
+                <span>Tabel Ringkasan Status Seluruh Faktur</span>
+              </h3>
+              <span className="text-xs text-slate-500">
+                Total {invoices.length} Faktur / Sales Order
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-2.5">No Faktur &amp; SO</th>
+                    <th className="p-2.5">Pelanggan</th>
+                    <th className="p-2.5">Area Kirim</th>
+                    <th className="p-2.5">Armada Box</th>
+                    <th className="p-2.5 text-center">Kemasan</th>
+                    <th className="p-2.5 text-center">Progress Muat</th>
+                    <th className="p-2.5 text-center">Status</th>
+                    <th className="p-2.5 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {invoices.map(inv => {
+                    const ev = evaluateInvoiceStatus(inv);
+                    const pct = ev.totalOrdered > 0 ? Math.min(100, Math.round((ev.totalLoaded / ev.totalOrdered) * 100)) : 0;
+                    const fleets = inv.fleetLabels && inv.fleetLabels.length > 0 ? inv.fleetLabels : [inv.fleetLabel];
+
+                    return (
+                      <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="p-2.5">
+                          <div className="font-mono font-bold text-slate-900 dark:text-white text-xs">{inv.invoiceNumber}</div>
+                          <div className="text-[10px] font-mono text-slate-400">{inv.soNumber}</div>
+                        </td>
+                        <td className="p-2.5 font-semibold text-slate-800 dark:text-slate-200">
+                          {inv.customerName}
+                        </td>
+                        <td className="p-2.5">
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                            {inv.areaName}
+                          </span>
+                        </td>
+                        <td className="p-2.5">
+                          {fleets.length > 1 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {fleets.map((fl, idx) => (
+                                <span key={idx} className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/80 border border-sky-300 dark:border-sky-800 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                                  {fl.split('—')[0].trim()}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                              {inv.fleetLabel.split('—')[0].trim()}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-center font-bold text-slate-900 dark:text-white">
+                          {ev.totalLoaded} / {ev.totalOrdered}
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <div className="w-24 mx-auto space-y-1">
+                            <div className="flex justify-between text-[10px]">
+                              <span>{pct}%</span>
+                            </div>
+                            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full ${pct >= 100 ? 'bg-emerald-500' : 'bg-indigo-600'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ev.badgeColor}`}>
+                            {ev.statusLabel}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onOpenRfidScannerForInvoice(inv.id)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition cursor-pointer"
+                          >
+                            Scan RFID
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Filter & Search Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1110,10 +1783,27 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                         <MapPin className="w-3.5 h-3.5 text-emerald-500" />
                         Area: <strong>{inv.areaName}</strong>
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Truck className="w-3.5 h-3.5 text-sky-500" />
-                        Armada Box: <strong>{inv.fleetLabel}</strong>
-                      </span>
+                      {(inv.fleetLabels && inv.fleetLabels.length > 1) || inv.fleetLabel.includes(' + ') ? (
+                        <span className="flex flex-wrap items-center gap-1">
+                          <Truck className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          <span className="font-bold text-sky-700 dark:text-sky-300">
+                            Multi-Armada ({(inv.fleetLabels || inv.fleetLabel.split(' + ')).length} Unit):
+                          </span>
+                          {(inv.fleetLabels || inv.fleetLabel.split(' + ')).map((f, fi) => (
+                            <span
+                              key={fi}
+                              className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/80 border border-sky-300 dark:border-sky-800 text-[10px] font-bold text-sky-700 dark:text-sky-300"
+                            >
+                              {f.split('—')[0].trim()}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <Truck className="w-3.5 h-3.5 text-sky-500" />
+                          Armada Box: <strong>{inv.fleetLabel}</strong>
+                        </span>
+                      )}
                       <span className="flex items-center gap-1">
                         <User className="w-3.5 h-3.5 text-amber-500" />
                         Admin PIC: <strong>{inv.adminPic}</strong>
@@ -1263,6 +1953,8 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
           })
         )}
       </div>
+    </>
+  )}
 
       {/* Modal Import & Review File Faktur / Sales Order (Pilih Area -> Upload File -> Review File) */}
       {isModalOpen && (
@@ -1325,7 +2017,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold uppercase text-indigo-600 dark:text-indigo-400 mb-1">
                       1. Pilih Nama Area Kirim *
@@ -1344,23 +2036,6 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       {OFFICIAL_DESTINATION_AREAS.map(ar => (
                         <option key={ar} value={ar}>
                           {ar}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                      Armada Box Tujuan *
-                    </label>
-                    <select
-                      value={fleetLabel}
-                      onChange={e => setFleetLabel(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
-                    >
-                      {fleetOptions.map(fl => (
-                        <option key={fl} value={fl}>
-                          {fl}
                         </option>
                       ))}
                     </select>
@@ -1395,6 +2070,78 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       ))}
                     </select>
                   </div>
+                </div>
+
+                {/* Multi-Armada Box Selector (Fitur Lebih Dari 1 Armada) */}
+                <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="text-[11px] font-bold uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Truck className="w-3.5 h-3.5 text-sky-500" />
+                      <span>Alokasi Armada Box Pengiriman (Mendukung &gt; 1 Armada / Multi-Armada) *</span>
+                    </label>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                      {selectedFleets.length} Armada Box Dipilih
+                    </span>
+                  </div>
+
+                  {/* Chips for Selected Fleets */}
+                  <div className="flex flex-wrap gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 min-h-[46px] items-center">
+                    {selectedFleets.map((fl, fIdx) => (
+                      <div
+                        key={fIdx}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/80 border border-sky-300 dark:border-sky-800 text-xs font-semibold text-slate-900 dark:text-white shadow-2xs"
+                      >
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-600 text-white">
+                          {fIdx === 0 ? 'Armada Utama' : `Armada #${fIdx + 1}`}
+                        </span>
+                        <span className="truncate max-w-[240px]" title={fl}>
+                          {fl}
+                        </span>
+                        {selectedFleets.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = selectedFleets.filter((_, i) => i !== fIdx);
+                              setSelectedFleets(next);
+                              if (next[0]) setFleetLabel(next[0]);
+                            }}
+                            className="text-slate-400 hover:text-rose-500 p-0.5 rounded cursor-pointer transition"
+                            title="Hapus armada ini dari faktur"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Dropdown to add another armada */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      value=""
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val && !selectedFleets.includes(val)) {
+                          const updated = [...selectedFleets, val];
+                          setSelectedFleets(updated);
+                          setFleetLabel(updated[0]);
+                        }
+                      }}
+                      className="w-full sm:w-auto flex-1 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-dashed border-sky-300 dark:border-sky-700 text-xs font-semibold text-sky-700 dark:text-sky-300 cursor-pointer hover:border-sky-500"
+                    >
+                      <option value="">+ Tambahkan Armada Box Lainnya (Jika Muatan Dibagi ke &gt; 1 Armada)...</option>
+                      {fleetOptions
+                        .filter(fl => !selectedFleets.includes(fl))
+                        .map(fl => (
+                          <option key={fl} value={fl}>
+                            {fl}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                    ℹ️ Gunakan opsi ini jika pesanan faktur ini membutuhkan lebih dari 1 armada box (misal volume barang besar atau armada pendamping).
+                  </p>
                 </div>
               </div>
 

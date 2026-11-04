@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, UserCheck, UserX, Clock, ShieldAlert, CheckCircle2, XCircle, 
   Search, Filter, Plus, Shield, User, Building, Phone, Mail, Calendar, 
@@ -20,12 +20,17 @@ const MODULE_DEFINITIONS = [
     iconBgClass: 'bg-blue-500/15 text-blue-400',
     IconComp: Truck,
     subMenus: [
-      { id: 'dashboard_logistik', name: 'Dashboard Logistik & Analitik Armada' },
-      { id: 'armada_ceklis', name: 'Data Armada, Formulir Pengadaan Armada & Simulasi Kubikasi' },
-      { id: 'live_map', name: 'Live Map GPS' },
-      { id: 'monitoring_sla', name: 'Monitoring SLA, Kru & Evaluasi Jalur' },
-      { id: 'rencana_rute', name: 'Jadwal & Penugasan Pengiriman' },
-      { id: 'portal_driver', name: 'Portal Driver Mobile' }
+      { id: 'operational_dashboard', name: 'Dashboard Logistik & Pengiriman' },
+      { id: 'schedules', name: 'Jadwal & Penugasan Armada' },
+      { id: 'driver_portal', name: 'Portal Driver Mobile' },
+      { id: 'fleet_forms', name: 'Formulir Pengadaan Armada' },
+      { id: 'driver_reports', name: 'Laporan Kiriman Kru' },
+      { id: 'tracking_eval', name: 'Evaluasi Jalur GPS (Excel)' },
+      { id: 'fleets', name: 'Data Armada Terpadu' },
+      { id: 'crew_history', name: 'Kru Pengiriman & Kernet' },
+      { id: 'spareparts', name: 'Suku Cadang & Bengkel' },
+      { id: 'fuel_efficiency', name: 'Efisiensi Bahan Bakar (BBM)' },
+      { id: 'warehouse_fleet_cubication', name: 'Simulasi Box Muatan Armada' }
     ]
   },
   {
@@ -36,42 +41,35 @@ const MODULE_DEFINITIONS = [
     iconBgClass: 'bg-indigo-500/15 text-indigo-400',
     IconComp: Briefcase,
     subMenus: [
-      { id: 'dashboard_penjualan', name: 'Dashboard Penjualan' },
-      { id: 'aktivitas_harian', name: 'Aktivitas Harian Admin' },
-      { id: 'jadwal_admin', name: 'Jadwal Admin & Produksi' },
-      { id: 'durasi_muat', name: 'Durasi Muat Admin' },
-      { id: 'input_faktur_so', name: 'Input Faktur / Sales Order (SO)' },
-      { id: 'aplikasi_rfid_muat', name: 'Aplikasi Scan & Foto Muat (RFID)' },
-      { id: 'matriks_skil', name: 'Matriks Skill Admin' },
-      { id: 'pengaturan_sop', name: 'Pengaturan SOP & Jobdesk' },
-      { id: 'data_kpi', name: 'Data KPI & Omset Penjualan' }
+      { id: 'sales_dashboard', name: 'Dashboard Sales Hub' },
+      { id: 'sales_activities', name: 'Checklist Aktivitas Harian' },
+      { id: 'sales_schedules', name: 'Jadwal Admin & Produksi' },
+      { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
+      { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
+      { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat (RFID)' },
+      { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
+      { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
+      { id: 'sales_kpi_individual', name: '1. KPI Individu Staf' },
+      { id: 'sales_kpi_fines', name: '2. Akumulasi Denda' },
+      { id: 'sales_kpi_nusantara', name: '3. Persentase Kiriman' },
+      { id: 'sales_kpi_omset', name: '4. Omset Admin Penjualan' }
     ]
   },
   {
     id: 'warehouse',
     name: 'Gudang (WMS)',
-    description: 'Dashboard gudang, master SKU & stok bin, inbound/outbound, denah rak, opname, dan kubikasi & berat barang per cabang.',
+    description: 'Database barang, dashboard gudang, master SKU & stok bin, denah rak, inbound/outbound, dan opname stok per cabang.',
     borderClass: 'border-emerald-500/30',
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     IconComp: Package,
     subMenus: [
-      { id: 'stok_barang', name: 'Master SKU, Database Barang, Denah Rak & Kubikasi' },
-      { id: 'permintaan_barang', name: 'Inbound (Barang Masuk)' },
-      { id: 'opname_stok', name: 'Stok Opname & Kartu Stok' },
-      { id: 'ceklis_muat', name: 'Outbound (Picking & Muat) & Database Barang' }
-    ]
-  },
-  {
-    id: 'marketing',
-    name: 'Marketing',
-    description: 'Marketing online, laporan kunjungan & laporan penjualan marketing offline, serta pemetaan jaringan toko per cabang.',
-    borderClass: 'border-amber-500/30',
-    iconBgClass: 'bg-amber-500/15 text-amber-400',
-    IconComp: Megaphone,
-    subMenus: [
-      { id: 'kampanye', name: 'Marketing Online' },
-      { id: 'leads_pipeline', name: 'Marketing Offline (Laporan Kunjungan & Penjualan)' },
-      { id: 'laporan_kunjungan', name: 'Jaringan Toko & Mitra' }
+      { id: 'warehouse_scanner', name: 'Database Barang (m³ & Kg)' },
+      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang (WMS)' },
+      { id: 'warehouse_inventory', name: 'Master SKU & Stok Bin' },
+      { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
+      { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
+      { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
+      { id: 'warehouse_opname', name: 'Stok Opname & Kartu Stok' }
     ]
   },
   {
@@ -82,23 +80,33 @@ const MODULE_DEFINITIONS = [
     iconBgClass: 'bg-purple-500/15 text-purple-400',
     IconComp: ShoppingBag,
     subMenus: [
-      { id: 'permintaan_pembelian', name: 'Dashboard Pembelian' },
-      { id: 'po_vendor', name: 'Analisa Stok & Prediksi Kebutuhan' },
-      { id: 'evaluasi_harga', name: 'Evaluasi Harga Supplier' }
+      { id: 'purchasing_dashboard', name: 'Dashboard Pembelian' },
+      { id: 'purchasing_stock_overview', name: 'Ringkasan Stok Bahan' },
+      { id: 'purchasing_stock_forecast', name: 'Prediksi Kebutuhan Stok' }
+    ]
+  },
+  {
+    id: 'marketing',
+    name: 'Marketing',
+    description: 'Marketing online, laporan kunjungan & laporan penjualan marketing offline, serta pemetaan jaringan toko per cabang.',
+    borderClass: 'border-amber-500/30',
+    iconBgClass: 'bg-amber-500/15 text-amber-400',
+    IconComp: Megaphone,
+    subMenus: [
+      { id: 'marketing_online', name: 'Marketing Online & Ads' },
+      { id: 'marketing_offline', name: 'Marketing Offline / Kunjungan' },
+      { id: 'customer_map', name: 'Jaringan Toko & Wilayah Mitra' }
     ]
   },
   {
     id: 'finance_tax',
     name: 'Finance & Tax',
-    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan pencatatan cicilan/pembayaran per cabang.',
+    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan pencatatan faktur/pembayaran per cabang.',
     borderClass: 'border-cyan-500/30',
     iconBgClass: 'bg-cyan-500/15 text-cyan-400',
     IconComp: DollarSign,
     subMenus: [
-      { id: 'kas_bank', name: 'Tagihan Pelanggan Belum Terlunasi' },
-      { id: 'faktur_pajak', name: 'Faktur Pajak & E-Faktur' },
-      { id: 'rekonsiliasi', name: 'Rekonsiliasi Keuangan' },
-      { id: 'laba_rugi', name: 'Laporan Laba Rugi' }
+      { id: 'finance_dashboard', name: 'Finance & Tagihan Pelanggan' }
     ]
   },
   {
@@ -109,28 +117,28 @@ const MODULE_DEFINITIONS = [
     iconBgClass: 'bg-rose-500/15 text-rose-400',
     IconComp: Users,
     subMenus: [
-      { id: 'hr_data_karyawan', name: 'HR - Dashboard & Presensi' },
-      { id: 'hr_gaji_kpi', name: 'HR - Gaji, Lembur & Penilaian Kinerja' },
-      { id: 'ga_security', name: 'GA - Security (Keamanan Pabrik)' },
-      { id: 'ga_hk', name: 'GA - HK (Housekeeping & Kebersihan)' },
-      { id: 'ga_aset', name: 'GA - Aset (Inventaris & Fasilitas)' },
-      { id: 'td_video_training', name: 'Training & Development - Video Training' },
-      { id: 'td_training_karyawan', name: 'Training & Development - Training Karyawan' }
+      { id: 'hr_dashboard', name: 'Dashboard SDM & Presensi' },
+      { id: 'ga_security', name: 'Security & Keamanan' },
+      { id: 'ga_hk', name: 'Housekeeping (Sanitasi)' },
+      { id: 'ga_aset', name: 'Manajemen Aset Pabrik' },
+      { id: 'training_videos', name: 'Video Training SOP' },
+      { id: 'training_karyawan', name: 'Modul Pelatihan Karyawan' }
     ]
   },
   {
     id: 'sistem_pengguna',
     name: 'Sistem & Pengguna',
-    description: 'Master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
+    description: 'Dashboard eksekutif, master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
     borderClass: 'border-slate-600/40',
     iconBgClass: 'bg-slate-700/40 text-slate-300',
     IconComp: Settings,
     subMenus: [
-      { id: 'daftar_pengguna', name: 'Master Cabang & Manajemen User' },
-      { id: 'manajemen_hak_akses', name: 'Manajemen Hak Akses & Skema SQL' },
-      { id: 'dashboard_eksekutif', name: 'Dashboard Eksekutif' },
-      { id: 'log_aktivitas_sistem', name: 'Log Aktivitas Sistem' },
-      { id: 'persetujuan_akun', name: 'Persetujuan Akun (Approval)' }
+      { id: 'dashboard', name: 'Dashboard Eksekutif' },
+      { id: 'users', name: 'Manajemen User & Approval' },
+      { id: 'branches', name: 'Master Cabang Operasional' },
+      { id: 'activity_log', name: 'Log Aktivitas Sistem' },
+      { id: 'e2e_testing', name: 'Pengujian E2E Otomatis' },
+      { id: 'architecture', name: 'Skema Database SQL' }
     ]
   }
 ];
@@ -183,6 +191,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
   // Granular Access & Per-Branch Menu Permissions State
   const [branches, setBranches] = useState<BranchRecord[]>(branchStore.getBranches());
+  const prevLoadedUserIdRef = useRef<string | null>(null);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [editingPermissions, setEditingPermissions] = useState<UserPermissions['modules']>({});
@@ -366,9 +375,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     return merged;
   };
 
-  // Whenever selectedUser changes, initialize editingPermissions and per-branch permissions
+  const handleExpandAllBranches = () => {
+    const next: Record<string, boolean> = {};
+    branches.forEach(b => {
+      next[b.id] = true;
+    });
+    setExpandedBranches(next);
+  };
+
+  const handleCollapseAllBranches = () => {
+    setExpandedBranches({});
+  };
+
+  // Whenever selectedUser changes to a DIFFERENT user, initialize editingPermissions, branchPermissions, and reset accordions
   useEffect(() => {
-    if (selectedUser) {
+    if (!selectedUser) {
+      prevLoadedUserIdRef.current = null;
+      return;
+    }
+
+    // Hanya reset dan muat ulang penuh saat berganti user (atau inisialisasi awal)
+    // Mengunci status accordion agar cabang/modul yang sedang diedit TIDAK tiba-tiba tertutup saat admin mencentang hak akses
+    if (prevLoadedUserIdRef.current !== selectedUser.id) {
+      prevLoadedUserIdRef.current = selectedUser.id;
+
       const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
       const isCrewRole = selectedUser.role === 'driver' || selectedUser.role === 'crew_helper';
@@ -393,9 +423,68 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
         mod.subMenus.forEach(sub => {
           if (isLegacyCrewDefault) {
-            subMenuPerms[sub.id] = sub.id === 'portal_driver' ? 'full_access' : 'none';
+            subMenuPerms[sub.id] = sub.id === 'driver_portal' || sub.id === 'portal_driver' ? 'full_access' : 'none';
           } else {
-            const savedVal = userMod?.subMenus?.[sub.id];
+            let savedVal = userMod?.subMenus?.[sub.id];
+            if (savedVal === undefined && userMod?.subMenus) {
+              const LEGACY_MAP: Record<string, string[]> = {
+                sales_kpi_individual: ['data_kpi'],
+                sales_kpi_fines: ['data_kpi'],
+                sales_kpi_nusantara: ['data_kpi'],
+                sales_kpi_omset: ['data_kpi'],
+                sales_dashboard: ['dashboard_penjualan'],
+                sales_activities: ['aktivitas_harian'],
+                sales_schedules: ['jadwal_admin'],
+                sales_loading_duration: ['durasi_muat'],
+                sales_invoice_so: ['input_faktur_so'],
+                sales_rfid_scanner: ['aplikasi_rfid_muat'],
+                sales_skill_matrix: ['matriks_skil'],
+                sales_jobdesk: ['pengaturan_sop'],
+                warehouse_scanner: ['stok_barang'],
+                warehouse_dashboard: ['stok_barang'],
+                warehouse_inventory: ['stok_barang'],
+                warehouse_slotting: ['stok_barang'],
+                warehouse_inbound: ['permintaan_barang'],
+                warehouse_outbound: ['ceklis_muat'],
+                warehouse_opname: ['opname_stok'],
+                operational_dashboard: ['dashboard_logistik'],
+                schedules: ['rencana_rute'],
+                driver_portal: ['portal_driver'],
+                fleet_forms: ['armada_ceklis'],
+                fleets: ['armada_ceklis'],
+                spareparts: ['armada_ceklis'],
+                fuel_efficiency: ['armada_ceklis'],
+                warehouse_fleet_cubication: ['armada_ceklis'],
+                driver_reports: ['monitoring_sla'],
+                crew_history: ['monitoring_sla'],
+                tracking_eval: ['monitoring_sla'],
+                marketing_online: ['kampanye'],
+                marketing_offline: ['leads_pipeline'],
+                customer_map: ['laporan_kunjungan'],
+                purchasing_dashboard: ['permintaan_pembelian'],
+                purchasing_stock_overview: ['po_vendor'],
+                purchasing_stock_forecast: ['po_vendor'],
+                finance_dashboard: ['kas_bank', 'faktur_pajak'],
+                hr_dashboard: ['hr_data_karyawan'],
+                training_videos: ['td_video_training'],
+                training_karyawan: ['td_training_karyawan'],
+                dashboard: ['dashboard_eksekutif'],
+                users: ['daftar_pengguna'],
+                branches: ['daftar_pengguna'],
+                e2e_testing: ['daftar_pengguna'],
+                architecture: ['manajemen_hak_akses'],
+                activity_log: ['log_aktivitas_sistem']
+              };
+              const legacyKeys = LEGACY_MAP[sub.id];
+              if (legacyKeys) {
+                for (const lk of legacyKeys) {
+                  if (userMod.subMenus[lk] !== undefined) {
+                    savedVal = userMod.subMenus[lk];
+                    break;
+                  }
+                }
+              }
+            }
             subMenuPerms[sub.id] = savedVal !== undefined ? savedVal : (defaultMod?.subMenus?.[sub.id] || 'none');
           }
         });
@@ -416,11 +505,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       );
       setBranchPermissions(loadedBranchPerms);
       setEditingPermissions(initialPerms);
-      // Cabang tertutup default (sesuai gambar 2)
+      // Cabang tertutup default hanya saat beralih ke user baru
       setExpandedBranches({});
       setExpandedModules({});
     }
-  }, [selectedUser?.id, selectedUser?.role, selectedUser?.permissions, branches.length]);
+  }, [selectedUser?.id, selectedUser?.role, branches.length]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
     super_admin: 'Super Admin / Manager',
@@ -1478,18 +1567,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                   {/* AKSES CABANG & MENU WEBSITE SECTION — Matches image_22fe4cd6.png & image_a6bb64da.png */}
                   <div className="p-5 space-y-4 max-h-[68vh] overflow-y-auto text-xs bg-slate-950/30">
-                    {/* Top Header Row: AKSES CABANG & Copy Akses */}
+                    {/* Top Header Row: AKSES CABANG & Controls */}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
                           AKSES CABANG
                         </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                          🔒 Terkunci Saat Edit (Tidak Otomatis Tertutup)
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="px-3 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
-                          CABANG TERTUTUP DEFAULT
-                        </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleExpandAllBranches}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px] transition cursor-pointer"
+                          title="Buka semua kartu cabang"
+                        >
+                          Buka Semua
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCollapseAllBranches}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px] transition cursor-pointer"
+                          title="Tutup semua kartu cabang"
+                        >
+                          Tutup Semua
+                        </button>
                         <button
                           type="button"
                           onClick={() => setIsCopyModalOpen(true)}

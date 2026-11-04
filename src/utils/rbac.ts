@@ -127,6 +127,18 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     logistics: {
       enabled: isAll || isLogistikStaff || isCrew,
       subMenus: {
+        operational_dashboard: isAll || isLogistikStaff ? 'full_access' : 'none',
+        schedules: isAll || isLogistikStaff ? 'full_access' : 'none',
+        driver_portal: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none',
+        fleet_forms: isAll || isLogistikStaff ? 'full_access' : 'none',
+        driver_reports: isAll || isLogistikStaff ? 'full_access' : 'none',
+        tracking_eval: isAll || isLogistikStaff ? 'full_access' : 'none',
+        fleets: isAll || isLogistikStaff ? 'full_access' : 'none',
+        crew_history: isAll || isLogistikStaff ? 'full_access' : 'none',
+        spareparts: isAll || isLogistikStaff ? 'full_access' : 'none',
+        fuel_efficiency: isAll || isLogistikStaff ? 'full_access' : 'none',
+        warehouse_fleet_cubication: isAll || isLogistikStaff ? 'full_access' : 'none',
+        // Legacy keys preserved for backward compatibility
         dashboard_logistik: isAll || isLogistikStaff ? 'full_access' : 'none',
         armada_ceklis: isAll || isLogistikStaff ? 'full_access' : 'none',
         live_map: isAll || isLogistikStaff ? 'full_access' : 'none',
@@ -138,6 +150,19 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     sales_admin: {
       enabled: isAll || isSales,
       subMenus: {
+        sales_dashboard: isAll || isSales ? 'full_access' : 'none',
+        sales_activities: isAll || isSales ? 'full_access' : 'none',
+        sales_schedules: isAll || isSales ? 'full_access' : 'none',
+        sales_loading_duration: isAll || isSales ? 'full_access' : 'none',
+        sales_invoice_so: isAll || isSales ? 'full_access' : 'none',
+        sales_rfid_scanner: isAll || isSales ? 'full_access' : 'none',
+        sales_skill_matrix: isAll || isSales ? 'full_access' : 'none',
+        sales_jobdesk: isAll || isSales ? 'full_access' : 'none',
+        sales_kpi_individual: isAll || isSales ? 'full_access' : 'none',
+        sales_kpi_fines: isAll || isSales ? 'full_access' : 'none',
+        sales_kpi_nusantara: isAll || isSales ? 'full_access' : 'none',
+        sales_kpi_omset: isAll || isSales ? 'full_access' : 'none',
+        // Legacy keys
         dashboard_penjualan: isAll || isSales ? 'full_access' : 'none',
         aktivitas_harian: isAll || isSales ? 'full_access' : 'none',
         jadwal_admin: isAll || isSales ? 'full_access' : 'none',
@@ -152,6 +177,14 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     warehouse: {
       enabled: isAll || isWarehouse,
       subMenus: {
+        warehouse_scanner: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_dashboard: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_inventory: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_slotting: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_inbound: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_outbound: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_opname: isAll || isWarehouse ? 'full_access' : 'none',
+        // Legacy keys
         stok_barang: isAll || isWarehouse ? 'full_access' : 'none',
         permintaan_barang: isAll || isWarehouse ? 'full_access' : 'none',
         opname_stok: isAll || isWarehouse ? 'full_access' : 'none',
@@ -161,6 +194,10 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     marketing: {
       enabled: isAll || isMktOnline || isMktOffline,
       subMenus: {
+        marketing_online: isAll || isMktOnline ? 'full_access' : 'none',
+        marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
+        customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
+        // Legacy keys
         kampanye: isAll || isMktOnline ? 'full_access' : 'none',
         leads_pipeline: isAll || isMktOffline ? 'full_access' : 'none',
         laporan_kunjungan: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none'
@@ -169,6 +206,10 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     purchasing: {
       enabled: isAll || isPurchasing,
       subMenus: {
+        purchasing_dashboard: isAll || isPurchasing ? 'full_access' : 'none',
+        purchasing_stock_overview: isAll || isPurchasing ? 'full_access' : 'none',
+        purchasing_stock_forecast: isAll || isPurchasing ? 'full_access' : 'none',
+        // Legacy keys
         permintaan_pembelian: isAll || isPurchasing ? 'full_access' : 'none',
         po_vendor: isAll || isPurchasing ? 'full_access' : 'none',
         evaluasi_harga: isAll || isPurchasing ? 'full_access' : 'none'
@@ -177,6 +218,8 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     finance_tax: {
       enabled: isAll || isFinance,
       subMenus: {
+        finance_dashboard: isAll || isFinance ? 'full_access' : 'none',
+        // Legacy keys
         kas_bank: isAll || isFinance ? 'full_access' : 'none',
         faktur_pajak: isAll || isFinance ? 'full_access' : 'none',
         rekonsiliasi: isAll || isFinance ? 'full_access' : 'none',
@@ -186,11 +229,15 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     hr: {
       enabled: isAll || isHr || isSecurity,
       subMenus: {
-        hr_data_karyawan: isAll || isHr ? 'full_access' : 'none',
-        hr_gaji_kpi: isAll || isHr ? 'full_access' : 'none',
+        hr_dashboard: isAll || isHr ? 'full_access' : 'none',
         ga_security: isAll || isHr || isSecurity ? 'full_access' : 'none',
         ga_hk: isAll || isHr ? 'full_access' : 'none',
         ga_aset: isAll || isHr ? 'full_access' : 'none',
+        training_videos: isAll || isHr ? 'full_access' : 'none',
+        training_karyawan: isAll || isHr ? 'full_access' : 'none',
+        // Legacy keys
+        hr_data_karyawan: isAll || isHr ? 'full_access' : 'none',
+        hr_gaji_kpi: isAll || isHr ? 'full_access' : 'none',
         td_video_training: isAll || isHr ? 'full_access' : 'none',
         td_training_karyawan: isAll || isHr ? 'full_access' : 'none'
       }
@@ -198,6 +245,13 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     sistem_pengguna: {
       enabled: isAll,
       subMenus: {
+        dashboard: isAll ? 'full_access' : 'none',
+        users: isAll ? 'full_access' : 'none',
+        branches: isAll ? 'full_access' : 'none',
+        activity_log: isAll ? 'full_access' : 'none',
+        e2e_testing: isAll ? 'full_access' : 'none',
+        architecture: isAll ? 'full_access' : 'none',
+        // Legacy keys
         daftar_pengguna: isAll ? 'full_access' : 'none',
         manajemen_hak_akses: isAll ? 'full_access' : 'none',
         dashboard_eksekutif: isAll ? 'full_access' : 'none',
@@ -266,58 +320,58 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
 ];
 
 const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }> = {
-  dashboard: { moduleId: 'sistem_pengguna', subMenuId: 'dashboard_eksekutif' },
-  driver_portal: { moduleId: 'logistics', subMenuId: 'portal_driver' },
-  driver_reports: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  operational_dashboard: { moduleId: 'logistics', subMenuId: 'dashboard_logistik' },
-  analytics_reports: { moduleId: 'logistics', subMenuId: 'dashboard_logistik' },
-  schedules: { moduleId: 'logistics', subMenuId: 'rencana_rute' },
-  fleets: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  spareparts: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  fuel_efficiency: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  crew_history: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  tracking_eval: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  fleet_forms: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  customer_map: { moduleId: 'marketing', subMenuId: 'laporan_kunjungan' },
-  sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'dashboard_penjualan' },
-  sales_activities: { moduleId: 'sales_admin', subMenuId: 'aktivitas_harian' },
-  sales_schedules: { moduleId: 'sales_admin', subMenuId: 'jadwal_admin' },
-  sales_loading_duration: { moduleId: 'sales_admin', subMenuId: 'durasi_muat' },
-  sales_invoice_so: { moduleId: 'sales_admin', subMenuId: 'input_faktur_so' },
-  sales_rfid_scanner: { moduleId: 'sales_admin', subMenuId: 'aplikasi_rfid_muat' },
-  sales_skill_matrix: { moduleId: 'sales_admin', subMenuId: 'matriks_skil' },
-  sales_jobdesk: { moduleId: 'sales_admin', subMenuId: 'pengaturan_sop' },
-  sales_kpi: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
-  sales_kpi_individual: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
-  sales_kpi_fines: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
-  sales_kpi_nusantara: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
-  sales_kpi_omset: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
-  warehouse_dashboard: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
-  warehouse_inventory: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
-  warehouse_inbound: { moduleId: 'warehouse', subMenuId: 'permintaan_barang' },
-  warehouse_outbound: { moduleId: 'warehouse', subMenuId: 'ceklis_muat' },
-  warehouse_scanner: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
-  warehouse_slotting: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
-  warehouse_opname: { moduleId: 'warehouse', subMenuId: 'opname_stok' },
-  warehouse_cubication: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
-  warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
-  marketing_online: { moduleId: 'marketing', subMenuId: 'kampanye' },
-  marketing_offline: { moduleId: 'marketing', subMenuId: 'leads_pipeline' },
-  purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'permintaan_pembelian' },
-  purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'po_vendor' },
-  purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'po_vendor' },
-  finance_dashboard: { moduleId: 'finance_tax', subMenuId: 'kas_bank' },
-  hr_dashboard: { moduleId: 'hr', subMenuId: 'hr_data_karyawan' },
+  dashboard: { moduleId: 'sistem_pengguna', subMenuId: 'dashboard' },
+  driver_portal: { moduleId: 'logistics', subMenuId: 'driver_portal' },
+  driver_reports: { moduleId: 'logistics', subMenuId: 'driver_reports' },
+  operational_dashboard: { moduleId: 'logistics', subMenuId: 'operational_dashboard' },
+  analytics_reports: { moduleId: 'logistics', subMenuId: 'operational_dashboard' },
+  schedules: { moduleId: 'logistics', subMenuId: 'schedules' },
+  fleets: { moduleId: 'logistics', subMenuId: 'fleets' },
+  spareparts: { moduleId: 'logistics', subMenuId: 'spareparts' },
+  fuel_efficiency: { moduleId: 'logistics', subMenuId: 'fuel_efficiency' },
+  crew_history: { moduleId: 'logistics', subMenuId: 'crew_history' },
+  tracking_eval: { moduleId: 'logistics', subMenuId: 'tracking_eval' },
+  fleet_forms: { moduleId: 'logistics', subMenuId: 'fleet_forms' },
+  customer_map: { moduleId: 'marketing', subMenuId: 'customer_map' },
+  sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'sales_dashboard' },
+  sales_activities: { moduleId: 'sales_admin', subMenuId: 'sales_activities' },
+  sales_schedules: { moduleId: 'sales_admin', subMenuId: 'sales_schedules' },
+  sales_loading_duration: { moduleId: 'sales_admin', subMenuId: 'sales_loading_duration' },
+  sales_invoice_so: { moduleId: 'sales_admin', subMenuId: 'sales_invoice_so' },
+  sales_rfid_scanner: { moduleId: 'sales_admin', subMenuId: 'sales_rfid_scanner' },
+  sales_skill_matrix: { moduleId: 'sales_admin', subMenuId: 'sales_skill_matrix' },
+  sales_jobdesk: { moduleId: 'sales_admin', subMenuId: 'sales_jobdesk' },
+  sales_kpi: { moduleId: 'sales_admin', subMenuId: 'sales_kpi_individual' },
+  sales_kpi_individual: { moduleId: 'sales_admin', subMenuId: 'sales_kpi_individual' },
+  sales_kpi_fines: { moduleId: 'sales_admin', subMenuId: 'sales_kpi_fines' },
+  sales_kpi_nusantara: { moduleId: 'sales_admin', subMenuId: 'sales_kpi_nusantara' },
+  sales_kpi_omset: { moduleId: 'sales_admin', subMenuId: 'sales_kpi_omset' },
+  warehouse_dashboard: { moduleId: 'warehouse', subMenuId: 'warehouse_dashboard' },
+  warehouse_inventory: { moduleId: 'warehouse', subMenuId: 'warehouse_inventory' },
+  warehouse_inbound: { moduleId: 'warehouse', subMenuId: 'warehouse_inbound' },
+  warehouse_outbound: { moduleId: 'warehouse', subMenuId: 'warehouse_outbound' },
+  warehouse_scanner: { moduleId: 'warehouse', subMenuId: 'warehouse_scanner' },
+  warehouse_slotting: { moduleId: 'warehouse', subMenuId: 'warehouse_slotting' },
+  warehouse_opname: { moduleId: 'warehouse', subMenuId: 'warehouse_opname' },
+  warehouse_cubication: { moduleId: 'warehouse', subMenuId: 'warehouse_scanner' },
+  warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'warehouse_fleet_cubication' },
+  marketing_online: { moduleId: 'marketing', subMenuId: 'marketing_online' },
+  marketing_offline: { moduleId: 'marketing', subMenuId: 'marketing_offline' },
+  purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'purchasing_dashboard' },
+  purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_overview' },
+  purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_forecast' },
+  finance_dashboard: { moduleId: 'finance_tax', subMenuId: 'finance_dashboard' },
+  hr_dashboard: { moduleId: 'hr', subMenuId: 'hr_dashboard' },
   ga_security: { moduleId: 'hr', subMenuId: 'ga_security' },
   ga_hk: { moduleId: 'hr', subMenuId: 'ga_hk' },
   ga_aset: { moduleId: 'hr', subMenuId: 'ga_aset' },
-  training_videos: { moduleId: 'hr', subMenuId: 'td_video_training' },
-  training_karyawan: { moduleId: 'hr', subMenuId: 'td_training_karyawan' },
-  activity_log: { moduleId: 'sistem_pengguna', subMenuId: 'log_aktivitas_sistem' },
-  branches: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
-  users: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
-  e2e_testing: { moduleId: 'sistem_pengguna', subMenuId: 'daftar_pengguna' },
-  architecture: { moduleId: 'sistem_pengguna', subMenuId: 'manajemen_hak_akses' }
+  training_videos: { moduleId: 'hr', subMenuId: 'training_videos' },
+  training_karyawan: { moduleId: 'hr', subMenuId: 'training_karyawan' },
+  activity_log: { moduleId: 'sistem_pengguna', subMenuId: 'activity_log' },
+  branches: { moduleId: 'sistem_pengguna', subMenuId: 'branches' },
+  users: { moduleId: 'sistem_pengguna', subMenuId: 'users' },
+  e2e_testing: { moduleId: 'sistem_pengguna', subMenuId: 'e2e_testing' },
+  architecture: { moduleId: 'sistem_pengguna', subMenuId: 'architecture' }
 };
 
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
@@ -380,19 +434,68 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
   if (resolvedSubMenuId) {
     let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
 
-    // If a new submenu was added after this user's permissions were saved in MySQL (e.g. input_faktur_so / aplikasi_rfid_muat),
-    // inherit from related submenu or role default when subPerm is undefined (never when explicitly set to 'none').
+    // Legacy submenu backward-compatibility resolution:
     if (subPerm === undefined && modulePerms.enabled) {
-      if (
-        resolvedModuleId === 'sales_admin' &&
-        (resolvedSubMenuId === 'input_faktur_so' || resolvedSubMenuId === 'aplikasi_rfid_muat')
-      ) {
-        subPerm =
-          modulePerms.subMenus?.['durasi_muat'] ||
-          modulePerms.subMenus?.['aktivitas_harian'] ||
-          defaultMod?.subMenus?.[resolvedSubMenuId] ||
-          'none';
-      } else {
+      const LEGACY_KEY_MAP: Record<string, string[]> = {
+        sales_kpi_individual: ['data_kpi'],
+        sales_kpi_fines: ['data_kpi'],
+        sales_kpi_nusantara: ['data_kpi'],
+        sales_kpi_omset: ['data_kpi'],
+        sales_dashboard: ['dashboard_penjualan'],
+        sales_activities: ['aktivitas_harian'],
+        sales_schedules: ['jadwal_admin'],
+        sales_loading_duration: ['durasi_muat'],
+        sales_invoice_so: ['input_faktur_so', 'durasi_muat', 'aktivitas_harian'],
+        sales_rfid_scanner: ['aplikasi_rfid_muat', 'durasi_muat', 'aktivitas_harian'],
+        sales_skill_matrix: ['matriks_skil'],
+        sales_jobdesk: ['pengaturan_sop'],
+        warehouse_scanner: ['stok_barang'],
+        warehouse_dashboard: ['stok_barang'],
+        warehouse_inventory: ['stok_barang'],
+        warehouse_slotting: ['stok_barang'],
+        warehouse_inbound: ['permintaan_barang'],
+        warehouse_outbound: ['ceklis_muat'],
+        warehouse_opname: ['opname_stok'],
+        operational_dashboard: ['dashboard_logistik'],
+        schedules: ['rencana_rute'],
+        driver_portal: ['portal_driver'],
+        fleet_forms: ['armada_ceklis'],
+        fleets: ['armada_ceklis'],
+        spareparts: ['armada_ceklis'],
+        fuel_efficiency: ['armada_ceklis'],
+        warehouse_fleet_cubication: ['armada_ceklis'],
+        driver_reports: ['monitoring_sla'],
+        crew_history: ['monitoring_sla'],
+        tracking_eval: ['monitoring_sla'],
+        marketing_online: ['kampanye'],
+        marketing_offline: ['leads_pipeline'],
+        customer_map: ['laporan_kunjungan'],
+        purchasing_dashboard: ['permintaan_pembelian'],
+        purchasing_stock_overview: ['po_vendor'],
+        purchasing_stock_forecast: ['po_vendor'],
+        finance_dashboard: ['kas_bank', 'faktur_pajak'],
+        hr_dashboard: ['hr_data_karyawan'],
+        training_videos: ['td_video_training'],
+        training_karyawan: ['td_training_karyawan'],
+        dashboard: ['dashboard_eksekutif'],
+        users: ['daftar_pengguna', 'persetujuan_akun'],
+        branches: ['daftar_pengguna'],
+        e2e_testing: ['daftar_pengguna'],
+        architecture: ['manajemen_hak_akses'],
+        activity_log: ['log_aktivitas_sistem']
+      };
+
+      const fallbackKeys = LEGACY_KEY_MAP[resolvedSubMenuId];
+      if (fallbackKeys) {
+        for (const k of fallbackKeys) {
+          if (modulePerms.subMenus?.[k] !== undefined) {
+            subPerm = modulePerms.subMenus[k];
+            break;
+          }
+        }
+      }
+
+      if (subPerm === undefined) {
         subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'none';
       }
     }

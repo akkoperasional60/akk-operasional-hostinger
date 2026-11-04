@@ -15,6 +15,7 @@ export interface DatabaseBarangRecord {
   volM3: number;
   beratKg: number;
   dokumentasiUrl?: string;
+  dokumentasiUrls?: string[];
   compressedSizeKb?: number;
   originalSizeKb?: number;
   compressionSavingsPct?: number;
@@ -422,9 +423,16 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
     : 0;
 
   // Hanya simpan foto jika memang foto kustom / unggahan pengguna, jangan simpan inline SVG ribuan kali di localStorage
-  const docUrl = item?.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
+  const rawUrls: string[] = Array.isArray(item?.dokumentasiUrls)
+    ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+    : [];
+  const singleDoc = item?.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
     ? item.dokumentasiUrl
     : '';
+  if (singleDoc && !rawUrls.includes(singleDoc)) {
+    rawUrls.unshift(singleDoc);
+  }
+  const primaryDoc = rawUrls[0] || singleDoc || '';
 
   return {
     id: item?.id || `dbb-${fallbackIndex + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -442,7 +450,8 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
     tinggiCm: t,
     volM3: v,
     beratKg: b,
-    dokumentasiUrl: docUrl,
+    dokumentasiUrl: primaryDoc,
+    dokumentasiUrls: rawUrls,
     compressedSizeKb: item?.compressedSizeKb ?? 0,
     originalSizeKb: item?.originalSizeKb ?? 0,
     compressionSavingsPct: item?.compressionSavingsPct ?? 0,
@@ -655,7 +664,10 @@ export const databaseBarangService = {
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
   },
 
-  getItemThumbnail(item: { noBarang?: string; deskripsiBarang?: string; unit1?: string; dokumentasiUrl?: string }): string {
+  getItemThumbnail(item: { noBarang?: string; deskripsiBarang?: string; unit1?: string; dokumentasiUrl?: string; dokumentasiUrls?: string[] }): string {
+    if (item.dokumentasiUrls && item.dokumentasiUrls.length > 0 && item.dokumentasiUrls[0] && !item.dokumentasiUrls[0].startsWith('data:image/svg+xml')) {
+      return item.dokumentasiUrls[0];
+    }
     if (item.dokumentasiUrl && item.dokumentasiUrl.trim() && !item.dokumentasiUrl.startsWith('data:image/svg+xml')) {
       return item.dokumentasiUrl;
     }
@@ -694,9 +706,15 @@ export const databaseBarangService = {
         ? Number(item.beratKg) || 0
         : 0;
 
-      // Hanya simpan foto jika foto kustom pengguna asli (bukan inline SVG)
+      // Ambil foto dokumentasi jika ada foto kustom asli
+      const rawUrls: string[] = Array.isArray(item.dokumentasiUrls)
+        ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+        : [];
       const rawDoc = item.dokumentasiUrl || '';
       const docUrl = rawDoc.startsWith('data:image/svg+xml') ? '' : rawDoc;
+      if (docUrl && !rawUrls.includes(docUrl)) {
+        rawUrls.unshift(docUrl);
+      }
 
       return {
         id: item.id || `dbb-${idx + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -714,7 +732,8 @@ export const databaseBarangService = {
         tinggiCm: t,
         volM3: v,
         beratKg: b,
-        dokumentasiUrl: docUrl,
+        dokumentasiUrl: rawUrls[0] || docUrl || '',
+        dokumentasiUrls: rawUrls,
         compressedSizeKb: item.compressedSizeKb ?? 0,
         originalSizeKb: item.originalSizeKb ?? 0,
         compressionSavingsPct: item.compressionSavingsPct ?? 0,
@@ -815,6 +834,7 @@ export const databaseBarangService = {
     volM3?: number;
     beratKg?: number;
     dokumentasiUrl?: string;
+    dokumentasiUrls?: string[];
     compressedSizeKb?: number;
     originalSizeKb?: number;
     compressionSavingsPct?: number;
@@ -845,10 +865,20 @@ export const databaseBarangService = {
       ? Number(input.beratKg) || 0
       : (prev?.beratKg ?? 0);
 
-    const docUrl =
-      input.dokumentasiUrl ||
-      (prev?.dokumentasiUrl || createDefaultBarangThumbnail(cleanCode, cleanDesc, cleanUnit1));
-    const compKb = input.compressedSizeKb ?? estimateDataUrlSizeKb(docUrl);
+    // Kumpulkan foto-foto dokumentasi
+    let urls: string[] = [];
+    if (Array.isArray(input.dokumentasiUrls) && input.dokumentasiUrls.length > 0) {
+      urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'));
+    } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml')) {
+      urls = [input.dokumentasiUrl];
+    } else if (prev?.dokumentasiUrls && prev.dokumentasiUrls.length > 0) {
+      urls = [...prev.dokumentasiUrls];
+    } else if (prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml')) {
+      urls = [prev.dokumentasiUrl];
+    }
+
+    const docUrl = urls[0] || (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') ? input.dokumentasiUrl : '');
+    const compKb = input.compressedSizeKb ?? (urls.length > 0 ? urls.reduce((acc, u) => acc + estimateDataUrlSizeKb(u), 0) : 0);
 
     const record: DatabaseBarangRecord = {
       id: input.id || (prev?.id || `dbb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
@@ -871,6 +901,7 @@ export const databaseBarangService = {
       volM3: v,
       beratKg: b,
       dokumentasiUrl: docUrl,
+      dokumentasiUrls: urls,
       compressedSizeKb: compKb,
       originalSizeKb: input.originalSizeKb ?? (prev?.originalSizeKb ?? 380),
       compressionSavingsPct: input.compressionSavingsPct ?? (prev?.compressionSavingsPct ?? 97),

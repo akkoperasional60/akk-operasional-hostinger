@@ -49,18 +49,37 @@ const FLEET_MANAGEMENT_TABS: NavTab[] = [
 ];
 
 const LiveClockBadge: React.FC = () => {
-  const [dateRangeLabel] = useState(() => {
-    const now = new Date();
-    const monthName = now.toLocaleDateString('id-ID', { month: 'short' });
-    const year = now.getFullYear();
-    const day = now.getDate();
-    return `1 ${monthName} – ${day} ${monthName}, ${year}`;
+  const [now, setNow] = useState<Date>(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dateStr = now.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
   });
 
+  const timeStr = now.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).replace(/\./g, ':');
+
   return (
-    <div className="hidden xl:flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium shadow-2xs">
-      <span>{dateRangeLabel}</span>
-      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+    <div className="hidden xl:flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-2xs font-mono">
+      <div className="flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="font-sans font-medium text-slate-600 dark:text-slate-300">{dateStr}</span>
+        <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+        <span className="font-bold text-slate-900 dark:text-white tracking-wider">{timeStr} WIB</span>
+      </div>
+      <Clock className="w-3.5 h-3.5 text-blue-500 ml-0.5" />
     </div>
   );
 };
@@ -207,7 +226,7 @@ export default function App() {
 
   const getTabTitle = (tab: NavTab): string => {
     switch (tab) {
-      case 'dashboard': return 'Dashboard Eksekutif (Rangkuman Operasional & Penjualan)';
+      case 'dashboard': return 'Dashboard Eksekutif';
       case 'driver_portal': return 'Portal Driver Mobile (Tugas Pengiriman & Status Supir)';
       case 'driver_reports': return 'Laporan & Kendala Kiriman Kru (Driver & Helper)';
       case 'analytics_reports': return 'Dashboard Logistik & Pengiriman';

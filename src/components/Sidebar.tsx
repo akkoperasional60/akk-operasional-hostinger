@@ -346,13 +346,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           {pendingReportsCount}
         </span>
       ) : undefined,
-      checkAccess: (user) =>
-        canAccess(user, 'logistics', 'portal_driver') ||
-        canAccess(user, 'logistics', 'monitoring_sla') ||
-        canAccess(user, 'logistics', 'dashboard_logistik') ||
-        canAccess(user, 'logistics', 'rencana_rute') ||
-        canAccess(user, 'logistics', 'armada_ceklis') ||
-        canAccess(user, 'logistics', 'live_map'),
+      checkAccess: (user) => canAccess(user, 'logistics'),
       groups: [
         {
           groupTitle: 'Dashboard & Analitik Logistik',
@@ -462,21 +456,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           WMS
         </span>
       ),
-      checkAccess: (user) =>
-        canAccess(user, 'warehouse', 'stok_barang') ||
-        canAccess(user, 'warehouse', 'permintaan_barang') ||
-        canAccess(user, 'warehouse', 'opname_stok') ||
-        canAccess(user, 'warehouse', 'ceklis_muat'),
+      checkAccess: (user) => canAccess(user, 'warehouse'),
       groups: [
         {
           groupTitle: 'Spesifikasi & Kubikasi',
           items: [
             {
-              tab: 'warehouse_cubication',
-              label: 'Dimensi & Kubikasi Barang',
-              icon: <Layers className="w-4 h-4 text-emerald-500" />,
+              tab: 'warehouse_scanner',
+              label: 'Database Barang',
+              icon: <Database className="w-4 h-4 text-emerald-500" />,
               badge: <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">m³ & Kg</span>,
-              description: 'Master ukuran m³ & berat satuan kemasan'
+              description: 'Nomor barang, dimensi, kubikasi & dokumentasi'
             }
           ]
         },
@@ -523,12 +513,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Stok Opname & Kartu Stok',
               icon: <ClipboardCheck className="w-4 h-4 text-purple-500" />,
               description: 'Audit periodik fisik vs sistem'
-            },
-            {
-              tab: 'warehouse_scanner',
-              label: 'Database Barang',
-              icon: <Database className="w-4 h-4 text-amber-500" />,
-              description: 'Nomor barang, keterangan, satuan & dokumentasi'
             }
           ]
         }
@@ -539,16 +523,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       label: 'Admin Penjualan',
       shortLabel: 'Admin Penjualan',
       icon: <Briefcase className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'sales_admin', 'dashboard_penjualan') ||
-        canAccess(user, 'sales_admin', 'aktivitas_harian') ||
-        canAccess(user, 'sales_admin', 'jadwal_admin') ||
-        canAccess(user, 'sales_admin', 'durasi_muat') ||
-        canAccess(user, 'sales_admin', 'input_faktur_so') ||
-        canAccess(user, 'sales_admin', 'aplikasi_rfid_muat') ||
-        canAccess(user, 'sales_admin', 'matriks_skil') ||
-        canAccess(user, 'sales_admin', 'pengaturan_sop') ||
-        canAccess(user, 'sales_admin', 'data_kpi'),
+      checkAccess: (user) => canAccess(user, 'sales_admin'),
       groups: [
         {
           groupTitle: 'Aktivitas Harian Admin',
@@ -659,10 +634,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       label: 'Adm Pembelian',
       shortLabel: 'Pembelian',
       icon: <ShoppingBag className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'purchasing', 'permintaan_pembelian') ||
-        canAccess(user, 'purchasing', 'po_vendor') ||
-        canAccess(user, 'purchasing', 'evaluasi_harga'),
+      checkAccess: (user) => canAccess(user, 'purchasing'),
       groups: [
         {
           groupTitle: 'Admin Pembelian (PO)',
@@ -694,10 +666,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       label: 'Marketing',
       shortLabel: 'Marketing',
       icon: <Megaphone className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'marketing', 'kampanye') ||
-        canAccess(user, 'marketing', 'leads_pipeline') ||
-        canAccess(user, 'marketing', 'laporan_kunjungan'),
+      checkAccess: (user) => canAccess(user, 'marketing'),
       groups: [
         {
           groupTitle: 'Pemasaran & Pemetaan Wilayah',
@@ -730,12 +699,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       shortLabel: 'Finance',
       icon: <FileText className="w-5 h-5" />,
       defaultTab: 'finance_dashboard',
-      checkAccess: (user) =>
-        canAccess(user, 'finance_tax', 'kas_bank') ||
-        canAccess(user, 'finance_tax', 'faktur_pajak') ||
-        canAccess(user, 'finance_tax', 'rekonsiliasi') ||
-        canAccess(user, 'finance_tax', 'laba_rugi') ||
-        canAccess(user, 'finance_dashboard'),
+      checkAccess: (user) => canAccess(user, 'finance_tax'),
       groups: [
         {
           groupTitle: 'Keuangan & Perpajakan',
@@ -845,11 +809,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           {pendingUsersCount}
         </span>
       ) : undefined,
-      checkAccess: (user) =>
-        canAccess(user, 'sistem_pengguna', 'daftar_pengguna') ||
-        canAccess(user, 'sistem_pengguna', 'manajemen_hak_akses') ||
-        canAccess(user, 'sistem_pengguna', 'log_aktivitas_sistem') ||
-        canAccess(user, 'sistem_pengguna', 'persetujuan_akun'),
+      checkAccess: (user) => canAccess(user, 'sistem_pengguna'),
       groups: [
         {
           groupTitle: 'Organisasi & Hak Akses',

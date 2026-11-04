@@ -540,11 +540,15 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
           if (onSelectStore) onSelectStore(store);
         });
 
+      const storeNote = String(store.catatan || store.notes || '').trim();
       const tooltipHTML = `
-        <div class="flex items-center gap-2 py-0.5 px-1 font-sans">
-          <span class="w-2.5 h-2.5 rounded-full ${tooltipDotColor} shrink-0"></span>
-          <span class="font-bold text-white text-xs whitespace-nowrap">${store.storeName}</span>
-          <span class="text-[10px] text-slate-300 font-semibold">(${kecamatanLabel !== '-' ? `${kecamatanLabel}, ` : ''}${kabupatenLabel})</span>
+        <div class="flex flex-col gap-0.5 py-0.5 px-1 font-sans">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full ${tooltipDotColor} shrink-0"></span>
+            <span class="font-bold text-white text-xs whitespace-nowrap">${store.storeName}</span>
+            <span class="text-[10px] text-slate-300 font-semibold">(${kecamatanLabel !== '-' ? `${kecamatanLabel}, ` : ''}${kabupatenLabel})</span>
+          </div>
+          ${storeNote ? `<div class="text-[10px] text-amber-300 font-medium pl-4.5 max-w-[260px] truncate">📝 ${storeNote}</div>` : ''}
         </div>
       `;
 
@@ -567,6 +571,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
           <div><strong>Longitude:</strong> <span class="font-mono">${lng.toFixed(6)}</span></div>
         </div>
         ${store.phone ? `<div class="text-[11px] mt-1 text-slate-600"><strong>Telp:</strong> <a href="tel:${store.phone}" class="text-blue-600 font-bold hover:underline">${store.phone}</a></div>` : ''}
+        ${storeNote ? `<div class="text-[11px] mt-1.5 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900"><strong>Catatan:</strong> ${storeNote}</div>` : ''}
       `;
       const btnContainer = L.DomUtil.create('div', 'mt-3 pt-2 border-t border-slate-200 flex items-center gap-1.5', popupContent);
       const btnSchedule = L.DomUtil.create('button', 'flex-1 py-1.5 px-2.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer', btnContainer);
