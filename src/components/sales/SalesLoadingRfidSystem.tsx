@@ -2771,6 +2771,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     scans: ItemPhotoScanLog[];
   } | null>(null);
   const [mobileSubTab, setMobileSubTab] = useState<'history' | 'items' | 'audit'>('history');
+  const [scannerPage, setScannerPage] = useState<'halaman1' | 'halaman2'>('halaman1');
   const [isBlueprintsModalOpen, setIsBlueprintsModalOpen] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -3441,360 +3442,467 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           </select>
         </div>
 
-        {/* 2. BARIS PILIH NO. SURAT JALAN / FAKTUR (DO/SO) */}
-        <div className="bg-[#0f172a] px-3.5 py-2.5 border-b border-[#1e293b] space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#94a3b8]">
-              No. Surat Jalan (DO/SO):
-            </span>
-            <span className="text-[10px] font-mono text-sky-300 truncate max-w-[200px]">
-              {activeInvoice.customerName} • {activeInvoice.fleetLabel.split('—')[0]}
-            </span>
-          </div>
-          <select
-            value={activeInvoice.id}
-            onChange={e => {
-              setSelectedInvoiceId(e.target.value);
-              localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
-              setTargetScanMode('AUTO');
-            }}
-            className="w-full px-3 py-2 rounded-xl bg-[#060a14] border border-[#334155] text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+        {/* TAB SWITCHER NAV 2 HALAMAN UNTUK APLIKASI ADMIN PENJUALAN */}
+        <div className="grid grid-cols-2 bg-[#060a14] border-b border-[#1e293b] p-1.5 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setScannerPage('halaman1')}
+            className={`py-2 px-2.5 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              scannerPage === 'halaman1'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-[#111827] text-[#94a3b8] hover:text-white'
+            }`}
           >
-            {invoices.map(inv => {
-              const ev = evaluateInvoiceStatus(inv);
-              return (
-                <option key={inv.id} value={inv.id} className="bg-[#0b1120] text-white">
-                  {inv.invoiceNumber} ({inv.soNumber}) — {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
-                </option>
-              );
-            })}
-          </select>
+            <Camera className="w-3.5 h-3.5" />
+            <span>1. Kamera &amp; List Faktur</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setScannerPage('halaman2')}
+            className={`py-2 px-2.5 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              scannerPage === 'halaman2'
+                ? 'bg-sky-600 text-white shadow-md'
+                : 'bg-[#111827] text-[#94a3b8] hover:text-white'
+            }`}
+          >
+            <Package className="w-3.5 h-3.5" />
+            <span>2. Termuat &amp; Sisa ({totalSisaCount})</span>
+          </button>
         </div>
 
         {/* ================================================================= */}
-        {/* 3. AREA KAMERA LIVE VIEWFINDER + RETICLE PEMANDU (TANPA OVERLAP)  */}
+        {/* HALAMAN 1: URUTAN NAMA PELANGGAN (FAKTUR), VIEWFINDER KAMERA BESAR, */}
+        {/* TOMBOL AMBIL FOTO & VERIFIKASI TERGABUNG, LIST BARANG FAKTUR     */}
         {/* ================================================================= */}
-        <div className="p-3 bg-[#090d16] border-b border-[#1e293b] space-y-2.5">
-          {/* Top Mini Camera Controls Bar */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[10px] font-bold text-[#94a3b8] flex items-center gap-1">
-              <Camera className="w-3.5 h-3.5 text-emerald-400" />
-              <span>AREA KAMERA LIVE VIEWFINDER</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              {!isCameraActive ? (
-                <button
-                  type="button"
-                  onClick={() => void startLiveCamera()}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
-                >
-                  ▶ Aktifkan Kamera
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={stopCamera}
-                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold cursor-pointer transition"
-                >
-                  ■ Matikan
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void handleSwitchCamera()}
-                className="px-2 py-1 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0] text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
-                title="Putar Kamera Depan/Belakang"
-              >
-                <RefreshCw className="w-3 h-3 text-sky-400" />
-                <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleToggleTorch()}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition ${
-                  isTorchOn
-                    ? 'bg-amber-400 text-[#090d16]'
-                    : 'bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0]'
-                }`}
-              >
-                {isTorchOn ? '🔦 ON' : '🔦 Flash'}
-              </button>
-            </div>
-          </div>
-
-          {/* Viewport Kamera (Clean & Non-Overlapping) */}
-          <div className="relative w-full h-56 rounded-2xl bg-[#030712] border-2 border-[#1e293b] overflow-hidden flex items-center justify-center">
-            {isCameraActive ? (
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                playsInline
-                muted
-                autoPlay
-              />
-            ) : lastCapturedPreview ? (
-              <img
-                src={lastCapturedPreview}
-                alt="Snapshot Terakhir"
-                className="w-full h-full object-cover opacity-80"
-              />
-            ) : null}
-
-            {/* Reticle / Kotak Pemandu di Tengah Viewfinder */}
-            <div className="relative z-10 w-[86%] h-[76%] rounded-xl border-2 border-dashed border-emerald-400/80 bg-[#030712]/55 flex flex-col items-center justify-between p-3 text-center pointer-events-none">
-              {/* Corner Brackets */}
-              <div className="absolute -top-0.5 -left-0.5 w-4 h-4 border-t-4 border-l-4 border-emerald-400 rounded-tl-sm" />
-              <div className="absolute -top-0.5 -right-0.5 w-4 h-4 border-t-4 border-r-4 border-emerald-400 rounded-tr-sm" />
-              <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-4 border-l-4 border-emerald-400 rounded-bl-sm" />
-              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-4 border-r-4 border-emerald-400 rounded-br-sm" />
-
-              {/* Top Badge inside Reticle */}
-              <div className="w-full flex items-center justify-between text-[9px] font-mono text-[#cbd5e1]">
-                <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-emerald-300">
-                  YOLO ROI • {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}
+        {scannerPage === 'halaman1' && (
+          <div className="space-y-0">
+            {/* 1. BARIS PILIH NO. SURAT JALAN / FAKTUR (DO/SO) - URUTAN NAMA PELANGGAN */}
+            <div className="bg-[#0f172a] px-3.5 py-2.5 border-b border-[#1e293b] space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#94a3b8]">
+                  Urutan Nama Pelanggan (Faktur DO/SO):
                 </span>
-                <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-amber-300">
-                  {autoScanEnabled ? '⚡ AUTO 2.5s ON' : 'MANUAL SNAP'}
+                <span className="text-[10px] font-mono text-emerald-300 font-bold truncate max-w-[180px]">
+                  {activeInvoice.customerName}
                 </span>
               </div>
-
-              {/* Center Reticle Prompt */}
-              <div className="my-auto space-y-1">
-                {(isVerifyingScan || autoScanEnabled) && (
-                  <div className="w-44 h-0.5 bg-emerald-400 shadow-[0_0_10px_#34d399] animate-pulse mx-auto mb-1" />
-                )}
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0b1120]/90 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold">
-                  <QrCode className="w-3.5 h-3.5" />
-                  <span>Arahkan Label ke Sini (ROI Box)</span>
-                </div>
-                <div className="text-[10px] text-[#cbd5e1] font-medium px-2 line-clamp-1">
-                  {targetScanMode === 'CUSTOM_CODE'
-                    ? `Mode Uji Kode: ${customTestCode || 'Ketik kode di bawah'}`
-                    : resolvedTargetItem
-                    ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName}`
-                    : 'Ultralytics YOLO ROI Cropping & EasyOCR Aktif'}
-                </div>
-              </div>
-
-              {/* Bottom Target Progress Pill */}
-              <div className="px-2.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] font-mono text-[10px] font-bold text-sky-300">
-                {resolvedTargetItem && targetScanMode !== 'CUSTOM_CODE'
-                  ? `Target Item: ${resolvedTargetItem.qtyLoaded} / ${resolvedTargetItem.qtyOrdered} ${resolvedTargetItem.unit} • CLAHE 1280px`
-                  : 'CLAHE Auto-Contrast • Maks 1280px (JPEG 0.8)'}
-              </div>
-            </div>
-          </div>
-
-          {/* Compact Selector Target Barang & Qty per Scan */}
-          <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-8">
-              <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
-                Target Barang / Mode OCR:
-              </label>
               <select
-                value={targetScanMode}
-                onChange={e => setTargetScanMode(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-bold text-white cursor-pointer"
+                value={activeInvoice.id}
+                onChange={e => {
+                  setSelectedInvoiceId(e.target.value);
+                  localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
+                  setTargetScanMode('AUTO');
+                }}
+                className="w-full px-3 py-2 rounded-xl bg-[#060a14] border border-[#334155] text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
-                <option value="AUTO" className="bg-[#0b1120] text-white">
-                  🤖 Auto OCR: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 22) || ''}
-                </option>
-                {activeInvoice.items.map(it => (
-                  <option key={it.id} value={it.id} className="bg-[#0b1120] text-white">
-                    [{it.skuCode}] {it.itemName} ({it.qtyLoaded}/{it.qtyOrdered} {it.unit})
-                  </option>
-                ))}
-                <option value="CUSTOM_CODE" className="bg-[#0b1120] text-amber-300">
-                  🧪 Uji Kode Salah Tujuan / Tidak Dikenali
-                </option>
+                {invoices.map(inv => {
+                  const ev = evaluateInvoiceStatus(inv);
+                  return (
+                    <option key={inv.id} value={inv.id} className="bg-[#0b1120] text-white">
+                      {inv.invoiceNumber} ({inv.soNumber}) &mdash; {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
+                    </option>
+                  );
+                })}
               </select>
             </div>
-            <div className="col-span-4">
-              {targetScanMode === 'CUSTOM_CODE' ? (
-                <>
-                  <label className="block text-[9px] font-bold uppercase text-amber-400 mb-0.5">
-                    Kode Uji:
-                  </label>
-                  <input
-                    type="text"
-                    value={customTestCode}
-                    onChange={e => setCustomTestCode(e.target.value.toUpperCase())}
-                    placeholder="BOX-999"
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-amber-500/60 text-[11px] font-mono font-bold text-amber-300"
-                  />
-                </>
-              ) : (
-                <>
-                  <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
-                    Qty / Scan ({resolvedTargetItem?.unit || 'Box'}):
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={scanQtyInput}
-                    onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-mono font-black text-emerald-400 text-center"
-                  />
-                </>
-              )}
-            </div>
-          </div>
-        </div>
 
-        {/* ================================================================= */}
-        {/* 4. STATUS TERAKHIR (HIJAU/MERAH) & PROGRES MUAT BAR               */}
-        {/* ================================================================= */}
-        <div className="p-3.5 bg-[#0f172a] border-b border-[#1e293b] space-y-3">
-          {/* Kartu Status Terakhir */}
-          <div
-            className={`rounded-2xl p-3 border transition-all ${
-              !lastFeedback
-                ? 'bg-[#111827] border-[#334155] text-[#e2e8f0]'
-                : lastFeedback.status === 'success'
-                ? 'bg-[#059669] border-emerald-300 text-white shadow-md'
-                : 'bg-[#dc2626] border-rose-300 text-white shadow-md'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-wider opacity-90 mb-1">
-              <span>Status Terakhir:</span>
-              {lastFeedback && <span className="font-mono">{lastFeedback.displayTime}</span>}
-            </div>
-            {!lastFeedback ? (
-              <div className="flex items-center gap-2 text-xs font-bold text-[#cbd5e1]">
-                <QrCode className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Menunggu scan pertama di {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}...</span>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <div className="flex items-start gap-2">
-                  <span className="px-1.5 py-0.5 rounded bg-black/25 font-mono text-xs font-black shrink-0">
-                    {lastFeedback.status === 'success' ? '[✓]' : '[✕]'}
-                  </span>
-                  <div className="text-xs sm:text-sm font-black leading-snug">
-                    {lastFeedback.status === 'success'
-                      ? `${lastFeedback.extractedCode} - ${lastFeedback.productName} (Valid • ${lastFeedback.itemLoaded}/${lastFeedback.itemTarget} Terbit)`
-                      : `${lastFeedback.extractedCode} - Tidak Dikenali / Salah Tujuan / Lebih Muat`}
-                  </div>
-                </div>
-                <div className="text-[11px] font-medium opacity-95 pl-7">
-                  {lastFeedback.message}
-                </div>
-                <div className="pl-7 pt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
-                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
-                    YOLO Conf: {Math.round((lastFeedback.confidenceScore || 0.964) * 100)}%
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
-                    SQL: {lastFeedback.sqlStatusTransition || (lastFeedback.status === 'success' ? 'PENDING → LOADED' : 'REJECTED')}
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
-                    {lastFeedback.status === 'success' ? '1200Hz Beep' : '250Hz Buzzer'}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Warning Banner jika ada Overload (Lebih Muat) */}
-          {evalActive.overloadItems.length > 0 && (
-            <div className="rounded-xl bg-[#991b1b] border border-rose-400 p-2.5 text-white space-y-1.5">
-              <div className="text-[10px] font-black uppercase tracking-wider text-rose-200 flex items-center gap-1">
-                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-                <span>⚠️ PERINGATAN BARANG LEBIH MUAT ({evalActive.overloadItems.length} SKU)</span>
-              </div>
-              {evalActive.overloadItems.map(item => (
-                <div key={item.id} className="flex items-center justify-between gap-2 text-[11px] bg-black/25 px-2.5 py-1.5 rounded-lg">
-                  <span className="truncate font-semibold">
-                    [{item.skuCode}] {item.qtyLoaded}/{item.qtyOrdered} {item.unit} (+{item.qtyLoaded - item.qtyOrdered})
-                  </span>
+            {/* 2. AREA KAMERA LIVE VIEWFINDER UTUH / BESAR (TIDAK TERBAGI 2) */}
+            <div className="p-3 bg-[#090d16] border-b border-[#1e293b] space-y-2">
+              {/* Controls bar mini kamera */}
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  {!isCameraActive ? (
+                    <button
+                      type="button"
+                      onClick={() => void startLiveCamera()}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                    >
+                      ▶ Aktifkan Kamera
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                    >
+                      ■ Matikan
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
-                    className="px-2 py-0.5 rounded bg-white text-rose-900 font-extrabold text-[10px] shrink-0 cursor-pointer"
+                    onClick={() => void handleSwitchCamera()}
+                    className="px-2 py-1 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0] text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
                   >
-                    Sesuaikan ({item.qtyOrdered})
+                    <RefreshCw className="w-3 h-3 text-sky-400" />
+                    <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
 
-          {/* Baris Progres Muat */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-[#cbd5e1]">Progres Muat:</span>
-              <span className="font-mono font-black text-emerald-400">
-                {evalActive.totalLoaded} / {evalActive.totalOrdered} Kemasan ({progressPercentage}%)
-              </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleTorch()}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition ${
+                      isTorchOn ? 'bg-amber-400 text-[#090d16]' : 'bg-[#1e293b] text-[#e2e8f0]'
+                    }`}
+                  >
+                    {isTorchOn ? '🔦 ON' : '🔦 Flash'}
+                  </button>
+                  <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300 border border-slate-700">
+                    Mode Auto: OFF
+                  </span>
+                </div>
+              </div>
+
+              {/* Viewport Kamera Besar & Penuh (Tergabung dengan Tombol Ambil Foto & Verifikasi) */}
+              <div className="relative w-full h-64 sm:h-72 rounded-2xl bg-[#030712] border-2 border-[#1e293b] overflow-hidden flex flex-col justify-between p-3">
+                {isCameraActive ? (
+                  <video
+                    ref={videoRef}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    playsInline
+                    muted
+                    autoPlay
+                  />
+                ) : lastCapturedPreview ? (
+                  <img
+                    src={lastCapturedPreview}
+                    alt="Snapshot Terakhir"
+                    className="absolute inset-0 w-full h-full object-cover opacity-80"
+                  />
+                ) : null}
+
+                {/* Reticle / Kotak Pemandu di Tengah Viewfinder */}
+                <div className="relative z-10 w-full h-full rounded-xl border-2 border-dashed border-emerald-400/80 bg-[#030712]/35 flex flex-col items-center justify-between p-2.5 text-center pointer-events-none">
+                  {/* Corner Brackets */}
+                  <div className="absolute -top-0.5 -left-0.5 w-4 h-4 border-t-4 border-l-4 border-emerald-400 rounded-tl-sm" />
+                  <div className="absolute -top-0.5 -right-0.5 w-4 h-4 border-t-4 border-r-4 border-emerald-400 rounded-tr-sm" />
+                  <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-4 border-l-4 border-emerald-400 rounded-bl-sm" />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-4 border-r-4 border-emerald-400 rounded-br-sm" />
+
+                  <div className="w-full flex items-center justify-between text-[9px] font-mono text-[#cbd5e1]">
+                    <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-emerald-300 font-bold">
+                      YOLO ROI • {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-amber-300 font-bold">
+                      CAMERA ACTIVE
+                    </span>
+                  </div>
+
+                  <div className="my-auto space-y-1">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0b1120]/90 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold shadow-md">
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>Arahkan Kemasan / Label ke Sini</span>
+                    </div>
+                    <div className="text-[10px] text-[#cbd5e1] font-bold px-2 line-clamp-1 bg-[#0b1120]/80 rounded py-0.5">
+                      {resolvedTargetItem
+                        ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName}`
+                        : 'Ultralytics YOLO ROI & Vision OCR'}
+                    </div>
+                  </div>
+
+                  {/* Tombol Ambil Foto & Verifikasi BERGABUNG DI ATAS LAYAR KAMERA */}
+                  <div className="w-full pointer-events-auto pt-1">
+                    <button
+                      type="button"
+                      disabled={isVerifyingScan}
+                      onClick={() => void executeCaptureAndVerify()}
+                      className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] disabled:opacity-50 text-white font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border border-emerald-400/50"
+                    >
+                      <Camera className="w-4 h-4 shrink-0" />
+                      <span>
+                        {isVerifyingScan ? 'MEMVERIFIKASI...' : '📸 AMBIL FOTO & VERIFIKASI'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Baris Kontrol Suara & Selector Target Barang */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold text-[#94a3b8]">Uji Suara Beep:</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => playScannerFeedbackBeep('success', true)}
+                      className="py-1 px-2.5 rounded-lg bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-emerald-300 text-[10px] font-bold cursor-pointer"
+                    >
+                      🔊 Beep OK
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => playScannerFeedbackBeep('error', true)}
+                      className="py-1 px-2.5 rounded-lg bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-rose-300 text-[10px] font-bold cursor-pointer"
+                    >
+                      🔊 Beep Err
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-8">
+                    <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
+                      Target Barang / Mode OCR:
+                    </label>
+                    <select
+                      value={targetScanMode}
+                      onChange={e => setTargetScanMode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-bold text-white cursor-pointer"
+                    >
+                      <option value="AUTO" className="bg-[#0b1120] text-white">
+                        🤖 Auto OCR: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 22) || ''}
+                      </option>
+                      {activeInvoice.items.map(it => (
+                        <option key={it.id} value={it.id} className="bg-[#0b1120] text-white">
+                          [{it.skuCode}] {it.itemName} ({it.qtyLoaded}/{it.qtyOrdered} {it.unit})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-4">
+                    <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
+                      Qty / Scan ({resolvedTargetItem?.unit || 'Box'}):
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={scanQtyInput}
+                      onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-mono font-black text-emerald-400 text-center"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="w-full h-3 rounded-full bg-[#060a14] border border-[#334155] overflow-hidden p-0.5">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  evalActive.overloadItems.length > 0
-                    ? 'bg-rose-500'
-                    : progressPercentage === 100
-                    ? 'bg-emerald-500'
-                    : 'bg-sky-500'
-                }`}
-                style={{ width: `${Math.min(100, progressPercentage)}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[10px] font-bold text-[#94a3b8] pt-0.5">
-              <span>Target: {evalActive.totalOrdered} ({activeInvoice.items.length} SKU)</span>
-              <span className="text-sky-400">Termuat: {evalActive.totalLoaded}</span>
-              <span className={totalSisaCount > 0 ? 'text-amber-400' : 'text-emerald-400'}>
-                {totalSisaCount > 0 ? `Sisa: ${totalSisaCount} SKU` : '✓ 100% Klop'}
-              </span>
+
+            {/* 3. DI BAWAH TAMPILAN KAMERA: LIST BARANG FAKTUR / SALES ORDER PELANGGAN */}
+            <div className="p-3.5 bg-[#0b1120] space-y-2.5 max-h-80 overflow-y-auto">
+              <div className="flex items-center justify-between text-[11px] font-black uppercase text-[#94a3b8]">
+                <span>Daftar Barang Faktur Pelanggan ({activeInvoice.items.length} SKU):</span>
+                <span className="text-sky-400 font-mono">{activeInvoice.invoiceNumber}</span>
+              </div>
+
+              {activeInvoice.items.map(item => {
+                const isSelected = resolvedTargetItem?.id === item.id && targetScanMode !== 'CUSTOM_CODE';
+                const isExact = item.qtyLoaded === item.qtyOrdered && item.qtyOrdered > 0;
+                const isOver = item.qtyLoaded > item.qtyOrdered;
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-3 rounded-2xl border text-xs space-y-2 ${
+                      isSelected
+                        ? 'bg-[#172554]/70 border-indigo-400 shadow-md'
+                        : 'bg-[#111827] border-[#1e293b]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black">
+                            {item.skuCode}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              isOver
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : isExact
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            }`}
+                          >
+                            {item.qtyLoaded} / {item.qtyOrdered} {item.unit}
+                          </span>
+                        </div>
+                        <div className="font-bold text-white text-xs leading-snug break-words">
+                          {item.itemName}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {item.scans.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })}
+                            className="px-2 py-1 rounded-lg bg-[#1e293b] text-sky-300 text-[10px] font-bold cursor-pointer"
+                            title="Lihat Foto"
+                          >
+                            📷 {item.scans.length}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSpecificItemToScan(item)}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black cursor-pointer shadow-xs flex items-center gap-1"
+                        >
+                          <Camera className="w-3 h-3" />
+                          <span>Pilih Scan</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
+        )}
 
         {/* ================================================================= */}
-        {/* 5. TAB NAVIGASI DALAM LAYAR HP (RIWAYAT / BARANG DO / CEK SISA)   */}
+        {/* HALAMAN 2: BARANG SUDAH TERMUAT, BARANG SISA & RINGKASAN AUDIT   */}
         {/* ================================================================= */}
-        <div className="grid grid-cols-3 bg-[#060a14] border-b border-[#1e293b] p-1 gap-1 text-[11px] font-bold">
-          <button
-            type="button"
-            onClick={() => setMobileSubTab('history')}
-            className={`py-1.5 rounded-lg transition cursor-pointer ${
-              mobileSubTab === 'history'
-                ? 'bg-[#1e293b] text-emerald-400 font-black'
-                : 'text-[#94a3b8] hover:text-white'
-            }`}
-          >
-            📋 Riwayat ({latestFiveScans.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileSubTab('items')}
-            className={`py-1.5 rounded-lg transition cursor-pointer ${
-              mobileSubTab === 'items'
-                ? 'bg-[#1e293b] text-sky-400 font-black'
-                : 'text-[#94a3b8] hover:text-white'
-            }`}
-          >
-            📦 Barang DO ({activeInvoice.items.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileSubTab('audit')}
-            className={`py-1.5 rounded-lg transition cursor-pointer ${
-              mobileSubTab === 'audit'
-                ? 'bg-[#1e293b] text-amber-400 font-black'
-                : 'text-[#94a3b8] hover:text-white'
-            }`}
-          >
-            🔍 Cek Sisa ({totalSisaCount})
-          </button>
-        </div>
-
-        {/* ISI TAB LAYAR HP */}
-        <div className="p-3.5 bg-[#0b1120] max-h-64 overflow-y-auto space-y-2">
-          {mobileSubTab === 'history' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">
-                  Riwayat 5 Scan Terakhir:
+        {scannerPage === 'halaman2' && (
+          <div className="p-3.5 bg-[#0b1120] space-y-3 max-h-[520px] overflow-y-auto">
+            {/* Ringkasan Progres Muat */}
+            <div className="p-3 bg-[#0f172a] rounded-2xl border border-[#1e293b] space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-[#cbd5e1]">Progres Muat Faktur:</span>
+                <span className="font-mono font-black text-emerald-400">
+                  {evalActive.totalLoaded} / {evalActive.totalOrdered} Kemasan ({progressPercentage}%)
                 </span>
+              </div>
+              <div className="w-full h-3 rounded-full bg-[#060a14] border border-[#334155] overflow-hidden p-0.5">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    evalActive.overloadItems.length > 0
+                      ? 'bg-rose-500'
+                      : progressPercentage === 100
+                      ? 'bg-emerald-500'
+                      : 'bg-sky-500'
+                  }`}
+                  style={{ width: `${Math.min(100, progressPercentage)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-bold text-[#94a3b8] pt-0.5">
+                <span>Target: {evalActive.totalOrdered} ({activeInvoice.items.length} SKU)</span>
+                <span className="text-sky-400">Termuat: {evalActive.totalLoaded}</span>
+                <span className={totalSisaCount > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+                  {totalSisaCount > 0 ? `Sisa: ${totalSisaCount} SKU` : '✓ 100% Lengkap'}
+                </span>
+              </div>
+            </div>
+
+            {/* Warning Banner jika ada Overload (Lebih Muat) */}
+            {evalActive.overloadItems.length > 0 && (
+              <div className="rounded-2xl bg-[#991b1b] border border-rose-400 p-3 text-white space-y-1.5">
+                <div className="text-[10px] font-black uppercase tracking-wider text-rose-200 flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                  <span>⚠️ PERINGATAN BARANG LEBIH MUAT ({evalActive.overloadItems.length} SKU)</span>
+                </div>
+                {evalActive.overloadItems.map(item => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 text-[11px] bg-black/25 px-2.5 py-1.5 rounded-lg">
+                    <span className="truncate font-semibold">
+                      [{item.skuCode}] {item.qtyLoaded}/{item.qtyOrdered} {item.unit} (+{item.qtyLoaded - item.qtyOrdered})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
+                      className="px-2 py-0.5 rounded bg-white text-rose-900 font-extrabold text-[10px] shrink-0 cursor-pointer"
+                    >
+                      Sesuaikan ({item.qtyOrdered})
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 1. DETEKSI BARANG SISA / BELUM TERMUAT */}
+            <div className="space-y-2 text-xs">
+              <div className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>1. Deteksi Barang Sisa / Belum Termuat ({totalSisaCount} SKU):</span>
+              </div>
+              {totalSisaCount === 0 ? (
+                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>Semua barang pada Surat Jalan ini sudah termuat 100%!</span>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {evalActive.unloadedItems.map(item => (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
+                        <div className="text-[11px] text-amber-300 font-medium">Status: BELUM TERMUAT SAMA SEKALI &mdash; Sisa {item.qtyOrdered} {item.unit}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSelectSpecificItemToScan(item);
+                          setScannerPage('halaman1');
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
+                      >
+                        Foto Sekarang
+                      </button>
+                    </div>
+                  ))}
+                  {evalActive.shortageItems.map(item => {
+                    const sisa = item.qtyOrdered - item.qtyLoaded;
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
+                          <div className="text-[11px] text-amber-300 font-medium">
+                            Status: KURANG MUAT ({item.qtyLoaded}/{item.qtyOrdered} {item.unit}) &mdash; Sisa {sisa} {item.unit}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSelectSpecificItemToScan(item);
+                            setScannerPage('halaman1');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
+                        >
+                          Foto Sisa ({sisa})
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 2. BARANG TERMUAT SESUAI FAKTUR */}
+            <div className="space-y-2 text-xs pt-1">
+              <div className="text-[11px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>2. Barang Termuat Sesuai Faktur ({evalActive.matchedItems.length} SKU):</span>
+              </div>
+              {evalActive.matchedItems.length === 0 ? (
+                <div className="py-3 px-3 text-[#64748b] text-[11px] border border-dashed border-[#1e293b] rounded-xl text-center">
+                  Belum ada barang yang termuat 100% sesuai target faktur.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {evalActive.matchedItems.map((item: SalesOrderItem) => (
+                    <div
+                      key={item.id}
+                      className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
+                        <div className="text-[11px] text-emerald-300 font-medium">Termuat Lengkap ({item.qtyLoaded}/{item.qtyOrdered} {item.unit})</div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black border border-emerald-500/30 shrink-0">
+                        ✓ 100% Sesuai
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 3. RIWAYAT SNAPSHOT SCAN FOTO TERAKHIR */}
+            <div className="space-y-2 text-xs pt-1 border-t border-[#1e293b]">
+              <div className="flex items-center justify-between text-[11px] font-black uppercase text-[#94a3b8]">
+                <span>Riwayat 5 Scan Foto Terakhir:</span>
                 {recentScansLog.length > 0 && (
                   <button
                     type="button"
@@ -3810,8 +3918,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
               </div>
 
               {latestFiveScans.length === 0 ? (
-                <div className="py-5 text-center text-xs text-[#64748b] border border-dashed border-[#1e293b] rounded-xl">
-                  Belum ada riwayat scan. Tekan tombol <strong>AMBIL FOTO &amp; VERIFIKASI</strong> di bawah.
+                <div className="py-4 text-center text-xs text-[#64748b] border border-dashed border-[#1e293b] rounded-xl">
+                  Belum ada riwayat foto. Ambil foto di Halaman 1.
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -3824,7 +3932,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                         <img
                           src={log.photoDataUrl}
                           alt={log.extractedCode}
-                          className="w-7 h-7 rounded-lg object-cover border border-[#334155] shrink-0"
+                          className="w-8 h-8 rounded-lg object-cover border border-[#334155] shrink-0"
                         />
                         <div className="min-w-0">
                           <div className="truncate font-bold text-[#f8fafc] text-[11px]">
@@ -3849,203 +3957,111 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </div>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {mobileSubTab === 'items' && (
-            <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">
-                Daftar Barang Surat Jalan ({activeInvoice.invoiceNumber}):
-              </div>
-              {activeInvoice.items.map(item => {
-                const isSelected = resolvedTargetItem?.id === item.id && targetScanMode !== 'CUSTOM_CODE';
-                const isExact = item.qtyLoaded === item.qtyOrdered && item.qtyOrdered > 0;
-                const isOver = item.qtyLoaded > item.qtyOrdered;
-                return (
-                  <div
-                    key={item.id}
-                    className={`p-2.5 rounded-xl border text-xs space-y-1.5 ${
-                      isSelected
-                        ? 'bg-[#172554]/60 border-indigo-400'
-                        : 'bg-[#111827] border-[#1e293b]'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-bold">
-                            {item.skuCode}
-                          </span>
-                          <span
-                            className={`text-[10px] font-extrabold ${
-                              isOver ? 'text-rose-400' : isExact ? 'text-emerald-400' : 'text-amber-300'
-                            }`}
-                          >
-                            {item.qtyLoaded}/{item.qtyOrdered} {item.unit}
-                          </span>
-                        </div>
-                        <div className="font-bold text-white text-xs mt-0.5 truncate">
-                          {item.itemName}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {item.scans.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })}
-                            className="px-2 py-1 rounded-lg bg-[#1e293b] text-sky-300 text-[10px] font-bold cursor-pointer"
-                          >
-                            📷 {item.scans.length}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSpecificItemToScan(item)}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
-                        >
-                          Pilih Scan
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {mobileSubTab === 'audit' && (
-            <div className="space-y-2 text-xs">
-              <div className="text-[10px] font-black uppercase tracking-wider text-amber-400">
-                Deteksi Barang Sisa / Belum Termuat ({totalSisaCount} SKU):
-              </div>
-              {totalSisaCount === 0 ? (
-                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>Semua barang pada Surat Jalan ini sudah termuat 100%!</span>
-                </div>
-              ) : (
-                <>
-                  {evalActive.unloadedItems.map(item => (
-                    <div
-                      key={item.id}
-                      className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
-                        <div className="text-[11px] text-amber-300">Belum termuat: sisa {item.qtyOrdered} {item.unit}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSpecificItemToScan(item)}
-                        className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-bold shrink-0 cursor-pointer"
-                      >
-                        Scan
-                      </button>
-                    </div>
-                  ))}
-                  {evalActive.shortageItems.map(item => {
-                    const sisa = item.qtyOrdered - item.qtyLoaded;
-                    return (
-                      <div
-                        key={item.id}
-                        className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
-                          <div className="text-[11px] text-amber-300">
-                            Kurang muat ({item.qtyLoaded}/{item.qtyOrdered}) • Sisa {sisa} {item.unit}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSpecificItemToScan(item)}
-                          className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-bold shrink-0 cursor-pointer"
-                        >
-                          Scan ({sisa})
-                        </button>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ================================================================= */}
-        {/* 6. TOMBOL KONTROL BAWAH HP: [ AMBIL FOTO & VERIFIKASI ] [Auto:ON] */}
-        {/* ================================================================= */}
-        <div className="p-3.5 bg-[#060a14] border-t border-[#1e293b] space-y-2">
-          <div className="grid grid-cols-12 gap-2">
+        {/* ===================================================================== */}
+        {/* PORTAL DRIVER & HELPER STYLE MOBILE BOTTOM NAVIGATION BAR             */}
+        {/* ===================================================================== */}
+        <div className="bg-[#0f172a] border-t border-[#1e293b] px-2 py-1.5 relative z-20 shadow-2xl">
+          <div className="grid grid-cols-5 items-center text-center">
+            {/* 1. Kamera & List Faktur (Halaman 1) */}
             <button
               type="button"
-              disabled={isVerifyingScan}
-              onClick={() => void executeCaptureAndVerify()}
-              className="col-span-8 py-3 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 text-white font-black text-xs sm:text-sm tracking-wide shadow-lg flex items-center justify-center gap-2 cursor-pointer transition"
-            >
-              <Camera className="w-4 h-4 shrink-0" />
-              <span>
-                {isVerifyingScan ? 'MEMVERIFIKASI...' : 'AMBIL FOTO & VERIFIKASI'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAutoScanEnabled(prev => !prev)}
-              className={`col-span-4 py-3 px-2 rounded-2xl font-black text-[11px] border flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                autoScanEnabled
-                  ? 'bg-amber-400 text-[#060a14] border-amber-300 shadow-md'
-                  : 'bg-[#111827] text-[#cbd5e1] border-[#334155] hover:bg-[#1e293b]'
+              onClick={() => setScannerPage('halaman1')}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl transition cursor-pointer relative ${
+                scannerPage === 'halaman1'
+                  ? 'text-emerald-400 font-extrabold'
+                  : 'text-[#94a3b8] hover:text-[#f8fafc]'
               }`}
             >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  autoScanEnabled ? 'bg-[#060a14] animate-ping' : 'bg-[#64748b]'
-                }`}
-              />
-              <span>Mode Auto: {autoScanEnabled ? 'ON' : 'OFF'}</span>
+              <Camera className={`w-5 h-5 transition-transform ${scannerPage === 'halaman1' ? 'scale-110 text-emerald-400' : ''}`} />
+              <span className="text-[10px] tracking-tighter leading-none">Kamera &amp; List</span>
+              {scannerPage === 'halaman1' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-xs shadow-emerald-400/50 mt-0.5 animate-pulse" />
+              )}
             </button>
-          </div>
 
-          {/* Secondary Mobile Bar: Buka Kamera HP Asli / Upload File & Tes Suara */}
-          <div className="flex items-center justify-between gap-2 pt-0.5">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileUploadAndVerify}
-              className="hidden"
-            />
+            {/* 2. Termuat & Sisa (Halaman 2) */}
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex-1 py-1.5 px-3 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-[#cbd5e1] text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+              onClick={() => setScannerPage('halaman2')}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl transition cursor-pointer relative ${
+                scannerPage === 'halaman2'
+                  ? 'text-sky-400 font-extrabold'
+                  : 'text-[#94a3b8] hover:text-[#f8fafc]'
+              }`}
             >
-              <Upload className="w-3.5 h-3.5 text-indigo-400" />
-              <span>📱 Buka Kamera HP / Pilih File Foto</span>
+              <div className="relative">
+                <Package className={`w-5 h-5 transition-transform ${scannerPage === 'halaman2' ? 'scale-110 text-sky-400' : ''}`} />
+                {totalSisaCount > 0 ? (
+                  <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black border border-[#0b1120] animate-bounce">
+                    {totalSisaCount}
+                  </span>
+                ) : (
+                  <span className="absolute -top-1 -right-2 px-0.5 rounded-full bg-emerald-500 text-slate-950 text-[8px] font-black">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] tracking-tighter leading-none">Termuat &amp; Sisa</span>
+              {scannerPage === 'halaman2' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-xs shadow-sky-400/50 mt-0.5 animate-pulse" />
+              )}
             </button>
-            <button
-              type="button"
-              onClick={() => playScannerFeedbackBeep('success', true)}
-              className="py-1.5 px-2.5 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-emerald-300 text-[10px] font-bold cursor-pointer"
-              title="Tes Suara Beep Valid"
-            >
-              🔊 Beep OK
-            </button>
-            <button
-              type="button"
-              onClick={() => playScannerFeedbackBeep('error', true)}
-              className="py-1.5 px-2.5 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-rose-300 text-[10px] font-bold cursor-pointer"
-              title="Tes Suara Buzzer Error"
-            >
-              🔊 Beep Err
-            </button>
-          </div>
 
-          {/* Home Indicator Bar Smartphone */}
-          <div className="pt-1 flex justify-center">
-            <div className="w-28 h-1 rounded-full bg-[#334155]" />
+            {/* 3. Central Floating Action Button (Jepret & Verifikasi / Quick Snap) */}
+            <div className="flex flex-col items-center justify-center relative">
+              <button
+                type="button"
+                onClick={() => {
+                  if (scannerPage !== 'halaman1') {
+                    setScannerPage('halaman1');
+                  }
+                  void executeCaptureAndVerify();
+                }}
+                className="w-12 h-12 -mt-6 rounded-full bg-gradient-to-tr from-emerald-600 via-indigo-600 to-indigo-500 text-white shadow-xl shadow-indigo-500/30 border-4 border-[#0b1120] hover:scale-105 active:scale-95 transition-transform flex items-center justify-center cursor-pointer group"
+                title="Ambil Foto & Verifikasi Sekarang"
+              >
+                <Camera className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+              </button>
+              <span className="text-[9px] font-bold text-emerald-400 mt-0.5 tracking-tighter">Scan Foto</span>
+            </div>
+
+            {/* 4. Riwayat Scan */}
+            <button
+              type="button"
+              onClick={() => {
+                setScannerPage('halaman2');
+              }}
+              className="flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl text-[#94a3b8] hover:text-[#f8fafc] transition cursor-pointer relative"
+            >
+              <div className="relative">
+                <FileText className="w-5 h-5" />
+                {recentScansLog.length > 0 && (
+                  <span className="absolute -top-1 -right-2 px-1 py-0.2 rounded-full bg-indigo-500 text-white text-[9px] font-black">
+                    {recentScansLog.length}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] tracking-tighter leading-none">Riwayat</span>
+            </button>
+
+            {/* 5. Blueprint Kode & SQL */}
+            <button
+              type="button"
+              onClick={() => setIsBlueprintsModalOpen(true)}
+              className="flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl text-[#94a3b8] hover:text-[#f8fafc] transition cursor-pointer"
+            >
+              <Layers className="w-5 h-5 text-amber-400" />
+              <span className="text-[10px] tracking-tighter leading-none text-amber-300">Blueprint</span>
+            </button>
           </div>
+        </div>
+
+        {/* Home Indicator Bar Smartphone */}
+        <div className="p-2 bg-[#060a14] border-t border-[#1e293b] flex justify-center">
+          <div className="w-28 h-1 rounded-full bg-[#334155]" />
         </div>
       </div>
 

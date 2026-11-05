@@ -36,6 +36,7 @@ import {
 import {
   databaseBarangService,
   DatabaseBarangRecord,
+  DatabaseBarangSyncStatus,
   calculateVolM3,
   createDefaultBarangThumbnail,
   compressDocumentationPhoto,
@@ -50,6 +51,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   onSyncWithMasterSku
 }) => {
   const [items, setItems] = useState<DatabaseBarangRecord[]>(() => databaseBarangService.getAll());
+  const [syncStatus, setSyncStatus] = useState<DatabaseBarangSyncStatus>(() => databaseBarangService.getSyncStatus());
   const [searchQuery, setSearchQuery] = useState('');
   const [unitFilter, setUnitFilter] = useState('ALL');
   const [volFilter, setVolFilter] = useState<'ALL' | 'has_vol' | 'no_vol'>('ALL');
@@ -291,13 +293,38 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const sync = () => {
       setItems(databaseBarangService.getAll());
     };
+    const handleSyncStatus = (e: Event) => {
+      const custom = e as CustomEvent<DatabaseBarangSyncStatus>;
+      if (custom.detail) {
+        setSyncStatus({ ...custom.detail });
+      } else {
+        setSyncStatus(databaseBarangService.getSyncStatus());
+      }
+    };
     window.addEventListener('akk-database-barang-updated', sync);
+    window.addEventListener('akk-database-barang-sync-status', handleSyncStatus);
     window.addEventListener('storage', sync);
     return () => {
       window.removeEventListener('akk-database-barang-updated', sync);
+      window.removeEventListener('akk-database-barang-sync-status', handleSyncStatus);
       window.removeEventListener('storage', sync);
     };
   }, []);
+
+  const handleManualServerSync = async () => {
+    const result = await databaseBarangService.forceSyncNow();
+    setItems(result.items);
+    if (onSyncWithMasterSku && result.items.length > 0) {
+      onSyncWithMasterSku(result.items);
+    }
+    setFeedbackModal({
+      title: result.count > 0 ? 'Sinkronisasi Server PC & HP Berhasil' : 'Server Belum Memiliki Data Barang',
+      message:
+        result.count > 0
+          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang telah tersinkronisasi penuh antara Server MySQL, tampilan PC, dan tampilan HP.`
+          : 'Saat ini belum ada data di Server MySQL. Buka halaman Database Barang di komputer (PC) tempat Anda meng-import Excel agar otomatis terunggah ke server, atau Import Excel langsung.'
+    });
+  };
 
   // Auto-calculate volM3 whenever panjang, lebar, tinggi change
   const handleDimensionChange = (p: number, l: number, t: number) => {
@@ -1103,6 +1130,24 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
               <Link2 className="w-3 h-3" />
               <span>Terintegrasi Input Faktur / Sales Order (SO)</span>
             </span>
+            <span
+              className={`px-2.5 py-0.5 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 ${
+                syncStatus.isSyncing
+                  ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
+                  : items.length > 0
+                  ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Smartphone className="w-3 h-3" />
+              <span>
+                {syncStatus.isSyncing
+                  ? `Sinkronisasi PC & HP (${syncStatus.progressPct}%)...`
+                  : items.length > 0
+                  ? `Tersinkron PC & HP (${items.length.toLocaleString('id-ID')} SKU)`
+                  : 'Sinkronisasi Cloud PC & HP Aktif'}
+              </span>
+            </span>
           </div>
           <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
             Database Barang &mdash; Spesifikasi Dimensi, Kubikasi, Satuan &amp; Rasio
@@ -1113,6 +1158,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleManualServerSync}
+            disabled={syncStatus.isSyncing}
+            className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+            title="Sinkronkan Database Barang antara Komputer (PC) dan Smartphone (HP)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+            <span>{syncStatus.isSyncing ? `Sinkron ${syncStatus.progressPct}%` : 'Sinkron PC & HP'}</span>
+          </button>
           <button
             type="button"
             onClick={handleExportDatabaseBarang}
@@ -1403,193 +1458,352 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           </span>
         </div>
 
-        {/* Tabel Mode Ringkas (Fit on screen, ZERO horizontal scrolling, Lebih Rapat & Bersih) */}
+        {/* Tabel Mode Ringkas (Fit on screen, ZERO horizontal scrolling di HP maupun PC) */}
         {tableMode === 'compact' ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold text-[11px] border-b border-slate-200 dark:border-slate-800 select-none">
-                <tr>
-                  <th className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 w-10 text-slate-400">#</th>
-                  <th
-                    onClick={() => setSortBy(prev => prev === 'no_asc' ? 'no_desc' : 'no_asc')}
-                    className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-32"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>No. Barang</span>
-                      {sortBy === 'no_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'no_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => setSortBy(prev => prev === 'nama_asc' ? 'nama_desc' : 'nama_asc')}
-                    className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition min-w-[260px]"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span>Deskripsi Barang &amp; Foto</span>
-                      {sortBy === 'nama_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'nama_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
-                    </div>
-                  </th>
-                  <th className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 w-40">
-                    <span>Satuan &amp; Konversi</span>
-                  </th>
-                  <th
-                    onClick={() => setSortBy(prev => prev === 'vol_asc' ? 'vol_desc' : 'vol_asc')}
-                    className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-44"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>Dimensi (P&times;L&times;T) &amp; M3</span>
-                      {sortBy === 'vol_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'vol_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => setSortBy(prev => prev === 'berat_asc' ? 'berat_desc' : 'berat_asc')}
-                    className="py-2 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-20"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>Berat</span>
-                      {sortBy === 'berat_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'berat_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
-                    </div>
-                  </th>
-                  <th className="py-2 px-2 text-center w-20">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
-                {paginatedItems.length > 0 ? (
-                  paginatedItems.map((item, idx) => {
-                    const rowNum = (currentPage - 1) * pageSize + idx + 1;
-                    const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
-                    const calculatedVol = item.volM3 > 0 ? item.volM3 : (hasDim ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm) : 0);
-
-                    const photoList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+          <div>
+            {/* Tampilan Mobile HP (Zero Horizontal Scroll Card List, tampil otomatis di layar HP < md) */}
+            <div className="md:hidden divide-y divide-slate-200 dark:divide-slate-800">
+              {paginatedItems.length > 0 ? (
+                paginatedItems.map((item, idx) => {
+                  const rowNum = (currentPage - 1) * pageSize + idx + 1;
+                  const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
+                  const calculatedVol =
+                    item.volM3 > 0
+                      ? item.volM3
+                      : hasDim
+                      ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm)
+                      : 0;
+                  const photoList =
+                    Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
                       ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-                      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
-                    const hasCustomPhoto = photoList.length > 0;
+                      : item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
+                      ? [item.dokumentasiUrl]
+                      : [];
+                  const hasCustomPhoto = photoList.length > 0;
 
-                    return (
-                      <tr key={item.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition">
-                        <td className="py-1.5 px-2 text-center font-mono font-bold text-slate-400 border-r border-slate-200 dark:border-slate-800 text-[11px]">
-                          {rowNum}
-                        </td>
-                        <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
-                          <span className="font-bold text-blue-700 dark:text-blue-400 text-xs">
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3.5 hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono font-bold text-[10px] text-slate-500">
+                            #{rowNum}
+                          </span>
+                          <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-xs">
                             {item.noBarang}
                           </span>
-                        </td>
-                        <td className="py-1.5 px-3 border-r border-slate-200 dark:border-slate-800">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold text-slate-900 dark:text-white leading-tight">
-                              {item.deskripsiBarang || item.keteranganBarang}
+                          {hasCustomPhoto ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewDocItem(item);
+                                setActivePhotoIndex(0);
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold"
+                            >
+                              <Camera className="w-2.5 h-2.5" />
+                              <span>{photoList.length} Foto</span>
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 text-[9px] font-medium">
+                              Tanpa Foto
                             </span>
-                            {hasCustomPhoto ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewDocItem(item);
-                                  setActivePhotoIndex(0);
-                                }}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold hover:bg-blue-100 transition cursor-pointer shrink-0"
-                                title="Klik untuk melihat foto dokumentasi"
-                              >
-                                <Camera className="w-2.5 h-2.5" />
-                                <span>{photoList.length} Foto</span>
-                              </button>
-                            ) : (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 text-slate-400 text-[9px] font-medium shrink-0">
-                                Tanpa Foto
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-[10px] text-slate-900 dark:text-white">
-                              {item.unit1 || item.satuan || 'Pcs'}
+                          )}
+                        </div>
+
+                        <div className="inline-flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => triggerCameraForRow(item)}
+                            className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            title="Ambil Foto Kamera HP"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                          </button>
+                          {hasCustomPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewDocItem(item);
+                                setActivePhotoIndex(0);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                              title="Lihat Foto"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(item)}
+                            className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300"
+                            title="Edit Barang"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItem(item)}
+                            className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                            title="Hapus Barang"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-xs font-bold text-slate-900 dark:text-white leading-snug break-words">
+                        {item.deskripsiBarang || item.keteranganBarang}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-[10px] text-slate-900 dark:text-white">
+                            {item.unit1 || item.satuan || 'Pcs'}
+                          </span>
+                          {item.unit2 && (
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                              1 {item.unit2} {item.rasio2 ? `= ${item.rasio2} ${item.unit1 || 'Pcs'}` : ''}
                             </span>
-                            {item.unit2 && (
-                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                                1 {item.unit2} {item.rasio2 ? `= ${item.rasio2} ${item.unit1 || 'Pcs'}` : ''}
+                          )}
+                          {item.unit3 && (
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                              • 1 {item.unit3} {item.rasio3 ? `= ${item.rasio3} ${item.unit1 || 'Pcs'}` : ''}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 font-mono">
+                          {(hasDim || calculatedVol > 0) && (
+                            <span className="text-[10px] text-slate-600 dark:text-slate-300">
+                              {item.panjangCm || 0}&times;{item.lebarCm || 0}&times;{item.tinggiCm || 0}cm
+                            </span>
+                          )}
+                          {calculatedVol > 0 && (
+                            <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-[11px]">
+                              {calculatedVol} M3
+                            </span>
+                          )}
+                          {item.beratKg > 0 && (
+                            <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px]">
+                              {item.beratKg} kg
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="py-10 px-4 text-center space-y-3">
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold">
+                    {items.length === 0
+                      ? 'Database Barang sedang disinkronkan atau belum diunggah dari komputer (PC) ke server.'
+                      : 'Tidak ada data barang yang sesuai filter pencarian.'}
+                  </p>
+                  {items.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={handleManualServerSync}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                      <span>Muat &amp; Sinkronkan Data dari Server</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Tampilan Tabel Desktop PC (>= md) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold text-[11px] border-b border-slate-200 dark:border-slate-800 select-none">
+                  <tr>
+                    <th className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 w-10 text-slate-400">#</th>
+                    <th
+                      onClick={() => setSortBy(prev => prev === 'no_asc' ? 'no_desc' : 'no_asc')}
+                      className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-32"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>No. Barang</span>
+                        {sortBy === 'no_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'no_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setSortBy(prev => prev === 'nama_asc' ? 'nama_desc' : 'nama_asc')}
+                      className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition min-w-[260px]"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Deskripsi Barang &amp; Foto</span>
+                        {sortBy === 'nama_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'nama_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
+                      </div>
+                    </th>
+                    <th className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 w-40">
+                      <span>Satuan &amp; Konversi</span>
+                    </th>
+                    <th
+                      onClick={() => setSortBy(prev => prev === 'vol_asc' ? 'vol_desc' : 'vol_asc')}
+                      className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-44"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Dimensi (P&times;L&times;T) &amp; M3</span>
+                        {sortBy === 'vol_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'vol_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setSortBy(prev => prev === 'berat_asc' ? 'berat_desc' : 'berat_asc')}
+                      className="py-2 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition w-20"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>Berat</span>
+                        {sortBy === 'berat_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'berat_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
+                      </div>
+                    </th>
+                    <th className="py-2 px-2 text-center w-20">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                  {paginatedItems.length > 0 ? (
+                    paginatedItems.map((item, idx) => {
+                      const rowNum = (currentPage - 1) * pageSize + idx + 1;
+                      const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
+                      const calculatedVol = item.volM3 > 0 ? item.volM3 : (hasDim ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm) : 0);
+
+                      const photoList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+                        ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+                        : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+                      const hasCustomPhoto = photoList.length > 0;
+
+                      return (
+                        <tr key={item.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition">
+                          <td className="py-1.5 px-2 text-center font-mono font-bold text-slate-400 border-r border-slate-200 dark:border-slate-800 text-[11px]">
+                            {rowNum}
+                          </td>
+                          <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
+                            <span className="font-bold text-blue-700 dark:text-blue-400 text-xs">
+                              {item.noBarang}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-3 border-r border-slate-200 dark:border-slate-800">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-slate-900 dark:text-white leading-tight">
+                                {item.deskripsiBarang || item.keteranganBarang}
                               </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
-                          {hasDim || calculatedVol > 0 ? (
-                            <div className="flex flex-col gap-1 items-start">
-                              <span className="text-slate-700 dark:text-slate-300 font-medium text-xs whitespace-nowrap">
-                                {item.panjangCm || 0} &times; {item.lebarCm || 0} &times; {item.tinggiCm || 0} cm
-                              </span>
-                              {calculatedVol > 0 ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-xs sm:text-[13px] tracking-wide shadow-2xs">
-                                  {calculatedVol} M3
-                                </span>
+                              {hasCustomPhoto ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewDocItem(item);
+                                    setActivePhotoIndex(0);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold hover:bg-blue-100 transition cursor-pointer shrink-0"
+                                  title="Klik untuk melihat foto dokumentasi"
+                                >
+                                  <Camera className="w-2.5 h-2.5" />
+                                  <span>{photoList.length} Foto</span>
+                                </button>
                               ) : (
-                                <span className="text-slate-400 text-xs">0 M3</span>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 text-slate-400 text-[9px] font-medium shrink-0">
+                                  Tanpa Foto
+                                </span>
                               )}
                             </div>
-                          ) : (
-                            <span className="text-slate-400 font-mono text-xs">-</span>
-                          )}
-                        </td>
-                        <td className="py-1.5 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
-                          {item.beratKg > 0 ? (
-                            <span className="font-bold text-slate-900 dark:text-white">{item.beratKg} kg</span>
-                          ) : (
-                            <span className="text-slate-400 font-mono">-</span>
-                          )}
-                        </td>
-                        <td className="py-1.5 px-2 text-center">
-                          <div className="inline-flex items-center justify-center gap-1">
-                            {/* Tombol Ambil Foto Langsung dari HP */}
-                            <button
-                              type="button"
-                              onClick={() => triggerCameraForRow(item)}
-                              className="p-1 rounded-md bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition cursor-pointer"
-                              title="Ambil Foto Langsung Kamera HP"
-                            >
-                              <Camera className="w-3.5 h-3.5" />
-                            </button>
-                            {hasCustomPhoto && (
+                          </td>
+                          <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-[10px] text-slate-900 dark:text-white">
+                                {item.unit1 || item.satuan || 'Pcs'}
+                              </span>
+                              {item.unit2 && (
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                  1 {item.unit2} {item.rasio2 ? `= ${item.rasio2} ${item.unit1 || 'Pcs'}` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2.5 border-r border-slate-200 dark:border-slate-800 font-mono">
+                            {hasDim || calculatedVol > 0 ? (
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className="text-slate-700 dark:text-slate-300 font-medium text-xs whitespace-nowrap">
+                                  {item.panjangCm || 0} &times; {item.lebarCm || 0} &times; {item.tinggiCm || 0} cm
+                                </span>
+                                {calculatedVol > 0 ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-xs sm:text-[13px] tracking-wide shadow-2xs">
+                                    {calculatedVol} M3
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-xs">0 M3</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-mono text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2.5 text-right border-r border-slate-200 dark:border-slate-800 font-mono">
+                            {item.beratKg > 0 ? (
+                              <span className="font-bold text-slate-900 dark:text-white">{item.beratKg} kg</span>
+                            ) : (
+                              <span className="text-slate-400 font-mono">-</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2 text-center">
+                            <div className="inline-flex items-center justify-center gap-1">
+                              {/* Tombol Ambil Foto Langsung dari HP */}
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setPreviewDocItem(item);
-                                  setActivePhotoIndex(0);
-                                }}
-                                className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-                                title="Lihat Foto Dokumentasi"
+                                onClick={() => triggerCameraForRow(item)}
+                                className="p-1 rounded-md bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition cursor-pointer"
+                                title="Ambil Foto Langsung Kamera HP"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                <Camera className="w-3.5 h-3.5" />
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(item)}
-                              className="p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
-                              title="Edit Data Barang"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteItem(item)}
-                              className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer"
-                              title="Hapus Barang"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="py-10 text-center text-slate-400 text-xs">
-                      Tidak ada data barang yang sesuai filter pencarian.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                              {hasCustomPhoto && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewDocItem(item);
+                                    setActivePhotoIndex(0);
+                                  }}
+                                  className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                                  title="Lihat Foto Dokumentasi"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(item)}
+                                className="p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
+                                title="Edit Data Barang"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteItem(item)}
+                                className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                                title="Hapus Barang"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-slate-400 text-xs">
+                        Tidak ada data barang yang sesuai filter pencarian.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           /* Tabel Mode Spreadsheet Lengkap (13 Kolom) */

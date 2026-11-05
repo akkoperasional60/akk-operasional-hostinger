@@ -223,6 +223,30 @@ CREATE TABLE IF NOT EXISTS `wms_scan_logs` (
   INDEX `idx_wms_logs_no_do` (`no_do`, `scanned_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 15. WMS_DATABASE_BARANG (Master Database Barang Gudang WMS Terpusat untuk Sinkronisasi PC & HP)
+CREATE TABLE IF NOT EXISTS `wms_database_barang` (
+  `id` VARCHAR(96) NOT NULL PRIMARY KEY,
+  `order_index` INT NOT NULL DEFAULT 0,
+  `no_barang` VARCHAR(100) NOT NULL,
+  `deskripsi_barang` VARCHAR(500) NOT NULL,
+  `unit1` VARCHAR(50) DEFAULT 'Pcs',
+  `unit2` VARCHAR(50) DEFAULT '',
+  `unit3` VARCHAR(50) DEFAULT '',
+  `rasio2` VARCHAR(50) DEFAULT '0',
+  `rasio3` VARCHAR(50) DEFAULT '0',
+  `panjang_cm` DECIMAL(10,2) DEFAULT 0.00,
+  `lebar_cm` DECIMAL(10,2) DEFAULT 0.00,
+  `tinggi_cm` DECIMAL(10,2) DEFAULT 0.00,
+  `vol_m3` DECIMAL(12,4) DEFAULT 0.0000,
+  `berat_kg` DECIMAL(10,2) DEFAULT 0.00,
+  `dokumentasi_url` MEDIUMTEXT NULL,
+  `dokumentasi_urls_json` LONGTEXT NULL,
+  `payload_json` LONGTEXT NULL,
+  `updated_at` VARCHAR(32) NULL,
+  INDEX `idx_wms_db_barang_order` (`order_index`),
+  INDEX `idx_wms_db_barang_code` (`no_barang`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ====================================================================
 -- SAFE UPGRADE FOR AN EARLIER HOSTINGER SCHEMA (NO DROP / NO TRUNCATE)
 -- ====================================================================

@@ -40,6 +40,7 @@ import { canAccess, getDefaultTabForRole, getFirstAccessibleTabForUser } from '.
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
+import { databaseBarangService } from './services/databaseBarangService';
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
@@ -188,6 +189,10 @@ export default function App() {
     id: currentUser.id,
     role: currentUser.role
   });
+
+  useEffect(() => {
+    void databaseBarangService.ensureHydrated();
+  }, []);
 
   useEffect(() => {
     if (isAuthChecking || !isAuthenticated) return;

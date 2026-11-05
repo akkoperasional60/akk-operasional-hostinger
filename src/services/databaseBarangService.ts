@@ -344,6 +344,44 @@ let inMemoryItems: DatabaseBarangRecord[] | null = null;
 let hasHydratedFromIdb = false;
 let hydrationPromise: Promise<DatabaseBarangRecord[]> | null = null;
 
+export interface DatabaseBarangSyncStatus {
+  isSyncing: boolean;
+  progressPct: number;
+  lastSyncedAt: string | null;
+  serverCount: number;
+  error: string | null;
+}
+
+let syncStatusState: DatabaseBarangSyncStatus = {
+  isSyncing: false,
+  progressPct: 0,
+  lastSyncedAt: null,
+  serverCount: 0,
+  error: null
+};
+
+function updateSyncStatus(partial: Partial<DatabaseBarangSyncStatus>): void {
+  syncStatusState = { ...syncStatusState, ...partial };
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('akk-database-barang-sync-status', { detail: syncStatusState }));
+  }
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      const token = localStorage.getItem('akk_session_token') || sessionStorage.getItem('akk_session_token');
+      if (token) {
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+  }
+  return headers;
+}
+
 function openIndexedDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -423,8 +461,8 @@ function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
       localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(records));
       localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
     } else {
-      // Untuk ribuan baris (cth. 4076 baris), simpan versi ringan tanpa foto base64 di localStorage
-      // agar pembukaan halaman secara sinkron langsung menampilkan data bersih (foto tetap utuh di IndexedDB)
+      // Untuk ribuan baris (cth. 4075 baris), simpan versi ringan tanpa foto base64 di localStorage
+      // agar pembukaan halaman secara sinkron langsung menampilkan data bersih (foto tetap utuh di IndexedDB & Server)
       const lightweight = records.map((r, idx) => ({
         id: r.id,
         orderIndex: idx,
@@ -458,9 +496,235 @@ function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
   }
 }
 
+function mergeLocalAndRemoteRecords(
+  localRecords: DatabaseBarangRecord[],
+  remoteRecords: DatabaseBarangRecord[]
+): { merged: DatabaseBarangRecord[]; shouldPushToServer: boolean; shouldSaveLocally: boolean } {
+  if (localRecords.length === 0 && remoteRecords.length === 0) {
+    return { merged: [], shouldPushToServer: false, shouldSaveLocally: false };
+  }
+  // Jika HP/browser baru belum punya data lokal tapi server sudah punya data -> tarik dari server ke HP
+  if (localRecords.length === 0 && remoteRecords.length > 0) {
+    return { merged: remoteRecords, shouldPushToServer: false, shouldSaveLocally: true };
+  }
+  // Jika PC sudah punya data lokal (misal 4.075 barang) tapi server masih kosong -> dorong dari PC ke server
+  if (localRecords.length > 0 && remoteRecords.length === 0) {
+    return { merged: localRecords, shouldPushToServer: true, shouldSaveLocally: false };
+  }
+
+  // Jika keduanya ada data, pilih sumber yang lebih lengkap sebagai basis namun tetap gabungkan foto dokumentasi dari kedua sisi
+  const useLocalAsPrimary = localRecords.length > remoteRecords.length;
+  const primary = useLocalAsPrimary ? localRecords : remoteRecords;
+  const secondary = useLocalAsPrimary ? remoteRecords : localRecords;
+
+  const secondaryByCode = new Map<string, DatabaseBarangRecord>();
+  secondary.forEach(item => {
+    secondaryByCode.set(item.noBarang.trim().toUpperCase(), item);
+  });
+
+  let shouldPush = localRecords.length > remoteRecords.length;
+  let shouldSaveLocal = remoteRecords.length > localRecords.length;
+
+  const merged = primary.map((item, idx) => {
+    const code = item.noBarang.trim().toUpperCase();
+    const sec = secondaryByCode.get(code);
+    if (!sec) return sanitizeRecord(item, idx);
+
+    const primaryPhotos = Array.isArray(item.dokumentasiUrls)
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : [];
+    const secPhotos = Array.isArray(sec.dokumentasiUrls)
+      ? sec.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : [];
+
+    const combinedPhotos = Array.from(new Set([...primaryPhotos, ...secPhotos]));
+    if (combinedPhotos.length > primaryPhotos.length) {
+      if (useLocalAsPrimary) shouldSaveLocal = true;
+      else shouldPush = true;
+    }
+
+    // Jika salah satu sisi memiliki dimensi/berat yang sudah diisi sedangkan sisi lain masih 0, pertahankan yang sudah terisi
+    const hasPrimaryDim = (item.panjangCm || 0) > 0 || (item.volM3 || 0) > 0;
+    const hasSecDim = (sec.panjangCm || 0) > 0 || (sec.volM3 || 0) > 0;
+
+    return sanitizeRecord(
+      {
+        ...item,
+        panjangCm: hasPrimaryDim ? item.panjangCm : (hasSecDim ? sec.panjangCm : item.panjangCm),
+        lebarCm: hasPrimaryDim ? item.lebarCm : (hasSecDim ? sec.lebarCm : item.lebarCm),
+        tinggiCm: hasPrimaryDim ? item.tinggiCm : (hasSecDim ? sec.tinggiCm : item.tinggiCm),
+        volM3: hasPrimaryDim ? item.volM3 : (hasSecDim ? sec.volM3 : item.volM3),
+        beratKg: (item.beratKg || 0) > 0 ? item.beratKg : ((sec.beratKg || 0) > 0 ? sec.beratKg : item.beratKg),
+        dokumentasiUrls: combinedPhotos,
+        dokumentasiUrl: combinedPhotos[0] || item.dokumentasiUrl || sec.dokumentasiUrl || ''
+      },
+      idx
+    );
+  });
+
+  return { merged, shouldPushToServer: shouldPush, shouldSaveLocally: shouldSaveLocal };
+}
+
 export const databaseBarangService = {
+  getSyncStatus(): DatabaseBarangSyncStatus {
+    return { ...syncStatusState };
+  },
+
+  async fetchFromServer(): Promise<DatabaseBarangRecord[] | null> {
+    if (typeof window === 'undefined') return null;
+    try {
+      const res = await fetch('/api/database-barang', {
+        method: 'GET',
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || !Array.isArray(data.items)) return null;
+      const cleaned = data.items
+        .filter((item: any) => !isLegacySeededBarang(item?.noBarang))
+        .map((item: any, idx: number) => sanitizeRecord(item, idx));
+      updateSyncStatus({
+        serverCount: cleaned.length,
+        lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        error: null
+      });
+      return cleaned;
+    } catch (err: any) {
+      console.warn('Peringatan: Gagal mengambil Database Barang dari server:', err?.message || err);
+      return null;
+    }
+  },
+
+  async syncAllToServer(
+    records: DatabaseBarangRecord[],
+    mode: 'replace_all' | 'append' = 'replace_all'
+  ): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      updateSyncStatus({ isSyncing: true, progressPct: 5, error: null });
+      const CHUNK_SIZE = 350;
+      const total = records.length;
+
+      if (total === 0) {
+        const res = await fetch('/api/database-barang/sync', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ items: [], mode: 'replace_all', chunkIndex: 0, chunkOffset: 0 })
+        });
+        updateSyncStatus({
+          isSyncing: false,
+          progressPct: 100,
+          serverCount: 0,
+          lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+        });
+        return res.ok;
+      }
+
+      const totalChunks = Math.ceil(total / CHUNK_SIZE);
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        const offset = chunkIdx * CHUNK_SIZE;
+        const slice = records.slice(offset, offset + CHUNK_SIZE).map((r, i) => ({
+          ...r,
+          orderIndex: offset + i
+        }));
+        const res = await fetch('/api/database-barang/sync', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            items: slice,
+            mode: chunkIdx === 0 ? mode : 'append',
+            chunkIndex: chunkIdx,
+            chunkOffset: offset,
+            totalChunks
+          })
+        });
+        if (!res.ok) {
+          const errPayload = await res.json().catch(() => ({}));
+          throw new Error(errPayload?.error || `HTTP ${res.status}`);
+        }
+        const pct = Math.min(99, Math.round(((chunkIdx + 1) / totalChunks) * 100));
+        updateSyncStatus({ isSyncing: true, progressPct: pct });
+      }
+
+      updateSyncStatus({
+        isSyncing: false,
+        progressPct: 100,
+        serverCount: total,
+        lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        error: null
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('Peringatan: Gagal sinkronisasi Database Barang ke server:', err?.message || err);
+      updateSyncStatus({
+        isSyncing: false,
+        progressPct: 0,
+        error: err?.message || 'Gagal sinkronisasi ke server'
+      });
+      return false;
+    }
+  },
+
+  async pushItemToServer(record: DatabaseBarangRecord, orderIndex?: number): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      await fetch('/api/database-barang/item', {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ item: { ...record, orderIndex } })
+      });
+      updateSyncStatus({
+        lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+      });
+    } catch (err) {
+      console.warn('Gagal sinkron item ke server:', err);
+    }
+  },
+
+  async deleteItemFromServer(id: string): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      await fetch(`/api/database-barang/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+    } catch (err) {
+      console.warn('Gagal hapus item di server:', err);
+    }
+  },
+
+  async forceSyncNow(): Promise<{ count: number; items: DatabaseBarangRecord[] }> {
+    hasHydratedFromIdb = false;
+    hydrationPromise = null;
+    const localList = this.getAll();
+    const remoteList = await this.fetchFromServer();
+
+    if (localList.length > 0 && (!remoteList || remoteList.length < localList.length)) {
+      await this.syncAllToServer(localList, 'replace_all');
+      return { count: localList.length, items: localList };
+    }
+    if (remoteList && remoteList.length > 0) {
+      const { merged, shouldPushToServer } = mergeLocalAndRemoteRecords(localList, remoteList);
+      inMemoryItems = merged;
+      hasHydratedFromIdb = true;
+      await saveRecordsToIndexedDb(merged);
+      writeSafeLocalStorageCache(merged);
+      if (shouldPushToServer) {
+        await this.syncAllToServer(merged, 'replace_all');
+      }
+      window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+      return { count: merged.length, items: merged };
+    }
+    return { count: localList.length, items: localList };
+  },
+
   async ensureHydrated(): Promise<DatabaseBarangRecord[]> {
-    if (hasHydratedFromIdb && inMemoryItems) {
+    if (hasHydratedFromIdb && inMemoryItems && inMemoryItems.length > 0) {
       return [...inMemoryItems];
     }
     if (hydrationPromise) {
@@ -469,6 +733,8 @@ export const databaseBarangService = {
 
     hydrationPromise = (async () => {
       try {
+        // 1. Muat data lokal terlebih dahulu (IndexedDB -> fallback localStorage)
+        let localList: DatabaseBarangRecord[] = [];
         const idbList = await loadRecordsFromIndexedDb();
         if (idbList && idbList.length > 0) {
           let needsResave = false;
@@ -476,7 +742,7 @@ export const databaseBarangService = {
           if (filteredIdb.length !== idbList.length) {
             needsResave = true;
           }
-          const sanitizedIdb = filteredIdb.map((item, idx) => {
+          localList = filteredIdb.map((item, idx) => {
             if (
               isLegacySyntheticUnitFallback(String(item?.unit2 || ''), String(item?.unit3 || ''), item?.rasio2, item?.rasio3) ||
               isLegacySyntheticDimensionFallback(
@@ -492,25 +758,42 @@ export const databaseBarangService = {
             return sanitizeRecord(item, idx);
           });
 
-          inMemoryItems = sanitizedIdb;
+          inMemoryItems = localList;
+          if (needsResave) {
+            await saveRecordsToIndexedDb(localList);
+            writeSafeLocalStorageCache(localList);
+          }
+          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        } else {
+          localList = this.getAll();
+          if (localList.length > 0) {
+            await saveRecordsToIndexedDb(localList);
+            writeSafeLocalStorageCache(localList);
+          }
+        }
+
+        // 2. Sinkronisasi dengan Server MySQL (/api/database-barang) agar PC & HP menampilkan data yang sama
+        const remoteList = await this.fetchFromServer();
+        if (remoteList !== null) {
+          const { merged, shouldPushToServer, shouldSaveLocally } = mergeLocalAndRemoteRecords(localList, remoteList);
+          inMemoryItems = merged;
           hasHydratedFromIdb = true;
 
-          if (needsResave) {
-            await saveRecordsToIndexedDb(sanitizedIdb);
-            writeSafeLocalStorageCache(sanitizedIdb);
+          if (shouldSaveLocally) {
+            await saveRecordsToIndexedDb(merged);
+            writeSafeLocalStorageCache(merged);
+            window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
           }
 
-          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-          return [...inMemoryItems];
+          if (shouldPushToServer && merged.length > 0) {
+            // Otomatis unggah 4.075 barang dari browser PC ke Hostinger MySQL di latar belakang
+            void this.syncAllToServer(merged, 'replace_all');
+          }
+
+          return [...merged];
         }
 
-        // Jika IndexedDB kosong, gunakan hasil dari localStorage dan simpan ke IndexedDB
-        const localList = this.getAll();
         hasHydratedFromIdb = true;
-        if (localList && localList.length > 0) {
-          await saveRecordsToIndexedDb(localList);
-          writeSafeLocalStorageCache(localList);
-        }
         return [...localList];
       } catch {
         hasHydratedFromIdb = true;
@@ -572,7 +855,7 @@ export const databaseBarangService = {
     }
   },
 
-  saveAll(records: DatabaseBarangRecord[]): void {
+  saveAll(records: DatabaseBarangRecord[], syncRemote = true): void {
     const sanitized = records
       .filter(r => !isLegacySeededBarang(r?.noBarang))
       .map((r, idx) => sanitizeRecord(r, idx));
@@ -584,6 +867,10 @@ export const databaseBarangService = {
 
     // Simpan ke localStorage secara aman tanpa pernah meninggalkan cache lama
     writeSafeLocalStorageCache(sanitized);
+
+    if (syncRemote) {
+      void this.syncAllToServer(sanitized, 'replace_all');
+    }
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
   },
@@ -721,9 +1008,10 @@ export const databaseBarangService = {
     inMemoryItems = finalRecords;
     hasHydratedFromIdb = true;
 
-    // Simpan ke IndexedDB dan localStorage secara konsisten
+    // Simpan ke IndexedDB, localStorage, dan Server MySQL secara konsisten
     void saveRecordsToIndexedDb(finalRecords);
     writeSafeLocalStorageCache(finalRecords);
+    void this.syncAllToServer(finalRecords, 'replace_all');
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     return { count: finalRecords.length, saved: finalRecords };
@@ -852,18 +1140,22 @@ export const databaseBarangService = {
       updatedAt: new Date().toISOString().split('T')[0]
     };
 
+    const targetOrderIdx = idx >= 0 ? idx : list.length;
     if (idx >= 0) {
       list[idx] = record;
     } else {
       list.push(record);
     }
 
-    this.saveAll(list);
+    this.saveAll(list, false);
+    void this.pushItemToServer(record, targetOrderIdx);
     return record;
   },
 
   deleteItem(id: string): void {
     const list = this.getAll().filter(i => i.id !== id);
-    this.saveAll(list);
+    this.saveAll(list, false);
+    void this.deleteItemFromServer(id);
   }
 };
+

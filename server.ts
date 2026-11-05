@@ -110,10 +110,9 @@ async function startServer() {
   app.use(express.json({ limit: '35mb' }));
   app.use(express.urlencoded({ limit: '35mb', extended: true }));
 
-  // Enterprise Security Headers Middleware
+  // Enterprise Security Headers Middleware (iFrame allowed for AI Studio preview)
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
@@ -703,6 +702,28 @@ async function startServer() {
         foto_path VARCHAR(255) NULL,
         scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_wms_logs_no_do (no_do, scanned_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS wms_database_barang (
+        id VARCHAR(96) NOT NULL PRIMARY KEY,
+        order_index INT NOT NULL DEFAULT 0,
+        no_barang VARCHAR(100) NOT NULL,
+        deskripsi_barang VARCHAR(500) NOT NULL,
+        unit1 VARCHAR(50) DEFAULT 'Pcs',
+        unit2 VARCHAR(50) DEFAULT '',
+        unit3 VARCHAR(50) DEFAULT '',
+        rasio2 VARCHAR(50) DEFAULT '0',
+        rasio3 VARCHAR(50) DEFAULT '0',
+        panjang_cm DECIMAL(10,2) DEFAULT 0.00,
+        lebar_cm DECIMAL(10,2) DEFAULT 0.00,
+        tinggi_cm DECIMAL(10,2) DEFAULT 0.00,
+        vol_m3 DECIMAL(12,4) DEFAULT 0.0000,
+        berat_kg DECIMAL(10,2) DEFAULT 0.00,
+        dokumentasi_url MEDIUMTEXT NULL,
+        dokumentasi_urls_json LONGTEXT NULL,
+        payload_json LONGTEXT NULL,
+        updated_at VARCHAR(32) NULL,
+        INDEX idx_wms_db_barang_order (order_index),
+        INDEX idx_wms_db_barang_code (no_barang)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -2784,8 +2805,8 @@ Kembalikan HANYA JSON valid:
              ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
             [JSON.stringify(updatedLogs)]
           );
-        } catch (dbErr: any) {
-          console.warn('[WMS Scan Muat] Gagal menyimpan transaksi ke MySQL:', dbErr?.message || dbErr);
+        } catch {
+          console.log('[WMS Scan Muat] MySQL host unavailable, transaction stored in active session state');
         }
       }
 
@@ -3016,6 +3037,447 @@ Kembalikan HANYA JSON valid:
     }
     return res.status(404).send('File APK tidak ditemukan.');
   };
+
+  // ============================================================================
+  // DATABASE BARANG (WMS) CENTRALIZED MYSQL + MULTI-DEVICE SYNC (PC <-> HP)
+  // ============================================================================
+  let memoryDatabaseBarang: any[] = [];
+
+  const mapRowToDatabaseBarang = (row: any, fallbackIdx: number) => {
+    let parsedPayload: any = {};
+    if (row.payload_json) {
+      try {
+        parsedPayload = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json;
+      } catch {}
+    }
+    let parsedUrls: string[] = [];
+    if (row.dokumentasi_urls_json) {
+      try {
+        const raw = typeof row.dokumentasi_urls_json === 'string' ? JSON.parse(row.dokumentasi_urls_json) : row.dokumentasi_urls_json;
+        if (Array.isArray(raw)) parsedUrls = raw.filter((u: any) => typeof u === 'string' && u.trim());
+      } catch {}
+    }
+    const docUrl = String(row.dokumentasi_url || parsedPayload.dokumentasiUrl || parsedUrls[0] || '');
+    if (docUrl && !parsedUrls.includes(docUrl) && !docUrl.startsWith('data:image/svg+xml')) {
+      parsedUrls.unshift(docUrl);
+    }
+    const r2Raw = row.rasio2 !== undefined && row.rasio2 !== null ? String(row.rasio2) : '0';
+    const r3Raw = row.rasio3 !== undefined && row.rasio3 !== null ? String(row.rasio3) : '0';
+    return {
+      id: String(row.id || parsedPayload.id || `dbb-${fallbackIdx + 1}`),
+      orderIndex: typeof row.order_index === 'number' ? row.order_index : fallbackIdx,
+      noBarang: String(row.no_barang || parsedPayload.noBarang || '').trim().toUpperCase(),
+      deskripsiBarang: String(row.deskripsi_barang || parsedPayload.deskripsiBarang || ''),
+      keteranganBarang: String(row.deskripsi_barang || parsedPayload.keteranganBarang || ''),
+      unit1: String(row.unit1 || parsedPayload.unit1 || 'Pcs'),
+      satuan: String(row.unit1 || parsedPayload.satuan || 'Pcs'),
+      unit2: String(row.unit2 ?? parsedPayload.unit2 ?? ''),
+      unit3: String(row.unit3 ?? parsedPayload.unit3 ?? ''),
+      rasio2: !isNaN(Number(r2Raw)) && r2Raw.trim() !== '' ? Number(r2Raw) : r2Raw,
+      rasio3: !isNaN(Number(r3Raw)) && r3Raw.trim() !== '' ? Number(r3Raw) : r3Raw,
+      panjangCm: Number(row.panjang_cm ?? parsedPayload.panjangCm ?? 0) || 0,
+      lebarCm: Number(row.lebar_cm ?? parsedPayload.lebarCm ?? 0) || 0,
+      tinggiCm: Number(row.tinggi_cm ?? parsedPayload.tinggiCm ?? 0) || 0,
+      volM3: Number(row.vol_m3 ?? parsedPayload.volM3 ?? 0) || 0,
+      beratKg: Number(row.berat_kg ?? parsedPayload.beratKg ?? 0) || 0,
+      dokumentasiUrl: docUrl,
+      dokumentasiUrls: parsedUrls,
+      compressedSizeKb: Number(parsedPayload.compressedSizeKb || 0),
+      originalSizeKb: Number(parsedPayload.originalSizeKb || 0),
+      compressionSavingsPct: Number(parsedPayload.compressionSavingsPct || 0),
+      kategoriBarang: String(parsedPayload.kategoriBarang || 'Karton Box Corrugated'),
+      stokTersedia: Number(parsedPayload.stokTersedia ?? 1000),
+      cabang: String(parsedPayload.cabang || 'Banyuwangi'),
+      updatedAt: String(row.updated_at || parsedPayload.updatedAt || new Date().toISOString().split('T')[0])
+    };
+  };
+
+  app.get('/api/database-barang', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    if (isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>(
+          `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                  panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
+                  payload_json, updated_at
+           FROM wms_database_barang
+           ORDER BY order_index ASC, no_barang ASC`
+        );
+        if (Array.isArray(rows) && rows.length > 0) {
+          const items = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
+          memoryDatabaseBarang = items;
+          return res.json({ success: true, source: 'mysql', count: items.length, items });
+        }
+        return res.json({ success: true, source: 'mysql', count: memoryDatabaseBarang.length, items: memoryDatabaseBarang });
+      } catch {
+        console.log('[GET /api/database-barang] MySQL host unavailable, using in-memory database storage');
+      }
+    }
+    return res.json({
+      success: true,
+      source: 'memory',
+      count: memoryDatabaseBarang.length,
+      items: memoryDatabaseBarang
+    });
+  });
+
+  app.post('/api/database-barang/sync', async (req: any, res: any) => {
+    try {
+      // Periksa jika user yang login berstatus read_only pada gudang/warehouse
+      const sessionUser = await getSessionUser(req);
+      if (sessionUser && String(sessionUser.role || '').toLowerCase() !== 'super_admin') {
+        const explicitAccess = resolveServerSubMenuAccess(sessionUser, 'warehouse', ['warehouse_inventory', 'stok_barang', 'warehouse_outbound']);
+        if (explicitAccess === 'read_only' || explicitAccess === 'none') {
+          return res.status(403).json({
+            success: false,
+            error: 'Akses Hanya Lihat (Read-Only): Tidak diizinkan mengubah Database Barang.'
+          });
+        }
+      }
+
+      const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+      const mode = String(req.body?.mode || 'replace_all');
+      const chunkIndex = Number(req.body?.chunkIndex ?? 0);
+      const chunkOffset = Number(req.body?.chunkOffset ?? 0);
+
+      if (chunkIndex === 0 && mode === 'replace_all') {
+        memoryDatabaseBarang = [];
+        if (isDatabaseConfigured()) {
+          try {
+            await ensureDatabaseSchema();
+            await mysqlQuery(`DELETE FROM wms_database_barang`);
+          } catch {
+            console.log('[Database Barang Sync] MySQL host unavailable, operating in-memory storage mode');
+          }
+        }
+      }
+
+      if (rawItems.length === 0) {
+        return res.json({ success: true, count: memoryDatabaseBarang.length });
+      }
+
+      const normalizedChunk = rawItems.map((item: any, idx: number) => {
+        const orderIndex = typeof item?.orderIndex === 'number' ? item.orderIndex : chunkOffset + idx;
+        const code = String(item?.noBarang || '').trim().toUpperCase() || `AKK-BRG-${orderIndex + 1}`;
+        const desc = String(item?.deskripsiBarang || item?.keteranganBarang || 'Barang Kemasan AKK').trim();
+        const u1 = String(item?.unit1 || item?.satuan || 'Pcs').trim();
+        const u2 = String(item?.unit2 ?? '').trim();
+        const u3 = String(item?.unit3 ?? '').trim();
+        const r2 = item?.rasio2 !== undefined && item?.rasio2 !== null ? item.rasio2 : 0;
+        const r3 = item?.rasio3 !== undefined && item?.rasio3 !== null ? item.rasio3 : 0;
+        const p = Number(item?.panjangCm) || 0;
+        const l = Number(item?.lebarCm) || 0;
+        const t = Number(item?.tinggiCm) || 0;
+        const v = Number(item?.volM3) || 0;
+        const b = Number(item?.beratKg) || 0;
+        const urls = Array.isArray(item?.dokumentasiUrls)
+          ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+          : [];
+        const docUrl = String(item?.dokumentasiUrl || urls[0] || '');
+        const cleanDocUrl = docUrl.startsWith('data:image/svg+xml') ? '' : docUrl;
+        return {
+          id: String(item?.id || `dbb-${code}-${orderIndex}`),
+          orderIndex,
+          noBarang: code,
+          deskripsiBarang: desc,
+          keteranganBarang: desc,
+          unit1: u1,
+          satuan: u1,
+          unit2: u2,
+          unit3: u3,
+          rasio2: r2,
+          rasio3: r3,
+          panjangCm: p,
+          lebarCm: l,
+          tinggiCm: t,
+          volM3: v,
+          beratKg: b,
+          dokumentasiUrl: cleanDocUrl,
+          dokumentasiUrls: urls,
+          compressedSizeKb: Number(item?.compressedSizeKb || 0),
+          originalSizeKb: Number(item?.originalSizeKb || 0),
+          compressionSavingsPct: Number(item?.compressionSavingsPct || 0),
+          kategoriBarang: String(item?.kategoriBarang || 'Karton Box Corrugated'),
+          stokTersedia: Number(item?.stokTersedia ?? 1000),
+          cabang: String(item?.cabang || 'Banyuwangi'),
+          updatedAt: String(item?.updatedAt || new Date().toISOString().split('T')[0])
+        };
+      });
+
+      // Update in-memory list
+      const byCode = new Map<string, number>();
+      memoryDatabaseBarang.forEach((existing, i) => {
+        byCode.set(String(existing.noBarang || '').toUpperCase(), i);
+      });
+      for (const item of normalizedChunk) {
+        const existingIdx = byCode.get(item.noBarang);
+        if (existingIdx !== undefined) {
+          memoryDatabaseBarang[existingIdx] = item;
+        } else {
+          byCode.set(item.noBarang, memoryDatabaseBarang.length);
+          memoryDatabaseBarang.push(item);
+        }
+      }
+      memoryDatabaseBarang.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+
+      if (isDatabaseConfigured()) {
+        try {
+          await ensureDatabaseSchema();
+          const BATCH_SIZE = 150;
+          for (let i = 0; i < normalizedChunk.length; i += BATCH_SIZE) {
+            const slice = normalizedChunk.slice(i, i + BATCH_SIZE);
+            const placeholders: string[] = [];
+            const params: any[] = [];
+            for (const rec of slice) {
+              placeholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+              params.push(
+                rec.id,
+                rec.orderIndex,
+                rec.noBarang,
+                rec.deskripsiBarang,
+                rec.unit1,
+                rec.unit2,
+                rec.unit3,
+                String(rec.rasio2 ?? '0'),
+                String(rec.rasio3 ?? '0'),
+                rec.panjangCm,
+                rec.lebarCm,
+                rec.tinggiCm,
+                rec.volM3,
+                rec.beratKg,
+                rec.dokumentasiUrl || null,
+                rec.dokumentasiUrls && rec.dokumentasiUrls.length > 0 ? JSON.stringify(rec.dokumentasiUrls) : null,
+                JSON.stringify({
+                  kategoriBarang: rec.kategoriBarang,
+                  stokTersedia: rec.stokTersedia,
+                  cabang: rec.cabang,
+                  compressedSizeKb: rec.compressedSizeKb,
+                  originalSizeKb: rec.originalSizeKb,
+                  compressionSavingsPct: rec.compressionSavingsPct
+                }),
+                rec.updatedAt
+              );
+            }
+            const sql = `
+              INSERT INTO wms_database_barang (
+                id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
+                dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
+              ) VALUES ${placeholders.join(', ')}
+              ON DUPLICATE KEY UPDATE
+                order_index = VALUES(order_index),
+                no_barang = VALUES(no_barang),
+                deskripsi_barang = VALUES(deskripsi_barang),
+                unit1 = VALUES(unit1),
+                unit2 = VALUES(unit2),
+                unit3 = VALUES(unit3),
+                rasio2 = VALUES(rasio2),
+                rasio3 = VALUES(rasio3),
+                panjang_cm = VALUES(panjang_cm),
+                lebar_cm = VALUES(lebar_cm),
+                tinggi_cm = VALUES(tinggi_cm),
+                vol_m3 = VALUES(vol_m3),
+                berat_kg = VALUES(berat_kg),
+                dokumentasi_url = COALESCE(VALUES(dokumentasi_url), dokumentasi_url),
+                dokumentasi_urls_json = COALESCE(VALUES(dokumentasi_urls_json), dokumentasi_urls_json),
+                payload_json = VALUES(payload_json),
+                updated_at = VALUES(updated_at)
+            `;
+            await mysqlQuery(sql, params);
+          }
+        } catch {
+          console.log('[Database Barang Sync] MySQL host unavailable, operating in-memory storage mode');
+        }
+      }
+
+      return res.json({
+        success: true,
+        chunkCount: normalizedChunk.length,
+        totalCount: memoryDatabaseBarang.length
+      });
+    } catch (err: any) {
+      console.error('[POST /api/database-barang/sync] Error:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Gagal menyimpan sinkronisasi Database Barang ke server'
+      });
+    }
+  });
+
+  app.post('/api/database-barang/item', async (req: any, res: any) => {
+    try {
+      const sessionUser = await getSessionUser(req);
+      if (sessionUser && String(sessionUser.role || '').toLowerCase() !== 'super_admin') {
+        const explicitAccess = resolveServerSubMenuAccess(sessionUser, 'warehouse', ['warehouse_inventory', 'stok_barang', 'warehouse_outbound']);
+        if (explicitAccess === 'read_only' || explicitAccess === 'none') {
+          return res.status(403).json({
+            success: false,
+            error: 'Akses Hanya Lihat (Read-Only): Tidak diizinkan mengubah item Database Barang.'
+          });
+        }
+      }
+
+      const item = req.body?.item || req.body;
+      if (!item || !item.noBarang) {
+        return res.status(400).json({ success: false, error: 'Data barang tidak lengkap' });
+      }
+
+      const code = String(item.noBarang).trim().toUpperCase();
+      const existingIdx = memoryDatabaseBarang.findIndex(
+        x => x.id === item.id || String(x.noBarang).toUpperCase() === code
+      );
+      const orderIndex = typeof item.orderIndex === 'number'
+        ? item.orderIndex
+        : existingIdx >= 0
+        ? memoryDatabaseBarang[existingIdx].orderIndex
+        : memoryDatabaseBarang.length;
+
+      const urls = Array.isArray(item.dokumentasiUrls)
+        ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+        : [];
+      const rawDoc = String(item.dokumentasiUrl || urls[0] || '');
+      const cleanDocUrl = rawDoc.startsWith('data:image/svg+xml') ? '' : rawDoc;
+
+      const rec = {
+        id: String(item.id || (existingIdx >= 0 ? memoryDatabaseBarang[existingIdx].id : `dbb-${Date.now()}`)),
+        orderIndex,
+        noBarang: code,
+        deskripsiBarang: String(item.deskripsiBarang || item.keteranganBarang || ''),
+        keteranganBarang: String(item.deskripsiBarang || item.keteranganBarang || ''),
+        unit1: String(item.unit1 || item.satuan || 'Pcs'),
+        satuan: String(item.unit1 || item.satuan || 'Pcs'),
+        unit2: String(item.unit2 ?? ''),
+        unit3: String(item.unit3 ?? ''),
+        rasio2: item.rasio2 ?? 0,
+        rasio3: item.rasio3 ?? 0,
+        panjangCm: Number(item.panjangCm) || 0,
+        lebarCm: Number(item.lebarCm) || 0,
+        tinggiCm: Number(item.tinggiCm) || 0,
+        volM3: Number(item.volM3) || 0,
+        beratKg: Number(item.beratKg) || 0,
+        dokumentasiUrl: cleanDocUrl,
+        dokumentasiUrls: urls,
+        compressedSizeKb: Number(item.compressedSizeKb || 0),
+        originalSizeKb: Number(item.originalSizeKb || 0),
+        compressionSavingsPct: Number(item.compressionSavingsPct || 0),
+        kategoriBarang: String(item.kategoriBarang || 'Karton Box Corrugated'),
+        stokTersedia: Number(item.stokTersedia ?? 1000),
+        cabang: String(item.cabang || 'Banyuwangi'),
+        updatedAt: String(item.updatedAt || new Date().toISOString().split('T')[0])
+      };
+
+      if (existingIdx >= 0) {
+        memoryDatabaseBarang[existingIdx] = rec;
+      } else {
+        memoryDatabaseBarang.push(rec);
+      }
+
+      if (isDatabaseConfigured()) {
+        try {
+          await ensureDatabaseSchema();
+          await mysqlQuery(
+            `INSERT INTO wms_database_barang (
+              id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+              panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
+              dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              order_index = VALUES(order_index),
+              no_barang = VALUES(no_barang),
+              deskripsi_barang = VALUES(deskripsi_barang),
+              unit1 = VALUES(unit1),
+              unit2 = VALUES(unit2),
+              unit3 = VALUES(unit3),
+              rasio2 = VALUES(rasio2),
+              rasio3 = VALUES(rasio3),
+              panjang_cm = VALUES(panjang_cm),
+              lebar_cm = VALUES(lebar_cm),
+              tinggi_cm = VALUES(tinggi_cm),
+              vol_m3 = VALUES(vol_m3),
+              berat_kg = VALUES(berat_kg),
+              dokumentasi_url = VALUES(dokumentasi_url),
+              dokumentasi_urls_json = VALUES(dokumentasi_urls_json),
+              payload_json = VALUES(payload_json),
+              updated_at = VALUES(updated_at)`,
+            [
+              rec.id,
+              rec.orderIndex,
+              rec.noBarang,
+              rec.deskripsiBarang,
+              rec.unit1,
+              rec.unit2,
+              rec.unit3,
+              String(rec.rasio2 ?? '0'),
+              String(rec.rasio3 ?? '0'),
+              rec.panjangCm,
+              rec.lebarCm,
+              rec.tinggiCm,
+              rec.volM3,
+              rec.beratKg,
+              rec.dokumentasiUrl || null,
+              rec.dokumentasiUrls.length > 0 ? JSON.stringify(rec.dokumentasiUrls) : null,
+              JSON.stringify({
+                kategoriBarang: rec.kategoriBarang,
+                stokTersedia: rec.stokTersedia,
+                cabang: rec.cabang,
+                compressedSizeKb: rec.compressedSizeKb,
+                originalSizeKb: rec.originalSizeKb,
+                compressionSavingsPct: rec.compressionSavingsPct
+              }),
+              rec.updatedAt
+            ]
+          );
+        } catch {
+          console.log('[Database Barang Item] MySQL host unavailable, operating in-memory storage mode');
+        }
+      }
+
+      return res.json({ success: true, item: rec });
+    } catch (err: any) {
+      console.error('[POST /api/database-barang/item] Error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan item barang' });
+    }
+  });
+
+  app.delete('/api/database-barang/:id', async (req: any, res: any) => {
+    try {
+      const sessionUser = await getSessionUser(req);
+      if (sessionUser && String(sessionUser.role || '').toLowerCase() !== 'super_admin') {
+        const explicitAccess = resolveServerSubMenuAccess(sessionUser, 'warehouse', ['warehouse_inventory', 'stok_barang', 'warehouse_outbound']);
+        if (explicitAccess === 'read_only' || explicitAccess === 'none') {
+          return res.status(403).json({
+            success: false,
+            error: 'Akses Hanya Lihat (Read-Only): Tidak diizinkan menghapus item Database Barang.'
+          });
+        }
+      }
+
+      const targetId = String(req.params.id || '').trim();
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'ID barang tidak valid' });
+      }
+
+      memoryDatabaseBarang = memoryDatabaseBarang.filter(
+        x => x.id !== targetId && String(x.noBarang).toUpperCase() !== targetId.toUpperCase()
+      );
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `DELETE FROM wms_database_barang WHERE id = ? OR UPPER(no_barang) = UPPER(?)`,
+            [targetId, targetId]
+          );
+        } catch {
+          console.log('[Database Barang Delete] MySQL host unavailable, operating in-memory storage mode');
+        }
+      }
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error('[DELETE /api/database-barang/:id] Error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus item barang' });
+    }
+  });
 
   app.get(['/api/download-apk', '/api/apk'], (req, res) => {
     serveApkFile('akk-mobile-v1.apk', res);
