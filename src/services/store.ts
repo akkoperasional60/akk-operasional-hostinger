@@ -109,7 +109,7 @@ import {
   INITIAL_FUEL_LOGS,
   FUEL_TARGET_RATIOS
 } from '../data/fuelMockData';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
 import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
@@ -825,38 +825,11 @@ class LogisticsStore {
     // 1. Deduplicate Super Admin accounts so only 1 primary Super Admin exists
     this.users = this.deduplicateSuperAdmins(this.users);
 
-    // 2. Ensure each user has valid permissions initialized for their role (and fix partial logistics submenus for SPV Logistik / Operasional / Pengiriman)
-    const primaryLogisticsRoles = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'];
-    this.users = this.users.map(u => {
-      if (!u.permissions || !u.permissions.modules || Object.keys(u.permissions.modules).length === 0) {
-        return {
-          ...u,
-          permissions: {
-            modules: getDefaultPermissionsForRole(u.role)
-          }
-        };
-      }
-      if (primaryLogisticsRoles.includes(u.role)) {
-        const logMod = u.permissions.modules.logistics;
-        const activeSubCount = logMod?.subMenus
-          ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
-          : 0;
-        if (!logMod || !logMod.enabled || activeSubCount <= 1) {
-          const defaultMods = getDefaultPermissionsForRole(u.role);
-          return {
-            ...u,
-            permissions: {
-              modules: {
-                ...defaultMods,
-                ...u.permissions.modules,
-                logistics: defaultMods.logistics
-              }
-            }
-          };
-        }
-      }
-      return u;
-    });
+    // 2. Ensure each user has valid, normalized permissions for their role without overwriting custom read_only/none settings
+    this.users = this.users.map(u => ({
+      ...u,
+      permissions: normalizeUserPermissions(u.role, u.permissions)
+    }));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
     if (this.currentUser && this.currentUser.id !== 'guest') {
@@ -868,19 +841,18 @@ class LogisticsStore {
       );
       if (matchedUser) {
         this.currentUser = {
-          ...matchedUser
+          ...matchedUser,
+          permissions: normalizeUserPermissions(matchedUser.role, matchedUser.permissions)
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
         try {
           if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
           if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
         } catch {}
-      } else if (!this.currentUser.permissions) {
+      } else {
         this.currentUser = {
           ...this.currentUser,
-          permissions: {
-            modules: getDefaultPermissionsForRole(this.currentUser.role)
-          }
+          permissions: normalizeUserPermissions(this.currentUser.role, this.currentUser.permissions)
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       }
@@ -2545,7 +2517,7 @@ class LogisticsStore {
           approvedBy: r.approvedBy || local?.approvedBy,
           notes: r.notes ?? local?.notes,
           password: undefined,
-          permissions: remotePerms || local?.permissions || { modules: getDefaultPermissionsForRole(role) }
+          permissions: normalizeUserPermissions(role, remotePerms || local?.permissions)
         } as UserProfile;
       });
       this.users = this.deduplicateSuperAdmins(mappedUsers);
@@ -2729,30 +2701,14 @@ class LogisticsStore {
     const existing = this.users[userIndex];
     const oldName = existing.fullName;
     const targetRole = (data.role || existing.role) as UserRole;
-    const isLogisticsLead = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(targetRole);
 
-    let nextPermissions = data.permissions
+    const rawPermissions = data.permissions
       ? data.permissions
       : (data.role && data.role !== existing.role)
       ? { modules: getDefaultPermissionsForRole(data.role) }
       : existing.permissions || { modules: getDefaultPermissionsForRole(targetRole) };
 
-    if (isLogisticsLead && nextPermissions?.modules?.logistics) {
-      const logMod = nextPermissions.modules.logistics;
-      const activeSubCount = logMod.subMenus
-        ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
-        : 0;
-      if (logMod.enabled && activeSubCount <= 1 && !data.permissions) {
-        const defaultMods = getDefaultPermissionsForRole(targetRole);
-        nextPermissions = {
-          modules: {
-            ...defaultMods,
-            ...nextPermissions.modules,
-            logistics: defaultMods.logistics
-          }
-        };
-      }
-    }
+    const nextPermissions = normalizeUserPermissions(targetRole, rawPermissions);
 
     const updatedUser: UserProfile = {
       ...existing,
@@ -2851,9 +2807,9 @@ class LogisticsStore {
       status: data.status || 'pending',
       createdAt: new Date().toISOString(),
       notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
-      permissions: {
+      permissions: normalizeUserPermissions(resolvedRole, {
         modules: getDefaultPermissionsForRole(resolvedRole)
-      }
+      })
     };
 
     this.users = [newUser, ...this.users];
@@ -2873,6 +2829,7 @@ class LogisticsStore {
         department: newUser.department,
         status: newUser.status,
         notes: newUser.notes,
+        permissions: newUser.permissions,
         password: data.password || ''
       })
     }).catch(err => console.warn('[Hostinger Users] Registrasi user gagal disinkronkan:', err));
@@ -3054,9 +3011,7 @@ class LogisticsStore {
     const resolvedUser: UserProfile = {
       ...matched,
       password: undefined,
-      permissions: matched.permissions?.modules
-        ? matched.permissions
-        : { modules: getDefaultPermissionsForRole(matched.role) }
+      permissions: normalizeUserPermissions(matched.role, matched.permissions)
     };
 
     const idx = this.users.findIndex(u =>
@@ -3125,9 +3080,10 @@ class LogisticsStore {
         department: remote.department || existing?.department || 'Logistics Operations',
         phone: remote.phone || existing?.phone || '',
         status: remote.status || existing?.status || 'approved',
-        permissions: (remote.permissions && remote.permissions.modules)
-          ? remote.permissions
-          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) })
+        permissions: normalizeUserPermissions(
+          role,
+          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+        )
       } as UserProfile;
 
       const idx = this.users.findIndex(u =>
@@ -3291,9 +3247,10 @@ class LogisticsStore {
         approvedAt: remote.approvedAt || existing?.approvedAt,
         approvedBy: remote.approvedBy || existing?.approvedBy,
         notes: remote.notes ?? existing?.notes,
-        permissions: (remote.permissions && remote.permissions.modules)
-          ? remote.permissions
-          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) }),
+        permissions: normalizeUserPermissions(
+          role,
+          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+        ),
         password: undefined
       } as UserProfile;
 
@@ -3585,7 +3542,21 @@ class LogisticsStore {
     this.notify();
   }
 
+  private canCurrentUserEditModule(moduleId: string, subMenuId?: string): boolean {
+    const u = this.getCurrentUser();
+    if (!u || u.id === 'guest' || u.id === 'usr-guest') return true;
+    return canEdit(u, moduleId, subMenuId);
+  }
+
   public addSchedule(schedule: Omit<Schedule, 'id' | 'createdAt'>): Schedule {
+    if (!this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi addSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return {
+        ...schedule,
+        id: 'sch-readonly-blocked',
+        createdAt: new Date().toISOString()
+      } as Schedule;
+    }
     const areaName = resolveScheduleAreaName(schedule);
     const isBali = schedule.isInterIsland || areaName.toUpperCase().includes('BALI') || areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA');
 
@@ -3658,6 +3629,10 @@ class LogisticsStore {
   }
 
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
+    if (!this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi updateSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return;
+    }
     let oldSch: Schedule | null = null;
     let newSch: Schedule | null = null;
     this.schedules = this.schedules.map(sch => {
@@ -3700,6 +3675,10 @@ class LogisticsStore {
   }
 
   public deleteSchedule(id: string) {
+    if (!this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi deleteSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return;
+    }
     const target = this.schedules.find(sch => sch.id === id);
     this.schedules = this.schedules.filter(sch => sch.id !== id);
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);

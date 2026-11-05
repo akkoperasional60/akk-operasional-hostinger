@@ -188,208 +188,25 @@ export async function compressDocumentationPhoto(
   };
 }
 
-const DEFAULT_DATABASE_BARANG: DatabaseBarangRecord[] = [
-  {
-    id: 'dbb-1',
-    noBarang: 'AKK-KBX-001',
-    deskripsiBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
-    keteranganBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Ikat',
-    unit3: 'Palet',
-    rasio2: 25,
-    rasio3: 500,
-    panjangCm: 60,
-    lebarCm: 40,
-    tinggiCm: 40,
-    volM3: 0.096,
-    beratKg: 0.65,
-    dokumentasiUrl: createDefaultBarangThumbnail('AKK-KBX-001', 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 420.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Karton Box Corrugated',
-    stokTersedia: 4850,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-2',
-    noBarang: 'AKK-KBX-002',
-    deskripsiBarang: 'Karton Box Double Wall CB-Flute Export 80x50x50 cm',
-    keteranganBarang: 'Karton Box Double Wall CB-Flute Export 80x50x50 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Ikat',
-    unit3: 'Palet',
-    rasio2: 20,
-    rasio3: 300,
-    panjangCm: 80,
-    lebarCm: 50,
-    tinggiCm: 50,
-    volM3: 0.200,
-    beratKg: 1.25,
-    dokumentasiUrl: createDefaultBarangThumbnail('AKK-KBX-002', 'Karton Box Double Wall CB-Flute Export 80x50x50 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 380.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Karton Box Double Wall',
-    stokTersedia: 1120,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-3',
-    noBarang: 'AKK-KBX-003',
-    deskripsiBarang: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm',
-    keteranganBarang: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Pack',
-    unit3: 'Karton',
-    rasio2: 50,
-    rasio3: 500,
-    panjangCm: 22,
-    lebarCm: 22,
-    tinggiCm: 8,
-    volM3: 0.0039,
-    beratKg: 0.08,
-    dokumentasiUrl: createDefaultBarangThumbnail('AKK-KBX-003', 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 510.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Box Kemasan Makanan',
-    stokTersedia: 9400,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-4',
-    noBarang: 'AKK-KBX-004',
-    deskripsiBarang: 'Karton Box Polos E-Flute 40x30x25 cm',
-    keteranganBarang: 'Karton Box Polos E-Flute 40x30x25 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Ikat',
-    unit3: 'Palet',
-    rasio2: 25,
-    rasio3: 600,
-    panjangCm: 40,
-    lebarCm: 30,
-    tinggiCm: 25,
-    volM3: 0.030,
-    beratKg: 0.35,
-    dokumentasiUrl: createDefaultBarangThumbnail('AKK-KBX-004', 'Karton Box Polos E-Flute 40x30x25 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 340.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Karton Box Corrugated',
-    stokTersedia: 3600,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-5',
-    noBarang: 'AKK-KBX-005',
-    deskripsiBarang: 'Karton Box C-Flute Tebal 50x35x35 cm',
-    keteranganBarang: 'Karton Box C-Flute Tebal 50x35x35 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Ikat',
-    unit3: 'Palet',
-    rasio2: 20,
-    rasio3: 400,
-    panjangCm: 50,
-    lebarCm: 35,
-    tinggiCm: 35,
-    volM3: 0.0613,
-    beratKg: 0.52,
-    dokumentasiUrl: createDefaultBarangThumbnail('AKK-KBX-005', 'Karton Box C-Flute Tebal 50x35x35 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 390.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Karton Box Corrugated',
-    stokTersedia: 4100,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-6',
-    noBarang: 'RFID-KB-002',
-    deskripsiBarang: 'Karton Box Duplex Cetak Custom 30x20x15 cm',
-    keteranganBarang: 'Karton Box Duplex Cetak Custom 30x20x15 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Box',
-    unit3: 'Bal',
-    rasio2: 50,
-    rasio3: 500,
-    panjangCm: 30,
-    lebarCm: 20,
-    tinggiCm: 15,
-    volM3: 0.009,
-    beratKg: 0.18,
-    dokumentasiUrl: createDefaultBarangThumbnail('RFID-KB-002', 'Karton Box Duplex Cetak Custom 30x20x15 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 460.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Box Kemasan Makanan',
-    stokTersedia: 2800,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-7',
-    noBarang: 'RFID-KB-004',
-    deskripsiBarang: 'Box Pizza E-Flute Kraft Coklat 25x25x5 cm',
-    keteranganBarang: 'Box Pizza E-Flute Kraft Coklat 25x25x5 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Ikat',
-    unit3: 'Karton',
-    rasio2: 50,
-    rasio3: 1000,
-    panjangCm: 25,
-    lebarCm: 25,
-    tinggiCm: 5,
-    volM3: 0.0031,
-    beratKg: 0.09,
-    dokumentasiUrl: createDefaultBarangThumbnail('RFID-KB-004', 'Box Pizza E-Flute Kraft Coklat 25x25x5 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 310.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Box Kemasan Makanan',
-    stokTersedia: 5200,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  },
-  {
-    id: 'dbb-8',
-    noBarang: 'RFID-KB-005',
-    deskripsiBarang: 'Paper Bag Kraft Coklat Tebal Uk. L 32x26x11 cm',
-    keteranganBarang: 'Paper Bag Kraft Coklat Tebal Uk. L 32x26x11 cm',
-    unit1: 'Pcs',
-    satuan: 'Pcs',
-    unit2: 'Pack',
-    unit3: 'Bal',
-    rasio2: 50,
-    rasio3: 1000,
-    panjangCm: 32,
-    lebarCm: 26,
-    tinggiCm: 11,
-    volM3: 0.0092,
-    beratKg: 0.06,
-    dokumentasiUrl: createDefaultBarangThumbnail('RFID-KB-005', 'Paper Bag Kraft Coklat Tebal Uk. L 32x26x11 cm', 'Pcs'),
-    compressedSizeKb: 0.9,
-    originalSizeKb: 295.0,
-    compressionSavingsPct: 99,
-    kategoriBarang: 'Paper Cup & Food Pack',
-    stokTersedia: 3100,
-    cabang: 'Banyuwangi',
-    updatedAt: '2026-11-04'
-  }
-];
+export const LEGACY_REMOVED_BARANG_CODES = new Set([
+  '7MKDMR51',
+  'AKK-KBX-001', 'AKK-KBX-002', 'AKK-KBX-003', 'AKK-KBX-004', 'AKK-KBX-005',
+  'AKK-KBX-006', 'AKK-KBX-007', 'AKK-KBX-008', 'AKK-KBX-009', 'AKK-KBX-010',
+  'AKK-PLS-014', 'AKK-PLS-019', 'AKK-PLS-022', 'AKK-PLS-030', 'AKK-PLS-034',
+  'AKK-MPK-007', 'AKK-MPK-008', 'AKK-MPK-011', 'AKK-MPK-015',
+  'AKK-PRD-025', 'AKK-PRD-028', 'AKK-PRD-031', 'AKK-PRD-035', 'AKK-KBX-040',
+  'RFID-KB-002', 'RFID-KB-004', 'RFID-KB-005'
+]);
+
+export function isLegacySeededBarang(noBarang?: string): boolean {
+  const code = String(noBarang || '').trim().toUpperCase();
+  if (!code) return false;
+  if (LEGACY_REMOVED_BARANG_CODES.has(code)) return true;
+  if (/^(AKK-(KBX|PLS|MPK|PRD)-\d+|RFID-KB-\d+)$/i.test(code)) return true;
+  return false;
+}
+
+const DEFAULT_DATABASE_BARANG: DatabaseBarangRecord[] = [];
 
 function normalizeText(str: string): string {
   return String(str || '')
@@ -397,30 +214,85 @@ function normalizeText(str: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+export interface DatabaseBarangRecordWithOrder extends DatabaseBarangRecord {
+  orderIndex?: number;
+}
+
+function isLegacySyntheticUnitFallback(
+  u2: string | undefined | null,
+  u3: string | undefined | null,
+  r2: number | string | undefined | null,
+  r3: number | string | undefined | null
+): boolean {
+  return (
+    String(u2 || '').trim().toLowerCase() === 'ikat' &&
+    String(u3 || '').trim().toLowerCase() === 'palet' &&
+    Number(r2) === 25 &&
+    Number(r3) === 500
+  );
+}
+
+function isLegacySyntheticDimensionFallback(p: number, l: number, t: number, v: number, b: number): boolean {
+  return (
+    p === 50 &&
+    l === 35 &&
+    t === 30 &&
+    (Math.abs(v - 0.0525) < 0.0005 || v === 0) &&
+    (b === 0.5 || b === 0)
+  );
+}
+
 function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
   const code = String(item?.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(fallbackIndex + 1).padStart(3, '0')}`;
   const desc = String(item?.deskripsiBarang || item?.keteranganBarang || 'Barang Kemasan AKK').trim();
   const u1 = String(item?.unit1 || item?.satuan || 'Pcs').trim();
-  const u2 = item?.unit2 !== undefined && item?.unit2 !== null ? String(item.unit2).trim() : '';
-  const u3 = item?.unit3 !== undefined && item?.unit3 !== null ? String(item.unit3).trim() : '';
-  const r2 = item?.rasio2 !== undefined && item?.rasio2 !== null && item?.rasio2 !== ''
-    ? (!isNaN(Number(item.rasio2)) ? Number(item.rasio2) : item.rasio2)
-    : 0;
-  const r3 = item?.rasio3 !== undefined && item?.rasio3 !== null && item?.rasio3 !== ''
-    ? (!isNaN(Number(item.rasio3)) ? Number(item.rasio3) : item.rasio3)
-    : 0;
-  const p = Number(item?.panjangCm) || 0;
-  const l = Number(item?.lebarCm) || 0;
-  const t = Number(item?.tinggiCm) || 0;
+  const rawU2 = item?.unit2 !== undefined && item?.unit2 !== null ? String(item.unit2).trim() : '';
+  const rawU3 = item?.unit3 !== undefined && item?.unit3 !== null ? String(item.unit3).trim() : '';
+  let u2 = rawU2 === '-' ? '' : rawU2;
+  let u3 = rawU3 === '-' ? '' : rawU3;
+  let r2: number | string =
+    item?.rasio2 !== undefined && item?.rasio2 !== null && item?.rasio2 !== '' && item?.rasio2 !== '-'
+      ? !isNaN(Number(item.rasio2))
+        ? Number(item.rasio2)
+        : item.rasio2
+      : 0;
+  let r3: number | string =
+    item?.rasio3 !== undefined && item?.rasio3 !== null && item?.rasio3 !== '' && item?.rasio3 !== '-'
+      ? !isNaN(Number(item.rasio3))
+        ? Number(item.rasio3)
+        : item.rasio3
+      : 0;
+
+  // Bersihkan nilai bawaan lama (Ikat / Palet / 25 / 500) yang sebelumnya memaksa kolom kosong terisi
+  if (isLegacySyntheticUnitFallback(u2, u3, r2, r3)) {
+    u2 = '';
+    u3 = '';
+    r2 = 0;
+    r3 = 0;
+  }
+
+  let p = Number(item?.panjangCm) || 0;
+  let l = Number(item?.lebarCm) || 0;
+  let t = Number(item?.tinggiCm) || 0;
   let v = 0;
   if (item?.volM3 !== undefined && item?.volM3 !== null && item?.volM3 !== '') {
     v = Number(item.volM3) || 0;
   } else if (p > 0 && l > 0 && t > 0) {
     v = calculateVolM3(p, l, t);
   }
-  const b = item?.beratKg !== undefined && item?.beratKg !== null && item?.beratKg !== ''
-    ? Number(item.beratKg) || 0
-    : 0;
+  let b =
+    item?.beratKg !== undefined && item?.beratKg !== null && item?.beratKg !== ''
+      ? Number(item.beratKg) || 0
+      : 0;
+
+  // Bersihkan dimensi bawaan lama (50 x 35 x 30 = 0.0525 M3, berat 0.5 kg) yang sebelumnya memaksa kolom 0 terisi
+  if (isLegacySyntheticDimensionFallback(p, l, t, v, b)) {
+    p = 0;
+    l = 0;
+    t = 0;
+    v = 0;
+    b = 0;
+  }
 
   // Hanya simpan foto jika memang foto kustom / unggahan pengguna, jangan simpan inline SVG ribuan kali di localStorage
   const rawUrls: string[] = Array.isArray(item?.dokumentasiUrls)
@@ -434,8 +306,9 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
   }
   const primaryDoc = rawUrls[0] || singleDoc || '';
 
-  return {
-    id: item?.id || `dbb-${fallbackIndex + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  const rec: DatabaseBarangRecordWithOrder = {
+    id: item?.id || `dbb-${ String(fallbackIndex + 1).padStart(6, '0') }-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    orderIndex: typeof item?.orderIndex === 'number' ? item.orderIndex : fallbackIndex,
     noBarang: code,
     deskripsiBarang: desc,
     keteranganBarang: desc,
@@ -460,6 +333,7 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
     cabang: item?.cabang || 'Banyuwangi',
     updatedAt: item?.updatedAt || new Date().toISOString().split('T')[0]
   };
+  return rec;
 }
 
 const IDB_NAME = 'AKK_WMS_DATABASE_V1';
@@ -467,7 +341,8 @@ const IDB_STORE = 'database_barang';
 const IDB_VERSION = 1;
 
 let inMemoryItems: DatabaseBarangRecord[] | null = null;
-let isHydratingIdb = false;
+let hasHydratedFromIdb = false;
+let hydrationPromise: Promise<DatabaseBarangRecord[]> | null = null;
 
 function openIndexedDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -493,9 +368,12 @@ export async function saveRecordsToIndexedDb(records: DatabaseBarangRecord[]): P
       const tx = db.transaction(IDB_STORE, 'readwrite');
       const store = tx.objectStore(IDB_STORE);
       store.clear();
-      for (const r of records) {
-        store.put(r);
-      }
+      records.forEach((r, idx) => {
+        store.put({
+          ...r,
+          orderIndex: idx
+        });
+      });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -512,8 +390,14 @@ export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]
       const store = tx.objectStore(IDB_STORE);
       const req = store.getAll();
       req.onsuccess = () => {
-        const res = req.result;
-        resolve(Array.isArray(res) ? res : []);
+        const res = Array.isArray(req.result) ? req.result : [];
+        res.sort((a: any, b: any) => {
+          const oa = typeof a?.orderIndex === 'number' ? a.orderIndex : 999999;
+          const ob = typeof b?.orderIndex === 'number' ? b.orderIndex : 999999;
+          if (oa !== ob) return oa - ob;
+          return String(a?.id || '').localeCompare(String(b?.id || ''), undefined, { numeric: true });
+        });
+        resolve(res);
       };
       req.onerror = () => reject(req.error);
     });
@@ -523,143 +407,183 @@ export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]
   }
 }
 
+function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // Selalu hapus data lama terlebih dahulu agar tidak pernah tersisa data usang saat kuota penuh
+    localStorage.removeItem(LS_KEY_DATABASE_BARANG);
+  } catch {}
+
+  try {
+    if (records.length === 0) {
+      localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
+      return;
+    }
+    if (records.length <= 350) {
+      localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(records));
+      localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
+    } else {
+      // Untuk ribuan baris (cth. 4076 baris), simpan versi ringan tanpa foto base64 di localStorage
+      // agar pembukaan halaman secara sinkron langsung menampilkan data bersih (foto tetap utuh di IndexedDB)
+      const lightweight = records.map((r, idx) => ({
+        id: r.id,
+        orderIndex: idx,
+        noBarang: r.noBarang,
+        deskripsiBarang: r.deskripsiBarang,
+        keteranganBarang: r.keteranganBarang,
+        unit1: r.unit1,
+        satuan: r.satuan,
+        unit2: r.unit2 || '',
+        unit3: r.unit3 || '',
+        rasio2: r.rasio2 || 0,
+        rasio3: r.rasio3 || 0,
+        panjangCm: r.panjangCm || 0,
+        lebarCm: r.lebarCm || 0,
+        tinggiCm: r.tinggiCm || 0,
+        volM3: r.volM3 || 0,
+        beratKg: r.beratKg || 0,
+        kategoriBarang: r.kategoriBarang,
+        stokTersedia: r.stokTersedia,
+        cabang: r.cabang,
+        updatedAt: r.updatedAt
+      }));
+      localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(lightweight));
+      localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
+    }
+  } catch {
+    try {
+      localStorage.removeItem(LS_KEY_DATABASE_BARANG);
+      localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
+    } catch {}
+  }
+}
+
 export const databaseBarangService = {
   async ensureHydrated(): Promise<DatabaseBarangRecord[]> {
-    if (inMemoryItems && inMemoryItems.length > 0) {
+    if (hasHydratedFromIdb && inMemoryItems) {
       return [...inMemoryItems];
     }
-    if (isHydratingIdb) {
-      return inMemoryItems ? [...inMemoryItems] : [...DEFAULT_DATABASE_BARANG];
+    if (hydrationPromise) {
+      return hydrationPromise;
     }
-    isHydratingIdb = true;
-    try {
-      const idbList = await loadRecordsFromIndexedDb();
-      if (idbList && idbList.length > 0) {
-        inMemoryItems = idbList;
-        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-        return [...inMemoryItems];
-      }
 
-      // Jika IndexedDB masih kosong, periksa localStorage untuk migrasi awal
-      const localList = this.getAll();
-      if (localList && localList.length > 0) {
-        await saveRecordsToIndexedDb(localList);
+    hydrationPromise = (async () => {
+      try {
+        const idbList = await loadRecordsFromIndexedDb();
+        if (idbList && idbList.length > 0) {
+          let needsResave = false;
+          const filteredIdb = idbList.filter(item => !isLegacySeededBarang(item?.noBarang));
+          if (filteredIdb.length !== idbList.length) {
+            needsResave = true;
+          }
+          const sanitizedIdb = filteredIdb.map((item, idx) => {
+            if (
+              isLegacySyntheticUnitFallback(String(item?.unit2 || ''), String(item?.unit3 || ''), item?.rasio2, item?.rasio3) ||
+              isLegacySyntheticDimensionFallback(
+                Number(item?.panjangCm) || 0,
+                Number(item?.lebarCm) || 0,
+                Number(item?.tinggiCm) || 0,
+                Number(item?.volM3) || 0,
+                Number(item?.beratKg) || 0
+              )
+            ) {
+              needsResave = true;
+            }
+            return sanitizeRecord(item, idx);
+          });
+
+          inMemoryItems = sanitizedIdb;
+          hasHydratedFromIdb = true;
+
+          if (needsResave) {
+            await saveRecordsToIndexedDb(sanitizedIdb);
+            writeSafeLocalStorageCache(sanitizedIdb);
+          }
+
+          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+          return [...inMemoryItems];
+        }
+
+        // Jika IndexedDB kosong, gunakan hasil dari localStorage dan simpan ke IndexedDB
+        const localList = this.getAll();
+        hasHydratedFromIdb = true;
+        if (localList && localList.length > 0) {
+          await saveRecordsToIndexedDb(localList);
+          writeSafeLocalStorageCache(localList);
+        }
+        return [...localList];
+      } catch {
+        hasHydratedFromIdb = true;
+        return this.getAll();
+      } finally {
+        hydrationPromise = null;
       }
-      return localList;
-    } catch {
-      return this.getAll();
-    } finally {
-      isHydratingIdb = false;
-    }
+    })();
+
+    return hydrationPromise;
   },
 
   getAll(): DatabaseBarangRecord[] {
     if (inMemoryItems && inMemoryItems.length > 0) {
+      const cleanedMem = inMemoryItems
+        .filter(item => !isLegacySeededBarang(item.noBarang))
+        .map((item, idx) => sanitizeRecord(item, idx));
+      inMemoryItems = cleanedMem;
       return [...inMemoryItems];
     }
 
     try {
       const saved = localStorage.getItem(LS_KEY_DATABASE_BARANG);
       let list: DatabaseBarangRecord[] = [];
+      let needsCleanWrite = false;
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          list = parsed.map((item, idx) => sanitizeRecord(item, idx));
-        }
-      }
-      if (list.length === 0) {
-        list = [...DEFAULT_DATABASE_BARANG];
-      }
-
-      // Sinkronkan juga dari Master SKU jika ada barang baru yang belum masuk
-      const rawSku = localStorage.getItem(LS_KEY_MASTER_SKU);
-      if (rawSku) {
-        const skuList = JSON.parse(rawSku);
-        if (Array.isArray(skuList)) {
-          const mapByNo = new Map<string, DatabaseBarangRecord>();
-          list.forEach(item => mapByNo.set(item.noBarang.trim().toUpperCase(), item));
-
-          let changed = false;
-          skuList.forEach((sku: any, idx: number) => {
-            const code = String(sku?.noBarang || '').trim().toUpperCase();
-            const desc = String(sku?.namaBarang || sku?.keterangan || '').trim();
-            const unit = String(sku?.satuan || 'Pcs').trim();
-            if (!code || !desc) return;
-            const existing = mapByNo.get(code);
-            if (!existing) {
-              const p = Number(sku?.panjangCm) || 50;
-              const l = Number(sku?.lebarCm) || 35;
-              const t = Number(sku?.tinggiCm) || 30;
-              const newItem = sanitizeRecord(
-                {
-                  id: sku.id || `dbb-sync-${Date.now()}-${idx}`,
-                  noBarang: code,
-                  deskripsiBarang: desc,
-                  keteranganBarang: desc,
-                  unit1: unit,
-                  satuan: unit,
-                  unit2: 'Ikat',
-                  unit3: 'Palet',
-                  rasio2: 25,
-                  rasio3: 500,
-                  panjangCm: p,
-                  lebarCm: l,
-                  tinggiCm: t,
-                  volM3: calculateVolM3(p, l, t),
-                  beratKg: Number(sku?.beratKg) || 0.5,
-                  kategoriBarang: sku.kategoriBarang || 'Karton Box Corrugated',
-                  stokTersedia: Number(sku.stokTersedia) || 0,
-                  cabang: sku.cabang || 'Banyuwangi',
-                  updatedAt: sku.tanggalStok || new Date().toISOString().split('T')[0]
-                },
-                idx
-              );
-              mapByNo.set(code, newItem);
-              list.push(newItem);
-              changed = true;
-            }
-          });
-
-          if (changed) {
-            try {
-              if (list.length <= 400) {
-                localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(list));
-              }
-            } catch {
-              // Abaikan jika kuota localStorage penuh
-            }
+          const filtered = parsed.filter(item => !isLegacySeededBarang(item?.noBarang));
+          if (filtered.length !== parsed.length) {
+            needsCleanWrite = true;
           }
+          list = filtered.map((item, idx) => {
+            if (
+              isLegacySyntheticUnitFallback(String(item?.unit2 || ''), String(item?.unit3 || ''), item?.rasio2, item?.rasio3) ||
+              isLegacySyntheticDimensionFallback(
+                Number(item?.panjangCm) || 0,
+                Number(item?.lebarCm) || 0,
+                Number(item?.tinggiCm) || 0,
+                Number(item?.volM3) || 0,
+                Number(item?.beratKg) || 0
+              )
+            ) {
+              needsCleanWrite = true;
+            }
+            return sanitizeRecord(item, idx);
+          });
         }
+      }
+
+      if (needsCleanWrite) {
+        writeSafeLocalStorageCache(list);
       }
 
       inMemoryItems = list;
-      return list;
+      return [...list];
     } catch {
-      return inMemoryItems || [...DEFAULT_DATABASE_BARANG];
+      return inMemoryItems ? [...inMemoryItems] : [];
     }
   },
 
   saveAll(records: DatabaseBarangRecord[]): void {
-    const sanitized = records.map((r, idx) => sanitizeRecord(r, idx));
+    const sanitized = records
+      .filter(r => !isLegacySeededBarang(r?.noBarang))
+      .map((r, idx) => sanitizeRecord(r, idx));
     inMemoryItems = sanitized;
+    hasHydratedFromIdb = true;
 
-    // Simpan ke IndexedDB (kapasitas tidak terbatas, cocok untuk ribuan baris)
-    saveRecordsToIndexedDb(sanitized);
+    // Simpan ke IndexedDB (kapasitas besar, cocok untuk ribuan baris + foto)
+    void saveRecordsToIndexedDb(sanitized);
 
-    // Simpan ke localStorage dengan aman tanpa menyebabkan QuotaExceededError
-    try {
-      if (sanitized.length <= 400) {
-        localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(sanitized));
-      } else {
-        localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
-        localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-      }
-    } catch (quotaErr) {
-      console.warn('LocalStorage kuota penuh, data tetap tersimpan aman di IndexedDB:', quotaErr);
-      try {
-        localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-      } catch {}
-    }
+    // Simpan ke localStorage secara aman tanpa pernah meninggalkan cache lama
+    writeSafeLocalStorageCache(sanitized);
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
   },
@@ -679,45 +603,68 @@ export const databaseBarangService = {
     mode: 'replace_all' | 'append' = 'replace_all'
   ): { count: number; saved: DatabaseBarangRecord[] } {
     const today = new Date().toISOString().split('T')[0];
+    const existingAll = this.getAll();
+    const existingByCode = new Map<string, DatabaseBarangRecord>();
+    existingAll.forEach(item => {
+      existingByCode.set(item.noBarang.trim().toUpperCase(), item);
+    });
 
-    // Maintain EXACT row order from file, sterilkan dokumentasiUrl agar tidak menyimpan jutaan string SVG
+    // Pertahankan urutan baris persis sesuai file Excel; nilai kosong tetap '' dan nilai 0 tetap 0
     const sanitizedBatch: DatabaseBarangRecord[] = records.map((item, idx) => {
       const code = String(item.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(idx + 1).padStart(4, '0')}`;
-      const desc = String(item.deskripsiBarang || item.keteranganBarang || 'Barang Kemasan AKK').trim();
-      const u1 = String(item.unit1 || item.satuan || 'Pcs').trim();
-      const u2 = item.unit2 !== undefined && item.unit2 !== null ? String(item.unit2).trim() : '';
-      const u3 = item.unit3 !== undefined && item.unit3 !== null ? String(item.unit3).trim() : '';
-      const r2 = item.rasio2 !== undefined && item.rasio2 !== null && item.rasio2 !== ''
-        ? (!isNaN(Number(item.rasio2)) ? Number(item.rasio2) : item.rasio2)
-        : 0;
-      const r3 = item.rasio3 !== undefined && item.rasio3 !== null && item.rasio3 !== ''
-        ? (!isNaN(Number(item.rasio3)) ? Number(item.rasio3) : item.rasio3)
-        : 0;
+      const prev = existingByCode.get(code);
+      const desc = String(item.deskripsiBarang || item.keteranganBarang || prev?.deskripsiBarang || 'Barang Kemasan AKK').trim();
+      const u1 = String(item.unit1 || item.satuan || prev?.unit1 || 'Pcs').trim();
+      const rawU2 = item.unit2 !== undefined && item.unit2 !== null ? String(item.unit2).trim() : '';
+      const rawU3 = item.unit3 !== undefined && item.unit3 !== null ? String(item.unit3).trim() : '';
+      const u2 = rawU2 === '-' ? '' : rawU2;
+      const u3 = rawU3 === '-' ? '' : rawU3;
+      const r2 =
+        item.rasio2 !== undefined && item.rasio2 !== null && item.rasio2 !== '' && item.rasio2 !== '-'
+          ? !isNaN(Number(item.rasio2))
+            ? Number(item.rasio2)
+            : item.rasio2
+          : 0;
+      const r3 =
+        item.rasio3 !== undefined && item.rasio3 !== null && item.rasio3 !== '' && item.rasio3 !== '-'
+          ? !isNaN(Number(item.rasio3))
+            ? Number(item.rasio3)
+            : item.rasio3
+          : 0;
       const p = Number(item.panjangCm) || 0;
       const l = Number(item.lebarCm) || 0;
       const t = Number(item.tinggiCm) || 0;
       let v = 0;
-      if (item.volM3 !== undefined && item.volM3 !== null) {
+      if (item.volM3 !== undefined && item.volM3 !== null && Number(item.volM3) > 0) {
         v = Number(item.volM3) || 0;
       } else if (p > 0 && l > 0 && t > 0) {
         v = calculateVolM3(p, l, t);
       }
-      const b = item.beratKg !== undefined && item.beratKg !== null
-        ? Number(item.beratKg) || 0
-        : 0;
+      const b =
+        item.beratKg !== undefined && item.beratKg !== null
+          ? Number(item.beratKg) || 0
+          : 0;
 
-      // Ambil foto dokumentasi jika ada foto kustom asli
-      const rawUrls: string[] = Array.isArray(item.dokumentasiUrls)
+      // Pertahankan foto dokumentasi jika barang sebelumnya sudah pernah difoto oleh user
+      const incomingUrls: string[] = Array.isArray(item.dokumentasiUrls)
         ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
         : [];
-      const rawDoc = item.dokumentasiUrl || '';
-      const docUrl = rawDoc.startsWith('data:image/svg+xml') ? '' : rawDoc;
-      if (docUrl && !rawUrls.includes(docUrl)) {
-        rawUrls.unshift(docUrl);
+      const rawDoc = item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? item.dokumentasiUrl : '';
+      if (rawDoc && !incomingUrls.includes(rawDoc)) {
+        incomingUrls.unshift(rawDoc);
       }
+      const finalUrls =
+        incomingUrls.length > 0
+          ? incomingUrls
+          : Array.isArray(prev?.dokumentasiUrls) && prev.dokumentasiUrls.length > 0
+          ? prev.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+          : prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml')
+          ? [prev.dokumentasiUrl]
+          : [];
 
-      return {
-        id: item.id || `dbb-${idx + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      const rec: DatabaseBarangRecordWithOrder = {
+        id: prev?.id || item.id || `dbb-${String(idx + 1).padStart(6, '0')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        orderIndex: idx,
         noBarang: code,
         deskripsiBarang: desc,
         keteranganBarang: desc,
@@ -732,57 +679,51 @@ export const databaseBarangService = {
         tinggiCm: t,
         volM3: v,
         beratKg: b,
-        dokumentasiUrl: rawUrls[0] || docUrl || '',
-        dokumentasiUrls: rawUrls,
-        compressedSizeKb: item.compressedSizeKb ?? 0,
-        originalSizeKb: item.originalSizeKb ?? 0,
-        compressionSavingsPct: item.compressionSavingsPct ?? 0,
-        kategoriBarang: item.kategoriBarang || 'Karton Box Corrugated',
-        stokTersedia: item.stokTersedia !== undefined ? Number(item.stokTersedia) : 1000,
-        cabang: item.cabang || 'Banyuwangi',
+        dokumentasiUrl: finalUrls[0] || '',
+        dokumentasiUrls: finalUrls,
+        compressedSizeKb: item.compressedSizeKb ?? prev?.compressedSizeKb ?? 0,
+        originalSizeKb: item.originalSizeKb ?? prev?.originalSizeKb ?? 0,
+        compressionSavingsPct: item.compressionSavingsPct ?? prev?.compressionSavingsPct ?? 0,
+        kategoriBarang: item.kategoriBarang || prev?.kategoriBarang || 'Karton Box Corrugated',
+        stokTersedia: item.stokTersedia !== undefined ? Number(item.stokTersedia) : (prev?.stokTersedia ?? 1000),
+        cabang: item.cabang || prev?.cabang || 'Banyuwangi',
         updatedAt: item.updatedAt || today
       };
+      return rec;
     });
 
     let finalRecords: DatabaseBarangRecord[] = [];
     if (mode === 'replace_all') {
       finalRecords = sanitizedBatch;
     } else {
-      const existing = this.getAll();
       const codeMap = new Map<string, number>();
-      existing.forEach((item, idx) => codeMap.set(item.noBarang.trim().toUpperCase(), idx));
+      existingAll.forEach((item, idx) => codeMap.set(item.noBarang.trim().toUpperCase(), idx));
 
-      finalRecords = [...existing];
+      finalRecords = [...existingAll];
       sanitizedBatch.forEach(item => {
         const existingIdx = codeMap.get(item.noBarang.trim().toUpperCase());
         if (existingIdx !== undefined) {
-          finalRecords[existingIdx] = { ...finalRecords[existingIdx], ...item };
+          finalRecords[existingIdx] = {
+            ...finalRecords[existingIdx],
+            ...item,
+            orderIndex: existingIdx
+          } as DatabaseBarangRecord;
         } else {
-          finalRecords.push(item);
+          finalRecords.push({
+            ...item,
+            orderIndex: finalRecords.length
+          } as DatabaseBarangRecord);
         }
       });
     }
 
     // Perbarui in-memory cache segera
     inMemoryItems = finalRecords;
+    hasHydratedFromIdb = true;
 
-    // Simpan ke IndexedDB (asinkron, kapasitas ratusan MB / GB tanpa batasan kuota 5MB)
-    saveRecordsToIndexedDb(finalRecords);
-
-    // Simpan ke localStorage secara aman tanpa crash QuotaExceededError
-    try {
-      if (finalRecords.length <= 400) {
-        localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(finalRecords));
-      } else {
-        localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
-        localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-      }
-    } catch (quotaErr) {
-      console.warn('LocalStorage kuota terlampaui, seluruh data tersimpan aman di IndexedDB:', quotaErr);
-      try {
-        localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-      } catch {}
-    }
+    // Simpan ke IndexedDB dan localStorage secara konsisten
+    void saveRecordsToIndexedDb(finalRecords);
+    writeSafeLocalStorageCache(finalRecords);
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     return { count: finalRecords.length, saved: finalRecords };

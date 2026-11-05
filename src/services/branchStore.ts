@@ -409,7 +409,10 @@ class BranchStoreService {
     existingUserModules?: UserPermissions['modules'],
     serverBranchPerms?: UserPermissions['branchPermissions']
   ): Record<string, UserBranchPermissionEntry> {
-    const savedForUser = serverBranchPerms || this.userBranchPerms[userId] || {};
+    const hasServerBranchPerms = Boolean(serverBranchPerms && Object.keys(serverBranchPerms).length > 0);
+    const savedForUser = hasServerBranchPerms
+      ? serverBranchPerms!
+      : (this.userBranchPerms[userId] || {});
     const result: Record<string, UserBranchPermissionEntry> = {};
     const roleDefaults = getDefaultPermissionsForRole(role);
 
@@ -417,14 +420,27 @@ class BranchStoreService {
       if (savedForUser[branch.id]) {
         const cloned = JSON.parse(JSON.stringify(savedForUser[branch.id])) as UserBranchPermissionEntry;
         // Ensure any newly added module or submenu keys exist on cloned.modules
+        // and sync with existingUserModules if this came from a stale local cache without serverBranchPerms
         Object.keys(roleDefaults).forEach(modId => {
+          const existingMod = existingUserModules?.[modId];
           if (!cloned.modules[modId]) {
-            cloned.modules[modId] = JSON.parse(JSON.stringify(existingUserModules?.[modId] || roleDefaults[modId]));
+            cloned.modules[modId] = JSON.parse(JSON.stringify(existingMod || roleDefaults[modId]));
           } else {
+            // If user profile did not have serverBranchPerms, ensure top-level existingUserModules restrictions ('read_only' / 'none') are respected
+            if (!hasServerBranchPerms && existingMod !== undefined) {
+              if (!existingMod.enabled) {
+                cloned.modules[modId].enabled = false;
+              }
+              Object.entries(existingMod.subMenus || {}).forEach(([subId, val]) => {
+                if (val === 'read_only' || val === 'none' || val === 'full_access') {
+                  cloned.modules[modId].subMenus[subId] = val;
+                }
+              });
+            }
             Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(subId => {
               if (cloned.modules[modId].subMenus[subId] === undefined) {
                 cloned.modules[modId].subMenus[subId] =
-                  existingUserModules?.[modId]?.subMenus?.[subId] ??
+                  existingMod?.subMenus?.[subId] ??
                   (cloned.modules[modId].enabled ? (roleDefaults[modId]?.subMenus?.[subId] || 'none') : 'none');
               }
             });
@@ -465,6 +481,10 @@ class BranchStoreService {
       }
     });
 
+    if (hasServerBranchPerms) {
+      this.userBranchPerms[userId] = JSON.parse(JSON.stringify(result));
+    }
+
     return result;
   }
 
@@ -473,6 +493,11 @@ class BranchStoreService {
     branchPerms: Record<string, UserBranchPermissionEntry>
   ) {
     this.userBranchPerms[userId] = JSON.parse(JSON.stringify(branchPerms));
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_USER_BRANCH_PERMS_KEY, JSON.stringify(this.userBranchPerms));
+      }
+    } catch {}
     this.notify();
   }
 

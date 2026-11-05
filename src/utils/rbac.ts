@@ -374,43 +374,390 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   architecture: { moduleId: 'sistem_pengguna', subMenuId: 'architecture' }
 };
 
-export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
-  if (!user) return false;
-  if (user.status === 'inactive' || user.status === 'rejected') return false;
-  if (isSuperAdminRole(user.role)) return true;
-  if (user.role === 'unassigned') return false;
+export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
+  sales_kpi_individual: ['data_kpi'],
+  sales_kpi_fines: ['data_kpi'],
+  sales_kpi_nusantara: ['data_kpi'],
+  sales_kpi_omset: ['data_kpi'],
+  sales_dashboard: ['dashboard_penjualan'],
+  sales_activities: ['aktivitas_harian'],
+  sales_schedules: ['jadwal_admin'],
+  sales_loading_duration: ['durasi_muat'],
+  sales_invoice_so: ['input_faktur_so', 'durasi_muat', 'aktivitas_harian'],
+  sales_rfid_scanner: ['aplikasi_rfid_muat', 'durasi_muat', 'aktivitas_harian'],
+  sales_skill_matrix: ['matriks_skil'],
+  sales_jobdesk: ['pengaturan_sop'],
+  warehouse_scanner: ['stok_barang'],
+  warehouse_dashboard: ['stok_barang'],
+  warehouse_inventory: ['stok_barang'],
+  warehouse_slotting: ['stok_barang'],
+  warehouse_inbound: ['permintaan_barang'],
+  warehouse_outbound: ['ceklis_muat'],
+  warehouse_opname: ['opname_stok'],
+  operational_dashboard: ['dashboard_logistik'],
+  schedules: ['rencana_rute'],
+  driver_portal: ['portal_driver'],
+  fleet_forms: ['armada_ceklis'],
+  fleets: ['armada_ceklis'],
+  spareparts: ['armada_ceklis'],
+  fuel_efficiency: ['armada_ceklis'],
+  warehouse_fleet_cubication: ['armada_ceklis'],
+  driver_reports: ['monitoring_sla'],
+  crew_history: ['monitoring_sla'],
+  tracking_eval: ['monitoring_sla'],
+  marketing_online: ['kampanye'],
+  marketing_offline: ['leads_pipeline'],
+  customer_map: ['laporan_kunjungan'],
+  purchasing_dashboard: ['permintaan_pembelian'],
+  purchasing_stock_overview: ['po_vendor'],
+  purchasing_stock_forecast: ['po_vendor'],
+  finance_dashboard: ['kas_bank', 'faktur_pajak'],
+  hr_dashboard: ['hr_data_karyawan'],
+  training_videos: ['td_video_training'],
+  training_karyawan: ['td_training_karyawan'],
+  dashboard: ['dashboard_eksekutif'],
+  users: ['daftar_pengguna', 'persetujuan_akun'],
+  branches: ['daftar_pengguna'],
+  e2e_testing: ['daftar_pengguna'],
+  architecture: ['manajemen_hak_akses'],
+  activity_log: ['log_aktivitas_sistem']
+};
 
-  // Composite tab checks so enabling any sub-option in User Management grants access to the corresponding view
+const MODERN_SUBMENU_KEYS_BY_MODULE: Record<string, string[]> = {
+  logistics: [
+    'operational_dashboard',
+    'schedules',
+    'driver_portal',
+    'fleet_forms',
+    'driver_reports',
+    'tracking_eval',
+    'fleets',
+    'crew_history',
+    'spareparts',
+    'fuel_efficiency',
+    'warehouse_fleet_cubication'
+  ],
+  sales_admin: [
+    'sales_dashboard',
+    'sales_activities',
+    'sales_schedules',
+    'sales_loading_duration',
+    'sales_invoice_so',
+    'sales_rfid_scanner',
+    'sales_skill_matrix',
+    'sales_jobdesk',
+    'sales_kpi_individual',
+    'sales_kpi_fines',
+    'sales_kpi_nusantara',
+    'sales_kpi_omset'
+  ],
+  warehouse: [
+    'warehouse_scanner',
+    'warehouse_dashboard',
+    'warehouse_inventory',
+    'warehouse_slotting',
+    'warehouse_inbound',
+    'warehouse_outbound',
+    'warehouse_opname'
+  ],
+  marketing: ['marketing_online', 'marketing_offline', 'customer_map'],
+  purchasing: ['purchasing_dashboard', 'purchasing_stock_overview', 'purchasing_stock_forecast'],
+  finance_tax: ['finance_dashboard'],
+  hr: ['hr_dashboard', 'ga_security', 'ga_hk', 'ga_aset', 'training_videos', 'training_karyawan'],
+  sistem_pengguna: ['dashboard', 'users', 'branches', 'activity_log', 'e2e_testing', 'architecture']
+};
+
+const maxAccessLevel = (
+  ...levels: Array<'full_access' | 'read_only' | 'none' | undefined>
+): 'full_access' | 'read_only' | 'none' => {
+  let result: 'full_access' | 'read_only' | 'none' = 'none';
+  for (const lvl of levels) {
+    if (lvl === 'full_access') return 'full_access';
+    if (lvl === 'read_only') result = 'read_only';
+  }
+  return result;
+};
+
+/**
+ * Normalizes and synchronizes user permissions for both legacy/old accounts and newly created accounts.
+ * Ensures modern submenu keys and legacy submenu keys never conflict, and that branchPermissions
+ * and top-level modules remain strictly in sync without overwriting 'read_only' or 'none' back to 'full_access'.
+ */
+export const normalizeUserPermissions = (
+  role: UserRole | string,
+  permissions?: UserPermissions | null
+): UserPermissions => {
+  const roleDefaults = getDefaultPermissionsForRole(role);
+  if (!permissions || (!permissions.modules && !permissions.branchPermissions)) {
+    return {
+      modules: JSON.parse(JSON.stringify(roleDefaults))
+    };
+  }
+
+  const rawModules = permissions.modules || {};
+  const isCrew = isDriverRole(role);
+
+  const normalizeSingleModulesMap = (
+    sourceModules: UserPermissions['modules'],
+    fallbackModules?: UserPermissions['modules']
+  ): UserPermissions['modules'] => {
+    const normalized: UserPermissions['modules'] = {};
+
+    Object.keys(roleDefaults).forEach(modId => {
+      const defaultMod = roleDefaults[modId];
+      const srcMod = sourceModules?.[modId];
+      const fbMod = fallbackModules?.[modId];
+
+      const modEnabled =
+        srcMod !== undefined
+          ? Boolean(srcMod.enabled)
+          : fbMod !== undefined
+          ? Boolean(fbMod.enabled)
+          : Boolean(defaultMod?.enabled);
+
+      const nextSubs: Record<string, 'read_only' | 'full_access' | 'none'> = {};
+      const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(defaultMod?.subMenus || {});
+
+      // Copy existing keys first
+      if (srcMod?.subMenus) {
+        Object.entries(srcMod.subMenus).forEach(([k, v]) => {
+          if (v === 'full_access' || v === 'read_only' || v === 'none') {
+            nextSubs[k] = v;
+          }
+        });
+      }
+
+      modernKeys.forEach(subId => {
+        if (!modEnabled) {
+          nextSubs[subId] = 'none';
+          return;
+        }
+        let val: 'full_access' | 'read_only' | 'none' | undefined = srcMod?.subMenus?.[subId];
+        if (val === undefined && fbMod?.subMenus?.[subId] !== undefined) {
+          val = fbMod.subMenus[subId];
+        }
+        if (val === undefined && srcMod?.subMenus) {
+          const legacyKeys = LEGACY_SUBMENU_KEY_MAP[subId];
+          if (legacyKeys) {
+            for (const lk of legacyKeys) {
+              if (srcMod.subMenus[lk] !== undefined) {
+                val = srcMod.subMenus[lk];
+                break;
+              }
+            }
+          }
+        }
+        if (val === undefined) {
+          val = defaultMod?.subMenus?.[subId] || 'none';
+        }
+        nextSubs[subId] = val;
+      });
+
+      // Keep legacy keys synchronized with modern keys so old keys never override 'read_only' or 'none'
+      Object.entries(LEGACY_SUBMENU_KEY_MAP).forEach(([modernKey, legacyKeys]) => {
+        if (modernKeys.includes(modernKey) && nextSubs[modernKey] !== undefined) {
+          legacyKeys.forEach(lk => {
+            if (defaultMod?.subMenus && lk in defaultMod.subMenus) {
+              nextSubs[lk] = nextSubs[modernKey];
+            }
+          });
+        }
+      });
+
+      // Legacy crew guard
+      if (isCrew && modId === 'logistics' && !permissions.branchPermissions && srcMod?.subMenus) {
+        const activeKeys = Object.entries(srcMod.subMenus)
+          .filter(([, v]) => v === 'full_access' || v === 'read_only')
+          .map(([k]) => k);
+        if (activeKeys.length === 2 && activeKeys.includes('portal_driver') && activeKeys.includes('monitoring_sla')) {
+          nextSubs.monitoring_sla = 'none';
+          nextSubs.driver_reports = 'none';
+          nextSubs.crew_history = 'none';
+          nextSubs.tracking_eval = 'none';
+        }
+      }
+
+      const hasActiveSub = Object.entries(nextSubs)
+        .filter(([k]) => modernKeys.includes(k))
+        .some(([, v]) => v === 'full_access' || v === 'read_only');
+
+      normalized[modId] = {
+        enabled: modEnabled && hasActiveSub,
+        subMenus: nextSubs
+      };
+    });
+
+    return normalized;
+  };
+
+  const normalizedTopModules = normalizeSingleModulesMap(rawModules);
+
+  if (permissions.branchPermissions && Object.keys(permissions.branchPermissions).length > 0) {
+    const normalizedBranches: NonNullable<UserPermissions['branchPermissions']> = {};
+    Object.entries(permissions.branchPermissions).forEach(([branchId, branchEntry]) => {
+      if (!branchEntry) return;
+      const normBranchMods = normalizeSingleModulesMap(branchEntry.modules || {}, normalizedTopModules);
+      const anyModActive = Object.values(normBranchMods).some(
+        m => m?.enabled && Object.values(m.subMenus || {}).some(v => v === 'full_access' || v === 'read_only')
+      );
+      normalizedBranches[branchId] = {
+        ...branchEntry,
+        branchId: branchEntry.branchId || branchId,
+        enabled: Boolean(branchEntry.enabled && anyModActive),
+        modules: normBranchMods
+      };
+    });
+
+    // Recompute merged top-level modules from enabled branches so modules & branchPermissions never diverge
+    const mergedModules: UserPermissions['modules'] = {};
+    Object.keys(roleDefaults).forEach(modId => {
+      const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
+      const subMenus: Record<string, 'read_only' | 'full_access' | 'none'> = {};
+      Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(k => {
+        subMenus[k] = 'none';
+      });
+      modernKeys.forEach(k => {
+        subMenus[k] = 'none';
+      });
+
+      let anyModEnabled = false;
+      Object.values(normalizedBranches).forEach(bEntry => {
+        if (!bEntry?.enabled) return;
+        const m = bEntry.modules?.[modId];
+        if (m?.enabled) {
+          anyModEnabled = true;
+          Object.keys(subMenus).forEach(subKey => {
+            const val = m.subMenus?.[subKey] || 'none';
+            subMenus[subKey] = maxAccessLevel(subMenus[subKey], val);
+          });
+        }
+      });
+
+      const hasActiveModern = modernKeys.some(k => subMenus[k] === 'full_access' || subMenus[k] === 'read_only');
+      mergedModules[modId] = {
+        enabled: anyModEnabled && hasActiveModern,
+        subMenus
+      };
+    });
+
+    return {
+      modules: mergedModules,
+      branchPermissions: normalizedBranches
+    };
+  }
+
+  return {
+    modules: normalizedTopModules
+  };
+};
+
+const resolveSubMenuLevelFromMod = (
+  modulePerms: { enabled: boolean; subMenus: Record<string, 'read_only' | 'full_access' | 'none'> } | undefined,
+  defaultMod: { enabled: boolean; subMenus: Record<string, 'read_only' | 'full_access' | 'none'> } | undefined,
+  resolvedModuleId: string,
+  resolvedSubMenuId: string | undefined,
+  isCrew: boolean,
+  hasBranchPerms: boolean
+): 'full_access' | 'read_only' | 'none' => {
+  if (!modulePerms || !modulePerms.enabled) return 'none';
+  if (!resolvedSubMenuId) {
+    // Module-level check: return highest submenu level in this module
+    const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[resolvedModuleId];
+    const entries = Object.entries(modulePerms.subMenus || {});
+    const filtered = modernKeys && modernKeys.length > 0
+      ? entries.filter(([k]) => modernKeys.includes(k))
+      : entries;
+    if (filtered.length === 0) return 'full_access';
+    return maxAccessLevel(...filtered.map(([, v]) => v));
+  }
+
+  let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
+
+  if (subPerm === undefined && modulePerms.enabled) {
+    const fallbackKeys = LEGACY_SUBMENU_KEY_MAP[resolvedSubMenuId];
+    if (fallbackKeys) {
+      for (const k of fallbackKeys) {
+        if (modulePerms.subMenus?.[k] !== undefined) {
+          subPerm = modulePerms.subMenus[k];
+          break;
+        }
+      }
+    }
+    if (subPerm === undefined) {
+      subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'none';
+    }
+  }
+
+  if (
+    isCrew &&
+    resolvedModuleId === 'logistics' &&
+    resolvedSubMenuId === 'monitoring_sla' &&
+    modulePerms.subMenus &&
+    !hasBranchPerms
+  ) {
+    const activeKeys = Object.entries(modulePerms.subMenus)
+      .filter(([, v]) => v === 'full_access' || v === 'read_only')
+      .map(([k]) => k);
+    if (
+      activeKeys.length === 2 &&
+      activeKeys.includes('portal_driver') &&
+      activeKeys.includes('monitoring_sla')
+    ) {
+      subPerm = 'none';
+    }
+  }
+
+  if (subPerm === 'full_access' || subPerm === 'read_only') {
+    return subPerm;
+  }
+  return 'none';
+};
+
+export const getAccessLevel = (
+  user: UserProfile | null | undefined,
+  moduleId: string,
+  subMenuId?: string,
+  branchId?: string
+): 'full_access' | 'read_only' | 'none' => {
+  if (!user) return 'none';
+  if (user.status === 'inactive' || user.status === 'rejected') return 'none';
+  if (isSuperAdminRole(user.role)) return 'full_access';
+  if (user.role === 'unassigned') return 'none';
+
+  // Composite tab checks
   if (!subMenuId) {
     if (moduleId === 'finance_dashboard') {
-      return (
-        canAccess(user, 'finance_tax', 'kas_bank') ||
-        canAccess(user, 'finance_tax', 'faktur_pajak') ||
-        canAccess(user, 'finance_tax', 'rekonsiliasi') ||
-        canAccess(user, 'finance_tax', 'laba_rugi')
+      return maxAccessLevel(
+        getAccessLevel(user, 'finance_tax', 'finance_dashboard', branchId),
+        getAccessLevel(user, 'finance_tax', 'kas_bank', branchId),
+        getAccessLevel(user, 'finance_tax', 'faktur_pajak', branchId),
+        getAccessLevel(user, 'finance_tax', 'rekonsiliasi', branchId),
+        getAccessLevel(user, 'finance_tax', 'laba_rugi', branchId)
       );
     }
     if (moduleId === 'hr_dashboard') {
-      return (
-        canAccess(user, 'hr', 'hr_data_karyawan') ||
-        canAccess(user, 'hr', 'hr_gaji_kpi')
+      return maxAccessLevel(
+        getAccessLevel(user, 'hr', 'hr_dashboard', branchId),
+        getAccessLevel(user, 'hr', 'hr_data_karyawan', branchId),
+        getAccessLevel(user, 'hr', 'hr_gaji_kpi', branchId)
       );
     }
     if (moduleId === 'users') {
-      return (
-        canAccess(user, 'sistem_pengguna', 'daftar_pengguna') ||
-        canAccess(user, 'sistem_pengguna', 'persetujuan_akun')
+      return maxAccessLevel(
+        getAccessLevel(user, 'sistem_pengguna', 'users', branchId),
+        getAccessLevel(user, 'sistem_pengguna', 'daftar_pengguna', branchId),
+        getAccessLevel(user, 'sistem_pengguna', 'persetujuan_akun', branchId)
       );
     }
     if (moduleId === 'purchasing_dashboard') {
-      return (
-        canAccess(user, 'purchasing', 'permintaan_pembelian') ||
-        canAccess(user, 'purchasing', 'evaluasi_harga')
+      return maxAccessLevel(
+        getAccessLevel(user, 'purchasing', 'purchasing_dashboard', branchId),
+        getAccessLevel(user, 'purchasing', 'permintaan_pembelian', branchId),
+        getAccessLevel(user, 'purchasing', 'evaluasi_harga', branchId)
       );
     }
   }
 
-  // Map NavTab to (moduleId, subMenuId) if moduleId is a tab name
   let resolvedModuleId = moduleId;
   let resolvedSubMenuId = subMenuId;
   if (!subMenuId && TAB_TO_MODULE_MAP[moduleId]) {
@@ -420,111 +767,74 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
 
   const defaultModules = getDefaultPermissionsForRole(user.role);
   const defaultMod = defaultModules[resolvedModuleId];
-
-  // Authorization strictly follows user.permissions.modules saved in User Management (Hostinger MySQL),
-  // falling back to role defaults ONLY when user.permissions.modules does not have this module configured.
-  const userModules = user.permissions?.modules;
-  const userMod = userModules?.[resolvedModuleId];
   const isCrew = isDriverRole(user.role);
+  const branchPerms = user.permissions?.branchPermissions;
+  const hasBranchPerms = Boolean(branchPerms && Object.keys(branchPerms).length > 0);
 
-  const modulePerms = userMod !== undefined ? userMod : defaultMod;
+  // If branchPermissions are configured on the user profile, evaluate branch-level permissions accurately
+  if (hasBranchPerms && branchPerms) {
+    if (branchId && branchPerms[branchId]) {
+      const bEntry = branchPerms[branchId];
+      if (!bEntry.enabled) return 'none';
+      const bMod = bEntry.modules?.[resolvedModuleId];
+      return resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, true);
+    }
 
-  if (!modulePerms || !modulePerms.enabled) return false;
+    // Aggregate across all enabled branches in branchPermissions
+    let branchAggregated: 'full_access' | 'read_only' | 'none' = 'none';
+    for (const bEntry of Object.values(branchPerms)) {
+      if (!bEntry?.enabled) continue;
+      const bMod = bEntry.modules?.[resolvedModuleId];
+      const lvl = resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, true);
+      branchAggregated = maxAccessLevel(branchAggregated, lvl);
+    }
 
-  if (resolvedSubMenuId) {
-    let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
-
-    // Legacy submenu backward-compatibility resolution:
-    if (subPerm === undefined && modulePerms.enabled) {
-      const LEGACY_KEY_MAP: Record<string, string[]> = {
-        sales_kpi_individual: ['data_kpi'],
-        sales_kpi_fines: ['data_kpi'],
-        sales_kpi_nusantara: ['data_kpi'],
-        sales_kpi_omset: ['data_kpi'],
-        sales_dashboard: ['dashboard_penjualan'],
-        sales_activities: ['aktivitas_harian'],
-        sales_schedules: ['jadwal_admin'],
-        sales_loading_duration: ['durasi_muat'],
-        sales_invoice_so: ['input_faktur_so', 'durasi_muat', 'aktivitas_harian'],
-        sales_rfid_scanner: ['aplikasi_rfid_muat', 'durasi_muat', 'aktivitas_harian'],
-        sales_skill_matrix: ['matriks_skil'],
-        sales_jobdesk: ['pengaturan_sop'],
-        warehouse_scanner: ['stok_barang'],
-        warehouse_dashboard: ['stok_barang'],
-        warehouse_inventory: ['stok_barang'],
-        warehouse_slotting: ['stok_barang'],
-        warehouse_inbound: ['permintaan_barang'],
-        warehouse_outbound: ['ceklis_muat'],
-        warehouse_opname: ['opname_stok'],
-        operational_dashboard: ['dashboard_logistik'],
-        schedules: ['rencana_rute'],
-        driver_portal: ['portal_driver'],
-        fleet_forms: ['armada_ceklis'],
-        fleets: ['armada_ceklis'],
-        spareparts: ['armada_ceklis'],
-        fuel_efficiency: ['armada_ceklis'],
-        warehouse_fleet_cubication: ['armada_ceklis'],
-        driver_reports: ['monitoring_sla'],
-        crew_history: ['monitoring_sla'],
-        tracking_eval: ['monitoring_sla'],
-        marketing_online: ['kampanye'],
-        marketing_offline: ['leads_pipeline'],
-        customer_map: ['laporan_kunjungan'],
-        purchasing_dashboard: ['permintaan_pembelian'],
-        purchasing_stock_overview: ['po_vendor'],
-        purchasing_stock_forecast: ['po_vendor'],
-        finance_dashboard: ['kas_bank', 'faktur_pajak'],
-        hr_dashboard: ['hr_data_karyawan'],
-        training_videos: ['td_video_training'],
-        training_karyawan: ['td_training_karyawan'],
-        dashboard: ['dashboard_eksekutif'],
-        users: ['daftar_pengguna', 'persetujuan_akun'],
-        branches: ['daftar_pengguna'],
-        e2e_testing: ['daftar_pengguna'],
-        architecture: ['manajemen_hak_akses'],
-        activity_log: ['log_aktivitas_sistem']
-      };
-
-      const fallbackKeys = LEGACY_KEY_MAP[resolvedSubMenuId];
-      if (fallbackKeys) {
-        for (const k of fallbackKeys) {
-          if (modulePerms.subMenus?.[k] !== undefined) {
-            subPerm = modulePerms.subMenus[k];
-            break;
-          }
-        }
-      }
-
-      if (subPerm === undefined) {
-        subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'none';
+    // Also check top-level user.permissions.modules if present; if top-level explicitly restricts to read_only or none
+    // while branchPermissions had stale legacy keys, respect the normalized intersection
+    const userMod = user.permissions?.modules?.[resolvedModuleId];
+    if (userMod !== undefined && resolvedSubMenuId && userMod.subMenus?.[resolvedSubMenuId] !== undefined) {
+      const explicitTopLevel = userMod.subMenus[resolvedSubMenuId];
+      if (!userMod.enabled || explicitTopLevel === 'none') return 'none';
+      if (explicitTopLevel === 'read_only' && branchAggregated === 'full_access') {
+        return 'read_only';
       }
     }
 
-    // Legacy migration guard: for driver / crew_helper accounts that had old default (portal_driver + monitoring_sla only)
-    // without explicit branch permissions, only portal_driver is enabled by default.
-    if (
-      isCrew &&
-      resolvedModuleId === 'logistics' &&
-      resolvedSubMenuId === 'monitoring_sla' &&
-      userMod?.subMenus &&
-      !user.permissions?.branchPermissions
-    ) {
-      const activeKeys = Object.entries(userMod.subMenus)
-        .filter(([, v]) => v === 'full_access' || v === 'read_only')
-        .map(([k]) => k);
-      if (
-        activeKeys.length === 2 &&
-        activeKeys.includes('portal_driver') &&
-        activeKeys.includes('monitoring_sla')
-      ) {
-        subPerm = 'none';
-      }
-    }
-
-    if (!subPerm || subPerm === 'none') return false;
+    return branchAggregated;
   }
 
-  return true;
+  const userModules = user.permissions?.modules;
+  const userMod = userModules?.[resolvedModuleId];
+  const modulePerms = userMod !== undefined ? userMod : defaultMod;
+
+  return resolveSubMenuLevelFromMod(modulePerms, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, false);
+};
+
+export const canAccess = (
+  user: UserProfile | null | undefined,
+  moduleId: string,
+  subMenuId?: string,
+  branchId?: string
+): boolean => {
+  return getAccessLevel(user, moduleId, subMenuId, branchId) !== 'none';
+};
+
+export const canEdit = (
+  user: UserProfile | null | undefined,
+  moduleId: string,
+  subMenuId?: string,
+  branchId?: string
+): boolean => {
+  return getAccessLevel(user, moduleId, subMenuId, branchId) === 'full_access';
+};
+
+export const isReadOnlyAccess = (
+  user: UserProfile | null | undefined,
+  moduleId: string,
+  subMenuId?: string,
+  branchId?: string
+): boolean => {
+  return getAccessLevel(user, moduleId, subMenuId, branchId) === 'read_only';
 };
 
 export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
@@ -582,5 +892,6 @@ export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
   }
   return roleDefault;
 };
+
 
 

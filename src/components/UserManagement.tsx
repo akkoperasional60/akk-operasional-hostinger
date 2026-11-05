@@ -503,8 +503,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         initialPerms,
         selectedUser.permissions?.branchPermissions
       );
+      const syncedMergedPerms = computeMergedModulesFromBranches(loadedBranchPerms, selectedUser.role);
       setBranchPermissions(loadedBranchPerms);
-      setEditingPermissions(initialPerms);
+      setEditingPermissions(syncedMergedPerms);
       // Cabang tertutup default hanya saat beralih ke user baru
       setExpandedBranches({});
       setExpandedModules({});

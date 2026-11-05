@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { logisticsStore } from '../services/store';
 import { inferKategoriBarang, type MasterSkuRecord } from './WarehouseManagementSystem';
+import { databaseBarangService, isLegacySeededBarang } from '../services/databaseBarangService';
 
 export interface SkuCubicationRecord extends MasterSkuRecord {
   panjangCm: number;
@@ -39,25 +40,23 @@ export function enrichSkuWithCubication(sku: MasterSkuRecord): SkuCubicationReco
   const existingAny = sku as Partial<SkuCubicationRecord>;
   if (
     typeof existingAny.panjangCm === 'number' &&
-    existingAny.panjangCm > 0 &&
     typeof existingAny.lebarCm === 'number' &&
-    existingAny.lebarCm > 0 &&
-    typeof existingAny.tinggiCm === 'number' &&
-    existingAny.tinggiCm > 0 &&
-    typeof existingAny.beratKg === 'number' &&
-    existingAny.beratKg > 0
+    typeof existingAny.tinggiCm === 'number'
   ) {
+    const pVal = Number(existingAny.panjangCm) || 0;
+    const lVal = Number(existingAny.lebarCm) || 0;
+    const tVal = Number(existingAny.tinggiCm) || 0;
     const calcM3 =
       typeof existingAny.kubikasiM3 === 'number' && existingAny.kubikasiM3 > 0
         ? existingAny.kubikasiM3
-        : Number(((existingAny.panjangCm * existingAny.lebarCm * existingAny.tinggiCm) / 1_000_000).toFixed(4));
+        : (pVal > 0 && lVal > 0 && tVal > 0 ? Number(((pVal * lVal * tVal) / 1_000_000).toFixed(4)) : 0);
     return {
       ...sku,
-      panjangCm: existingAny.panjangCm,
-      lebarCm: existingAny.lebarCm,
-      tinggiCm: existingAny.tinggiCm,
+      panjangCm: pVal,
+      lebarCm: lVal,
+      tinggiCm: tVal,
       kubikasiM3: calcM3,
-      beratKg: existingAny.beratKg
+      beratKg: Number(existingAny.beratKg) || 0
     };
   }
 
@@ -125,7 +124,10 @@ export const WarehouseItemCubicationView: React.FC<{
   skuItems: MasterSkuRecord[];
   onUpdateSkuItems: (next: MasterSkuRecord[]) => void;
 }> = ({ skuItems, onUpdateSkuItems }) => {
-  const enrichedList = useMemo(() => skuItems.map(enrichSkuWithCubication), [skuItems]);
+  const enrichedList = useMemo(
+    () => skuItems.filter(s => !isLegacySeededBarang(s.noBarang)).map(enrichSkuWithCubication),
+    [skuItems]
+  );
 
   const [search, setSearch] = useState('');
   const [kategoriFilter, setKategoriFilter] = useState('ALL');
@@ -1163,8 +1165,15 @@ export const WarehouseItemCubicationView: React.FC<{
               <button
                 type="button"
                 onClick={() => {
-                  const updated = skuItems.filter(s => s.id !== deletingItem.id);
+                  const targetCode = deletingItem.noBarang.trim().toUpperCase();
+                  const updated = skuItems.filter(
+                    s => s.id !== deletingItem.id && s.noBarang.trim().toUpperCase() !== targetCode
+                  );
                   onUpdateSkuItems(updated);
+                  const dbList = databaseBarangService
+                    .getAll()
+                    .filter(i => i.id !== deletingItem.id && i.noBarang.trim().toUpperCase() !== targetCode);
+                  databaseBarangService.saveAll(dbList);
                   const name = deletingItem.namaBarang;
                   setDeletingItem(null);
                   setPopupModal({

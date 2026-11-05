@@ -1026,3 +1026,54 @@ html.dark .leaflet-cluster-spider-leg {
   }
 }
 
+/* =========================================================================
+   HANDHELD WMS SCANNER DARK PHONE FRAME ISOLATION (IMMUNE TO LIGHT THEME)
+   ========================================================================= */
+html.light .wms-handheld-dark,
+html.light .wms-handheld-dark .text-white {
+  color: #ffffff !important;
+}
+
+html.light .wms-handheld-dark .text-emerald-200,
+html.light .wms-handheld-dark .text-emerald-300,
+html.light .wms-handheld-dark .text-emerald-400 {
+  color: #6ee7b7 !important;
+}
+
+html.light .wms-handheld-dark .text-sky-300,
+html.light .wms-handheld-dark .text-sky-400 {
+  color: #7dd3fc !important;
+}
+
+html.light .wms-handheld-dark .text-amber-200,
+html.light .wms-handheld-dark .text-amber-300,
+html.light .wms-handheld-dark .text-amber-400 {
+  color: #fcd34d !important;
+}
+
+html.light .wms-handheld-dark .text-rose-100,
+html.light .wms-handheld-dark .text-rose-200,
+html.light .wms-handheld-dark .text-rose-300,
+html.light .wms-handheld-dark .text-rose-400 {
+  color: #fda4af !important;
+}
+
+html.light .wms-handheld-dark .text-indigo-200,
+html.light .wms-handheld-dark .text-indigo-300,
+html.light .wms-handheld-dark .text-indigo-400 {
+  color: #a5b4fc !important;
+}
+
+html.light .wms-handheld-dark select,
+html.light .wms-handheld-dark input {
+  background-color: #111827 !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+html.light .wms-handheld-dark select option {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+}
+
+

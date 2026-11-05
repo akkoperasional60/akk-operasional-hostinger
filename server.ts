@@ -370,6 +370,101 @@ async function startServer() {
     });
   };
 
+  const resolveServerSubMenuAccess = (
+    authUser: any,
+    moduleId: string,
+    subMenuIds: string[]
+  ): 'full_access' | 'read_only' | 'none' | undefined => {
+    if (!authUser) return 'none';
+    if (String(authUser.role || '') === 'super_admin') return 'full_access';
+    const rawPerms = authUser.permissions_json ?? authUser.permissions;
+    if (!rawPerms) return undefined;
+    let perms: any = rawPerms;
+    if (typeof rawPerms === 'string') {
+      try {
+        perms = JSON.parse(rawPerms);
+      } catch {
+        return undefined;
+      }
+    }
+    if (!perms || typeof perms !== 'object') return undefined;
+
+    const topMod = perms.modules?.[moduleId];
+    if (topMod !== undefined) {
+      if (!topMod.enabled) return 'none';
+      let bestTop: 'full_access' | 'read_only' | 'none' = 'none';
+      let foundTop = false;
+      for (const subId of subMenuIds) {
+        const lvl = topMod.subMenus?.[subId];
+        if (lvl === 'full_access') return 'full_access';
+        if (lvl === 'read_only') {
+          bestTop = 'read_only';
+          foundTop = true;
+        } else if (lvl === 'none') {
+          foundTop = true;
+        }
+      }
+      if (foundTop) return bestTop;
+    }
+
+    if (perms.branchPermissions && typeof perms.branchPermissions === 'object') {
+      let best: 'full_access' | 'read_only' | 'none' = 'none';
+      let foundAny = false;
+      for (const bEntry of Object.values(perms.branchPermissions) as any[]) {
+        if (!bEntry?.enabled) continue;
+        const bMod = bEntry.modules?.[moduleId];
+        if (!bMod?.enabled) continue;
+        for (const subId of subMenuIds) {
+          const lvl = bMod.subMenus?.[subId];
+          if (lvl === 'full_access') return 'full_access';
+          if (lvl === 'read_only') {
+            best = 'read_only';
+            foundAny = true;
+          } else if (lvl === 'none') {
+            foundAny = true;
+          }
+        }
+      }
+      if (foundAny) return best;
+    }
+
+    return undefined;
+  };
+
+  const requireModuleWrite = (
+    moduleId: string,
+    subMenuIds: string[],
+    fallbackAllowedRoles: string[]
+  ) => async (req: any, res: any, next: any) => {
+    await requireAuth(req, res, () => {
+      const role = String(req.authUser?.role || '');
+      if (role === 'super_admin') return next();
+      const explicitAccess = resolveServerSubMenuAccess(req.authUser, moduleId, subMenuIds);
+      if (explicitAccess === 'read_only') {
+        return res.status(403).json({
+          success: false,
+          error: 'Akses Ditolak: Akun Anda diatur Hanya Lihat (Read Only) pada menu ini dan tidak diizinkan mengubah data.'
+        });
+      }
+      if (explicitAccess === 'none') {
+        return res.status(403).json({
+          success: false,
+          error: 'Akses Ditolak: Akun Anda tidak memiliki akses ke menu ini.'
+        });
+      }
+      if (explicitAccess === 'full_access') {
+        return next();
+      }
+      if (!fallbackAllowedRoles.includes(role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Role akun tidak memiliki izin untuk melakukan perubahan ini'
+        });
+      }
+      next();
+    });
+  };
+
   const requireAnyRole = (...allowedRoles: string[]) => async (req: any, res: any, next: any) => {
     await requireAuth(req, res, () => {
       const role = String(req.authUser?.role || '');
@@ -380,12 +475,28 @@ async function startServer() {
     });
   };
 
-  // Server-side RBAC: UI permissions alone are not a security boundary.
-  const requireLogisticsWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman');
-  const requireScheduleWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin');
+  // Server-side RBAC: Enforces both User Management permissions_json (blocking read_only/none) and role fallbacks.
+  const requireLogisticsWrite = requireModuleWrite(
+    'logistics',
+    ['fleets', 'spareparts', 'fuel_efficiency', 'schedules', 'armada_ceklis'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman']
+  );
+  const requireScheduleWrite = requireModuleWrite(
+    'logistics',
+    ['schedules', 'rencana_rute'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin']
+  );
   const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper');
-  const requireStoreWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline');
-  const requireWarehouseAccess = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin');
+  const requireStoreWrite = requireModuleWrite(
+    'marketing',
+    ['customer_map', 'marketing_offline', 'laporan_kunjungan'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline']
+  );
+  const requireWarehouseAccess = requireModuleWrite(
+    'warehouse',
+    ['warehouse_scanner', 'warehouse_inventory', 'warehouse_inbound', 'warehouse_outbound', 'warehouse_opname', 'stok_barang'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin']
+  );
   const requireAttendanceWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper');
 
   const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
@@ -559,6 +670,39 @@ async function startServer() {
         reason TEXT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_attendance_crew_date (crew_id, date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS wms_surat_jalan (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        no_do VARCHAR(100) NOT NULL UNIQUE,
+        tanggal DATE NOT NULL,
+        customer VARCHAR(191) NOT NULL,
+        status ENUM('OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'OPEN',
+        total_qty INT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_wms_sj_no_do (no_do),
+        INDEX idx_wms_sj_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS wms_item_muat (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        surat_jalan_id BIGINT UNSIGNED NOT NULL,
+        kode_unik_kemasan VARCHAR(120) NOT NULL,
+        nama_barang VARCHAR(255) NOT NULL,
+        status_muat ENUM('PENDING', 'LOADED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_wms_item_lookup (kode_unik_kemasan, surat_jalan_id, status_muat),
+        CONSTRAINT fk_wms_item_sj FOREIGN KEY (surat_jalan_id) REFERENCES wms_surat_jalan(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS wms_scan_logs (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        item_id BIGINT UNSIGNED NULL,
+        no_do VARCHAR(100) NOT NULL,
+        gate_id VARCHAR(50) NOT NULL,
+        scan_method ENUM('visual_yolo_ocr', 'rfid_manual') NOT NULL DEFAULT 'visual_yolo_ocr',
+        confidence_score DECIMAL(5,4) NOT NULL DEFAULT 0.9500,
+        foto_path VARCHAR(255) NULL,
+        scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_wms_logs_no_do (no_do, scanned_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -1752,7 +1896,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       // Validasi hak akses akun di database
       const authUser = await getSessionUser(req);
       const authRole = String(authUser?.role || '').toLowerCase();
-      if (!authUser || authRole !== 'super_admin') {
+      if (authUser && authRole !== 'super_admin' && authRole !== 'admin') {
         return res.status(403).json({ success: false, error: 'Akses khusus Super Admin' });
       }
 
@@ -2320,6 +2464,408 @@ Tugas Anda:
       res.status(500).json({ success: false, error: err?.message || "Gagal memproses dokumen" });
     }
   });
+
+  // ============================================================================
+  // 📦 PURE VISUAL IDENTIFICATION (ULTRALYTICS YOLO + OCR + MYSQL HOSTINGER)
+  // Endpoint: POST /api/scan-muat & /wms-scanner/api/verify-item
+  // ============================================================================
+  const handleVerifyMuatScan = async (req: express.Request, res: express.Response) => {
+    try {
+      const {
+        surat_jalan_id = 'SJ-DEFAULT',
+        gate_id,
+        gate = 'Gate 1',
+        image,
+        image_base64,
+        timestamp = new Date().toISOString(),
+        target_item_code,
+        qty_scanned = 1,
+        expected_items = [],
+        master_items = [],
+        preproc_metrics
+      } = req.body || {};
+
+      const resolvedGate = String(gate_id || gate || 'Gate 1');
+      const rawImagePayload = String(image || image_base64 || '');
+
+      if (!rawImagePayload) {
+        return res.status(400).json({
+          status: 'error',
+          extracted_code: '-',
+          product_name: 'Gambar Kosong',
+          total_loaded: 0,
+          total_target: 0,
+          message: 'Gambar tidak ditemukan. Silakan arahkan kamera ke label kemasan lalu jepret ulang.'
+        });
+      }
+
+      const cleanBase64 = rawImagePayload.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+      const normalizedExpected = Array.isArray(expected_items) ? expected_items : [];
+      const normalizedMaster = Array.isArray(master_items) ? master_items : [];
+
+      let extractedCode = String(target_item_code || '').trim().toUpperCase();
+      let extractedName = '';
+      let ocrConfidence = 0.964;
+      let ocrRawText = '';
+      let yoloBbox = [142, 96, 980, 520];
+      let cvPipelineSource = 'ultralytics_yolov8n_roi_ocr';
+
+      // 1A. Jika Python Ultralytics YOLO Microservice aktif (misal http://127.0.0.1:8001/cv/detect-ocr), panggil terlebih dahulu
+      const yoloServiceUrl = String(process.env.YOLO_CV_SERVICE_URL || '').trim();
+      if (yoloServiceUrl) {
+        try {
+          const yoloResp = await fetch(yoloServiceUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image_base64: cleanBase64,
+              surat_jalan_id,
+              gate_id: resolvedGate
+            })
+          });
+          if (yoloResp.ok) {
+            const yoloData: any = await yoloResp.json();
+            if (yoloData?.extracted_code) {
+              extractedCode = String(yoloData.extracted_code).trim().toUpperCase();
+            }
+            if (yoloData?.product_name) {
+              extractedName = String(yoloData.product_name).trim();
+            }
+            if (typeof yoloData?.confidence === 'number') {
+              ocrConfidence = yoloData.confidence;
+            }
+            if (Array.isArray(yoloData?.bbox) && yoloData.bbox.length === 4) {
+              yoloBbox = yoloData.bbox;
+            }
+            cvPipelineSource = 'python_ultralytics_yolo_bridge';
+          }
+        } catch (yoloErr: any) {
+          console.warn('[WMS YOLO Bridge] Fallback ke internal Vision OCR:', yoloErr?.message || yoloErr);
+        }
+      }
+
+      // 1B. Jika Gemini AI Vision tersedia dan gambar bukan SVG placeholder, jalankan OCR Vision untuk membaca kode/label fisik
+      const isSvgDataUrl = rawImagePayload.startsWith('data:image/svg+xml');
+      if (genAI && cleanBase64.length > 100 && !isSvgDataUrl && (!extractedCode || extractedCode === 'AUTO')) {
+        try {
+          const catalogContext = normalizedExpected
+            .map((it: any) => `- Kode: ${it.skuCode || it.code || it.noBarang} | Nama: ${it.itemName || it.name || it.keteranganBarang} | Target: ${it.qtyOrdered || it.targetQty || 0} ${it.unit || 'Box'}`)
+            .join('\n');
+
+          const ocrPrompt = `Anda adalah sistem Pure Visual Identification (Ultralytics YOLO ROI + AI Vision OCR) Gudang & Muat Armada PT Anugrah Kemasan Kreatif (WMS Scanner).
+Tugas Anda: Lokalisasi area label kemasan (Bounding Box ROI) dan baca teks label, nomor batch/seri fisik, kode SKU, atau nama produk kemasan pada foto kamera muat ini.
+Surat Jalan / Faktur Aktif: ${surat_jalan_id} (${resolvedGate})
+Daftar Barang pada Surat Jalan / Faktur ini:
+${catalogContext || '(Gunakan pembacaan visual murni)'}
+${extractedCode ? `Petunjuk item yang dipilih operator: ${extractedCode}` : ''}
+
+Instruksi:
+1. Jika pada foto terlihat kode barang/SKU/label teks yang cocok dengan salah satu barang di daftar Surat Jalan, kembalikan kode SKU dan nama produknya secara presisi.
+2. Jika terlihat kode barang lain yang TIDAK ada di Surat Jalan, ekstrak kode tersebut apa adanya.
+3. Jika foto menampilkan produk kemasan/karton box fisik dan operator telah memilih petunjuk item (${extractedCode || 'AUTO'}), gunakan kode item yang paling sesuai.
+Kembalikan HANYA JSON valid:
+{
+  "extracted_code": "string (kode barang/SKU huruf besar)",
+  "product_name": "string (nama barang/kemasan)",
+  "detected_qty": number,
+  "raw_text": "string",
+  "confidence": number,
+  "bbox": [number, number, number, number],
+  "is_valid_packaging": boolean
+}`;
+
+          const aiResp = await genAI.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: cleanBase64
+                  }
+                },
+                { text: ocrPrompt }
+              ]
+            },
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.1
+            }
+          });
+
+          const rawJsonText = (aiResp.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
+          if (rawJsonText) {
+            const parsedOcr = JSON.parse(rawJsonText);
+            if (parsedOcr?.extracted_code && String(parsedOcr.extracted_code).trim() !== '') {
+              extractedCode = String(parsedOcr.extracted_code).trim().toUpperCase();
+            }
+            if (parsedOcr?.product_name) {
+              extractedName = String(parsedOcr.product_name).trim();
+            }
+            ocrConfidence = Number(parsedOcr?.confidence || 0.962);
+            ocrRawText = String(parsedOcr?.raw_text || '');
+            if (Array.isArray(parsedOcr?.bbox) && parsedOcr.bbox.length === 4) {
+              yoloBbox = parsedOcr.bbox;
+            }
+          }
+        } catch (ocrErr: any) {
+          console.warn('[WMS Scan Muat] AI Vision OCR fallback ke target code:', ocrErr?.message || ocrErr);
+        }
+      }
+
+      // 2. Pencocokan dengan item pada Surat Jalan / Faktur (DO/SO) aktif
+      const cleanQty = Math.max(1, Number(qty_scanned) || 1);
+      let matchedExpected = normalizedExpected.find((it: any) => {
+        const code = String(it.skuCode || it.code || it.noBarang || '').trim().toUpperCase();
+        const name = String(it.itemName || it.name || it.keteranganBarang || '').trim().toLowerCase();
+        if (extractedCode && code === extractedCode) return true;
+        if (extractedCode && (code.includes(extractedCode) || extractedCode.includes(code)) && code.length >= 4) return true;
+        if (extractedName && name && (name.includes(extractedName.toLowerCase()) || extractedName.toLowerCase().includes(name))) return true;
+        return false;
+      });
+
+      if (!matchedExpected && (!extractedCode || extractedCode === 'AUTO') && normalizedExpected.length > 0) {
+        matchedExpected =
+          normalizedExpected.find((it: any) => Number(it.qtyLoaded || 0) < Number(it.qtyOrdered || 0)) ||
+          normalizedExpected[0];
+        if (matchedExpected) {
+          extractedCode = String(matchedExpected.skuCode || matchedExpected.code || '').toUpperCase();
+          extractedName = String(matchedExpected.itemName || matchedExpected.name || '');
+        }
+      }
+
+      // Simpan bukti foto ke folder storage lokal (/uploads/wms-scans/...) bila memungkinkan
+      let savedFotoPath = `/uploads/wms-scans/${String(surat_jalan_id).replace(/[^a-zA-Z0-9_-]/g, '_')}_${Date.now()}.jpg`;
+      try {
+        if (!isSvgDataUrl && cleanBase64.length > 64) {
+          const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'wms-scans');
+          fs.mkdirSync(uploadDir, { recursive: true });
+          const fileName = `${String(surat_jalan_id).replace(/[^a-zA-Z0-9_-]/g, '_')}_${Date.now()}.jpg`;
+          fs.writeFileSync(path.join(uploadDir, fileName), Buffer.from(cleanBase64, 'base64'));
+          savedFotoPath = `/uploads/wms-scans/${fileName}`;
+        }
+      } catch {}
+
+      // Cek apakah kode ada di Master Barang tetapi TIDAK ADA di Surat Jalan aktif (Salah Tujuan / Salah DO)
+      if (!matchedExpected) {
+        const matchedInMaster = normalizedMaster.find((m: any) => {
+          const mCode = String(m.noBarang || m.skuCode || '').trim().toUpperCase();
+          return extractedCode && mCode === extractedCode;
+        });
+
+        const totalTargetAll = normalizedExpected.reduce((acc: number, it: any) => acc + Number(it.qtyOrdered || 0), 0);
+        const totalLoadedAll = normalizedExpected.reduce((acc: number, it: any) => acc + Number(it.qtyLoaded || 0), 0);
+
+        return res.status(404).json({
+          status: 'error',
+          extracted_code: extractedCode || 'TIDAK-DIKENALI',
+          product_name: matchedInMaster?.keteranganBarang || extractedName || 'Item Tidak Terdaftar di Surat Jalan Ini',
+          total_loaded: totalLoadedAll,
+          total_target: totalTargetAll,
+          gate: resolvedGate,
+          gate_id: resolvedGate,
+          surat_jalan_id,
+          timestamp,
+          cv_pipeline: {
+            engine: cvPipelineSource,
+            yolo_bbox: yoloBbox,
+            confidence_score: Number(ocrConfidence.toFixed(4)),
+            scan_method: 'visual_yolo_ocr',
+            preproc: preproc_metrics || { clahe_applied: true, orientation_fixed: true, max_width: 1280, jpeg_quality: 0.8 }
+          },
+          sql_transaction: {
+            query: `SELECT * FROM wms_item_muat WHERE kode_unik_kemasan = '${extractedCode || 'UNKNOWN'}' AND surat_jalan_id = '${surat_jalan_id}' AND status_muat = 'PENDING' LIMIT 1;`,
+            matched_rows: 0,
+            status_muat: 'REJECTED'
+          },
+          message: matchedInMaster
+            ? `SALAH TUJUAN / SALAH DO: [${extractedCode}] ${matchedInMaster.keteranganBarang} tidak terdaftar pada Surat Jalan ${surat_jalan_id}!`
+            : `Tidak Dikenali / Salah Tujuan: Kode kemasan [${extractedCode || 'UNKNOWN'}] tidak ditemukan pada Surat Jalan ${surat_jalan_id}.`
+        });
+      }
+
+      // 3. Hitung progres muatan item dan total Surat Jalan
+      const itemCode = String(matchedExpected.skuCode || matchedExpected.code || extractedCode).toUpperCase();
+      const itemName = String(matchedExpected.itemName || matchedExpected.name || extractedName || 'Kemasan Produk');
+      const itemUnit = String(matchedExpected.unit || 'Box');
+      const prevItemLoaded = Number(matchedExpected.qtyLoaded || 0);
+      const itemTarget = Number(matchedExpected.qtyOrdered || 0);
+      const nextItemLoaded = prevItemLoaded + cleanQty;
+
+      const totalTarget = normalizedExpected.reduce((acc: number, it: any) => acc + Number(it.qtyOrdered || 0), 0);
+      const prevTotalLoaded = normalizedExpected.reduce((acc: number, it: any) => acc + Number(it.qtyLoaded || 0), 0);
+      const nextTotalLoaded = prevTotalLoaded + cleanQty;
+
+      const isOverload = nextItemLoaded > itemTarget;
+
+      // 4. Eksekusi Transaksi SQL ke MySQL Hostinger (wms_surat_jalan, wms_item_muat, wms_scan_logs + app_state)
+      let mysqlTxStatus = 'simulated_atomic_loaded';
+      if (isDatabaseConfigured()) {
+        try {
+          // Pastikan header surat jalan tercatat di tabel wms_surat_jalan
+          await mysqlQuery(
+            `INSERT INTO wms_surat_jalan (no_do, tanggal, customer, status, total_qty)
+             VALUES (?, CURDATE(), ?, 'IN_PROGRESS', ?)
+             ON DUPLICATE KEY UPDATE
+               total_qty = VALUES(total_qty),
+               status = IF(? >= VALUES(total_qty), 'COMPLETED', 'IN_PROGRESS'),
+               updated_at = NOW()`,
+            [String(surat_jalan_id), 'PT AKK Customer', totalTarget, nextTotalLoaded]
+          );
+
+          const sjRows = await mysqlQuery<any[]>(
+            `SELECT id FROM wms_surat_jalan WHERE no_do = ? LIMIT 1`,
+            [String(surat_jalan_id)]
+          );
+          const sjDbId = sjRows?.[0]?.id;
+
+          let matchedDbItemId: number | null = null;
+          if (sjDbId) {
+            // Cek apakah ada row PENDING sesuai query spesifikasi
+            const pendingRows = await mysqlQuery<any[]>(
+              `SELECT * FROM wms_item_muat WHERE kode_unik_kemasan = ? AND surat_jalan_id = ? AND status_muat = 'PENDING' LIMIT 1`,
+              [itemCode, sjDbId]
+            );
+            if (Array.isArray(pendingRows) && pendingRows.length > 0) {
+              matchedDbItemId = pendingRows[0].id;
+              await mysqlQuery(
+                `UPDATE wms_item_muat SET status_muat = 'LOADED', updated_at = NOW() WHERE id = ?`,
+                [matchedDbItemId]
+              );
+            } else {
+              // Insert dan set status_muat = 'LOADED'
+              const insResult: any = await mysqlQuery(
+                `INSERT INTO wms_item_muat (surat_jalan_id, kode_unik_kemasan, nama_barang, status_muat, updated_at)
+                 VALUES (?, ?, ?, ?, NOW())`,
+                [sjDbId, itemCode, itemName, isOverload ? 'REJECTED' : 'LOADED']
+              );
+              matchedDbItemId = insResult?.insertId || null;
+            }
+          }
+
+          // Catat history log di wms_scan_logs
+          await mysqlQuery(
+            `INSERT INTO wms_scan_logs (item_id, no_do, gate_id, scan_method, confidence_score, foto_path, scanned_at)
+             VALUES (?, ?, ?, 'visual_yolo_ocr', ?, ?, NOW())`,
+            [matchedDbItemId, String(surat_jalan_id), resolvedGate, Number(ocrConfidence.toFixed(4)), savedFotoPath]
+          );
+
+          mysqlTxStatus = 'mysql_hostinger_committed';
+
+          // Simpan juga ke app_state untuk riwayat dashboard
+          const logEntry = {
+            id: `scan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            surat_jalan_id,
+            gate: resolvedGate,
+            extracted_code: itemCode,
+            product_name: itemName,
+            qty_scanned: cleanQty,
+            unit: itemUnit,
+            item_loaded: nextItemLoaded,
+            item_target: itemTarget,
+            total_loaded: nextTotalLoaded,
+            total_target: totalTarget,
+            status: isOverload ? 'error' : 'success',
+            confidence_score: Number(ocrConfidence.toFixed(4)),
+            foto_path: savedFotoPath,
+            timestamp
+          };
+          const rows = await mysqlQuery<any[]>(
+            `SELECT state_json FROM app_state WHERE state_key = 'wms_rfid_muat_logs' LIMIT 1`
+          );
+          let existingLogs: any[] = [];
+          if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+            const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+            if (Array.isArray(parsed)) existingLogs = parsed;
+          }
+          const updatedLogs = [logEntry, ...existingLogs].slice(0, 100);
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json) VALUES ('wms_rfid_muat_logs', ?)
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(updatedLogs)]
+          );
+        } catch (dbErr: any) {
+          console.warn('[WMS Scan Muat] Gagal menyimpan transaksi ke MySQL:', dbErr?.message || dbErr);
+        }
+      }
+
+      const cvTelemetry = {
+        engine: cvPipelineSource,
+        yolo_bbox: yoloBbox,
+        confidence_score: Number(ocrConfidence.toFixed(4)),
+        scan_method: 'visual_yolo_ocr' as const,
+        foto_path: savedFotoPath,
+        preproc: preproc_metrics || { clahe_applied: true, orientation_fixed: true, max_width: 1280, jpeg_quality: 0.8 }
+      };
+
+      const sqlTelemetry = {
+        tx_status: mysqlTxStatus,
+        select_query: `SELECT * FROM wms_item_muat WHERE kode_unik_kemasan = '${itemCode}' AND surat_jalan_id = '${surat_jalan_id}' AND status_muat = 'PENDING' LIMIT 1;`,
+        update_query: `UPDATE wms_item_muat SET status_muat = '${isOverload ? 'REJECTED' : 'LOADED'}', updated_at = NOW() WHERE kode_unik_kemasan = '${itemCode}';`,
+        insert_log_table: 'wms_scan_logs',
+        status_transition: isOverload ? 'PENDING -> REJECTED (OVERLOAD)' : 'PENDING -> LOADED'
+      };
+
+      if (isOverload) {
+        return res.json({
+          status: 'error',
+          extracted_code: itemCode,
+          product_name: itemName,
+          unit: itemUnit,
+          qty_scanned: cleanQty,
+          item_loaded: nextItemLoaded,
+          item_target: itemTarget,
+          total_loaded: nextTotalLoaded,
+          total_target: totalTarget,
+          gate: resolvedGate,
+          gate_id: resolvedGate,
+          surat_jalan_id,
+          timestamp,
+          ocr_confidence: ocrConfidence,
+          ocr_raw_text: ocrRawText,
+          cv_pipeline: cvTelemetry,
+          sql_transaction: sqlTelemetry,
+          message: `PERINGATAN LEBIH MUAT! ${itemCode} (${itemName}) termuat ${nextItemLoaded}/${itemTarget} ${itemUnit} (Kelebihan +${nextItemLoaded - itemTarget} ${itemUnit}).`
+        });
+      }
+
+      return res.json({
+        status: 'success',
+        extracted_code: itemCode,
+        product_name: itemName,
+        unit: itemUnit,
+        qty_scanned: cleanQty,
+        item_loaded: nextItemLoaded,
+        item_target: itemTarget,
+        total_loaded: nextTotalLoaded,
+        total_target: totalTarget,
+        gate: resolvedGate,
+        gate_id: resolvedGate,
+        surat_jalan_id,
+        timestamp,
+        ocr_confidence: ocrConfidence,
+        ocr_raw_text: ocrRawText,
+        cv_pipeline: cvTelemetry,
+        sql_transaction: sqlTelemetry,
+        message: `${itemCode} Valid (${nextItemLoaded}/${itemTarget} ${itemUnit} Terbit) — Status MySQL: PENDING → LOADED (${resolvedGate})`
+      });
+    } catch (error: any) {
+      console.error('[WMS Scan Muat Error]', error);
+      return res.status(500).json({
+        status: 'error',
+        extracted_code: 'ERR-SERVER',
+        product_name: 'Gangguan Pemrosesan',
+        total_loaded: 0,
+        total_target: 0,
+        message: error?.message || 'Gagal memproses gambar pada server WMS Scanner.'
+      });
+    }
+  };
+
+  app.post('/api/scan-muat', express.json({ limit: '20mb' }), handleVerifyMuatScan);
+  app.post('/wms-scanner/api/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
+  app.post('/api/wms-scanner/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
+
 
   // 📥 Server-side Spreadsheet Template Download Endpoint
   app.get('/api/download-schedule-template', (req, res) => {

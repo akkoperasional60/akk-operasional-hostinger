@@ -3,10 +3,12 @@ import { UserProfile, UserRole } from '../types';
 import { logisticsStore } from '../services/store';
 import {
   canAccess,
+  canEdit,
   getUserRoleDisplayTitle,
   hasRequiredRole,
   isDispatcherRole,
   isDriverRole,
+  isReadOnlyAccess,
   isSuperAdminRole
 } from '../utils/rbac';
 
@@ -21,11 +23,13 @@ export interface UseRoleAccessReturn {
   isDispatcher: (targetUser?: UserProfile) => boolean;
   hasRole: (allowedRoles: Array<UserRole | 'dispatcher' | 'manager'>, targetUser?: UserProfile) => boolean;
   canAccessModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
+  canEditModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
+  isReadOnlyModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
 }
 
 /**
  * Custom RBAC hook providing reactive user state from the logistics store
- * along with role helper functions (`canManageFleet`, `isDriver`, `isAdmin`).
+ * along with role helper functions (`canManageFleet`, `isDriver`, `isAdmin`, `canEditModule`, `isReadOnlyModule`).
  */
 export function useRoleAccess(): UseRoleAccessReturn {
   const [user, setUser] = useState<UserProfile>(() => logisticsStore.getCurrentUser());
@@ -41,7 +45,7 @@ export function useRoleAccess(): UseRoleAccessReturn {
           prev.role === next.role &&
           prev.status === next.status &&
           prev.email === next.email &&
-          prev.permissions === next.permissions
+          JSON.stringify(prev.permissions) === JSON.stringify(next.permissions)
         ) {
           return prev;
         }
@@ -93,10 +97,10 @@ export function useRoleAccess(): UseRoleAccessReturn {
       if (isDriverRole(activeUser.role)) {
         return false;
       }
-      if (isSuperAdminRole(activeUser.role) || isDispatcherRole(activeUser.role)) {
+      if (isSuperAdminRole(activeUser.role)) {
         return true;
       }
-      return canAccess(activeUser, 'fleets') || canAccess(activeUser, 'schedules');
+      return canEdit(activeUser, 'fleets') || canEdit(activeUser, 'schedules');
     },
     [user]
   );
@@ -117,6 +121,22 @@ export function useRoleAccess(): UseRoleAccessReturn {
     [user]
   );
 
+  const canEditModule = useCallback(
+    (moduleId: string, subMenuId?: string, targetUser?: UserProfile): boolean => {
+      const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
+      return canEdit(activeUser, moduleId, subMenuId);
+    },
+    [user]
+  );
+
+  const isReadOnlyModule = useCallback(
+    (moduleId: string, subMenuId?: string, targetUser?: UserProfile): boolean => {
+      const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
+      return isReadOnlyAccess(activeUser, moduleId, subMenuId);
+    },
+    [user]
+  );
+
   return {
     user,
     role: user.role,
@@ -127,6 +147,9 @@ export function useRoleAccess(): UseRoleAccessReturn {
     isAdmin,
     isDispatcher,
     hasRole,
-    canAccessModule
+    canAccessModule,
+    canEditModule,
+    isReadOnlyModule
   };
 }
+

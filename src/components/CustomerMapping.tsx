@@ -4,6 +4,7 @@ import { RetailStore, UserRole } from '../types';
 import { CENTRAL_WAREHOUSE } from '../data/mockData';
 import { LeafletMap } from './LeafletMap';
 import { logisticsStore } from '../services/store';
+import { canEdit as checkCanEdit } from '../utils/rbac';
 import {
   extractCoordinatesFromObject,
   getStoreLocationType,
@@ -57,19 +58,22 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
   onCreateScheduleForStore,
   onScheduleForStore,
   onAddStore,
-  currentRole = 'super_admin'
+  currentRole: _currentRole = 'super_admin'
 }) => {
   const [storeList, setStoreList] = useState<RetailStore[]>(propStores || logisticsStore.getStores());
+  const [activeUser, setActiveUser] = useState(() => logisticsStore.getCurrentUser());
 
   React.useEffect(() => {
+    const unsub = logisticsStore.subscribe(() => {
+      if (!propStores) {
+        setStoreList(logisticsStore.getStores());
+      }
+      setActiveUser(logisticsStore.getCurrentUser());
+    });
     if (propStores) {
       setStoreList(propStores);
-    } else {
-      const unsub = logisticsStore.subscribe(() => {
-        setStoreList(logisticsStore.getStores());
-      });
-      return unsub;
     }
+    return unsub;
   }, [propStores]);
 
   const stores = storeList;
@@ -82,11 +86,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
     }
   };
 
-  const canEdit =
-    currentRole === 'super_admin' ||
-    currentRole === 'spv_logistik' ||
-    currentRole === 'operasional' ||
-    currentRole === 'dispatcher';
+  const canEdit = checkCanEdit(activeUser, 'customer_map');
   const excelInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedRegionType, setSelectedRegionType] = useState<'all' | StoreLocationType>('all');

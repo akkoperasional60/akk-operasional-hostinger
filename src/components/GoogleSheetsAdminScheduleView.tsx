@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import { canEdit } from '../utils/rbac';
 import { 
   ADMIN_SCHEDULE_WEEKS, 
   AdminScheduleWeek, 
@@ -1293,6 +1294,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return unsub;
   }, []);
 
+  const currentUserProfile = logisticsStore.getCurrentUser();
+  const canEditSchedules = canEdit(currentUserProfile, 'schedules');
+
   const getIntegratedDrivers = () => {
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
@@ -1830,6 +1834,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const handleConfirmReplaceAbsentCrew = () => {
+    if (!canEditSchedules) return;
     if (!replaceAbsentModal) return;
     const { standbyCrewName, dayNumber, dateString, selectedTripIndex, replacePosition } = replaceAbsentModal;
 
@@ -1989,6 +1994,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   // Fitur "Tidak Jadi Ganti" untuk membatalkan penggantikan kru Hari H agar tidak muncul lagi pada rincian jadwal
   const handleCancelReplaceAbsentCrew = (targetCrewName?: string) => {
+    if (!canEditSchedules) return;
     const crewNameToCancel = targetCrewName || replaceAbsentModal?.standbyCrewName;
     if (!crewNameToCancel) {
       setReplaceAbsentModal(null);
@@ -2479,6 +2485,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     mode: 'tambahkan' | 'ganti' = 'tambahkan',
     sourceLabel: string = 'Kombinasi Tambah & Unggah Jadwal'
   ) => {
+    if (!canEditSchedules) return;
     if (!incomingTrips || incomingTrips.length === 0) return;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
@@ -2718,6 +2725,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const handleSaveTripModal = () => {
+    if (!canEditSchedules) return;
     if (!editingTripModal) return;
     const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, departureDateIso, returnDateIso, departureTime, targetReturnTime, isNew } = editingTripModal;
 
@@ -3108,6 +3116,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const handleDeleteTrip = (p: DeliveryAssignment, dayNumber: number, tripIndex: number) => {
+    if (!canEditSchedules) return;
     if (p.id) {
       logisticsStore.deleteSchedule(p.id);
     } else {
@@ -4149,70 +4158,84 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
           {/* Simplified Header Actions */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <input 
-              type="file" 
-              ref={fileInputRef}
-              accept=".xlsx,.xls,.csv" 
-              className="hidden" 
-              onChange={handleFileUpload}
-            />
+            {canEditSchedules && (
+              <input 
+                type="file" 
+                ref={fileInputRef}
+                accept=".xlsx,.xls,.csv" 
+                className="hidden" 
+                onChange={handleFileUpload}
+              />
+            )}
 
-            <button
-              onClick={() => {
-                const today = getTodayIso();
-                setManualScheduleForm(prev => ({
-                  ...prev,
-                  dateIso: today,
-                  departureDateIso: today,
-                  returnDateIso: today,
-                  area: ''
-                }));
-                setIsUploadConfigModalOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-xs transition cursor-pointer"
-              title="Pop-up Form Tambah Jadwal Baru (Manual)"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah Jadwal Manual</span>
-            </button>
+            {canEditSchedules ? (
+              <>
+                <button
+                  onClick={() => {
+                    const today = getTodayIso();
+                    setManualScheduleForm(prev => ({
+                      ...prev,
+                      dateIso: today,
+                      departureDateIso: today,
+                      returnDateIso: today,
+                      area: ''
+                    }));
+                    setIsUploadConfigModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-xs transition cursor-pointer"
+                  title="Pop-up Form Tambah Jadwal Baru (Manual)"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Tambah Jadwal Manual</span>
+                </button>
 
-            <button
-              onClick={() => {
-                const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
-                setImportMonth(MONTH_NAMES[effectiveMo] || 'Januari');
-                setImportYear(String(selectedYear));
-                setActiveSubPage('upload_excel');
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-xs transition cursor-pointer"
-              title="Halaman Unggah File Jadwal Excel (.xls, .xlsx, .csv)"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Unggah File Excel</span>
-            </button>
+                <button
+                  onClick={() => {
+                    const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
+                    setImportMonth(MONTH_NAMES[effectiveMo] || 'Januari');
+                    setImportYear(String(selectedYear));
+                    setActiveSubPage('upload_excel');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-xs transition cursor-pointer"
+                  title="Halaman Unggah File Jadwal Excel (.xls, .xlsx, .csv)"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Unggah File Excel</span>
+                </button>
 
-            <button
-              onClick={() => {
-                setActiveMappingCategory('area');
-                setIsAreaMappingModalOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
-              title="Pemetaan Area Kirim"
-            >
-              <MapPin className="w-3.5 h-3.5 text-rose-400" />
-              <span>Area ({Object.keys(detectedAreaMappings).length})</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveMappingCategory('area');
+                    setIsAreaMappingModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+                  title="Pemetaan Area Kirim"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Area ({Object.keys(detectedAreaMappings).length})</span>
+                </button>
 
-            <button
-              onClick={() => {
-                setActiveMappingCategory('crew');
-                setIsAreaMappingModalOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
-              title="Pemetaan Kru (Driver & Helper)"
-            >
-              <Users className="w-3.5 h-3.5 text-blue-400" />
-              <span>Kru ({Object.keys(detectedCrewMappings).length})</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveMappingCategory('crew');
+                    setIsAreaMappingModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+                  title="Pemetaan Kru (Driver & Helper)"
+                >
+                  <Users className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Kru ({Object.keys(detectedCrewMappings).length})</span>
+                </button>
+              </>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold"
+                title="Akun Anda diatur Hanya Lihat (Read Only) pada menu Jadwal & Penugasan Armada"
+              >
+                <Eye className="w-3.5 h-3.5 text-amber-400" />
+                <span>Mode Hanya Lihat (Read Only)</span>
+              </span>
+            )}
 
             <button
               onClick={handleExportXLSX}
@@ -4793,15 +4816,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                                         Menggantikan {backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} {backupTargetName}
                                       </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCancelTripReplacement(p)}
-                                        className="mt-0.5 inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 border border-rose-200 dark:border-rose-800/60 px-1.5 py-0.5 rounded cursor-pointer transition-colors w-fit shadow-2xs"
-                                        title="Batalkan kru pengganti untuk rute ini"
-                                      >
-                                        <XCircle className="w-2.5 h-2.5 text-rose-500" />
-                                        <span>Tidak Jadi Ganti</span>
-                                      </button>
+                                      {canEditSchedules && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCancelTripReplacement(p)}
+                                          className="mt-0.5 inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 border border-rose-200 dark:border-rose-800/60 px-1.5 py-0.5 rounded cursor-pointer transition-colors w-fit shadow-2xs"
+                                          title="Batalkan kru pengganti untuk rute ini"
+                                        >
+                                          <XCircle className="w-2.5 h-2.5 text-rose-500" />
+                                          <span>Tidak Jadi Ganti</span>
+                                        </button>
+                                      )}
                                     </div>
                                   ) : (
                                     <span className="text-slate-400 text-xs font-semibold">-</span>
@@ -4927,22 +4952,31 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                         <Zap className="w-3 h-3 text-amber-500 fill-current" />
                                       </button>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
-                                      className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
-                                      title="Edit Rincian Pengiriman Ini"
-                                    >
-                                      <Edit className="w-3 h-3" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setDeleteConfirmModal({ p, dayNumber: activeDayObj.dayNumber, tripIndex: pIdx, dateString: activeDayObj.dateString })}
-                                      className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
-                                      title="Hapus Rincian Pengiriman Ini"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
+                                    {canEditSchedules ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
+                                          className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+                                          title="Edit Rincian Pengiriman Ini"
+                                        >
+                                          <Edit className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeleteConfirmModal({ p, dayNumber: activeDayObj.dayNumber, tripIndex: pIdx, dateString: activeDayObj.dateString })}
+                                          className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
+                                          title="Hapus Rincian Pengiriman Ini"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
+                                        <Eye className="w-2.5 h-2.5" />
+                                        <span>Hanya Lihat</span>
+                                      </span>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -5067,39 +5101,46 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                                       {/* Aksi Penggantian Hari H */}
                                       <td className="py-1.5 px-2 text-center">
-                                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              setReplaceAbsentModal({
-                                                isOpen: true,
-                                                standbyCrewName: crew.name,
-                                                standbyCrewRole: crew.role,
-                                                dayNumber: activeDayObj.dayNumber,
-                                                dateString: activeDayObj.dateString,
-                                                selectedTripIndex: 0,
-                                                replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
-                                                absentReason: ''
-                                              })
-                                            }
-                                            className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
-                                            title="Gantikan kru kiriman area lain yang berhalangan hadir pada Hari H"
-                                          >
-                                            <RefreshCw className="w-2.5 h-2.5" />
-                                            <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
-                                          </button>
-                                          {crew.isReplacing && (
+                                        {canEditSchedules ? (
+                                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                             <button
                                               type="button"
-                                              onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
-                                              className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
-                                              title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                                              onClick={() =>
+                                                setReplaceAbsentModal({
+                                                  isOpen: true,
+                                                  standbyCrewName: crew.name,
+                                                  standbyCrewRole: crew.role,
+                                                  dayNumber: activeDayObj.dayNumber,
+                                                  dateString: activeDayObj.dateString,
+                                                  selectedTripIndex: 0,
+                                                  replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
+                                                  absentReason: ''
+                                                })
+                                              }
+                                              className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                              title="Gantikan kru kiriman area lain yang berhalangan hadir pada Hari H"
                                             >
-                                              <XCircle className="w-2.5 h-2.5 text-rose-500" />
-                                              <span>Tidak Jadi Ganti</span>
+                                              <RefreshCw className="w-2.5 h-2.5" />
+                                              <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
                                             </button>
-                                          )}
-                                        </div>
+                                            {crew.isReplacing && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
+                                                className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                                title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                                              >
+                                                <XCircle className="w-2.5 h-2.5 text-rose-500" />
+                                                <span>Tidak Jadi Ganti</span>
+                                              </button>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
+                                            <Eye className="w-2.5 h-2.5" />
+                                            <span>Hanya Lihat</span>
+                                          </span>
+                                        )}
                                       </td>
                                     </tr>
                                   );

@@ -184,6 +184,45 @@ CREATE TABLE IF NOT EXISTS `attendance` (
   INDEX `idx_attendance_crew_date` (`crew_id`, `date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 12. WMS_SURAT_JALAN (Header Surat Jalan / Faktur DO untuk Verifikasi Muat Visual YOLO)
+CREATE TABLE IF NOT EXISTS `wms_surat_jalan` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `no_do` VARCHAR(100) NOT NULL UNIQUE,
+  `tanggal` DATE NOT NULL,
+  `customer` VARCHAR(191) NOT NULL,
+  `status` ENUM('OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'OPEN',
+  `total_qty` INT NOT NULL DEFAULT 0,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_wms_sj_no_do` (`no_do`),
+  INDEX `idx_wms_sj_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13. WMS_ITEM_MUAT (Detail Item Kemasan per Surat Jalan pada WMS Visual Scanner)
+CREATE TABLE IF NOT EXISTS `wms_item_muat` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `surat_jalan_id` BIGINT UNSIGNED NOT NULL,
+  `kode_unik_kemasan` VARCHAR(120) NOT NULL,
+  `nama_barang` VARCHAR(255) NOT NULL,
+  `status_muat` ENUM('PENDING', 'LOADED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_wms_item_lookup` (`kode_unik_kemasan`, `surat_jalan_id`, `status_muat`),
+  CONSTRAINT `fk_wms_item_sj` FOREIGN KEY (`surat_jalan_id`) REFERENCES `wms_surat_jalan`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 14. WMS_SCAN_LOGS (Riwayat Audit Log Pemindaian Visual & Bukti Foto Muat)
+CREATE TABLE IF NOT EXISTS `wms_scan_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `item_id` BIGINT UNSIGNED NULL,
+  `no_do` VARCHAR(100) NOT NULL,
+  `gate_id` VARCHAR(50) NOT NULL,
+  `scan_method` ENUM('visual_yolo_ocr', 'rfid_manual') NOT NULL DEFAULT 'visual_yolo_ocr',
+  `confidence_score` DECIMAL(5,4) NOT NULL DEFAULT 0.9500,
+  `foto_path` VARCHAR(255) NULL,
+  `scanned_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_wms_logs_no_do` (`no_do`, `scanned_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ====================================================================
 -- SAFE UPGRADE FOR AN EARLIER HOSTINGER SCHEMA (NO DROP / NO TRUNCATE)
 -- ====================================================================

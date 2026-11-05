@@ -28,7 +28,7 @@ import {
 } from './WarehouseCubicationModules';
 import { branchStore, BranchRecord } from '../services/branchStore';
 import { WarehouseDatabaseBarangView } from './WarehouseDatabaseBarangView';
-import { databaseBarangService } from '../services/databaseBarangService';
+import { databaseBarangService, isLegacySeededBarang } from '../services/databaseBarangService';
 
 export type WmsSubTab =
   | 'overview'
@@ -100,13 +100,7 @@ export interface KartuStokAnalysisRecord {
   namaGudang: string;
 }
 
-const INITIAL_MASTER_SKUS: MasterSkuRecord[] = [
-  { id: 'sku-1', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-001', namaBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)', stokTersedia: 4850, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-2', kategoriBarang: 'Karton Box Double Wall', noBarang: 'AKK-KBX-002', namaBarang: 'Karton Box Double Wall CB-Flute Export 80x50x50 cm', stokTersedia: 1120, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-3', kategoriBarang: 'Box Kemasan Makanan', noBarang: 'AKK-KBX-003', namaBarang: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm', stokTersedia: 9400, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-4', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-004', namaBarang: 'Karton Box Polos E-Flute 40x30x25 cm', stokTersedia: 3600, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-5', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-005', namaBarang: 'Karton Box C-Flute Tebal 50x35x35 cm', stokTersedia: 4100, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' }
-];
+const INITIAL_MASTER_SKUS: MasterSkuRecord[] = [];
 
 const INITIAL_KARTU_STOK_ANALYSIS: KartuStokAnalysisRecord[] = [
   {
@@ -394,46 +388,90 @@ export const WarehouseManagementSystem: React.FC<{
 }> = ({ initialTab = 'overview', onNavigateTab }) => {
   const [activeTab, setActiveTab] = useState<WmsSubTab>(initialTab);
 
-  // Master SKU State (persisted in localStorage)
+  // Master SKU State (persisted in localStorage & synced with Database Barang)
   const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>(() => {
     try {
-      // Prefer the current v3 store, but migrate existing v2 data instead of
-      // silently discarding user-imported Master SKU records on upgrade.
       const savedV3 = localStorage.getItem(LS_KEY_MASTER_SKU);
       const savedLegacy = localStorage.getItem(LS_KEY_MASTER_SKU_LEGACY);
       const saved = savedV3 || savedLegacy;
+      try {
+        if (savedLegacy) localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+      } catch {}
 
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Only replace the exact 24-row legacy demo dataset. Do not wipe
-          // arbitrary user-imported data merely because it contains sku-6.
-          const legacyDemoCodes = new Set([
-            'AKK-KBX-001', 'AKK-KBX-002', 'AKK-KBX-003', 'AKK-KBX-004', 'AKK-KBX-005',
-            'AKK-KBX-006', 'AKK-KBX-007', 'AKK-KBX-008', 'AKK-KBX-009', 'AKK-KBX-010',
-            'AKK-PLS-014', 'AKK-PLS-019', 'AKK-PLS-022', 'AKK-PLS-030', 'AKK-PLS-034',
-            'AKK-MPK-007', 'AKK-MPK-008', 'AKK-MPK-011', 'AKK-MPK-015',
-            'AKK-PRD-025', 'AKK-PRD-028', 'AKK-PRD-031', 'AKK-PRD-035', 'AKK-KBX-040'
-          ]);
-          const isExactLegacyDemo =
-            parsed.length === legacyDemoCodes.size &&
-            parsed.every((item: any) => legacyDemoCodes.has(String(item?.noBarang || '').toUpperCase()));
-
-          if (isExactLegacyDemo) {
-            return INITIAL_MASTER_SKUS;
+          const cleaned = parsed.filter((item: any) => !isLegacySeededBarang(item?.noBarang));
+          if (cleaned.length > 0) {
+            return cleaned.map((item: any) => ({
+              ...item,
+              kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
+            }));
           }
-
-          return parsed.map((item: any) => ({
-            ...item,
-            kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
-          }));
         }
       }
     } catch {
-      // ignore malformed local cache and fall back to initial data
+      // ignore malformed local cache
     }
     return INITIAL_MASTER_SKUS;
   });
+
+  // Hydrate & synchronize Master SKU with Database Barang (IndexedDB) and purge any legacy items
+  useEffect(() => {
+    let active = true;
+    const syncFromDatabaseBarang = (records: ReturnType<typeof databaseBarangService.getAll>) => {
+      if (!active) return;
+      const validRecords = records.filter(r => !isLegacySeededBarang(r.noBarang));
+      if (validRecords.length === 0) {
+        setSkuItems(prev => prev.filter(item => !isLegacySeededBarang(item.noBarang)));
+        return;
+      }
+      setSkuItems(prev => {
+        const existingByCode = new Map<string, MasterSkuRecord>();
+        prev.forEach(item => {
+          if (!isLegacySeededBarang(item.noBarang)) {
+            existingByCode.set(item.noBarang.trim().toUpperCase(), item);
+          }
+        });
+        return validRecords.map(rec => {
+          const key = rec.noBarang.trim().toUpperCase();
+          const ex = existingByCode.get(key);
+          return {
+            id: ex?.id || rec.id,
+            kategoriBarang:
+              rec.kategoriBarang ||
+              ex?.kategoriBarang ||
+              inferKategoriBarang(rec.noBarang, rec.deskripsiBarang || rec.keteranganBarang),
+            noBarang: rec.noBarang,
+            namaBarang: rec.deskripsiBarang || rec.keteranganBarang,
+            stokTersedia: ex?.stokTersedia ?? rec.stokTersedia ?? 1000,
+            satuan: rec.unit1 || rec.satuan || ex?.satuan || 'Pcs',
+            cabang: ex?.cabang || rec.cabang || 'Banyuwangi',
+            lokasiStock: ex?.lokasiStock || 'Gudang Utama Argopuro',
+            tanggalStok: rec.updatedAt || ex?.tanggalStok,
+            panjangCm: rec.panjangCm,
+            lebarCm: rec.lebarCm,
+            tinggiCm: rec.tinggiCm,
+            kubikasiM3: rec.volM3,
+            beratKg: rec.beratKg
+          };
+        });
+      });
+    };
+
+    databaseBarangService.ensureHydrated().then(records => {
+      syncFromDatabaseBarang(records);
+    });
+
+    const handleDbUpdated = () => {
+      syncFromDatabaseBarang(databaseBarangService.getAll());
+    };
+    window.addEventListener('akk-database-barang-updated', handleDbUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('akk-database-barang-updated', handleDbUpdated);
+    };
+  }, []);
 
   // Kartu Stok Analysis State (persisted in localStorage)
   const [kartuStokList, setKartuStokList] = useState<KartuStokAnalysisRecord[]>(() => {
@@ -441,12 +479,14 @@ export const WarehouseManagementSystem: React.FC<{
       const saved = localStorage.getItem(LS_KEY_KARTU_STOK);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter((item: any) => !isLegacySeededBarang(item?.kodeBarang));
+        }
       }
     } catch {
       // ignore
     }
-    return INITIAL_KARTU_STOK_ANALYSIS;
+    return INITIAL_KARTU_STOK_ANALYSIS.filter(item => !isLegacySeededBarang(item.kodeBarang));
   });
 
   // Dynamic Lokasi Stock List
@@ -465,9 +505,16 @@ export const WarehouseManagementSystem: React.FC<{
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_KEY_MASTER_SKU, JSON.stringify(skuItems));
+      const cleaned = skuItems.filter(item => !isLegacySeededBarang(item.noBarang));
+      if (cleaned.length <= 400) {
+        localStorage.setItem(LS_KEY_MASTER_SKU, JSON.stringify(cleaned));
+      } else {
+        localStorage.removeItem(LS_KEY_MASTER_SKU);
+      }
     } catch {
-      // ignore
+      try {
+        localStorage.removeItem(LS_KEY_MASTER_SKU);
+      } catch {}
     }
   }, [skuItems]);
 
@@ -1720,27 +1767,37 @@ export const WarehouseManagementSystem: React.FC<{
         <WarehouseDatabaseBarangView
           onSyncWithMasterSku={records => {
             setSkuItems(prev => {
-              const map = new Map<string, MasterSkuRecord>();
-              prev.forEach(item => map.set(item.noBarang.toUpperCase(), item));
-              records.forEach(rec => {
-                const key = rec.noBarang.toUpperCase();
-                const existing = map.get(key);
-                map.set(key, {
-                  id: existing?.id || rec.id,
-                  kategoriBarang:
-                    existing?.kategoriBarang ||
-                    rec.kategoriBarang ||
-                    inferKategoriBarang(rec.noBarang, rec.keteranganBarang),
-                  noBarang: rec.noBarang,
-                  namaBarang: rec.keteranganBarang,
-                  stokTersedia: existing?.stokTersedia ?? rec.stokTersedia ?? 1000,
-                  satuan: rec.satuan,
-                  cabang: existing?.cabang || rec.cabang || 'Banyuwangi',
-                  lokasiStock: existing?.lokasiStock || 'Gudang Utama Argopuro',
-                  tanggalStok: rec.updatedAt
-                });
+              const existingByCode = new Map<string, MasterSkuRecord>();
+              prev.forEach(item => {
+                if (!isLegacySeededBarang(item.noBarang)) {
+                  existingByCode.set(item.noBarang.trim().toUpperCase(), item);
+                }
               });
-              return Array.from(map.values());
+              return records
+                .filter(rec => !isLegacySeededBarang(rec.noBarang))
+                .map(rec => {
+                  const key = rec.noBarang.trim().toUpperCase();
+                  const existing = existingByCode.get(key);
+                  return {
+                    id: existing?.id || rec.id,
+                    kategoriBarang:
+                      rec.kategoriBarang ||
+                      existing?.kategoriBarang ||
+                      inferKategoriBarang(rec.noBarang, rec.deskripsiBarang || rec.keteranganBarang),
+                    noBarang: rec.noBarang,
+                    namaBarang: rec.deskripsiBarang || rec.keteranganBarang,
+                    stokTersedia: existing?.stokTersedia ?? rec.stokTersedia ?? 1000,
+                    satuan: rec.unit1 || rec.satuan,
+                    cabang: existing?.cabang || rec.cabang || 'Banyuwangi',
+                    lokasiStock: existing?.lokasiStock || 'Gudang Utama Argopuro',
+                    tanggalStok: rec.updatedAt,
+                    panjangCm: rec.panjangCm,
+                    lebarCm: rec.lebarCm,
+                    tinggiCm: rec.tinggiCm,
+                    kubikasiM3: rec.volM3,
+                    beratKg: rec.beratKg
+                  };
+                });
             });
           }}
         />

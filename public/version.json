@@ -1,8 +1,8 @@
 {
-  "versionCode": 10008,
-  "versionName": "1.0.8",
-  "updatedAt": "2026-11-03T12:00:00.000000",
-  "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
+  "versionCode": 10009,
+  "versionName": "1.0.9",
+  "updatedAt": "2026-11-05T10:42:00.000000",
+  "changelog": "Sinkronisasi V21 AI Studio ke Hostinger: Mode Hanya Lihat (ReadOnlyModuleBoundary), Pembersihan Data Dummy Database Barang & Kubikasi, Handheld WMS Visual YOLO Scanner (/api/scan-muat), serta Sinkronisasi RBAC Server & Skema MySQL.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live."
 }

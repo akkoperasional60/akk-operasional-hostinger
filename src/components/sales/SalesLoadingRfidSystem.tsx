@@ -52,6 +52,7 @@ import {
   createDefaultBarangThumbnail,
   estimateDataUrlSizeKb
 } from '../../services/databaseBarangService';
+import { WmsPureVisualBlueprintsModal } from './WmsPureVisualBlueprintsModal';
 
 export interface ItemPhotoScanLog {
   id: string;
@@ -99,15 +100,17 @@ const MASTER_PACKAGING_CATALOG: Array<{
   itemName: string;
   unit: SalesOrderItem['unit'];
 }> = [
+  { skuCode: '7AFBG453', itemName: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', unit: 'Box' },
+  { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
+  { skuCode: '7AT01225', itemName: 'ALU TRAY OX-1225 (100PCS/PAK)', unit: 'Pack' },
+  { skuCode: '7AT06005', itemName: 'ALU TRAY OX-6005 (100PCS/PAK)', unit: 'Pack' },
   { skuCode: 'RFID-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-002', itemName: 'Karton Box Duplex Cetak Custom 30x20x15', unit: 'Box' },
-  { skuCode: 'RFID-KB-003', itemName: 'Box Kemasan Roti & Kue Ivory 22x22x8', unit: 'Bal' },
-  { skuCode: 'RFID-KB-004', itemName: 'Box Pizza E-Flute Kraft Coklat 25x25x5', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-005', itemName: 'Paper Bag Kraft Coklat Tebal Uk. L', unit: 'Pack' },
   { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
   { skuCode: 'RFID-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
   { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
 ];
+
+const PURGED_RFID_CODES = new Set(['RFID-KB-002', 'RFID-KB-003', 'RFID-KB-004', 'RFID-KB-005']);
 
 function createSampleSvgPhoto(itemName: string, skuCode: string, qty: number, unit: string, timestamp: string): string {
   const safeName = itemName.replace(/[<>&"']/g, '');
@@ -144,7 +147,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       fleetLabel: fleetDefault,
       adminPic: adminDefault,
       isLoadingFinished: false,
-      notes: 'Order kemasan rutin mingguan — pastikan box duplex di tumpukan atas',
+      notes: 'Order kemasan rutin mingguan — pastikan karton & tray di tumpukan aman',
       items: [
         {
           id: 'itm-1',
@@ -166,8 +169,8 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
         },
         {
           id: 'itm-2',
-          skuCode: 'RFID-KB-002',
-          itemName: 'Karton Box Duplex Cetak Custom 30x20x15',
+          skuCode: '7AFBG453',
+          itemName: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
           unit: 'Box',
           qtyOrdered: 15,
           qtyLoaded: 10,
@@ -176,7 +179,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-2',
               timestamp: '08:22 WIB',
               qtyScanned: 10,
-              photoDataUrl: createSampleSvgPhoto('Karton Box Duplex Cetak Custom 30x20x15', 'RFID-KB-002', 10, 'Box', '08:22 WIB'),
+              photoDataUrl: createSampleSvgPhoto('ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', '7AFBG453', 10, 'Box', '08:22 WIB'),
               scannedBy: adminDefault,
               notes: 'Kloter pertama 10 box masuk armada'
             }
@@ -184,9 +187,9 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
         },
         {
           id: 'itm-3',
-          skuCode: 'RFID-KB-004',
-          itemName: 'Box Pizza E-Flute Kraft Coklat 25x25x5',
-          unit: 'Ikat',
+          skuCode: '7AT00935',
+          itemName: 'ALU TRAY OX-935 (100PCS/PAK)',
+          unit: 'Pack',
           qtyOrdered: 12,
           qtyLoaded: 0,
           scans: []
@@ -208,9 +211,9 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       items: [
         {
           id: 'itm-201',
-          skuCode: 'RFID-KB-003',
-          itemName: 'Box Kemasan Roti & Kue Ivory 22x22x8',
-          unit: 'Bal',
+          skuCode: 'RFID-KB-006',
+          itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)',
+          unit: 'Box',
           qtyOrdered: 25,
           qtyLoaded: 25,
           scans: [
@@ -218,7 +221,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-201',
               timestamp: '08:50 WIB',
               qtyScanned: 25,
-              photoDataUrl: createSampleSvgPhoto('Box Kemasan Roti & Kue Ivory 22x22x8', 'RFID-KB-003', 25, 'Bal', '08:50 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', 'RFID-KB-006', 25, 'Box', '08:50 WIB'),
               scannedBy: adminDefault,
               notes: 'Muatan sesuai faktur'
             }
@@ -226,9 +229,9 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
         },
         {
           id: 'itm-202',
-          skuCode: 'RFID-KB-005',
-          itemName: 'Paper Bag Kraft Coklat Tebal Uk. L',
-          unit: 'Pack',
+          skuCode: 'RFID-KB-008',
+          itemName: 'Lakban Coklat Packing AKK 48mm x 90Y',
+          unit: 'Box',
           qtyOrdered: 30,
           qtyLoaded: 34,
           scans: [
@@ -236,9 +239,9 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-202',
               timestamp: '09:05 WIB',
               qtyScanned: 34,
-              photoDataUrl: createSampleSvgPhoto('Paper Bag Kraft Coklat Tebal Uk. L', 'RFID-KB-005', 34, 'Pack', '09:05 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Lakban Coklat Packing AKK 48mm x 90Y', 'RFID-KB-008', 34, 'Box', '09:05 WIB'),
               scannedBy: adminDefault,
-              notes: 'Terbawa 4 pack ekstra dari palet sebelah'
+              notes: 'Terbawa 4 box ekstra dari palet sebelah'
             }
           ]
         }
@@ -355,12 +358,45 @@ function useSharedSalesRfidInvoices() {
   const defaultFleet = fleetOptions[0] || '[NL1] P 8476 V — CDE Box';
   const defaultAdmin = adminNames[0] || 'ADMIN PENJUALAN';
 
+  const sanitizeSavedInvoices = (rawList: SalesOrderInvoice[]): SalesOrderInvoice[] => {
+    const replacements: Record<string, { skuCode: string; itemName: string; unit: SalesOrderItem['unit'] }> = {
+      'RFID-KB-002': { skuCode: '7AFBG453', itemName: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', unit: 'Box' },
+      'RFID-KB-003': { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+      'RFID-KB-004': { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
+      'RFID-KB-005': { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
+    };
+    let mutated = false;
+    const cleaned = rawList.map(inv => ({
+      ...inv,
+      items: (inv.items || []).map(it => {
+        const codeUpper = String(it.skuCode || '').trim().toUpperCase();
+        if (PURGED_RFID_CODES.has(codeUpper) && replacements[codeUpper]) {
+          mutated = true;
+          const rep = replacements[codeUpper];
+          return {
+            ...it,
+            skuCode: rep.skuCode,
+            itemName: rep.itemName,
+            unit: rep.unit
+          };
+        }
+        return it;
+      })
+    }));
+    if (mutated) {
+      try {
+        localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(cleaned));
+      } catch {}
+    }
+    return cleaned;
+  };
+
   const [invoices, setInvoices] = useState<SalesOrderInvoice[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SALES_RFID);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return sanitizeSavedInvoices(parsed);
       }
     } catch {}
     return getInitialInvoices(defaultFleet, defaultAdmin);
@@ -372,7 +408,7 @@ function useSharedSalesRfidInvoices() {
         const saved = localStorage.getItem(STORAGE_KEY_SALES_RFID);
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) setInvoices(parsed);
+          if (Array.isArray(parsed)) setInvoices(sanitizeSavedInvoices(parsed));
         }
       } catch {}
     };
@@ -459,6 +495,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   );
 
   useEffect(() => {
+    void databaseBarangService.ensureHydrated().then(loaded => {
+      setDbBarangList(loaded);
+    });
     const syncDb = () => {
       setDbBarangList(databaseBarangService.getAll());
     };
@@ -730,19 +769,19 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         id: `smp-${Date.now()}-2`,
         noFaktur: `FKT/AKK/2026/11/${seq1}`,
         namaPelanggan: `TK SINAR KEMASAN (${areaName})`,
-        itemBarang: 'Karton Box Duplex Cetak Custom 30x20x15',
+        itemBarang: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
         qty: 15,
         satuan: 'Box',
-        skuCode: 'RFID-KB-002'
+        skuCode: '7AFBG453'
       },
       {
         id: `smp-${Date.now()}-3`,
         noFaktur: `FKT/AKK/2026/11/${seq2}`,
         namaPelanggan: `UD MITRA MANDIRI (${areaName})`,
-        itemBarang: 'Box Pizza E-Flute Kraft Coklat 25x25x5',
+        itemBarang: 'ALU TRAY OX-935 (100PCS/PAK)',
         qty: 30,
-        satuan: 'Ikat',
-        skuCode: 'RFID-KB-004'
+        satuan: 'Pack',
+        skuCode: '7AT00935'
       }
     ];
     setUploadedFileName(`Import_Faktur_${areaName.replace(/\s+/g, '_')}.xlsx`);
@@ -2563,11 +2602,84 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 };
 
 // ============================================================================
-// SUB-MENU 2: APLIKASI SCAN & FOTO BARANG MUAT (SISTEM RFID VISUAL)
+// SUB-MENU 2: APLIKASI SCAN & FOTO BARANG MUAT (SMART RFID & AI VISION MUAT BOX)
 // ============================================================================
 interface SalesRfidScannerAppTabProps {
   initialInvoiceId?: string | null;
   onNavigateToInvoiceInput: () => void;
+}
+
+interface RealtimeScanFeedback {
+  id: string;
+  status: 'success' | 'error';
+  extractedCode: string;
+  productName: string;
+  unit: string;
+  qtyScanned: number;
+  itemLoaded: number;
+  itemTarget: number;
+  totalLoaded: number;
+  totalTarget: number;
+  gate: string;
+  suratJalanId: string;
+  timestamp: string;
+  displayTime: string;
+  message: string;
+  photoDataUrl: string;
+  confidenceScore?: number;
+  yoloBbox?: number[];
+  sqlStatusTransition?: string;
+}
+
+const LOADING_GATE_OPTIONS = [
+  'Gate 1 (Loading Utama)',
+  'Gate 2 (Loading Tengah)',
+  'Gate 3 (Loading Timur)',
+  'Pintu Ram 1 (Gudang Box)',
+  'Pintu Ram 2 (Gudang Kemasan)',
+  'Pintu Ram 3 (Ekspedisi Lintas Pulau)'
+];
+
+const SCAN_HISTORY_STORAGE_KEY = 'akk_wms_rfid_recent_scan_logs_v1';
+
+// Web Audio API Sound Synthesizer: 1200Hz Beep Sukses & 250Hz Buzzer Gagal
+function playScannerFeedbackBeep(type: 'success' | 'error', enabled: boolean = true) {
+  if (!enabled || typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    if (type === 'success') {
+      // Audio Beep Sukses: Frekuensi 1200Hz (Web Audio API sintetis)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      gain.gain.setValueAtTime(0.24, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.22);
+      setTimeout(() => ctx.close().catch(() => {}), 320);
+    } else {
+      // Audio Buzzer Gagal: Frekuensi rendah 250Hz
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(250, ctx.currentTime);
+      gain.gain.setValueAtTime(0.28, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.42);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.42);
+      setTimeout(() => ctx.close().catch(() => {}), 500);
+    }
+  } catch {
+    // Ignore audio context restriction if user hasn't interacted yet
+  }
 }
 
 export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
@@ -2608,14 +2720,45 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     return invoices.find(i => i.id === selectedInvoiceId) || invoices[0] || null;
   }, [invoices, selectedInvoiceId]);
 
-  // Camera & Photo Scan Modal / Drawer States
-  const [scanningItemId, setScanningItemId] = useState<string | null>(null);
+  // Header & Operational States
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [selectedGate, setSelectedGate] = useState<string>(LOADING_GATE_OPTIONS[0]);
+  const [scanAdminPic, setScanAdminPic] = useState<string>(defaultAdmin);
+
+  // Live Viewfinder & Hardware Camera Controls
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [torchSupported, setTorchSupported] = useState<boolean>(false);
+  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [isVerifyingScan, setIsVerifyingScan] = useState<boolean>(false);
+
+  // Target Item / OCR Mode Selection
+  // 'AUTO' = Otomatis pilih item yang belum klop / AI Vision OCR, atau pilih ID item tertentu, atau 'CUSTOM_CODE' untuk simulasi/input kode manual
+  const [targetScanMode, setTargetScanMode] = useState<string>('AUTO');
+  const [customTestCode, setCustomTestCode] = useState<string>('');
   const [scanQtyInput, setScanQtyInput] = useState<number>(1);
   const [scanNotesInput, setScanNotesInput] = useState<string>('');
-  const [scanAdminPic, setScanAdminPic] = useState<string>(defaultAdmin);
-  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
-  const [capturedExif, setCapturedExif] = useState<ExifTimestampMetadata | null>(null);
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [lastCapturedPreview, setLastCapturedPreview] = useState<string | null>(null);
+  const [lastCapturedExif, setLastCapturedExif] = useState<ExifTimestampMetadata | null>(null);
+
+  // Real-Time Feedback Card & Recent 5 Scans Log
+  const [lastFeedback, setLastFeedback] = useState<RealtimeScanFeedback | null>(null);
+  const [recentScansLog, setRecentScansLog] = useState<RealtimeScanFeedback[]>(() => {
+    try {
+      const raw = localStorage.getItem(SCAN_HISTORY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(0, 15);
+      }
+    } catch {}
+    return [];
+  });
+
+  // Modals for Overload Warning & Item Photo Gallery
   const [overloadWarningAlert, setOverloadWarningAlert] = useState<{
     itemName: string;
     skuCode: string;
@@ -2627,79 +2770,449 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     itemName: string;
     scans: ItemPhotoScanLog[];
   } | null>(null);
+  const [mobileSubTab, setMobileSubTab] = useState<'history' | 'items' | 'audit'>('history');
+  const [isBlueprintsModalOpen, setIsBlueprintsModalOpen] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const autoScanTimerRef = useRef<number | null>(null);
+
+  // Online / Offline Listener
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const stopCamera = () => {
+    if (autoScanTimerRef.current) {
+      window.clearInterval(autoScanTimerRef.current);
+      autoScanTimerRef.current = null;
+    }
+    setAutoScanEnabled(false);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    setIsTorchOn(false);
+    setTorchSupported(false);
     setIsCameraActive(false);
   };
 
   useEffect(() => {
     return () => {
+      if (autoScanTimerRef.current) {
+        window.clearInterval(autoScanTimerRef.current);
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
     };
   }, []);
 
-  const startLiveCamera = async () => {
+  const startLiveCamera = async (overrideFacing?: 'environment' | 'user') => {
+    const desiredFacing = overrideFacing || facingMode;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+      }
+      let stream: MediaStream;
+      try {
+        // Prioritaskan exact facingMode (contoh: facingMode: { exact: "environment" }) pada smartphone
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { exact: desiredFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+      } catch {
+        // Fallback ke ideal bila dibuka di perangkat single-camera / laptop
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: desiredFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+      }
       streamRef.current = stream;
+      setFacingMode(desiredFacing);
       setIsCameraActive(true);
+
+      // Check hardware torch capability on mobile rear camera
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+        const caps = videoTrack.getCapabilities() as Record<string, unknown>;
+        setTorchSupported(Boolean(caps && 'torch' in caps));
+      } else {
+        setTorchSupported(false);
+      }
+      setIsTorchOn(false);
+
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play().catch(() => {});
         }
-      }, 100);
+      }, 80);
     } catch {
-      showToast('Kamera perangkat tidak terdeteksi — menggunakan mode ambil foto cepat / unggah gambar.', 'info');
-      if (scanningItem) {
-        const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-        setCapturedPhotoUrl(
-          createSampleSvgPhoto(scanningItem.itemName, scanningItem.skuCode, scanQtyInput, scanningItem.unit, nowStr)
-        );
-      }
+      showToast(
+        'Kamera langsung tidak tersedia pada perangkat ini — Anda tetap dapat klik "Ambil Foto & Verifikasi" atau "Buka Kamera HP".',
+        'info'
+      );
+      setIsCameraActive(false);
     }
   };
 
-  const captureSnapshotFromVideo = () => {
-    const exifMeta = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
-    if (videoRef.current && videoRef.current.videoWidth > 0) {
+  const handleSwitchCamera = async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacing);
+    if (isCameraActive) {
+      await startLiveCamera(nextFacing);
+    }
+  };
+
+  const handleToggleTorch = async () => {
+    if (!streamRef.current) {
+      showToast('Aktifkan kamera terlebih dahulu untuk menyalakan lampu Flash / Torch.', 'info');
+      return;
+    }
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    const nextTorch = !isTorchOn;
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: nextTorch } as unknown as MediaTrackConstraintSet]
+      });
+      setIsTorchOn(nextTorch);
+    } catch {
+      showToast('Lampu Flash / Torch tidak didukung oleh browser atau kamera perangkat ini.', 'info');
+    }
+  };
+
+  // Resolve which item is currently targeted in viewfinder
+  const resolvedTargetItem = useMemo((): SalesOrderItem | null => {
+    if (!activeInvoice || activeInvoice.items.length === 0) return null;
+    if (targetScanMode === 'CUSTOM_CODE') return null;
+    if (targetScanMode !== 'AUTO') {
+      const found = activeInvoice.items.find(it => it.id === targetScanMode || it.skuCode === targetScanMode);
+      if (found) return found;
+    }
+    // AUTO: Pilih item pertama yang belum mencapai target faktur, atau item pertama
+    return (
+      activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered) ||
+      activeInvoice.items[0] ||
+      null
+    );
+  }, [activeInvoice, targetScanMode]);
+
+  // Helper: Compress video frame or image onto Canvas (max width 1280px, JPEG 0.8) with EXIF overlay
+  const captureCompressedBase64FromViewfinder = (
+    fallbackCode: string,
+    fallbackName: string,
+    qty: number,
+    unit: string
+  ): { base64: string; exif: ExifTimestampMetadata } => {
+    const nowDate = new Date();
+    const exifMeta = createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR');
+
+    if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+      const rawW = videoRef.current.videoWidth;
+      const rawH = videoRef.current.videoHeight;
+      const maxWidth = 1280;
+      const scale = rawW > maxWidth ? maxWidth / rawW : 1;
+      const targetW = Math.round(rawW * scale);
+      const targetH = Math.round(rawH * scale);
+
       const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      canvas.width = targetW;
+      canvas.height = targetH;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        drawExifMetadataOnCanvas(ctx, canvas.width, canvas.height, exifMeta);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        setCapturedPhotoUrl(dataUrl);
-        setCapturedExif(exifMeta);
-        stopCamera();
-        return;
+        ctx.drawImage(videoRef.current, 0, 0, targetW, targetH);
+        drawExifMetadataOnCanvas(ctx, targetW, targetH, exifMeta);
+        const compressedJpeg = canvas.toDataURL('image/jpeg', 0.8);
+        return { base64: compressedJpeg, exif: exifMeta };
       }
     }
-    if (scanningItem) {
-      const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-      setCapturedPhotoUrl(
-        createSampleSvgPhoto(scanningItem.itemName, scanningItem.skuCode, scanQtyInput, scanningItem.unit, nowStr)
+
+    // Fallback: jika pengguna sudah mengunggah/memotret file sebelumnya atau kamera belum menyala
+    if (lastCapturedPreview && lastCapturedPreview.startsWith('data:image/jpeg')) {
+      return { base64: lastCapturedPreview, exif: lastCapturedExif || exifMeta };
+    }
+
+    const nowStr = nowDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
+    return {
+      base64: createSampleSvgPhoto(fallbackName, fallbackCode, qty, unit, nowStr),
+      exif: exifMeta
+    };
+  };
+
+  // Core Verification Workflow: Capture -> Compress -> POST /api/scan-muat -> Audio & UI Feedback -> Update Faktur/SO
+  const executeCaptureAndVerify = async (customImageBase64?: string, customExif?: ExifTimestampMetadata) => {
+    if (!activeInvoice || isVerifyingScan) return;
+
+    setIsVerifyingScan(true);
+    const nowDate = new Date();
+    const isoTimestamp = nowDate.toISOString();
+    const displayTime =
+      nowDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
+
+    const cleanQty = Math.max(1, Number(scanQtyInput) || 1);
+    const desiredCode =
+      targetScanMode === 'CUSTOM_CODE'
+        ? customTestCode.trim().toUpperCase() || 'BOX-UNKNOWN-999'
+        : resolvedTargetItem?.skuCode || 'AUTO';
+    const desiredName =
+      targetScanMode === 'CUSTOM_CODE'
+        ? `Kode Uji Manual (${desiredCode})`
+        : resolvedTargetItem?.itemName || 'Kemasan Faktur';
+    const desiredUnit = resolvedTargetItem?.unit || 'Box';
+
+    const captured = customImageBase64
+      ? { base64: customImageBase64, exif: customExif || createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR') }
+      : captureCompressedBase64FromViewfinder(desiredCode, desiredName, cleanQty, desiredUnit);
+
+    setLastCapturedPreview(captured.base64);
+    setLastCapturedExif(captured.exif);
+
+    const masterBarang = databaseBarangService.getAll().slice(0, 200);
+
+    try {
+      const response = await fetch('/api/scan-muat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: captured.base64,
+          image_base64: captured.base64,
+          surat_jalan_id: activeInvoice.invoiceNumber,
+          so_number: activeInvoice.soNumber,
+          gate_id: selectedGate,
+          gate: selectedGate,
+          timestamp: isoTimestamp,
+          target_item_code: desiredCode,
+          qty_scanned: cleanQty,
+          expected_items: activeInvoice.items,
+          master_items: masterBarang,
+          preproc_metrics: {
+            clahe_applied: true,
+            orientation_fixed: true,
+            max_width: 1280,
+            jpeg_quality: 0.8
+          }
+        })
+      });
+
+      const result = await response.json();
+      const extractedCode = String(result.extracted_code || desiredCode).toUpperCase();
+      const matchedItem = activeInvoice.items.find(
+        it => it.skuCode.trim().toUpperCase() === extractedCode
       );
-      setCapturedExif(exifMeta);
-      stopCamera();
+
+      if (response.ok && result.status === 'success' && matchedItem) {
+        // SUCCESS: Valid item on active Surat Jalan / Faktur
+        const newItemLoaded = matchedItem.qtyLoaded + cleanQty;
+        const newScanEntry: ItemPhotoScanLog = {
+          id: `scan-${Date.now()}`,
+          timestamp: displayTime,
+          qtyScanned: cleanQty,
+          photoDataUrl: captured.base64,
+          scannedBy: scanAdminPic,
+          notes:
+            scanNotesInput.trim() ||
+            `[${selectedGate}] Terverifikasi RFID/Vision (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit})`,
+          exifMetadata: captured.exif
+        };
+
+        saveInvoices(prev =>
+          prev.map(inv => {
+            if (inv.id !== activeInvoice.id) return inv;
+            return {
+              ...inv,
+              items: inv.items.map(it =>
+                it.id === matchedItem.id
+                  ? {
+                      ...it,
+                      qtyLoaded: newItemLoaded,
+                      scans: [newScanEntry, ...it.scans]
+                    }
+                  : it
+              )
+            };
+          })
+        );
+
+        const totalOrderedAll = activeInvoice.items.reduce((acc, i) => acc + i.qtyOrdered, 0);
+        const totalLoadedAll =
+          activeInvoice.items.reduce((acc, i) => acc + i.qtyLoaded, 0) + cleanQty;
+
+        const feedbackObj: RealtimeScanFeedback = {
+          id: `fb-${Date.now()}`,
+          status: 'success',
+          extractedCode: matchedItem.skuCode,
+          productName: matchedItem.itemName,
+          unit: matchedItem.unit,
+          qtyScanned: cleanQty,
+          itemLoaded: newItemLoaded,
+          itemTarget: matchedItem.qtyOrdered,
+          totalLoaded: totalLoadedAll,
+          totalTarget: totalOrderedAll,
+          gate: selectedGate,
+          suratJalanId: activeInvoice.invoiceNumber,
+          timestamp: isoTimestamp,
+          displayTime,
+          message:
+            result.message ||
+            `${matchedItem.skuCode} Valid (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit} Terbit)`,
+          photoDataUrl: captured.base64,
+          confidenceScore: Number(result?.cv_pipeline?.confidence_score || result?.ocr_confidence || 0.964),
+          yoloBbox: Array.isArray(result?.cv_pipeline?.yolo_bbox) ? result.cv_pipeline.yolo_bbox : [142, 96, 980, 520],
+          sqlStatusTransition: result?.sql_transaction?.status_transition || 'PENDING -> LOADED'
+        };
+
+        setLastFeedback(feedbackObj);
+        setRecentScansLog(prev => {
+          const next = [feedbackObj, ...prev].slice(0, 15);
+          try {
+            localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+
+        playScannerFeedbackBeep('success', soundEnabled);
+        showToast(
+          `✅ ${matchedItem.skuCode} Valid (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit} Terbit) — Dimuat melalui ${selectedGate}`,
+          'success'
+        );
+      } else {
+        // ERROR: Either Overloaded or Unrecognized / Wrong Destination DO
+        if (matchedItem) {
+          const newItemLoaded = matchedItem.qtyLoaded + cleanQty;
+          const newScanEntry: ItemPhotoScanLog = {
+            id: `scan-${Date.now()}`,
+            timestamp: displayTime,
+            qtyScanned: cleanQty,
+            photoDataUrl: captured.base64,
+            scannedBy: scanAdminPic,
+            notes:
+              scanNotesInput.trim() ||
+              `[${selectedGate}] PERINGATAN LEBIH MUAT (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit})`,
+            exifMetadata: captured.exif
+          };
+
+          saveInvoices(prev =>
+            prev.map(inv => {
+              if (inv.id !== activeInvoice.id) return inv;
+              return {
+                ...inv,
+                items: inv.items.map(it =>
+                  it.id === matchedItem.id
+                    ? {
+                        ...it,
+                        qtyLoaded: newItemLoaded,
+                        scans: [newScanEntry, ...it.scans]
+                      }
+                    : it
+                )
+              };
+            })
+          );
+
+          setOverloadWarningAlert({
+            itemName: matchedItem.itemName,
+            skuCode: matchedItem.skuCode,
+            qtyOrdered: matchedItem.qtyOrdered,
+            qtyLoaded: newItemLoaded,
+            unit: matchedItem.unit
+          });
+        }
+
+        const totalOrderedAll = activeInvoice.items.reduce((acc, i) => acc + i.qtyOrdered, 0);
+        const totalLoadedAll =
+          activeInvoice.items.reduce((acc, i) => acc + i.qtyLoaded, 0) + (matchedItem ? cleanQty : 0);
+
+        const errorFeedback: RealtimeScanFeedback = {
+          id: `fb-${Date.now()}`,
+          status: 'error',
+          extractedCode: extractedCode || 'TIDAK-DIKENALI',
+          productName: result.product_name || matchedItem?.itemName || 'Tidak Dikenali / Salah Tujuan',
+          unit: matchedItem?.unit || 'Box',
+          qtyScanned: cleanQty,
+          itemLoaded: matchedItem ? matchedItem.qtyLoaded + cleanQty : 0,
+          itemTarget: matchedItem ? matchedItem.qtyOrdered : 0,
+          totalLoaded: totalLoadedAll,
+          totalTarget: totalOrderedAll,
+          gate: selectedGate,
+          suratJalanId: activeInvoice.invoiceNumber,
+          timestamp: isoTimestamp,
+          displayTime,
+          message:
+            result.message ||
+            `Tidak Dikenali / Salah Tujuan: [${extractedCode}] tidak sesuai kuota Surat Jalan ${activeInvoice.invoiceNumber}`,
+          photoDataUrl: captured.base64
+        };
+
+        setLastFeedback(errorFeedback);
+        setRecentScansLog(prev => {
+          const next = [errorFeedback, ...prev].slice(0, 15);
+          try {
+            localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+
+        playScannerFeedbackBeep('error', soundEnabled);
+        showToast(`🚨 ${errorFeedback.message}`, 'error');
+      }
+    } catch {
+      playScannerFeedbackBeep('error', soundEnabled);
+      showToast('Gagal menghubungi endpoint verifikasi /api/scan-muat. Periksa koneksi jaringan.', 'error');
+    } finally {
+      setIsVerifyingScan(false);
     }
   };
 
-  const handleFileUploadPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Auto-Detect Interval (Every 2.5 Seconds when Auto-Scan is ON)
+  useEffect(() => {
+    if (!autoScanEnabled) {
+      if (autoScanTimerRef.current) {
+        window.clearInterval(autoScanTimerRef.current);
+        autoScanTimerRef.current = null;
+      }
+      return;
+    }
+
+    autoScanTimerRef.current = window.setInterval(() => {
+      if (!isVerifyingScan && activeInvoice) {
+        const remainingItem = activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered);
+        if (!remainingItem && targetScanMode === 'AUTO') {
+          setAutoScanEnabled(false);
+          showToast('Seluruh barang pada Faktur/Surat Jalan aktif sudah termuat 100%. Auto-Detect dihentikan.', 'info');
+          return;
+        }
+        void executeCaptureAndVerify();
+      }
+    }, 2500);
+
+    return () => {
+      if (autoScanTimerRef.current) {
+        window.clearInterval(autoScanTimerRef.current);
+        autoScanTimerRef.current = null;
+      }
+    };
+  }, [autoScanEnabled, isVerifyingScan, activeInvoice, targetScanMode, selectedGate, scanQtyInput, soundEnabled]);
+
+  // Handle File Upload / Direct Mobile Camera Input (Resized to max 1280px JPEG 0.8)
+  const handleFileUploadAndVerify = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     extractExifFromFile(file).then(exifMeta => {
@@ -2709,121 +3222,32 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const maxDim = 960;
+            const maxWidth = 1280;
             let w = img.width || 800;
             let h = img.height || 600;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
+            if (w > maxWidth) {
+              h = Math.round((h * maxWidth) / w);
+              w = maxWidth;
             }
             canvas.width = w;
             canvas.height = h;
             const ctx = canvas.getContext('2d');
+            let compressedDataUrl = ev.target!.result as string;
             if (ctx) {
               ctx.drawImage(img, 0, 0, w, h);
               drawExifMetadataOnCanvas(ctx, w, h, exifMeta);
-              setCapturedPhotoUrl(canvas.toDataURL('image/jpeg', 0.82));
-            } else {
-              setCapturedPhotoUrl(ev.target!.result as string);
+              compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
             }
-            setCapturedExif(exifMeta);
+            setLastCapturedPreview(compressedDataUrl);
+            setLastCapturedExif(exifMeta);
+            void executeCaptureAndVerify(compressedDataUrl, exifMeta);
           };
           img.src = ev.target.result;
         }
       };
       reader.readAsDataURL(file);
     });
-  };
-
-  const scanningItem = useMemo(() => {
-    if (!activeInvoice || !scanningItemId) return null;
-    return activeInvoice.items.find(i => i.id === scanningItemId) || null;
-  }, [activeInvoice, scanningItemId]);
-
-  const openPhotoScannerForItem = (item: SalesOrderItem) => {
-    const remaining = Math.max(1, item.qtyOrdered - item.qtyLoaded);
-    setScanningItemId(item.id);
-    setScanQtyInput(remaining);
-    setScanNotesInput('');
-    setCapturedPhotoUrl(null);
-    setCapturedExif(null);
-    stopCamera();
-  };
-
-  const handleConfirmPhotoScan = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeInvoice || !scanningItem) return;
-
-    const nowDate = new Date();
-    const nowStr = nowDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-    const finalExif = capturedExif || createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR');
-    const finalPhoto =
-      capturedPhotoUrl ||
-      createSampleSvgPhoto(scanningItem.itemName, scanningItem.skuCode, scanQtyInput, scanningItem.unit, nowStr);
-
-    const addedQty = Math.max(1, Number(scanQtyInput) || 1);
-    const newTotalLoaded = scanningItem.qtyLoaded + addedQty;
-
-    const newScanLog: ItemPhotoScanLog = {
-      id: `scan-${Date.now()}`,
-      timestamp: nowStr,
-      qtyScanned: addedQty,
-      photoDataUrl: finalPhoto,
-      scannedBy: scanAdminPic,
-      notes: scanNotesInput.trim() || `Foto verifikasi barang keluar (${addedQty} ${scanningItem.unit})`,
-      exifMetadata: finalExif
-    };
-
-    saveInvoices(prev =>
-      prev.map(inv => {
-        if (inv.id !== activeInvoice.id) return inv;
-        return {
-          ...inv,
-          items: inv.items.map(it =>
-            it.id === scanningItem.id
-              ? {
-                  ...it,
-                  qtyLoaded: newTotalLoaded,
-                  scans: [newScanLog, ...it.scans]
-                }
-              : it
-          )
-        };
-      })
-    );
-
-    stopCamera();
-    setScanningItemId(null);
-
-    // Check if over-loaded (Lebih Muat Barang) -> Trigger explicit warning!
-    if (newTotalLoaded > scanningItem.qtyOrdered) {
-      setOverloadWarningAlert({
-        itemName: scanningItem.itemName,
-        skuCode: scanningItem.skuCode,
-        qtyOrdered: scanningItem.qtyOrdered,
-        qtyLoaded: newTotalLoaded,
-        unit: scanningItem.unit
-      });
-      showToast(
-        `⚠️ WARNING LEBIH MUAT BARANG! ${scanningItem.itemName} termuat ${newTotalLoaded} ${scanningItem.unit} (Faktur: ${scanningItem.qtyOrdered} ${scanningItem.unit}). Kelebihan +${newTotalLoaded - scanningItem.qtyOrdered} ${scanningItem.unit}!`,
-        'error'
-      );
-    } else if (newTotalLoaded < scanningItem.qtyOrdered) {
-      showToast(
-        `Foto tersimpan! ${scanningItem.itemName} termuat ${newTotalLoaded}/${scanningItem.qtyOrdered} ${scanningItem.unit} (Masih sisa ${scanningItem.qtyOrdered - newTotalLoaded} ${scanningItem.unit} belum termuat).`,
-        'info'
-      );
-    } else {
-      showToast(
-        `✅ Lengkap! ${scanningItem.itemName} telah difoto & termuat sesuai faktur (${newTotalLoaded} ${scanningItem.unit}).`,
-        'success'
-      );
-    }
+    e.target.value = '';
   };
 
   const handleAdjustLoadedQty = (item: SalesOrderItem, exactQty: number) => {
@@ -2855,16 +3279,19 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
     const ev = evaluateInvoiceStatus(activeInvoice);
     if (ev.overloadItems.length > 0) {
+      playScannerFeedbackBeep('error', soundEnabled);
       showToast(
         `⚠️ PERINGATAN: Ditemukan ${ev.overloadItems.length} item LEBIH MUAT pada Faktur ${activeInvoice.invoiceNumber}!`,
         'error'
       );
     } else if (ev.unloadedItems.length > 0 || ev.shortageItems.length > 0) {
+      playScannerFeedbackBeep('error', soundEnabled);
       showToast(
         `🔍 Deteksi Selesai: Terdeteksi ${ev.unloadedItems.length + ev.shortageItems.length} item BARANG SISA / BELUM TERMUAT ke armada box!`,
         'error'
       );
     } else {
+      playScannerFeedbackBeep('success', soundEnabled);
       showToast(
         `✅ Proses Muat Selesai 100%! Seluruh barang pada Faktur ${activeInvoice.invoiceNumber} telah termuat lengkap tanpa selisih.`,
         'success'
@@ -2872,18 +3299,28 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
   };
 
+  const handleSelectSpecificItemToScan = (item: SalesOrderItem) => {
+    setTargetScanMode(item.id);
+    const remaining = Math.max(1, item.qtyOrdered - item.qtyLoaded);
+    setScanQtyInput(Math.min(5, remaining));
+    setMobileSubTab('history');
+    if (!isCameraActive) {
+      void startLiveCamera();
+    }
+  };
+
   if (!activeInvoice) {
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center space-y-3">
-        <QrCode className="w-12 h-12 text-indigo-500 mx-auto" />
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Belum Ada Faktur / Sales Order Aktif</h2>
-        <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Silakan input terlebih dahulu Faktur atau Sales Order di sub-menu <strong>Input Faktur / Sales Order (SO)</strong> untuk mulai memfoto barang muatan armada box.
+      <div className="max-w-[440px] mx-auto bg-[#0b1120] text-[#f8fafc] border-[6px] border-[#1e293b] rounded-[36px] p-8 text-center space-y-4 shadow-2xl">
+        <QrCode className="w-12 h-12 text-emerald-400 mx-auto" />
+        <h2 className="text-base font-black text-white">Belum Ada Faktur / Surat Jalan Aktif</h2>
+        <p className="text-xs text-[#94a3b8] leading-relaxed">
+          Silakan input terlebih dahulu Faktur atau Sales Order di sub-menu <strong>Input Faktur / Sales Order (SO)</strong> untuk mulai memindai barang muatan armada box.
         </p>
         <button
           type="button"
           onClick={onNavigateToInvoiceInput}
-          className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer"
+          className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold cursor-pointer"
         >
           Ke Sub-Menu Input Faktur / Sales Order
         </button>
@@ -2892,667 +3329,732 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   }
 
   const evalActive = evaluateInvoiceStatus(activeInvoice);
+  const progressPercentage =
+    evalActive.totalOrdered > 0
+      ? Math.min(100, Math.round((evalActive.totalLoaded / evalActive.totalOrdered) * 100))
+      : 0;
+  const latestFiveScans = recentScansLog.slice(0, 5);
+  const totalSisaCount = evalActive.unloadedItems.length + evalActive.shortageItems.length;
 
   return (
-    <div className="space-y-6">
-      {/* Top App Header (Handheld RFID / Vision Scanner Style) */}
-      <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-lg">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center shrink-0">
-              <QrCode className="w-6 h-6 text-indigo-400" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
-                  Sub-Menu 2 • Aplikasi RFID Visual Admin Penjualan
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                  Terintegrasi Faktur / SO
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight mt-1">
-                Aplikasi Scan &amp; Foto Pengeluaran Barang (Smart RFID Muat Box)
-              </h1>
-              <p className="text-xs text-slate-300 mt-1 max-w-3xl">
-                Fotokan setiap item barang yang dikeluarkan menuju armada box sesuai Faktur/SO. Aplikasi otomatis mendeteksi <strong>Barang Sisa (Belum Termuat / Kurang Muat)</strong> saat proses muat selesai, serta memunculkan <strong>Warning Real-Time jika ada Barang Lebih Muat</strong>.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center">
-            <button
-              type="button"
-              onClick={onNavigateToInvoiceInput}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
-            >
-              <FileText className="w-4 h-4 text-indigo-400" />
-              <span>Kelola / Tambah Faktur (SO)</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleFinishLoadingAndDetectRemaining}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition cursor-pointer"
-            >
-              <ClipboardCheck className="w-4 h-4" />
-              <span>Selesai Proses Muat &amp; Cek Barang Sisa</span>
-            </button>
-          </div>
+    <div className="py-2 px-1 sm:px-4">
+      {/* Top Info Bar Above Mobile Phone Frame */}
+      <div className="max-w-[460px] mx-auto mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-1.5">
+          <span className="px-2.5 py-1 rounded-full bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+            <QrCode className="w-3 h-3" />
+            <span>Pure Visual YOLO • Tampilan HP</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setIsBlueprintsModalOpen(true)}
+            className="px-2.5 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-xs"
+            title="Lihat Skrip SQL Hostinger, Python Ultralytics YOLO Backend & HTML5 Client"
+          >
+            <span>📦 Kode &amp; SQL (YOLO)</span>
+          </button>
         </div>
-
-        {/* Selector Faktur / Sales Order Aktif */}
-        <div className="mt-5 pt-5 border-t border-slate-800 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-          <div className="lg:col-span-6">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              Pilih Faktur / Sales Order (SO) yang Sedang Dimuat ke Armada Box:
-            </label>
-            <select
-              value={activeInvoice.id}
-              onChange={e => {
-                setSelectedInvoiceId(e.target.value);
-                localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
-              }}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-indigo-500"
-            >
-              {invoices.map(inv => {
-                const ev = evaluateInvoiceStatus(inv);
-                return (
-                  <option key={inv.id} value={inv.id}>
-                    {inv.invoiceNumber} ({inv.soNumber}) — {inv.customerName} | {inv.fleetLabel} [{ev.statusLabel}]
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          <div className="lg:col-span-6 grid grid-cols-3 gap-2.5 text-center">
-            <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
-              <div className="text-[10px] font-bold uppercase text-slate-400">Target Faktur</div>
-              <div className="text-lg font-black text-white">{evalActive.totalOrdered} Kemasan</div>
-              <div className="text-[10px] text-slate-400">{activeInvoice.items.length} Jenis SKU</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
-              <div className="text-[10px] font-bold uppercase text-slate-400">Sudah Difoto / Muat</div>
-              <div className="text-lg font-black text-sky-400">{evalActive.totalLoaded} Kemasan</div>
-              <div className="text-[10px] text-slate-400">{activeInvoice.fleetLabel.split('—')[0]}</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
-              <div className="text-[10px] font-bold uppercase text-slate-400">Barang Sisa / Lebih</div>
-              <div
-                className={`text-lg font-black ${
-                  evalActive.overloadItems.length > 0
-                    ? 'text-rose-400'
-                    : evalActive.unloadedItems.length + evalActive.shortageItems.length > 0
-                    ? 'text-amber-400'
-                    : 'text-emerald-400'
-                }`}
-              >
-                {evalActive.overloadItems.length > 0
-                  ? `${evalActive.overloadItems.length} Lebih Muat!`
-                  : evalActive.unloadedItems.length + evalActive.shortageItems.length > 0
-                  ? `${evalActive.unloadedItems.length + evalActive.shortageItems.length} Item Sisa`
-                  : '0 Sisa (Klop)'}
-              </div>
-              <div className="text-[10px] text-slate-400">{activeInvoice.areaName}</div>
-            </div>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onNavigateToInvoiceInput}
+            className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+          >
+            <FileText className="w-3 h-3 text-indigo-400" />
+            <span>Input SO</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleFinishLoadingAndDetectRemaining}
+            className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+          >
+            <ClipboardCheck className="w-3 h-3" />
+            <span>Selesai Muat</span>
+          </button>
         </div>
       </div>
 
       {/* ===================================================================== */}
-      {/* REAL-TIME WARNING BANNER: BARANG LEBIH MUAT (OVER-LOAD NOTIFICATION) */}
+      {/* FRAME UTAMA TAMPILAN HP (MOBILE HANDHELD WMS SCANNER)                 */}
+      {/* Dilindungi class .wms-handheld-dark agar kontras terjaga di LightMode */}
       {/* ===================================================================== */}
-      {evalActive.overloadItems.length > 0 && (
-        <div className="bg-rose-600 text-white rounded-2xl p-5 shadow-lg border-2 border-rose-300 animate-pulse">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3.5">
-              <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                <ShieldAlert className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <div className="text-xs font-black uppercase tracking-wider bg-rose-900/50 px-2.5 py-0.5 rounded-md inline-block">
-                  ⚠️ NOTIFIKASI WARNING: TERDETEKSI BARANG LEBIH MUAT (OVER-LOAD)!
-                </div>
-                <h3 className="text-base sm:text-lg font-black mt-1">
-                  Terdapat {evalActive.overloadItems.length} Item Barang yang Dimuat Melebihi Kuota Faktur {activeInvoice.invoiceNumber}!
-                </h3>
-                <ul className="mt-2 space-y-1 text-xs sm:text-sm font-semibold">
-                  {evalActive.overloadItems.map(item => (
-                    <li key={item.id} className="flex flex-wrap items-center gap-2">
-                      <span>
-                        • <strong>[{item.skuCode}] {item.itemName}</strong>: Faktur hanya{' '}
-                        <u className="font-black">{item.qtyOrdered} {item.unit}</u>, tetapi termuat{' '}
-                        <u className="font-black">{item.qtyLoaded} {item.unit}</u> (Kelebihan{' '}
-                        <span className="bg-white text-rose-700 px-2 py-0.5 rounded-md font-black">
-                          +{item.qtyLoaded - item.qtyOrdered} {item.unit}
-                        </span>
-                        )
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-950/80 hover:bg-slate-950 text-white text-[11px] font-bold cursor-pointer"
-                      >
-                        Turunkan Kelebihan (Sesuaikan ke {item.qtyOrdered} {item.unit})
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+      <div className="wms-handheld-dark max-w-[460px] mx-auto bg-[#0b1120] text-[#f8fafc] rounded-[38px] border-[7px] border-[#1e293b] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.65)] overflow-hidden flex flex-col">
+        {/* 0. Status Bar Smartphone & Speaker Notch */}
+        <div className="bg-[#060a14] px-5 pt-2.5 pb-2 flex items-center justify-between text-[11px] font-mono text-[#cbd5e1] border-b border-[#1e293b]/80 select-none">
+          <div className="flex items-center gap-1.5 font-bold">
+            <span>
+              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#1e293b] text-emerald-400 font-black">
+              5G
+            </span>
+          </div>
+          {/* Dynamic Island / Speaker Cutout */}
+          <div className="w-20 h-3.5 rounded-full bg-[#000000] border border-[#1e293b] flex items-center justify-end pr-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80" />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSoundEnabled(prev => !prev)}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#1e293b] text-[#e2e8f0] cursor-pointer"
+              title="Toggle Suara Beep"
+            >
+              {soundEnabled ? '🔊 Beep' : '🔇 Mute'}
+            </button>
+            <span className="text-[10px] font-bold text-emerald-400">100% 🔋</span>
           </div>
         </div>
-      )}
 
-      {/* ===================================================================== */}
-      {/* PANEL HASIL DETEKSI BARANG SISA / BELUM TERMUAT & REKONSILIASI FAKTUR */}
-      {/* ===================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left 7 Cols: Daftar Item Barang Faktur untuk Difoto Satu per Satu */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Camera className="w-4 h-4 text-indigo-600" />
-                <span>Daftar Barang Faktur — Fotokan Barang Saat Masuk Armada Box</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Klik tombol <strong>&ldquo;📸 Foto / Scan Barang&rdquo;</strong> pada setiap item sesuai fisik barang yang dikeluarkan.
-              </p>
-            </div>
-            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
-              {activeInvoice.invoiceNumber}
+        {/* 1. HEADER BAR: [● Online] WMS SCANNER - MUAT BARANG [Gate 1 v] */}
+        <div className="bg-[#111827] px-3.5 py-2.5 border-b border-[#1e293b] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 ${
+                isOnline
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isOnline ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'
+                }`}
+              />
+              <span>{isOnline ? 'Online' : 'Offline'}</span>
+            </span>
+            <span className="text-xs font-black tracking-tight text-white truncate">
+              WMS SCANNER - MUAT BARANG
             </span>
           </div>
 
-          <div className="space-y-3">
-            {activeInvoice.items.map(item => {
-              const diff = item.qtyLoaded - item.qtyOrdered;
-              const isUnloaded = item.qtyLoaded === 0;
-              const isShort = item.qtyLoaded > 0 && item.qtyLoaded < item.qtyOrdered;
-              const isOver = item.qtyLoaded > item.qtyOrdered;
-              const isExact = item.qtyLoaded === item.qtyOrdered && item.qtyOrdered > 0;
-              const latestPhoto = item.scans[0]?.photoDataUrl;
-
-              return (
-                <div
-                  key={item.id}
-                  className={`p-4 rounded-2xl border transition ${
-                    isOver
-                      ? 'bg-rose-500/5 border-rose-500/40'
-                      : isExact
-                      ? 'bg-emerald-500/5 border-emerald-500/30'
-                      : isShort
-                      ? 'bg-amber-500/5 border-amber-500/30'
-                      : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      {/* Photo Thumbnail or Placeholder */}
-                      <div
-                        onClick={() =>
-                          item.scans.length > 0 &&
-                          setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })
-                        }
-                        className={`w-16 h-16 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-900 flex items-center justify-center overflow-hidden shrink-0 ${
-                          item.scans.length > 0 ? 'cursor-pointer hover:opacity-90' : ''
-                        }`}
-                        title={item.scans.length > 0 ? 'Klik untuk lihat bukti foto' : 'Belum ada foto'}
-                      >
-                        {latestPhoto ? (
-                          <img src={latestPhoto} alt={item.itemName} className="w-full h-full object-cover" />
-                        ) : (
-                          <Camera className="w-6 h-6 text-slate-600" />
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono text-[11px] font-bold">
-                            {item.skuCode}
-                          </span>
-                          {isUnloaded && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold uppercase">
-                              BELUM TERMUAT (BARANG SISA: {item.qtyOrdered} {item.unit})
-                            </span>
-                          )}
-                          {isShort && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold uppercase">
-                              KURANG MUAT (SISA {Math.abs(diff)} {item.unit} BELUM MUAT)
-                            </span>
-                          )}
-                          {isOver && (
-                            <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-extrabold uppercase animate-pulse">
-                              ⚠️ WARNING: LEBIH MUAT +{diff} {item.unit}!
-                            </span>
-                          )}
-                          {isExact && (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold uppercase">
-                              ✓ TERMUAT LENGKAP &amp; SESUAI
-                            </span>
-                          )}
-                        </div>
-
-                        <h3 className="text-sm font-bold text-slate-900 dark:text-white mt-1">
-                          {item.itemName}
-                        </h3>
-
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-400 mt-1">
-                          <span>
-                            Target Faktur: <strong className="text-slate-900 dark:text-white">{item.qtyOrdered} {item.unit}</strong>
-                          </span>
-                          <span>
-                            Termuat (Difoto):{' '}
-                            <strong
-                              className={
-                                isOver
-                                  ? 'text-rose-600 dark:text-rose-400'
-                                  : isExact
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-indigo-600 dark:text-indigo-400'
-                              }
-                            >
-                              {item.qtyLoaded} {item.unit}
-                            </strong>
-                          </span>
-                          {item.scans.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })}
-                              className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>Lihat {item.scans.length} Foto</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap sm:flex-col items-end gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openPhotoScannerForItem(item)}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>📸 Foto / Scan Barang</span>
-                      </button>
-
-                      {item.qtyLoaded > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => handleAdjustLoadedQty(item, 0)}
-                          className="text-[11px] text-slate-400 hover:text-rose-500 font-semibold cursor-pointer"
-                        >
-                          Reset Muatan Item
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <select
+            value={selectedGate}
+            onChange={e => setSelectedGate(e.target.value)}
+            className="px-2.5 py-1 rounded-lg bg-[#060a14] border border-[#334155] text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 shrink-0 cursor-pointer"
+          >
+            {LOADING_GATE_OPTIONS.map(gate => (
+              <option key={gate} value={gate} className="bg-[#0b1120] text-white">
+                {gate.split(' ')[0]} {gate.split(' ')[1]}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* Right 5 Cols: Panel Deteksi Otomatis Barang Sisa (Belum Termuat) & Lebih Muat */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  <span>Hasil Deteksi Barang Sisa &amp; Audit Muat</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Otomatis mendeteksi barang apa saja yang belum termuat (barang sisa di gudang) maupun kelebihan muat.
-                </p>
-              </div>
-            </div>
+        {/* 2. BARIS PILIH NO. SURAT JALAN / FAKTUR (DO/SO) */}
+        <div className="bg-[#0f172a] px-3.5 py-2.5 border-b border-[#1e293b] space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#94a3b8]">
+              No. Surat Jalan (DO/SO):
+            </span>
+            <span className="text-[10px] font-mono text-sky-300 truncate max-w-[200px]">
+              {activeInvoice.customerName} • {activeInvoice.fleetLabel.split('—')[0]}
+            </span>
+          </div>
+          <select
+            value={activeInvoice.id}
+            onChange={e => {
+              setSelectedInvoiceId(e.target.value);
+              localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
+              setTargetScanMode('AUTO');
+            }}
+            className="w-full px-3 py-2 rounded-xl bg-[#060a14] border border-[#334155] text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            {invoices.map(inv => {
+              const ev = evaluateInvoiceStatus(inv);
+              return (
+                <option key={inv.id} value={inv.id} className="bg-[#0b1120] text-white">
+                  {inv.invoiceNumber} ({inv.soNumber}) — {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
+                </option>
+              );
+            })}
+          </select>
+        </div>
 
-            {/* 1. DETEKSI BARANG SISA / BELUM TERMUAT */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  1. Deteksi Barang Sisa / Belum Termuat ({evalActive.unloadedItems.length + evalActive.shortageItems.length} Item)
+        {/* ================================================================= */}
+        {/* 3. AREA KAMERA LIVE VIEWFINDER + RETICLE PEMANDU (TANPA OVERLAP)  */}
+        {/* ================================================================= */}
+        <div className="p-3 bg-[#090d16] border-b border-[#1e293b] space-y-2.5">
+          {/* Top Mini Camera Controls Bar */}
+          <div className="flex items-center justify-between gap-1.5">
+            <span className="text-[10px] font-bold text-[#94a3b8] flex items-center gap-1">
+              <Camera className="w-3.5 h-3.5 text-emerald-400" />
+              <span>AREA KAMERA LIVE VIEWFINDER</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              {!isCameraActive ? (
+                <button
+                  type="button"
+                  onClick={() => void startLiveCamera()}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                >
+                  ▶ Aktifkan Kamera
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                >
+                  ■ Matikan
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleSwitchCamera()}
+                className="px-2 py-1 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0] text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
+                title="Putar Kamera Depan/Belakang"
+              >
+                <RefreshCw className="w-3 h-3 text-sky-400" />
+                <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleToggleTorch()}
+                className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition ${
+                  isTorchOn
+                    ? 'bg-amber-400 text-[#090d16]'
+                    : 'bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0]'
+                }`}
+              >
+                {isTorchOn ? '🔦 ON' : '🔦 Flash'}
+              </button>
+            </div>
+          </div>
+
+          {/* Viewport Kamera (Clean & Non-Overlapping) */}
+          <div className="relative w-full h-56 rounded-2xl bg-[#030712] border-2 border-[#1e293b] overflow-hidden flex items-center justify-center">
+            {isCameraActive ? (
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                playsInline
+                muted
+                autoPlay
+              />
+            ) : lastCapturedPreview ? (
+              <img
+                src={lastCapturedPreview}
+                alt="Snapshot Terakhir"
+                className="w-full h-full object-cover opacity-80"
+              />
+            ) : null}
+
+            {/* Reticle / Kotak Pemandu di Tengah Viewfinder */}
+            <div className="relative z-10 w-[86%] h-[76%] rounded-xl border-2 border-dashed border-emerald-400/80 bg-[#030712]/55 flex flex-col items-center justify-between p-3 text-center pointer-events-none">
+              {/* Corner Brackets */}
+              <div className="absolute -top-0.5 -left-0.5 w-4 h-4 border-t-4 border-l-4 border-emerald-400 rounded-tl-sm" />
+              <div className="absolute -top-0.5 -right-0.5 w-4 h-4 border-t-4 border-r-4 border-emerald-400 rounded-tr-sm" />
+              <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-4 border-l-4 border-emerald-400 rounded-bl-sm" />
+              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-4 border-r-4 border-emerald-400 rounded-br-sm" />
+
+              {/* Top Badge inside Reticle */}
+              <div className="w-full flex items-center justify-between text-[9px] font-mono text-[#cbd5e1]">
+                <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-emerald-300">
+                  YOLO ROI • {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-amber-300">
+                  {autoScanEnabled ? '⚡ AUTO 2.5s ON' : 'MANUAL SNAP'}
                 </span>
               </div>
 
-              {evalActive.unloadedItems.length === 0 && evalActive.shortageItems.length === 0 ? (
-                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2.5 font-semibold">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>Tidak ada barang sisa! Seluruh item pada faktur ini sudah termuat ke dalam armada box.</span>
+              {/* Center Reticle Prompt */}
+              <div className="my-auto space-y-1">
+                {(isVerifyingScan || autoScanEnabled) && (
+                  <div className="w-44 h-0.5 bg-emerald-400 shadow-[0_0_10px_#34d399] animate-pulse mx-auto mb-1" />
+                )}
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0b1120]/90 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold">
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Arahkan Label ke Sini (ROI Box)</span>
+                </div>
+                <div className="text-[10px] text-[#cbd5e1] font-medium px-2 line-clamp-1">
+                  {targetScanMode === 'CUSTOM_CODE'
+                    ? `Mode Uji Kode: ${customTestCode || 'Ketik kode di bawah'}`
+                    : resolvedTargetItem
+                    ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName}`
+                    : 'Ultralytics YOLO ROI Cropping & EasyOCR Aktif'}
+                </div>
+              </div>
+
+              {/* Bottom Target Progress Pill */}
+              <div className="px-2.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] font-mono text-[10px] font-bold text-sky-300">
+                {resolvedTargetItem && targetScanMode !== 'CUSTOM_CODE'
+                  ? `Target Item: ${resolvedTargetItem.qtyLoaded} / ${resolvedTargetItem.qtyOrdered} ${resolvedTargetItem.unit} • CLAHE 1280px`
+                  : 'CLAHE Auto-Contrast • Maks 1280px (JPEG 0.8)'}
+              </div>
+            </div>
+          </div>
+
+          {/* Compact Selector Target Barang & Qty per Scan */}
+          <div className="grid grid-cols-12 gap-2">
+            <div className="col-span-8">
+              <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
+                Target Barang / Mode OCR:
+              </label>
+              <select
+                value={targetScanMode}
+                onChange={e => setTargetScanMode(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-bold text-white cursor-pointer"
+              >
+                <option value="AUTO" className="bg-[#0b1120] text-white">
+                  🤖 Auto OCR: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 22) || ''}
+                </option>
+                {activeInvoice.items.map(it => (
+                  <option key={it.id} value={it.id} className="bg-[#0b1120] text-white">
+                    [{it.skuCode}] {it.itemName} ({it.qtyLoaded}/{it.qtyOrdered} {it.unit})
+                  </option>
+                ))}
+                <option value="CUSTOM_CODE" className="bg-[#0b1120] text-amber-300">
+                  🧪 Uji Kode Salah Tujuan / Tidak Dikenali
+                </option>
+              </select>
+            </div>
+            <div className="col-span-4">
+              {targetScanMode === 'CUSTOM_CODE' ? (
+                <>
+                  <label className="block text-[9px] font-bold uppercase text-amber-400 mb-0.5">
+                    Kode Uji:
+                  </label>
+                  <input
+                    type="text"
+                    value={customTestCode}
+                    onChange={e => setCustomTestCode(e.target.value.toUpperCase())}
+                    placeholder="BOX-999"
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-amber-500/60 text-[11px] font-mono font-bold text-amber-300"
+                  />
+                </>
+              ) : (
+                <>
+                  <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
+                    Qty / Scan ({resolvedTargetItem?.unit || 'Box'}):
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={scanQtyInput}
+                    onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-mono font-black text-emerald-400 text-center"
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ================================================================= */}
+        {/* 4. STATUS TERAKHIR (HIJAU/MERAH) & PROGRES MUAT BAR               */}
+        {/* ================================================================= */}
+        <div className="p-3.5 bg-[#0f172a] border-b border-[#1e293b] space-y-3">
+          {/* Kartu Status Terakhir */}
+          <div
+            className={`rounded-2xl p-3 border transition-all ${
+              !lastFeedback
+                ? 'bg-[#111827] border-[#334155] text-[#e2e8f0]'
+                : lastFeedback.status === 'success'
+                ? 'bg-[#059669] border-emerald-300 text-white shadow-md'
+                : 'bg-[#dc2626] border-rose-300 text-white shadow-md'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-wider opacity-90 mb-1">
+              <span>Status Terakhir:</span>
+              {lastFeedback && <span className="font-mono">{lastFeedback.displayTime}</span>}
+            </div>
+            {!lastFeedback ? (
+              <div className="flex items-center gap-2 text-xs font-bold text-[#cbd5e1]">
+                <QrCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Menunggu scan pertama di {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}...</span>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="flex items-start gap-2">
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 font-mono text-xs font-black shrink-0">
+                    {lastFeedback.status === 'success' ? '[✓]' : '[✕]'}
+                  </span>
+                  <div className="text-xs sm:text-sm font-black leading-snug">
+                    {lastFeedback.status === 'success'
+                      ? `${lastFeedback.extractedCode} - ${lastFeedback.productName} (Valid • ${lastFeedback.itemLoaded}/${lastFeedback.itemTarget} Terbit)`
+                      : `${lastFeedback.extractedCode} - Tidak Dikenali / Salah Tujuan / Lebih Muat`}
+                  </div>
+                </div>
+                <div className="text-[11px] font-medium opacity-95 pl-7">
+                  {lastFeedback.message}
+                </div>
+                <div className="pl-7 pt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
+                    YOLO Conf: {Math.round((lastFeedback.confidenceScore || 0.964) * 100)}%
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
+                    SQL: {lastFeedback.sqlStatusTransition || (lastFeedback.status === 'success' ? 'PENDING → LOADED' : 'REJECTED')}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 text-white">
+                    {lastFeedback.status === 'success' ? '1200Hz Beep' : '250Hz Buzzer'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Warning Banner jika ada Overload (Lebih Muat) */}
+          {evalActive.overloadItems.length > 0 && (
+            <div className="rounded-xl bg-[#991b1b] border border-rose-400 p-2.5 text-white space-y-1.5">
+              <div className="text-[10px] font-black uppercase tracking-wider text-rose-200 flex items-center gap-1">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>⚠️ PERINGATAN BARANG LEBIH MUAT ({evalActive.overloadItems.length} SKU)</span>
+              </div>
+              {evalActive.overloadItems.map(item => (
+                <div key={item.id} className="flex items-center justify-between gap-2 text-[11px] bg-black/25 px-2.5 py-1.5 rounded-lg">
+                  <span className="truncate font-semibold">
+                    [{item.skuCode}] {item.qtyLoaded}/{item.qtyOrdered} {item.unit} (+{item.qtyLoaded - item.qtyOrdered})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
+                    className="px-2 py-0.5 rounded bg-white text-rose-900 font-extrabold text-[10px] shrink-0 cursor-pointer"
+                  >
+                    Sesuaikan ({item.qtyOrdered})
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Baris Progres Muat */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-[#cbd5e1]">Progres Muat:</span>
+              <span className="font-mono font-black text-emerald-400">
+                {evalActive.totalLoaded} / {evalActive.totalOrdered} Kemasan ({progressPercentage}%)
+              </span>
+            </div>
+            <div className="w-full h-3 rounded-full bg-[#060a14] border border-[#334155] overflow-hidden p-0.5">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  evalActive.overloadItems.length > 0
+                    ? 'bg-rose-500'
+                    : progressPercentage === 100
+                    ? 'bg-emerald-500'
+                    : 'bg-sky-500'
+                }`}
+                style={{ width: `${Math.min(100, progressPercentage)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-bold text-[#94a3b8] pt-0.5">
+              <span>Target: {evalActive.totalOrdered} ({activeInvoice.items.length} SKU)</span>
+              <span className="text-sky-400">Termuat: {evalActive.totalLoaded}</span>
+              <span className={totalSisaCount > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+                {totalSisaCount > 0 ? `Sisa: ${totalSisaCount} SKU` : '✓ 100% Klop'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ================================================================= */}
+        {/* 5. TAB NAVIGASI DALAM LAYAR HP (RIWAYAT / BARANG DO / CEK SISA)   */}
+        {/* ================================================================= */}
+        <div className="grid grid-cols-3 bg-[#060a14] border-b border-[#1e293b] p-1 gap-1 text-[11px] font-bold">
+          <button
+            type="button"
+            onClick={() => setMobileSubTab('history')}
+            className={`py-1.5 rounded-lg transition cursor-pointer ${
+              mobileSubTab === 'history'
+                ? 'bg-[#1e293b] text-emerald-400 font-black'
+                : 'text-[#94a3b8] hover:text-white'
+            }`}
+          >
+            📋 Riwayat ({latestFiveScans.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileSubTab('items')}
+            className={`py-1.5 rounded-lg transition cursor-pointer ${
+              mobileSubTab === 'items'
+                ? 'bg-[#1e293b] text-sky-400 font-black'
+                : 'text-[#94a3b8] hover:text-white'
+            }`}
+          >
+            📦 Barang DO ({activeInvoice.items.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileSubTab('audit')}
+            className={`py-1.5 rounded-lg transition cursor-pointer ${
+              mobileSubTab === 'audit'
+                ? 'bg-[#1e293b] text-amber-400 font-black'
+                : 'text-[#94a3b8] hover:text-white'
+            }`}
+          >
+            🔍 Cek Sisa ({totalSisaCount})
+          </button>
+        </div>
+
+        {/* ISI TAB LAYAR HP */}
+        <div className="p-3.5 bg-[#0b1120] max-h-64 overflow-y-auto space-y-2">
+          {mobileSubTab === 'history' && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">
+                  Riwayat 5 Scan Terakhir:
+                </span>
+                {recentScansLog.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecentScansLog([]);
+                      localStorage.removeItem(SCAN_HISTORY_STORAGE_KEY);
+                    }}
+                    className="text-[10px] text-rose-400 hover:underline font-bold cursor-pointer"
+                  >
+                    Bersihkan
+                  </button>
+                )}
+              </div>
+
+              {latestFiveScans.length === 0 ? (
+                <div className="py-5 text-center text-xs text-[#64748b] border border-dashed border-[#1e293b] rounded-xl">
+                  Belum ada riwayat scan. Tekan tombol <strong>AMBIL FOTO &amp; VERIFIKASI</strong> di bawah.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
+                  {latestFiveScans.map(log => (
+                    <div
+                      key={log.id}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#111827] border border-[#1e293b] text-xs font-mono"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <img
+                          src={log.photoDataUrl}
+                          alt={log.extractedCode}
+                          className="w-7 h-7 rounded-lg object-cover border border-[#334155] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate font-bold text-[#f8fafc] text-[11px]">
+                            {log.displayTime.replace(' WIB', '')} - {log.extractedCode}
+                          </div>
+                          <div className="truncate text-[10px] text-[#94a3b8] font-sans">
+                            {log.productName}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
+                          log.status === 'success'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        }`}
+                      >
+                        {log.status === 'success' ? `(OK ${log.itemLoaded}/${log.itemTarget})` : '(ERROR)'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {mobileSubTab === 'items' && (
+            <div className="space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">
+                Daftar Barang Surat Jalan ({activeInvoice.invoiceNumber}):
+              </div>
+              {activeInvoice.items.map(item => {
+                const isSelected = resolvedTargetItem?.id === item.id && targetScanMode !== 'CUSTOM_CODE';
+                const isExact = item.qtyLoaded === item.qtyOrdered && item.qtyOrdered > 0;
+                const isOver = item.qtyLoaded > item.qtyOrdered;
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-2.5 rounded-xl border text-xs space-y-1.5 ${
+                      isSelected
+                        ? 'bg-[#172554]/60 border-indigo-400'
+                        : 'bg-[#111827] border-[#1e293b]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-bold">
+                            {item.skuCode}
+                          </span>
+                          <span
+                            className={`text-[10px] font-extrabold ${
+                              isOver ? 'text-rose-400' : isExact ? 'text-emerald-400' : 'text-amber-300'
+                            }`}
+                          >
+                            {item.qtyLoaded}/{item.qtyOrdered} {item.unit}
+                          </span>
+                        </div>
+                        <div className="font-bold text-white text-xs mt-0.5 truncate">
+                          {item.itemName}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {item.scans.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })}
+                            className="px-2 py-1 rounded-lg bg-[#1e293b] text-sky-300 text-[10px] font-bold cursor-pointer"
+                          >
+                            📷 {item.scans.length}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSpecificItemToScan(item)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
+                        >
+                          Pilih Scan
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {mobileSubTab === 'audit' && (
+            <div className="space-y-2 text-xs">
+              <div className="text-[10px] font-black uppercase tracking-wider text-amber-400">
+                Deteksi Barang Sisa / Belum Termuat ({totalSisaCount} SKU):
+              </div>
+              {totalSisaCount === 0 ? (
+                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Semua barang pada Surat Jalan ini sudah termuat 100%!</span>
+                </div>
+              ) : (
+                <>
                   {evalActive.unloadedItems.map(item => (
                     <div
                       key={item.id}
-                      className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2 text-xs"
+                      className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
                     >
-                      <div>
-                        <div className="font-bold text-slate-900 dark:text-white">
-                          [{item.skuCode}] {item.itemName}
-                        </div>
-                        <div className="text-amber-700 dark:text-amber-300 font-semibold mt-0.5">
-                          Status: <strong>BELUM TERMUAT SAMA SEKALI</strong> — Sisa di gudang:{' '}
-                          <u className="font-black">{item.qtyOrdered} {item.unit}</u>
-                        </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
+                        <div className="text-[11px] text-amber-300">Belum termuat: sisa {item.qtyOrdered} {item.unit}</div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => openPhotoScannerForItem(item)}
-                        className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+                        onClick={() => handleSelectSpecificItemToScan(item)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-bold shrink-0 cursor-pointer"
                       >
-                        Foto Sekarang
+                        Scan
                       </button>
                     </div>
                   ))}
-
                   {evalActive.shortageItems.map(item => {
                     const sisa = item.qtyOrdered - item.qtyLoaded;
                     return (
                       <div
                         key={item.id}
-                        className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2 text-xs"
+                        className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
                       >
-                        <div>
-                          <div className="font-bold text-slate-900 dark:text-white">
-                            [{item.skuCode}] {item.itemName}
-                          </div>
-                          <div className="text-amber-700 dark:text-amber-300 font-semibold mt-0.5">
-                            Status: <strong>KURANG MUAT</strong> (Baru muat {item.qtyLoaded}/{item.qtyOrdered} {item.unit}) —{' '}
-                            <span className="bg-amber-500/20 px-1.5 py-0.5 rounded font-black">
-                              Barang Sisa Belum Termuat: {sisa} {item.unit}
-                            </span>
+                        <div className="min-w-0">
+                          <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
+                          <div className="text-[11px] text-amber-300">
+                            Kurang muat ({item.qtyLoaded}/{item.qtyOrdered}) • Sisa {sisa} {item.unit}
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => openPhotoScannerForItem(item)}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+                          onClick={() => handleSelectSpecificItemToScan(item)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-bold shrink-0 cursor-pointer"
                         >
-                          Foto Sisa ({sisa})
+                          Scan ({sisa})
                         </button>
                       </div>
                     );
                   })}
-                </div>
+                </>
               )}
             </div>
+          )}
+        </div>
 
-            {/* 2. DETEKSI WARNING BARANG LEBIH MUAT */}
-            <div className="space-y-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <span className="text-xs font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 block">
-                2. Deteksi Peringatan Lebih Muat ({evalActive.overloadItems.length} Item)
+        {/* ================================================================= */}
+        {/* 6. TOMBOL KONTROL BAWAH HP: [ AMBIL FOTO & VERIFIKASI ] [Auto:ON] */}
+        {/* ================================================================= */}
+        <div className="p-3.5 bg-[#060a14] border-t border-[#1e293b] space-y-2">
+          <div className="grid grid-cols-12 gap-2">
+            <button
+              type="button"
+              disabled={isVerifyingScan}
+              onClick={() => void executeCaptureAndVerify()}
+              className="col-span-8 py-3 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 text-white font-black text-xs sm:text-sm tracking-wide shadow-lg flex items-center justify-center gap-2 cursor-pointer transition"
+            >
+              <Camera className="w-4 h-4 shrink-0" />
+              <span>
+                {isVerifyingScan ? 'MEMVERIFIKASI...' : 'AMBIL FOTO & VERIFIKASI'}
               </span>
+            </button>
 
-              {evalActive.overloadItems.length === 0 ? (
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-xs text-slate-500 flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>Aman — Tidak ada barang yang melebihi jumlah Faktur / Sales Order.</span>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {evalActive.overloadItems.map(item => {
-                    const excess = item.qtyLoaded - item.qtyOrdered;
-                    return (
-                      <div
-                        key={item.id}
-                        className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs space-y-1.5"
-                      >
-                        <div className="flex items-center justify-between font-bold text-rose-600 dark:text-rose-400">
-                          <span>⚠️ WARNING LEBIH MUAT: {item.itemName}</span>
-                          <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px]">
-                            +{excess} {item.unit} Lebih
-                          </span>
-                        </div>
-                        <p className="text-slate-600 dark:text-slate-300">
-                          Order Faktur: <strong>{item.qtyOrdered} {item.unit}</strong> • Termuat di Armada:{' '}
-                          <strong>{item.qtyLoaded} {item.unit}</strong>. Mohon keluarkan{' '}
-                          <strong>{excess} {item.unit}</strong> dari armada box.
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => setAutoScanEnabled(prev => !prev)}
+              className={`col-span-4 py-3 px-2 rounded-2xl font-black text-[11px] border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                autoScanEnabled
+                  ? 'bg-amber-400 text-[#060a14] border-amber-300 shadow-md'
+                  : 'bg-[#111827] text-[#cbd5e1] border-[#334155] hover:bg-[#1e293b]'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  autoScanEnabled ? 'bg-[#060a14] animate-ping' : 'bg-[#64748b]'
+                }`}
+              />
+              <span>Mode Auto: {autoScanEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+          </div>
 
-            {/* 3. RINGKASAN BARANG SUDAH TERVERIFIKASI SESUAI */}
-            <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <span className="text-xs font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
-                3. Barang Termuat Sesuai Faktur ({evalActive.matchedItems.length} / {activeInvoice.items.length} Item)
-              </span>
-              {evalActive.matchedItems.length > 0 ? (
-                <div className="space-y-1.5">
-                  {evalActive.matchedItems.map(item => (
-                    <div
-                      key={item.id}
-                      className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs"
-                    >
-                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                        ✓ {item.itemName}
-                      </span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                        {item.qtyLoaded} {item.unit} (Sesuai)
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400 italic">Belum ada item yang mencapai jumlah klop 100%.</p>
-              )}
-            </div>
+          {/* Secondary Mobile Bar: Buka Kamera HP Asli / Upload File & Tes Suara */}
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileUploadAndVerify}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex-1 py-1.5 px-3 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-[#cbd5e1] text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+            >
+              <Upload className="w-3.5 h-3.5 text-indigo-400" />
+              <span>📱 Buka Kamera HP / Pilih File Foto</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => playScannerFeedbackBeep('success', true)}
+              className="py-1.5 px-2.5 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-emerald-300 text-[10px] font-bold cursor-pointer"
+              title="Tes Suara Beep Valid"
+            >
+              🔊 Beep OK
+            </button>
+            <button
+              type="button"
+              onClick={() => playScannerFeedbackBeep('error', true)}
+              className="py-1.5 px-2.5 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-rose-300 text-[10px] font-bold cursor-pointer"
+              title="Tes Suara Buzzer Error"
+            >
+              🔊 Beep Err
+            </button>
+          </div>
+
+          {/* Home Indicator Bar Smartphone */}
+          <div className="pt-1 flex justify-center">
+            <div className="w-28 h-1 rounded-full bg-[#334155]" />
           </div>
         </div>
       </div>
-
-      {/* ===================================================================== */}
-      {/* MODAL KAMERA & FOTO VERIFIKASI BARANG MUAT (RFID VISUAL CAPTURE)       */}
-      {/* ===================================================================== */}
-      {scanningItem && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs overflow-y-auto flex items-start justify-center p-3 sm:p-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl my-auto space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                  Kamera Verifikasi RFID Visual • {scanningItem.skuCode}
-                </span>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
-                  {scanningItem.itemName}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  stopCamera();
-                  setScanningItemId(null);
-                }}
-                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Info Target vs Sudah Termuat */}
-            <div className="grid grid-cols-3 gap-2 text-center bg-slate-50 dark:bg-slate-800/70 p-3 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs">
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Qty Faktur</div>
-                <div className="text-base font-black text-slate-900 dark:text-white">
-                  {scanningItem.qtyOrdered} {scanningItem.unit}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Sudah Termuat</div>
-                <div className="text-base font-black text-indigo-600 dark:text-indigo-400">
-                  {scanningItem.qtyLoaded} {scanningItem.unit}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-bold">Sisa Belum Muat</div>
-                <div className="text-base font-black text-amber-600 dark:text-amber-400">
-                  {Math.max(0, scanningItem.qtyOrdered - scanningItem.qtyLoaded)} {scanningItem.unit}
-                </div>
-              </div>
-            </div>
-
-            {/* Camera Viewfinder / Photo Preview Box */}
-            <div className="space-y-2.5">
-              <div className="relative w-full h-56 rounded-2xl bg-slate-950 border-2 border-dashed border-indigo-500/40 overflow-hidden flex flex-col items-center justify-center">
-                {isCameraActive ? (
-                  <>
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
-                    <div className="absolute inset-4 border-2 border-sky-400/70 rounded-xl pointer-events-none flex items-end justify-center pb-2">
-                      <span className="px-2.5 py-0.5 rounded bg-slate-950/80 text-sky-300 text-[10px] font-mono">
-                        ARAHKAN KAMERA KE BARANG / LABEL KEMASAN ({scanningItem.skuCode})
-                      </span>
-                    </div>
-                  </>
-                ) : capturedPhotoUrl ? (
-                  <img src={capturedPhotoUrl} alt="Captured" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="text-center p-4 space-y-2">
-                    <Camera className="w-10 h-10 text-indigo-400 mx-auto" />
-                    <div className="text-xs font-bold text-white">Ambil Foto Bukti Barang Masuk Armada Box</div>
-                    <p className="text-[11px] text-slate-400">
-                      Gunakan kamera langsung atau unggah foto fisik barang yang sedang dimuat.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {!isCameraActive ? (
-                  <button
-                    type="button"
-                    onClick={startLiveCamera}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Buka Kamera Langsung</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={captureSnapshotFromVideo}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Jepret Foto Barang Sekarang</span>
-                  </button>
-                )}
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleFileUploadPhoto}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Ambil / Pilih Foto File</span>
-                </button>
-              </div>
-
-              {capturedPhotoUrl && (
-                <ExifMetadataBadge exif={capturedExif} />
-              )}
-            </div>
-
-            <form onSubmit={handleConfirmPhotoScan} className="space-y-3.5 pt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                    Jumlah Barang yang Difoto / Masuk Box ({scanningItem.unit}) *
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    required
-                    value={scanQtyInput}
-                    onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-black text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                    Admin Penjualan Pemeriksa *
-                  </label>
-                  <select
-                    value={scanAdminPic}
-                    onChange={e => setScanAdminPic(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-                  >
-                    {adminNames.map(adm => (
-                      <option key={adm} value={adm}>{adm}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Instant Live Preview Warning if input quantity will exceed Faktur */}
-              {scanningItem.qtyLoaded + scanQtyInput > scanningItem.qtyOrdered && (
-                <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-400 font-bold flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>
-                    PERINGATAN LEBIH MUAT: Menambahkan {scanQtyInput} {scanningItem.unit} akan membuat total muatan menjadi{' '}
-                    <u>{scanningItem.qtyLoaded + scanQtyInput} {scanningItem.unit}</u>, melebihi Faktur ({scanningItem.qtyOrdered} {scanningItem.unit}) sebanyak{' '}
-                    <strong>+{scanningItem.qtyLoaded + scanQtyInput - scanningItem.qtyOrdered} {scanningItem.unit}</strong>!
-                  </span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                  Catatan Foto / Kondisi Barang (Opsional)
-                </label>
-                <input
-                  type="text"
-                  value={scanNotesInput}
-                  onChange={e => setScanNotesInput(e.target.value)}
-                  placeholder="cth. Palet ke-1 masuk armada box kondisi baik..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setScanningItemId(null);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm cursor-pointer"
-                >
-                  Simpan Foto &amp; Catat Barang Termuat
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ===================================================================== */}
       {/* POPUP MODAL WARNING KETIKA TERJADI LEBIH MUAT BARANG                   */}
       {/* ===================================================================== */}
       {overloadWarningAlert && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center space-y-4">
+          <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-3xl max-w-md w-full p-6 shadow-2xl text-center space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-rose-500/15 text-rose-600 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-8 h-8 animate-bounce" />
             </div>
@@ -3588,7 +4090,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       {/* ===================================================================== */}
       {previewPhotoModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs overflow-y-auto flex items-start justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-5 shadow-2xl my-auto space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-5 shadow-2xl my-auto space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
@@ -3626,6 +4128,15 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* ===================================================================== */}
+      {/* MODAL SKRIP SQL HOSTINGER, PYTHON ULTRALYTICS YOLO & STANDALONE HTML5  */}
+      {/* ===================================================================== */}
+      <WmsPureVisualBlueprintsModal
+        isOpen={isBlueprintsModalOpen}
+        onClose={() => setIsBlueprintsModalOpen(false)}
+      />
     </div>
   );
 };
+

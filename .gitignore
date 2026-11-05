@@ -16,4 +16,6 @@ coverage/
 
 # Editor/AI Studio temporary artifacts (not part of Hostinger runtime)
 .aistudio/
+public/assets/aistudio/
 bun.lock
+public/uploads/

@@ -30,7 +30,8 @@ import {
   FileText,
   Camera,
   Smartphone,
-  Video
+  Video,
+  AlertTriangle
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -103,27 +104,33 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [dokumentasiUrls, setDokumentasiUrls] = useState<string[]>([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState<number>(0);
 
-  // Form states matching Foto 1
+  // Form states matching Foto 1 (default kosong / 0 agar tidak memaksa nilai terisi)
   const [noBarang, setNoBarang] = useState('');
   const [deskripsiBarang, setDeskripsiBarang] = useState('');
   const [unit1, setUnit1] = useState('Pcs');
-  const [unit2, setUnit2] = useState('Ikat');
-  const [unit3, setUnit3] = useState('Palet');
-  const [rasio2, setRasio2] = useState<number | string>(25);
-  const [rasio3, setRasio3] = useState<number | string>(500);
-  const [panjangCm, setPanjangCm] = useState<number>(60);
-  const [lebarCm, setLebarCm] = useState<number>(40);
-  const [tinggiCm, setTinggiCm] = useState<number>(40);
-  const [volM3, setVolM3] = useState<number>(0.096);
-  const [beratKg, setBeratKg] = useState<number>(0.65);
+  const [unit2, setUnit2] = useState('');
+  const [unit3, setUnit3] = useState('');
+  const [rasio2, setRasio2] = useState<number | string>(0);
+  const [rasio3, setRasio3] = useState<number | string>(0);
+  const [panjangCm, setPanjangCm] = useState<number>(0);
+  const [lebarCm, setLebarCm] = useState<number>(0);
+  const [tinggiCm, setTinggiCm] = useState<number>(0);
+  const [volM3, setVolM3] = useState<number>(0);
+  const [beratKg, setBeratKg] = useState<number>(0);
   const [dokumentasiUrl, setDokumentasiUrl] = useState('');
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
 
   // Lightbox preview for photo if clicked
   const [previewDocItem, setPreviewDocItem] = useState<DatabaseBarangRecord | null>(null);
 
-  // Toast / Feedback popup
-  const [feedbackModal, setFeedbackModal] = useState<{ title: string; message: string } | null>(null);
+  // Custom Delete Confirmation Popup & Feedback Popup
+  const [itemToDelete, setItemToDelete] = useState<DatabaseBarangRecord | null>(null);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    title: string;
+    message: string;
+    variant?: 'success' | 'danger' | 'info';
+    badge?: string;
+  } | null>(null);
 
   // Direct Live Camera & HP Camera capture state
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
@@ -276,7 +283,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
   useEffect(() => {
     databaseBarangService.ensureHydrated().then(loaded => {
-      if (loaded && loaded.length > 0) {
+      if (Array.isArray(loaded)) {
         setItems(loaded);
       }
     });
@@ -546,12 +553,23 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   };
 
   const handleDeleteItem = (item: DatabaseBarangRecord) => {
-    if (window.confirm(`Hapus barang ${item.noBarang} - ${item.deskripsiBarang || item.keteranganBarang}?`)) {
-      databaseBarangService.deleteItem(item.id);
-      const all = databaseBarangService.getAll();
-      setItems(all);
-      if (onSyncWithMasterSku) onSyncWithMasterSku(all);
-    }
+    setItemToDelete(item);
+  };
+
+  const confirmDeleteItem = () => {
+    if (!itemToDelete) return;
+    const target = itemToDelete;
+    databaseBarangService.deleteItem(target.id);
+    const all = databaseBarangService.getAll();
+    setItems(all);
+    if (onSyncWithMasterSku) onSyncWithMasterSku(all);
+    setItemToDelete(null);
+    setFeedbackModal({
+      title: 'Barang Berhasil Dihapus',
+      message: `Data barang "${target.deskripsiBarang || target.keteranganBarang}" (${target.noBarang}) telah dihapus secara permanen dari Database Barang.`,
+      variant: 'danger',
+      badge: target.noBarang
+    });
   };
 
   // Template Excel download matching Foto 1 exact columns
@@ -679,15 +697,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             ) {
               descBrg = rawStr;
             } else if (k === 'unit1' || k === 'satuan' || k === 'unit') {
-              if (rawStr) u1 = rawStr;
+              if (rawStr && rawStr !== '-') u1 = rawStr;
             } else if (k === 'unit2') {
-              u2 = rawStr;
+              u2 = rawStr === '-' || rawStr === '0' ? '' : rawStr;
             } else if (k === 'unit3') {
-              u3 = rawStr;
+              u3 = rawStr === '-' || rawStr === '0' ? '' : rawStr;
             } else if (k === 'rasio2') {
-              r2 = rawStr === '' ? 0 : (!isNaN(Number(val)) ? Number(val) : rawStr);
+              r2 = rawStr === '' || rawStr === '-' || rawStr === '0' ? 0 : (!isNaN(Number(val)) ? Number(val) : rawStr);
             } else if (k === 'rasio3') {
-              r3 = rawStr === '' ? 0 : (!isNaN(Number(val)) ? Number(val) : rawStr);
+              r3 = rawStr === '' || rawStr === '-' || rawStr === '0' ? 0 : (!isNaN(Number(val)) ? Number(val) : rawStr);
             } else if (k === 'panjanglcm' || k === 'panjang' || k === 'length') {
               p = numVal;
             } else if (k === 'lebarwcm' || k === 'lebar' || k === 'width') {
@@ -2398,34 +2416,153 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Feedback Notification Modal */}
+      {/* Custom Delete Confirmation Modal (Menggantikan window.confirm browser bawaan) */}
+      {itemToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setItemToDelete(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Top Accent Header */}
+            <div className="bg-gradient-to-r from-rose-600 to-red-600 px-6 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-rose-100">
+                    Konfirmasi Penghapusan Data
+                  </div>
+                  <h4 className="text-sm font-black tracking-tight text-white">
+                    Hapus Barang dari Database?
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body Detail Barang */}
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Anda akan menghapus item berikut dari <strong>Database Barang Gudang (WMS)</strong>. Tindakan ini akan memperbarui daftar barang secara permanen:
+              </p>
+
+              <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-rose-600 text-white font-mono text-xs font-black">
+                    {itemToDelete.noBarang}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                    Satuan: {itemToDelete.unit1 || itemToDelete.satuan || 'Pcs'}
+                  </span>
+                </div>
+                <div className="text-sm font-black text-slate-900 dark:text-white leading-snug">
+                  {itemToDelete.deskripsiBarang || itemToDelete.keteranganBarang}
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 font-mono pt-1 border-t border-rose-200/60 dark:border-rose-800/40">
+                  <span>
+                    Dimensi: {itemToDelete.panjangCm || 0}&times;{itemToDelete.lebarCm || 0}&times;{itemToDelete.tinggiCm || 0} cm
+                  </span>
+                  <span>&bull;</span>
+                  <span>VOL: {itemToDelete.volM3 || 0} M3</span>
+                  <span>&bull;</span>
+                  <span>Berat: {itemToDelete.beratKg || 0} kg</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={confirmDeleteItem}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Ya, Hapus Barang</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modern Feedback Notification Modal */}
       {feedbackModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
           onClick={() => setFeedbackModal(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-6 h-6" />
+            <div
+              className={`px-6 py-4 flex items-center justify-between text-white ${
+                feedbackModal.variant === 'danger'
+                  ? 'bg-gradient-to-r from-rose-600 to-red-600'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest opacity-90">
+                    Notifikasi Sistem Database
+                  </div>
+                  <h4 className="text-sm font-black tracking-tight text-white">
+                    {feedbackModal.title}
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFeedbackModal(null)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <div className="space-y-1.5">
-              <h4 className="text-base font-black text-slate-900 dark:text-white">
-                {feedbackModal.title}
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+
+            <div className="p-6 space-y-4 text-center">
+              {feedbackModal.badge && (
+                <span className="inline-block px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-xs font-black text-blue-600 dark:text-blue-400">
+                  {feedbackModal.badge}
+                </span>
+              )}
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 {feedbackModal.message}
               </p>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setFeedbackModal(null)}
+                className={`w-full py-2.5 rounded-xl text-white font-black text-xs cursor-pointer transition shadow-sm ${
+                  feedbackModal.variant === 'danger'
+                    ? 'bg-rose-600 hover:bg-rose-500'
+                    : 'bg-emerald-600 hover:bg-emerald-500'
+                }`}
+              >
+                Oke, Mengerti
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setFeedbackModal(null)}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer transition"
-            >
-              Oke, Mengerti
-            </button>
           </div>
         </div>
       )}

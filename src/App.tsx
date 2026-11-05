@@ -39,6 +39,7 @@ import { useToast } from './context/ToastContext';
 import { canAccess, getDefaultTabForRole, getFirstAccessibleTabForUser } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
+import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
@@ -493,6 +494,7 @@ export default function App() {
         <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${
           currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'
         }`}>
+          <ReadOnlyModuleBoundary user={currentUser} activeTab={currentTab}>
           {currentTab === 'dashboard' && (
             isAdmin() || canAccess(currentUser, 'dashboard') ? (
               <ExecutiveDashboard onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
@@ -741,6 +743,7 @@ export default function App() {
           {currentTab === 'e2e_testing' && (
             <E2ETesterModule onNavigate={(tab) => setCurrentTab(tab)} />
           )}
+          </ReadOnlyModuleBoundary>
         </main>
 
         {/* Enterprise AKK Footer (hidden on driver portal to keep clean mobile bottom bar) */}
