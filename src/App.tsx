@@ -152,8 +152,15 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    void logisticsStore.restoreServerSession().finally(() => {
+    const authTimeout = setTimeout(() => {
+      if (active && isAuthChecking) {
+        setIsAuthChecking(false);
+      }
+    }, 3000);
+
+    void logisticsStore.restoreServerSession().catch(() => {}).finally(() => {
       if (active) {
+        clearTimeout(authTimeout);
         setIsAuthenticated(logisticsStore.isAuthenticated());
         setIsAuthChecking(false);
       }
@@ -496,8 +503,10 @@ export default function App() {
           </div>
         )}
 
-        <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${
-          currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'
+        <main className={`flex-1 max-w-7xl w-full mx-auto ${
+          currentTab === 'driver_portal' || currentTab === 'sales_rfid_scanner'
+            ? 'px-0 pb-0 pt-14 lg:pt-0'
+            : `p-4 sm:p-6 lg:p-8 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'}`
         }`}>
           <ReadOnlyModuleBoundary user={currentUser} activeTab={currentTab}>
           {currentTab === 'dashboard' && (
@@ -751,8 +760,8 @@ export default function App() {
           </ReadOnlyModuleBoundary>
         </main>
 
-        {/* Enterprise AKK Footer (hidden on driver portal to keep clean mobile bottom bar) */}
-        {currentTab !== 'driver_portal' && (
+        {/* Enterprise AKK Footer (hidden on driver portal & sales rfid scanner to keep clean mobile bottom bar) */}
+        {currentTab !== 'driver_portal' && currentTab !== 'sales_rfid_scanner' && (
           <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
               <div className="text-slate-400">

@@ -2632,12 +2632,9 @@ interface RealtimeScanFeedback {
 }
 
 const LOADING_GATE_OPTIONS = [
-  'Gate 1 (Loading Utama)',
-  'Gate 2 (Loading Tengah)',
-  'Gate 3 (Loading Timur)',
-  'Pintu Ram 1 (Gudang Box)',
-  'Pintu Ram 2 (Gudang Kemasan)',
-  'Pintu Ram 3 (Ekspedisi Lintas Pulau)'
+  'Ram 1',
+  'Ram 2',
+  'Ram 3'
 ];
 
 const SCAN_HISTORY_STORAGE_KEY = 'akk_wms_rfid_recent_scan_logs_v1';
@@ -2698,9 +2695,30 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const {
     invoices,
     saveInvoices,
-    adminNames,
     defaultAdmin
   } = useSharedSalesRfidInvoices();
+
+  // Live synchronization with Gudang -> Database Barang (kode barang, deskripsi barang, satuan)
+  const [dbBarangList, setDbBarangList] = useState<DatabaseBarangRecord[]>(() =>
+    databaseBarangService.getAll()
+  );
+
+  useEffect(() => {
+    void databaseBarangService.fetchFromServer().then(rows => {
+      if (rows && rows.length > 0) {
+        setDbBarangList(rows);
+      }
+    });
+    const syncDb = () => {
+      setDbBarangList(databaseBarangService.getAll());
+    };
+    window.addEventListener('akk-database-barang-updated', syncDb);
+    window.addEventListener('storage', syncDb);
+    return () => {
+      window.removeEventListener('akk-database-barang-updated', syncDb);
+      window.removeEventListener('storage', syncDb);
+    };
+  }, []);
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(() => {
     const savedId = localStorage.getItem(ACTIVE_INVOICE_KEY);
@@ -2725,38 +2743,53 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
   const [selectedGate, setSelectedGate] = useState<string>(LOADING_GATE_OPTIONS[0]);
-  const [scanAdminPic, setScanAdminPic] = useState<string>(defaultAdmin);
+  const [scanAdminPic] = useState<string>(defaultAdmin);
 
   // Live Viewfinder & Hardware Camera Controls
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [manualCameraPaused, setManualCameraPaused] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
-  const [torchSupported, setTorchSupported] = useState<boolean>(false);
+  const [, setTorchSupported] = useState<boolean>(false);
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [isVerifyingScan, setIsVerifyingScan] = useState<boolean>(false);
 
   // Target Item / OCR Mode Selection
-  // 'AUTO' = Otomatis pilih item yang belum klop / AI Vision OCR, atau pilih ID item tertentu, atau 'CUSTOM_CODE' untuk simulasi/input kode manual
   const [targetScanMode, setTargetScanMode] = useState<string>('AUTO');
-  const [customTestCode, setCustomTestCode] = useState<string>('');
+  const [customTestCode] = useState<string>('');
   const [scanQtyInput, setScanQtyInput] = useState<number>(1);
-  const [scanNotesInput, setScanNotesInput] = useState<string>('');
+  const [scanNotesInput] = useState<string>('');
   const [lastCapturedPreview, setLastCapturedPreview] = useState<string | null>(null);
   const [lastCapturedExif, setLastCapturedExif] = useState<ExifTimestampMetadata | null>(null);
 
-  // Real-Time Feedback Card & Recent 5 Scans Log
-  const [lastFeedback, setLastFeedback] = useState<RealtimeScanFeedback | null>(null);
+  // Strict Error Lock State: Jika ada kesalahan atau perbedaan barang dengan Database Barang / Faktur,
+  // otomatis MERAH dan TIDAK BISA melanjutkan ke barang selanjutnya sampai barang ini difoto ulang dengan benar.
+  const [scanErrorLock, setScanErrorLock] = useState<{
+    lockedItemId: string;
+    expectedCode: string;
+    expectedName: string;
+    expectedUnit: string;
+    detectedCode: string;
+    detectedName: string;
+    reason: string;
+    photoDataUrl: string;
+    timestamp: string;
+  } | null>(null);
+
+  // Real-Time Feedback Card & Recent Scans Log
+  const [, setLastFeedback] = useState<RealtimeScanFeedback | null>(null);
   const [recentScansLog, setRecentScansLog] = useState<RealtimeScanFeedback[]>(() => {
     try {
       const raw = localStorage.getItem(SCAN_HISTORY_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.slice(0, 15);
+        if (Array.isArray(parsed)) return parsed.slice(0, 30);
       }
     } catch {}
     return [];
   });
+  const [historyFilter, setHistoryFilter] = useState<'ALL' | 'SUCCESS' | 'ERROR'>('ALL');
 
   // Modals for Overload Warning & Item Photo Gallery
   const [overloadWarningAlert, setOverloadWarningAlert] = useState<{
@@ -2770,13 +2803,12 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     itemName: string;
     scans: ItemPhotoScanLog[];
   } | null>(null);
-  const [mobileSubTab, setMobileSubTab] = useState<'history' | 'items' | 'audit'>('history');
-  const [scannerPage, setScannerPage] = useState<'halaman1' | 'halaman2'>('halaman1');
-  const [isBlueprintsModalOpen, setIsBlueprintsModalOpen] = useState<boolean>(false);
+
+  // 3 Dedicated Mobile Pages: 'halaman1' (Kamera & List), 'halaman2' (Termuat & Sisa), 'riwayat' (Riwayat Scan)
+  const [scannerPage, setScannerPage] = useState<'halaman1' | 'halaman2' | 'riwayat'>('halaman1');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const autoScanTimerRef = useRef<number | null>(null);
 
   // Online / Offline Listener
@@ -2791,7 +2823,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   }, []);
 
-  const stopCamera = () => {
+  const stopCamera = (isManualPause: boolean = true) => {
+    if (isManualPause) {
+      setManualCameraPaused(true);
+    }
     if (autoScanTimerRef.current) {
       window.clearInterval(autoScanTimerRef.current);
       autoScanTimerRef.current = null;
@@ -2819,13 +2854,13 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
   const startLiveCamera = async (overrideFacing?: 'environment' | 'user') => {
     const desiredFacing = overrideFacing || facingMode;
+    setManualCameraPaused(false);
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
       let stream: MediaStream;
       try {
-        // Prioritaskan exact facingMode (contoh: facingMode: { exact: "environment" }) pada smartphone
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { exact: desiredFacing },
@@ -2835,7 +2870,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           audio: false
         });
       } catch {
-        // Fallback ke ideal bila dibuka di perangkat single-camera / laptop
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: desiredFacing },
@@ -2849,7 +2883,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       setFacingMode(desiredFacing);
       setIsCameraActive(true);
 
-      // Check hardware torch capability on mobile rear camera
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
         const caps = videoTrack.getCapabilities() as Record<string, unknown>;
@@ -2866,20 +2899,29 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         }
       }, 80);
     } catch {
-      showToast(
-        'Kamera langsung tidak tersedia pada perangkat ini — Anda tetap dapat klik "Ambil Foto & Verifikasi" atau "Buka Kamera HP".',
-        'info'
-      );
       setIsCameraActive(false);
     }
   };
 
+  // 1. OTOMATIS LANGSUNG AKTIFKAN KAMERA saat masuk ke halaman1 (Kamera & List)
+  useEffect(() => {
+    if (scannerPage === 'halaman1' && !isCameraActive && !manualCameraPaused) {
+      void startLiveCamera();
+    }
+  }, [scannerPage, isCameraActive, manualCameraPaused]);
+
+  // Pastikan elemen <video> terhubung ke stream aktif saat berpindah tab kembali ke halaman1
+  useEffect(() => {
+    if (scannerPage === 'halaman1' && isCameraActive && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [scannerPage, isCameraActive]);
+
   const handleSwitchCamera = async () => {
     const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextFacing);
-    if (isCameraActive) {
-      await startLiveCamera(nextFacing);
-    }
+    await startLiveCamera(nextFacing);
   };
 
   const handleToggleTorch = async () => {
@@ -2900,21 +2942,39 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
   };
 
-  // Resolve which item is currently targeted in viewfinder
+  // Resolve which item is currently targeted in viewfinder (jika terkunci error merah, paksa tetap di item yang terkunci)
   const resolvedTargetItem = useMemo((): SalesOrderItem | null => {
     if (!activeInvoice || activeInvoice.items.length === 0) return null;
+    if (scanErrorLock) {
+      const lockedFound = activeInvoice.items.find(it => it.id === scanErrorLock.lockedItemId);
+      if (lockedFound) return lockedFound;
+    }
     if (targetScanMode === 'CUSTOM_CODE') return null;
     if (targetScanMode !== 'AUTO') {
       const found = activeInvoice.items.find(it => it.id === targetScanMode || it.skuCode === targetScanMode);
       if (found) return found;
     }
-    // AUTO: Pilih item pertama yang belum mencapai target faktur, atau item pertama
     return (
       activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered) ||
       activeInvoice.items[0] ||
       null
     );
-  }, [activeInvoice, targetScanMode]);
+  }, [activeInvoice, targetScanMode, scanErrorLock]);
+
+  // Helper: Cross-reference item Faktur dengan Database Barang (Kode Barang, Deskripsi Barang, Satuan)
+  const getIntegratedDbInfo = (item: SalesOrderItem) => {
+    const matched =
+      dbBarangList.find(
+        db => db.noBarang.trim().toUpperCase() === item.skuCode.trim().toUpperCase()
+      ) || databaseBarangService.findMatch(item.skuCode, item.itemName);
+    return {
+      isRegisteredInDb: Boolean(matched),
+      kodeBarang: matched?.noBarang || item.skuCode,
+      deskripsiBarang: matched?.deskripsiBarang || matched?.keteranganBarang || item.itemName,
+      satuan: (matched?.satuan || matched?.unit1 || item.unit) as SalesOrderItem['unit'],
+      matchedRecord: matched || null
+    };
+  };
 
   // Helper: Compress video frame or image onto Canvas (max width 1280px, JPEG 0.8) with EXIF overlay
   const captureCompressedBase64FromViewfinder = (
@@ -2946,7 +3006,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       }
     }
 
-    // Fallback: jika pengguna sudah mengunggah/memotret file sebelumnya atau kamera belum menyala
     if (lastCapturedPreview && lastCapturedPreview.startsWith('data:image/jpeg')) {
       return { base64: lastCapturedPreview, exif: lastCapturedExif || exifMeta };
     }
@@ -2958,8 +3017,12 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   };
 
-  // Core Verification Workflow: Capture -> Compress -> POST /api/scan-muat -> Audio & UI Feedback -> Update Faktur/SO
-  const executeCaptureAndVerify = async (customImageBase64?: string, customExif?: ExifTimestampMetadata) => {
+  // Core Verification Workflow: Capture -> Compress -> Verify against Database Barang & /api/scan-muat -> Lock RED if Mismatch
+  const executeCaptureAndVerify = async (
+    customImageBase64?: string,
+    customExif?: ExifTimestampMetadata,
+    simulateMismatch: boolean = false
+  ) => {
     if (!activeInvoice || isVerifyingScan) return;
 
     setIsVerifyingScan(true);
@@ -2969,24 +3032,32 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       nowDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
 
     const cleanQty = Math.max(1, Number(scanQtyInput) || 1);
+    const currentTarget = resolvedTargetItem || activeInvoice.items[0];
+    const dbInfo = currentTarget ? getIntegratedDbInfo(currentTarget) : null;
+
     const desiredCode =
       targetScanMode === 'CUSTOM_CODE'
         ? customTestCode.trim().toUpperCase() || 'BOX-UNKNOWN-999'
-        : resolvedTargetItem?.skuCode || 'AUTO';
+        : dbInfo?.kodeBarang || currentTarget?.skuCode || 'AUTO';
     const desiredName =
       targetScanMode === 'CUSTOM_CODE'
         ? `Kode Uji Manual (${desiredCode})`
-        : resolvedTargetItem?.itemName || 'Kemasan Faktur';
-    const desiredUnit = resolvedTargetItem?.unit || 'Box';
+        : dbInfo?.deskripsiBarang || currentTarget?.itemName || 'Kemasan Faktur';
+    const desiredUnit = dbInfo?.satuan || currentTarget?.unit || 'Box';
 
     const captured = customImageBase64
       ? { base64: customImageBase64, exif: customExif || createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR') }
-      : captureCompressedBase64FromViewfinder(desiredCode, desiredName, cleanQty, desiredUnit);
+      : captureCompressedBase64FromViewfinder(
+          simulateMismatch ? 'BRG-SALAH-999' : desiredCode,
+          simulateMismatch ? 'BARANG BERBEDA / TIDAK SESUAI DATABASE BARANG' : desiredName,
+          cleanQty,
+          desiredUnit
+        );
 
     setLastCapturedPreview(captured.base64);
     setLastCapturedExif(captured.exif);
 
-    const masterBarang = databaseBarangService.getAll().slice(0, 200);
+    const masterBarang = databaseBarangService.getAll().slice(0, 250);
 
     try {
       const response = await fetch('/api/scan-muat', {
@@ -3004,6 +3075,11 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           qty_scanned: cleanQty,
           expected_items: activeInvoice.items,
           master_items: masterBarang,
+          force_mismatch: simulateMismatch,
+          simulated_wrong_code: simulateMismatch ? 'BRG-SALAH-999' : undefined,
+          simulated_wrong_name: simulateMismatch
+            ? 'Kemasan Berbeda / Tidak Sesuai Database Barang'
+            : undefined,
           preproc_metrics: {
             clahe_applied: true,
             orientation_fixed: true,
@@ -3019,8 +3095,31 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         it => it.skuCode.trim().toUpperCase() === extractedCode
       );
 
-      if (response.ok && result.status === 'success' && matchedItem) {
-        // SUCCESS: Valid item on active Surat Jalan / Faktur
+      // Verifikasi ketat terhadap Database Barang & Target Barang yang sedang dipilih
+      const isDifferentFromTarget =
+        Boolean(currentTarget) &&
+        extractedCode !== currentTarget.skuCode.trim().toUpperCase() &&
+        extractedCode !== (dbInfo?.kodeBarang || '').trim().toUpperCase();
+
+      const isNotRegisteredInDatabaseBarang =
+        Boolean(currentTarget) && !getIntegratedDbInfo(currentTarget).isRegisteredInDb;
+
+      const willExceedTargetQuota =
+        Boolean(matchedItem) && matchedItem!.qtyLoaded + cleanQty > matchedItem!.qtyOrdered;
+
+      if (
+        response.ok &&
+        result.status === 'success' &&
+        matchedItem &&
+        !simulateMismatch &&
+        !isDifferentFromTarget &&
+        !isNotRegisteredInDatabaseBarang &&
+        !willExceedTargetQuota
+      ) {
+        // SUCCESS: Valid item on active Faktur & Database Barang -> Clear any red lock!
+        setScanErrorLock(null);
+
+        const matchedDbInfo = getIntegratedDbInfo(matchedItem);
         const newItemLoaded = matchedItem.qtyLoaded + cleanQty;
         const newScanEntry: ItemPhotoScanLog = {
           id: `scan-${Date.now()}`,
@@ -3030,7 +3129,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           scannedBy: scanAdminPic,
           notes:
             scanNotesInput.trim() ||
-            `[${selectedGate}] Terverifikasi RFID/Vision (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit})`,
+            `[${selectedGate}] Klop Database Barang [${matchedDbInfo.kodeBarang}] (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           exifMetadata: captured.exif
         };
 
@@ -3039,18 +3138,32 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             if (inv.id !== activeInvoice.id) return inv;
             return {
               ...inv,
-              items: inv.items.map(it =>
-                it.id === matchedItem.id
-                  ? {
-                      ...it,
-                      qtyLoaded: newItemLoaded,
-                      scans: [newScanEntry, ...it.scans]
-                    }
-                  : it
-              )
+              items: inv.items.map(it => {
+                if (it.id !== matchedItem.id) return it;
+                return {
+                  ...it,
+                  skuCode: matchedDbInfo.kodeBarang,
+                  itemName: matchedDbInfo.deskripsiBarang,
+                  unit: matchedDbInfo.satuan,
+                  qtyLoaded: newItemLoaded,
+                  scans: [newScanEntry, ...it.scans]
+                };
+              })
             };
           })
         );
+
+        // Otomatis lanjut ke item berikutnya jika item saat ini sudah 100% klop
+        if (newItemLoaded >= matchedItem.qtyOrdered) {
+          const nextRemaining = activeInvoice.items.find(
+            it => it.id !== matchedItem.id && it.qtyLoaded < it.qtyOrdered
+          );
+          if (nextRemaining) {
+            setTargetScanMode(nextRemaining.id);
+          } else {
+            setTargetScanMode('AUTO');
+          }
+        }
 
         const totalOrderedAll = activeInvoice.items.reduce((acc, i) => acc + i.qtyOrdered, 0);
         const totalLoadedAll =
@@ -3059,9 +3172,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         const feedbackObj: RealtimeScanFeedback = {
           id: `fb-${Date.now()}`,
           status: 'success',
-          extractedCode: matchedItem.skuCode,
-          productName: matchedItem.itemName,
-          unit: matchedItem.unit,
+          extractedCode: matchedDbInfo.kodeBarang,
+          productName: matchedDbInfo.deskripsiBarang,
+          unit: matchedDbInfo.satuan,
           qtyScanned: cleanQty,
           itemLoaded: newItemLoaded,
           itemTarget: matchedItem.qtyOrdered,
@@ -3071,9 +3184,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           suratJalanId: activeInvoice.invoiceNumber,
           timestamp: isoTimestamp,
           displayTime,
-          message:
-            result.message ||
-            `${matchedItem.skuCode} Valid (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit} Terbit)`,
+          message: `${matchedDbInfo.kodeBarang} Sesuai Database Barang (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           photoDataUrl: captured.base64,
           confidenceScore: Number(result?.cv_pipeline?.confidence_score || result?.ocr_confidence || 0.964),
           yoloBbox: Array.isArray(result?.cv_pipeline?.yolo_bbox) ? result.cv_pipeline.yolo_bbox : [142, 96, 980, 520],
@@ -3082,7 +3193,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
         setLastFeedback(feedbackObj);
         setRecentScansLog(prev => {
-          const next = [feedbackObj, ...prev].slice(0, 15);
+          const next = [feedbackObj, ...prev].slice(0, 30);
           try {
             localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
           } catch {}
@@ -3091,80 +3202,78 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
         playScannerFeedbackBeep('success', soundEnabled);
         showToast(
-          `✅ ${matchedItem.skuCode} Valid (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit} Terbit) — Dimuat melalui ${selectedGate}`,
+          `✅ [${matchedDbInfo.kodeBarang}] ${matchedDbInfo.deskripsiBarang} Sesuai Database Barang (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           'success'
         );
       } else {
-        // ERROR: Either Overloaded or Unrecognized / Wrong Destination DO
-        if (matchedItem) {
-          const newItemLoaded = matchedItem.qtyLoaded + cleanQty;
-          const newScanEntry: ItemPhotoScanLog = {
-            id: `scan-${Date.now()}`,
-            timestamp: displayTime,
-            qtyScanned: cleanQty,
-            photoDataUrl: captured.base64,
-            scannedBy: scanAdminPic,
-            notes:
-              scanNotesInput.trim() ||
-              `[${selectedGate}] PERINGATAN LEBIH MUAT (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedItem.unit})`,
-            exifMetadata: captured.exif
-          };
+        // ERROR / PERBEDAAN BARANG -> OTOMATIS MERAH & KUNCI PROGRES (TIDAK BISA LANJUT KE BARANG SELANJUTNYA)
+        const lockedItem = currentTarget || matchedItem || activeInvoice.items[0];
+        const lockedDbInfo = lockedItem ? getIntegratedDbInfo(lockedItem) : null;
 
-          saveInvoices(prev =>
-            prev.map(inv => {
-              if (inv.id !== activeInvoice.id) return inv;
-              return {
-                ...inv,
-                items: inv.items.map(it =>
-                  it.id === matchedItem.id
-                    ? {
-                        ...it,
-                        qtyLoaded: newItemLoaded,
-                        scans: [newScanEntry, ...it.scans]
-                      }
-                    : it
-                )
-              };
-            })
-          );
+        let rejectionReason =
+          result.message ||
+          `Terdeteksi perbedaan barang: [${extractedCode}] tidak sesuai dengan target [${lockedDbInfo?.kodeBarang || desiredCode}] pada Database Barang & Faktur!`;
 
+        if (isNotRegisteredInDatabaseBarang && lockedItem) {
+          rejectionReason = `Kode Barang [${lockedItem.skuCode}] "${lockedItem.itemName}" tidak ditemukan / berbeda dengan Master Database Barang Gudang!`;
+        } else if (willExceedTargetQuota && matchedItem) {
+          rejectionReason = `Kuota muat [${matchedItem.skuCode}] melebihi Faktur (${matchedItem.qtyLoaded + cleanQty}/${matchedItem.qtyOrdered} ${matchedItem.unit}). Tidak diizinkan lanjut!`;
           setOverloadWarningAlert({
             itemName: matchedItem.itemName,
             skuCode: matchedItem.skuCode,
             qtyOrdered: matchedItem.qtyOrdered,
-            qtyLoaded: newItemLoaded,
+            qtyLoaded: matchedItem.qtyLoaded + cleanQty,
             unit: matchedItem.unit
+          });
+        } else if (isDifferentFromTarget && lockedItem) {
+          rejectionReason = `Barang terfoto [${extractedCode}] (${result.product_name || 'Barang Berbeda'}) TIDAK SESUAI dengan target [${lockedDbInfo?.kodeBarang}] ${lockedDbInfo?.deskripsiBarang}!`;
+        }
+
+        if (lockedItem) {
+          setTargetScanMode(lockedItem.id);
+          setScanErrorLock({
+            lockedItemId: lockedItem.id,
+            expectedCode: lockedDbInfo?.kodeBarang || lockedItem.skuCode,
+            expectedName: lockedDbInfo?.deskripsiBarang || lockedItem.itemName,
+            expectedUnit: lockedDbInfo?.satuan || lockedItem.unit,
+            detectedCode: simulateMismatch ? 'BRG-SALAH-999' : extractedCode || 'TIDAK-SESUAI',
+            detectedName: simulateMismatch
+              ? 'Kemasan Barang Berbeda (Tidak Sesuai Database Barang)'
+              : result.product_name || 'Objek / Barang Tidak Sesuai Database Barang',
+            reason: rejectionReason,
+            photoDataUrl: captured.base64,
+            timestamp: displayTime
           });
         }
 
         const totalOrderedAll = activeInvoice.items.reduce((acc, i) => acc + i.qtyOrdered, 0);
-        const totalLoadedAll =
-          activeInvoice.items.reduce((acc, i) => acc + i.qtyLoaded, 0) + (matchedItem ? cleanQty : 0);
+        const totalLoadedAll = activeInvoice.items.reduce((acc, i) => acc + i.qtyLoaded, 0);
 
         const errorFeedback: RealtimeScanFeedback = {
           id: `fb-${Date.now()}`,
           status: 'error',
-          extractedCode: extractedCode || 'TIDAK-DIKENALI',
-          productName: result.product_name || matchedItem?.itemName || 'Tidak Dikenali / Salah Tujuan',
-          unit: matchedItem?.unit || 'Box',
+          extractedCode: simulateMismatch ? 'BRG-SALAH-999' : extractedCode || 'TIDAK-SESUAI',
+          productName:
+            result.product_name ||
+            lockedDbInfo?.deskripsiBarang ||
+            'Perbedaan Barang / Tidak Sesuai Database Barang',
+          unit: lockedDbInfo?.satuan || 'Box',
           qtyScanned: cleanQty,
-          itemLoaded: matchedItem ? matchedItem.qtyLoaded + cleanQty : 0,
-          itemTarget: matchedItem ? matchedItem.qtyOrdered : 0,
+          itemLoaded: lockedItem ? lockedItem.qtyLoaded : 0,
+          itemTarget: lockedItem ? lockedItem.qtyOrdered : 0,
           totalLoaded: totalLoadedAll,
           totalTarget: totalOrderedAll,
           gate: selectedGate,
           suratJalanId: activeInvoice.invoiceNumber,
           timestamp: isoTimestamp,
           displayTime,
-          message:
-            result.message ||
-            `Tidak Dikenali / Salah Tujuan: [${extractedCode}] tidak sesuai kuota Surat Jalan ${activeInvoice.invoiceNumber}`,
+          message: rejectionReason,
           photoDataUrl: captured.base64
         };
 
         setLastFeedback(errorFeedback);
         setRecentScansLog(prev => {
-          const next = [errorFeedback, ...prev].slice(0, 15);
+          const next = [errorFeedback, ...prev].slice(0, 30);
           try {
             localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
           } catch {}
@@ -3172,7 +3281,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         });
 
         playScannerFeedbackBeep('error', soundEnabled);
-        showToast(`🚨 ${errorFeedback.message}`, 'error');
+        showToast(
+          `🚨 MERAH & TERKUNCI: ${rejectionReason} — Tidak bisa lanjut ke barang selanjutnya!`,
+          'error'
+        );
       }
     } catch {
       playScannerFeedbackBeep('error', soundEnabled);
@@ -3182,9 +3294,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
   };
 
-  // Auto-Detect Interval (Every 2.5 Seconds when Auto-Scan is ON)
+  // Auto-Detect Interval (Every 2.5 Seconds when Auto-Scan is ON, paused automatically if locked RED)
   useEffect(() => {
-    if (!autoScanEnabled) {
+    if (!autoScanEnabled || scanErrorLock) {
       if (autoScanTimerRef.current) {
         window.clearInterval(autoScanTimerRef.current);
         autoScanTimerRef.current = null;
@@ -3193,7 +3305,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
 
     autoScanTimerRef.current = window.setInterval(() => {
-      if (!isVerifyingScan && activeInvoice) {
+      if (!isVerifyingScan && activeInvoice && !scanErrorLock) {
         const remainingItem = activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered);
         if (!remainingItem && targetScanMode === 'AUTO') {
           setAutoScanEnabled(false);
@@ -3210,46 +3322,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         autoScanTimerRef.current = null;
       }
     };
-  }, [autoScanEnabled, isVerifyingScan, activeInvoice, targetScanMode, selectedGate, scanQtyInput, soundEnabled]);
-
-  // Handle File Upload / Direct Mobile Camera Input (Resized to max 1280px JPEG 0.8)
-  const handleFileUploadAndVerify = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    extractExifFromFile(file).then(exifMeta => {
-      const reader = new FileReader();
-      reader.onload = ev => {
-        if (typeof ev.target?.result === 'string') {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const maxWidth = 1280;
-            let w = img.width || 800;
-            let h = img.height || 600;
-            if (w > maxWidth) {
-              h = Math.round((h * maxWidth) / w);
-              w = maxWidth;
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            let compressedDataUrl = ev.target!.result as string;
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, w, h);
-              drawExifMetadataOnCanvas(ctx, w, h, exifMeta);
-              compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            }
-            setLastCapturedPreview(compressedDataUrl);
-            setLastCapturedExif(exifMeta);
-            void executeCaptureAndVerify(compressedDataUrl, exifMeta);
-          };
-          img.src = ev.target.result;
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-    e.target.value = '';
-  };
+  }, [autoScanEnabled, isVerifyingScan, activeInvoice, targetScanMode, selectedGate, scanQtyInput, soundEnabled, scanErrorLock]);
 
   const handleAdjustLoadedQty = (item: SalesOrderItem, exactQty: number) => {
     if (!activeInvoice) return;
@@ -3266,45 +3339,20 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     showToast(`Jumlah muat ${item.itemName} disesuaikan menjadi ${clamped} ${item.unit}.`, 'info');
   };
 
-  const handleFinishLoadingAndDetectRemaining = () => {
-    if (!activeInvoice) return;
-    const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-
-    saveInvoices(prev =>
-      prev.map(inv =>
-        inv.id === activeInvoice.id
-          ? { ...inv, isLoadingFinished: true, finishedAt: nowStr }
-          : inv
-      )
-    );
-
-    const ev = evaluateInvoiceStatus(activeInvoice);
-    if (ev.overloadItems.length > 0) {
-      playScannerFeedbackBeep('error', soundEnabled);
-      showToast(
-        `⚠️ PERINGATAN: Ditemukan ${ev.overloadItems.length} item LEBIH MUAT pada Faktur ${activeInvoice.invoiceNumber}!`,
-        'error'
-      );
-    } else if (ev.unloadedItems.length > 0 || ev.shortageItems.length > 0) {
-      playScannerFeedbackBeep('error', soundEnabled);
-      showToast(
-        `🔍 Deteksi Selesai: Terdeteksi ${ev.unloadedItems.length + ev.shortageItems.length} item BARANG SISA / BELUM TERMUAT ke armada box!`,
-        'error'
-      );
-    } else {
-      playScannerFeedbackBeep('success', soundEnabled);
-      showToast(
-        `✅ Proses Muat Selesai 100%! Seluruh barang pada Faktur ${activeInvoice.invoiceNumber} telah termuat lengkap tanpa selisih.`,
-        'success'
-      );
-    }
-  };
-
   const handleSelectSpecificItemToScan = (item: SalesOrderItem) => {
+    // Jika sedang ada kunci error merah pada barang lain, TOLAK perpindahan ke barang selanjutnya!
+    if (scanErrorLock && scanErrorLock.lockedItemId !== item.id) {
+      playScannerFeedbackBeep('error', soundEnabled);
+      showToast(
+        `🔒 TERKUNCI MERAH: Selesaikan / foto ulang barang [${scanErrorLock.expectedCode}] ${scanErrorLock.expectedName} terlebih dahulu! Tidak bisa melanjutkan ke barang selanjutnya.`,
+        'error'
+      );
+      return;
+    }
     setTargetScanMode(item.id);
     const remaining = Math.max(1, item.qtyOrdered - item.qtyLoaded);
     setScanQtyInput(Math.min(5, remaining));
-    setMobileSubTab('history');
+    setScannerPage('halaman1');
     if (!isCameraActive) {
       void startLiveCamera();
     }
@@ -3312,10 +3360,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
   if (!activeInvoice) {
     return (
-      <div className="max-w-[440px] mx-auto bg-[#0b1120] text-[#f8fafc] border-[6px] border-[#1e293b] rounded-[36px] p-8 text-center space-y-4 shadow-2xl">
+      <div className="w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 p-6 flex flex-col items-center justify-center text-center space-y-4 border-x border-slate-900">
         <QrCode className="w-12 h-12 text-emerald-400 mx-auto" />
-        <h2 className="text-base font-black text-white">Belum Ada Faktur / Surat Jalan Aktif</h2>
-        <p className="text-xs text-[#94a3b8] leading-relaxed">
+        <h2 className="text-base font-black text-slate-100">Belum Ada Faktur / Surat Jalan Aktif</h2>
+        <p className="text-xs text-slate-400 leading-relaxed">
           Silakan input terlebih dahulu Faktur atau Sales Order di sub-menu <strong>Input Faktur / Sales Order (SO)</strong> untuk mulai memindai barang muatan armada box.
         </p>
         <button
@@ -3334,409 +3382,504 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     evalActive.totalOrdered > 0
       ? Math.min(100, Math.round((evalActive.totalLoaded / evalActive.totalOrdered) * 100))
       : 0;
-  const latestFiveScans = recentScansLog.slice(0, 5);
   const totalSisaCount = evalActive.unloadedItems.length + evalActive.shortageItems.length;
+  const filteredHistoryLogs = recentScansLog.filter(log => {
+    if (historyFilter === 'SUCCESS') return log.status === 'success';
+    if (historyFilter === 'ERROR') return log.status === 'error';
+    return true;
+  });
 
   return (
-    <div className="py-2 px-1 sm:px-4">
-      {/* Top Info Bar Above Mobile Phone Frame */}
-      <div className="max-w-[460px] mx-auto mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-1.5">
-          <span className="px-2.5 py-1 rounded-full bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
-            <QrCode className="w-3 h-3" />
-            <span>Pure Visual YOLO • Tampilan HP</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setIsBlueprintsModalOpen(true)}
-            className="px-2.5 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-xs"
-            title="Lihat Skrip SQL Hostinger, Python Ultralytics YOLO Backend & HTML5 Client"
-          >
-            <span>📦 Kode &amp; SQL (YOLO)</span>
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onNavigateToInvoiceInput}
-            className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
-          >
-            <FileText className="w-3 h-3 text-indigo-400" />
-            <span>Input SO</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleFinishLoadingAndDetectRemaining}
-            className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
-          >
-            <ClipboardCheck className="w-3 h-3" />
-            <span>Selesai Muat</span>
-          </button>
-        </div>
-      </div>
-
+    <div className="w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 pb-28 shadow-2xl relative border-x border-slate-900 flex flex-col">
       {/* ===================================================================== */}
-      {/* FRAME UTAMA TAMPILAN HP (MOBILE HANDHELD WMS SCANNER)                 */}
-      {/* Dilindungi class .wms-handheld-dark agar kontras terjaga di LightMode */}
+      {/* STICKY TOP HEADER (UKURAN & GAYA SAMA PERSIS DENGAN PORTAL DRIVER)    */}
       {/* ===================================================================== */}
-      <div className="wms-handheld-dark max-w-[460px] mx-auto bg-[#0b1120] text-[#f8fafc] rounded-[38px] border-[7px] border-[#1e293b] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.65)] overflow-hidden flex flex-col">
-        {/* 0. Status Bar Smartphone & Speaker Notch */}
-        <div className="bg-[#060a14] px-5 pt-2.5 pb-2 flex items-center justify-between text-[11px] font-mono text-[#cbd5e1] border-b border-[#1e293b]/80 select-none">
-          <div className="flex items-center gap-1.5 font-bold">
-            <span>
-              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#1e293b] text-emerald-400 font-black">
-              5G
-            </span>
-          </div>
-          {/* Dynamic Island / Speaker Cutout */}
-          <div className="w-20 h-3.5 rounded-full bg-[#000000] border border-[#1e293b] flex items-center justify-end pr-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setSoundEnabled(prev => !prev)}
-              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#1e293b] text-[#e2e8f0] cursor-pointer"
-              title="Toggle Suara Beep"
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                scanErrorLock
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 animate-pulse'
+                  : 'bg-indigo-600/20 border-indigo-500/30 text-indigo-400'
+              }`}
             >
-              {soundEnabled ? '🔊 Beep' : '🔇 Mute'}
-            </button>
-            <span className="text-[10px] font-bold text-emerald-400">100% 🔋</span>
+              <Camera className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold tracking-wider uppercase text-indigo-400">
+                  ADMIN PENJUALAN AKK
+                </span>
+                <span className="text-[9px] text-slate-500">&bull;</span>
+                <span className="text-[9px] font-semibold text-emerald-400">
+                  DB BARANG ({dbBarangList.length})
+                </span>
+              </div>
+              <h1 className="text-sm font-bold text-white leading-tight truncate">
+                WMS Scanner Muat Armada
+              </h1>
+            </div>
           </div>
-        </div>
 
-        {/* 1. HEADER BAR: [● Online] WMS SCANNER - MUAT BARANG [Gate 1 v] */}
-        <div className="bg-[#111827] px-3.5 py-2.5 border-b border-[#1e293b] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 ${
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold border ${
                 isOnline
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
               }`}
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  isOnline ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'
+                  isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
                 }`}
               />
               <span>{isOnline ? 'Online' : 'Offline'}</span>
             </span>
-            <span className="text-xs font-black tracking-tight text-white truncate">
-              WMS SCANNER - MUAT BARANG
+
+            <select
+              value={selectedGate}
+              onChange={e => setSelectedGate(e.target.value)}
+              className="px-2.5 py-1 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-emerald-400 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {LOADING_GATE_OPTIONS.map(gate => (
+                <option key={gate} value={gate}>
+                  {gate}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setSoundEnabled(prev => !prev)}
+              className="p-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold cursor-pointer"
+              title="Toggle Suara Beep"
+            >
+              {soundEnabled ? '🔊' : '🔇'}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ===================================================================== */}
+      {/* BANNER PERINGATAN MERAH & KUNCI PROGRES JIKA BARANG TIDAK SESUAI      */}
+      {/* ===================================================================== */}
+      {scanErrorLock && (
+        <div className="mx-3 mt-3 p-3.5 rounded-2xl bg-rose-600 text-white border-2 border-rose-300 shadow-xl space-y-2 animate-pulse">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-white shrink-0" />
+              <div className="text-xs font-black uppercase tracking-wide">
+                🚨 KESALAHAN / PERBEDAAN BARANG TERDETEKSI!
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-black/30 text-[10px] font-black uppercase shrink-0">
+              🔒 TERKUNCI
             </span>
           </div>
 
-          <select
-            value={selectedGate}
-            onChange={e => setSelectedGate(e.target.value)}
-            className="px-2.5 py-1 rounded-lg bg-[#060a14] border border-[#334155] text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 shrink-0 cursor-pointer"
-          >
-            {LOADING_GATE_OPTIONS.map(gate => (
-              <option key={gate} value={gate} className="bg-[#0b1120] text-white">
-                {gate.split(' ')[0]} {gate.split(' ')[1]}
-              </option>
-            ))}
-          </select>
-        </div>
+          <p className="text-[11px] font-semibold leading-relaxed text-white/95">
+            {scanErrorLock.reason}
+          </p>
 
-        {/* TAB SWITCHER NAV 2 HALAMAN UNTUK APLIKASI ADMIN PENJUALAN */}
-        <div className="grid grid-cols-2 bg-[#060a14] border-b border-[#1e293b] p-1.5 gap-1.5">
-          <button
-            type="button"
-            onClick={() => setScannerPage('halaman1')}
-            className={`py-2 px-2.5 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 ${
-              scannerPage === 'halaman1'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-[#111827] text-[#94a3b8] hover:text-white'
+          <div className="grid grid-cols-1 gap-1.5 text-[11px] bg-black/25 p-2.5 rounded-xl border border-white/20">
+            <div>
+              <span className="font-bold text-rose-200">Seharusnya (Database Barang): </span>
+              <span className="font-mono font-black text-white">
+                [{scanErrorLock.expectedCode}] {scanErrorLock.expectedName} ({scanErrorLock.expectedUnit})
+              </span>
+            </div>
+            <div>
+              <span className="font-bold text-rose-200">Hasil Terfoto: </span>
+              <span className="font-mono font-black text-amber-200">
+                [{scanErrorLock.detectedCode}] {scanErrorLock.detectedName}
+              </span>
+            </div>
+          </div>
+
+          <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-200">
+            ⛔ TIDAK BISA MELANJUTKAN KE BARANG SELANJUTNYA SEBELUM BARANG INI SESUAI!
+          </div>
+
+          <div className="pt-1 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isVerifyingScan}
+              onClick={() => {
+                setScanErrorLock(null);
+                void executeCaptureAndVerify(undefined, undefined, false);
+              }}
+              className="flex-1 py-2 px-3 rounded-xl bg-white text-rose-700 hover:bg-rose-50 font-black text-xs shadow-md cursor-pointer transition"
+            >
+              📸 Foto Ulang &amp; Verifikasi Barang Ini
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* HALAMAN 1: KAMERA OTOMATIS AKTIF & DAFTAR BARANG FAKTUR (DB BARANG)   */}
+      {/* ===================================================================== */}
+      {scannerPage === 'halaman1' && (
+        <div className="p-3 space-y-3 flex-1">
+          {/* 1. BARIS PILIH URUTAN NAMA PELANGGAN (FAKTUR DO/SO) */}
+          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-1.5 shadow-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                Urutan Nama Pelanggan (Faktur DO/SO):
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400 font-bold truncate max-w-[180px]">
+                {activeInvoice.customerName}
+              </span>
+            </div>
+            <select
+              value={activeInvoice.id}
+              disabled={Boolean(scanErrorLock)}
+              onChange={e => {
+                if (scanErrorLock) return;
+                setSelectedInvoiceId(e.target.value);
+                localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
+                setTargetScanMode('AUTO');
+              }}
+              className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-xs font-bold text-slate-100 focus:outline-none ${
+                scanErrorLock
+                  ? 'border-rose-500/60 opacity-60 cursor-not-allowed'
+                  : 'border-slate-700 focus:border-indigo-500 cursor-pointer'
+              }`}
+            >
+              {invoices.map(inv => {
+                const ev = evaluateInvoiceStatus(inv);
+                return (
+                  <option key={inv.id} value={inv.id}>
+                    {inv.invoiceNumber} ({inv.soNumber}) &mdash; {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* 2. AREA KAMERA LIVE VIEWFINDER (OTOMATIS AKTIF & BERSIH TANPA TULISAN MENGGANGGU) */}
+          <div
+            className={`p-3 rounded-2xl border space-y-2.5 transition-colors ${
+              scanErrorLock
+                ? 'bg-rose-950/40 border-2 border-rose-500 shadow-lg shadow-rose-500/20'
+                : 'bg-slate-900 border-slate-800'
             }`}
           >
-            <Camera className="w-3.5 h-3.5" />
-            <span>1. Kamera &amp; List Faktur</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setScannerPage('halaman2')}
-            className={`py-2 px-2.5 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 ${
-              scannerPage === 'halaman2'
-                ? 'bg-sky-600 text-white shadow-md'
-                : 'bg-[#111827] text-[#94a3b8] hover:text-white'
-            }`}
-          >
-            <Package className="w-3.5 h-3.5" />
-            <span>2. Termuat &amp; Sisa ({totalSisaCount})</span>
-          </button>
-        </div>
-
-        {/* ================================================================= */}
-        {/* HALAMAN 1: URUTAN NAMA PELANGGAN (FAKTUR), VIEWFINDER KAMERA BESAR, */}
-        {/* TOMBOL AMBIL FOTO & VERIFIKASI TERGABUNG, LIST BARANG FAKTUR     */}
-        {/* ================================================================= */}
-        {scannerPage === 'halaman1' && (
-          <div className="space-y-0">
-            {/* 1. BARIS PILIH NO. SURAT JALAN / FAKTUR (DO/SO) - URUTAN NAMA PELANGGAN */}
-            <div className="bg-[#0f172a] px-3.5 py-2.5 border-b border-[#1e293b] space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#94a3b8]">
-                  Urutan Nama Pelanggan (Faktur DO/SO):
-                </span>
-                <span className="text-[10px] font-mono text-emerald-300 font-bold truncate max-w-[180px]">
-                  {activeInvoice.customerName}
-                </span>
+            {/* Baris kontrol kamera */}
+            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                {!isCameraActive ? (
+                  <button
+                    type="button"
+                    onClick={() => void startLiveCamera()}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                  >
+                    ▶ Kamera Aktif
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => stopCamera(true)}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-[10px] font-extrabold cursor-pointer transition"
+                  >
+                    ● Kamera Live ON
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleSwitchCamera()}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3 text-sky-400" />
+                  <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
+                </button>
               </div>
-              <select
-                value={activeInvoice.id}
-                onChange={e => {
-                  setSelectedInvoiceId(e.target.value);
-                  localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
-                  setTargetScanMode('AUTO');
-                }}
-                className="w-full px-3 py-2 rounded-xl bg-[#060a14] border border-[#334155] text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-              >
-                {invoices.map(inv => {
-                  const ev = evaluateInvoiceStatus(inv);
-                  return (
-                    <option key={inv.id} value={inv.id} className="bg-[#0b1120] text-white">
-                      {inv.invoiceNumber} ({inv.soNumber}) &mdash; {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
-                    </option>
-                  );
-                })}
-              </select>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void handleToggleTorch()}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition border ${
+                    isTorchOn
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : 'bg-slate-800 text-slate-200 border-slate-700'
+                  }`}
+                >
+                  {isTorchOn ? '🔦 ON' : '🔦 Flash'}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(scanErrorLock)}
+                  onClick={() => setAutoScanEnabled(prev => !prev)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                    autoScanEnabled
+                      ? 'bg-emerald-600 text-white border-emerald-400'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
+                  Mode Auto: {autoScanEnabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
             </div>
 
-            {/* 2. AREA KAMERA LIVE VIEWFINDER UTUH / BESAR (TIDAK TERBAGI 2) */}
-            <div className="p-3 bg-[#090d16] border-b border-[#1e293b] space-y-2">
-              {/* Controls bar mini kamera */}
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  {!isCameraActive ? (
-                    <button
-                      type="button"
-                      onClick={() => void startLiveCamera()}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
-                    >
-                      ▶ Aktifkan Kamera
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={stopCamera}
-                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold cursor-pointer transition"
-                    >
-                      ■ Matikan
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void handleSwitchCamera()}
-                    className="px-2 py-1 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-[#e2e8f0] text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
-                  >
-                    <RefreshCw className="w-3 h-3 text-sky-400" />
-                    <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
-                  </button>
-                </div>
+            {/* Viewport Kamera Bersih (Tanpa teks "Arahkan Kemasan..." di tengah agar tidak mengganggu foto) */}
+            <div
+              className={`relative w-full h-64 sm:h-72 rounded-2xl bg-slate-950 border-2 overflow-hidden flex flex-col justify-between p-2.5 ${
+                scanErrorLock ? 'border-rose-500' : 'border-emerald-500/60'
+              }`}
+            >
+              {isCameraActive ? (
+                <video
+                  ref={videoRef}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  playsInline
+                  muted
+                  autoPlay
+                />
+              ) : lastCapturedPreview ? (
+                <img
+                  src={lastCapturedPreview}
+                  alt="Snapshot Terakhir"
+                  className="absolute inset-0 w-full h-full object-cover opacity-85"
+                />
+              ) : null}
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void handleToggleTorch()}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition ${
-                      isTorchOn ? 'bg-amber-400 text-[#090d16]' : 'bg-[#1e293b] text-[#e2e8f0]'
+              {/* Corner Brackets Minimalis (Tanpa tulisan di tengah layar kamera) */}
+              <div className="relative z-10 w-full h-full rounded-xl flex flex-col justify-between p-1.5 pointer-events-none">
+                <div
+                  className={`absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 rounded-tl-md ${
+                    scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                  }`}
+                />
+                <div
+                  className={`absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 rounded-tr-md ${
+                    scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                  }`}
+                />
+                <div
+                  className={`absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 rounded-bl-md ${
+                    scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                  }`}
+                />
+                <div
+                  className={`absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 rounded-br-md ${
+                    scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                  }`}
+                />
+
+                {/* Indikator Sudut Atas Minimalis */}
+                <div className="w-full flex items-center justify-between text-[9px] font-mono">
+                  <span
+                    className={`px-2 py-0.5 rounded-md font-bold border ${
+                      scanErrorLock
+                        ? 'bg-rose-600 text-white border-rose-300'
+                        : 'bg-slate-950/80 text-emerald-300 border-slate-700'
                     }`}
                   >
-                    {isTorchOn ? '🔦 ON' : '🔦 Flash'}
-                  </button>
-                  <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300 border border-slate-700">
-                    Mode Auto: OFF
+                    {scanErrorLock ? '🚨 ERROR MERAH • TERKUNCI' : `YOLO ROI • ${selectedGate}`}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-950/80 border border-slate-700 text-amber-300 font-bold">
+                    {isCameraActive ? 'LIVE CAMERA' : 'READY'}
                   </span>
                 </div>
-              </div>
 
-              {/* Viewport Kamera Besar & Penuh (Tergabung dengan Tombol Ambil Foto & Verifikasi) */}
-              <div className="relative w-full h-64 sm:h-72 rounded-2xl bg-[#030712] border-2 border-[#1e293b] overflow-hidden flex flex-col justify-between p-3">
-                {isCameraActive ? (
-                  <video
-                    ref={videoRef}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    playsInline
-                    muted
-                    autoPlay
-                  />
-                ) : lastCapturedPreview ? (
-                  <img
-                    src={lastCapturedPreview}
-                    alt="Snapshot Terakhir"
-                    className="absolute inset-0 w-full h-full object-cover opacity-80"
-                  />
-                ) : null}
-
-                {/* Reticle / Kotak Pemandu di Tengah Viewfinder */}
-                <div className="relative z-10 w-full h-full rounded-xl border-2 border-dashed border-emerald-400/80 bg-[#030712]/35 flex flex-col items-center justify-between p-2.5 text-center pointer-events-none">
-                  {/* Corner Brackets */}
-                  <div className="absolute -top-0.5 -left-0.5 w-4 h-4 border-t-4 border-l-4 border-emerald-400 rounded-tl-sm" />
-                  <div className="absolute -top-0.5 -right-0.5 w-4 h-4 border-t-4 border-r-4 border-emerald-400 rounded-tr-sm" />
-                  <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-4 border-l-4 border-emerald-400 rounded-bl-sm" />
-                  <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-4 border-r-4 border-emerald-400 rounded-br-sm" />
-
-                  <div className="w-full flex items-center justify-between text-[9px] font-mono text-[#cbd5e1]">
-                    <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-emerald-300 font-bold">
-                      YOLO ROI • {selectedGate.split(' ')[0]} {selectedGate.split(' ')[1]}
+                {/* Tombol Ambil Foto & Verifikasi di bagian bawah kamera */}
+                <div className="w-full pointer-events-auto pt-1 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={isVerifyingScan}
+                    onClick={() => void executeCaptureAndVerify(undefined, undefined, false)}
+                    className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border ${
+                      scanErrorLock
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-300'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border-emerald-400/50'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4 shrink-0" />
+                    <span>
+                      {isVerifyingScan
+                        ? 'MEMVERIFIKASI...'
+                        : scanErrorLock
+                        ? '📸 FOTO ULANG BARANG YANG BENAR'
+                        : '📸 AMBIL FOTO & VERIFIKASI'}
                     </span>
-                    <span className="px-1.5 py-0.5 rounded bg-[#0b1120]/90 border border-[#334155] text-amber-300 font-bold">
-                      CAMERA ACTIVE
-                    </span>
-                  </div>
+                  </button>
 
-                  <div className="my-auto space-y-1">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0b1120]/90 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold shadow-md">
-                      <QrCode className="w-3.5 h-3.5" />
-                      <span>Arahkan Kemasan / Label ke Sini</span>
-                    </div>
-                    <div className="text-[10px] text-[#cbd5e1] font-bold px-2 line-clamp-1 bg-[#0b1120]/80 rounded py-0.5">
-                      {resolvedTargetItem
-                        ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName}`
-                        : 'Ultralytics YOLO ROI & Vision OCR'}
-                    </div>
-                  </div>
-
-                  {/* Tombol Ambil Foto & Verifikasi BERGABUNG DI ATAS LAYAR KAMERA */}
-                  <div className="w-full pointer-events-auto pt-1">
-                    <button
-                      type="button"
-                      disabled={isVerifyingScan}
-                      onClick={() => void executeCaptureAndVerify()}
-                      className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] disabled:opacity-50 text-white font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border border-emerald-400/50"
-                    >
-                      <Camera className="w-4 h-4 shrink-0" />
-                      <span>
-                        {isVerifyingScan ? 'MEMVERIFIKASI...' : '📸 AMBIL FOTO & VERIFIKASI'}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Baris Kontrol Suara & Selector Target Barang */}
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-bold text-[#94a3b8]">Uji Suara Beep:</span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => playScannerFeedbackBeep('success', true)}
-                      className="py-1 px-2.5 rounded-lg bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-emerald-300 text-[10px] font-bold cursor-pointer"
-                    >
-                      🔊 Beep OK
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => playScannerFeedbackBeep('error', true)}
-                      className="py-1 px-2.5 rounded-lg bg-[#111827] hover:bg-[#1e293b] border border-[#334155] text-rose-300 text-[10px] font-bold cursor-pointer"
-                    >
-                      🔊 Beep Err
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-12 gap-2">
-                  <div className="col-span-8">
-                    <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
-                      Target Barang / Mode OCR:
-                    </label>
-                    <select
-                      value={targetScanMode}
-                      onChange={e => setTargetScanMode(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-bold text-white cursor-pointer"
-                    >
-                      <option value="AUTO" className="bg-[#0b1120] text-white">
-                        🤖 Auto OCR: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 22) || ''}
-                      </option>
-                      {activeInvoice.items.map(it => (
-                        <option key={it.id} value={it.id} className="bg-[#0b1120] text-white">
-                          [{it.skuCode}] {it.itemName} ({it.qtyLoaded}/{it.qtyOrdered} {it.unit})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-span-4">
-                    <label className="block text-[9px] font-bold uppercase text-[#94a3b8] mb-0.5">
-                      Qty / Scan ({resolvedTargetItem?.unit || 'Box'}):
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={scanQtyInput}
-                      onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#111827] border border-[#334155] text-[11px] font-mono font-black text-emerald-400 text-center"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    disabled={isVerifyingScan}
+                    onClick={() => void executeCaptureAndVerify(undefined, undefined, true)}
+                    className="py-2.5 px-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-black text-[10px] shadow-lg border border-rose-400/60 shrink-0 cursor-pointer transition"
+                    title="Simulasi jika barang terfoto berbeda dengan Database Barang (Otomatis Merah & Terkunci)"
+                  >
+                    ⚠️ Uji Salah
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* 3. DI BAWAH TAMPILAN KAMERA: LIST BARANG FAKTUR / SALES ORDER PELANGGAN */}
-            <div className="p-3.5 bg-[#0b1120] space-y-2.5 max-h-80 overflow-y-auto">
-              <div className="flex items-center justify-between text-[11px] font-black uppercase text-[#94a3b8]">
-                <span>Daftar Barang Faktur Pelanggan ({activeInvoice.items.length} SKU):</span>
-                <span className="text-sky-400 font-mono">{activeInvoice.invoiceNumber}</span>
+            {/* Target Barang Aktif & Qty */}
+            <div className="grid grid-cols-12 gap-2 pt-0.5">
+              <div className="col-span-8">
+                <label className="block text-[9px] font-bold uppercase text-slate-400 mb-0.5">
+                  Target Barang (Terintegrasi Database Barang):
+                </label>
+                <select
+                  value={resolvedTargetItem?.id || targetScanMode}
+                  disabled={Boolean(scanErrorLock)}
+                  onChange={e => {
+                    if (scanErrorLock) return;
+                    setTargetScanMode(e.target.value);
+                  }}
+                  className={`w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border text-[11px] font-bold text-slate-100 ${
+                    scanErrorLock
+                      ? 'border-rose-500 text-rose-300 cursor-not-allowed opacity-75'
+                      : 'border-slate-700 cursor-pointer'
+                  }`}
+                >
+                  <option value="AUTO">
+                    🤖 Auto: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 24) || ''}
+                  </option>
+                  {activeInvoice.items.map(it => {
+                    const dbIt = getIntegratedDbInfo(it);
+                    return (
+                      <option key={it.id} value={it.id}>
+                        [{dbIt.kodeBarang}] {dbIt.deskripsiBarang} ({it.qtyLoaded}/{it.qtyOrdered} {dbIt.satuan})
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
+              <div className="col-span-4">
+                <label className="block text-[9px] font-bold uppercase text-slate-400 mb-0.5">
+                  Qty ({resolvedTargetItem ? getIntegratedDbInfo(resolvedTargetItem).satuan : 'Box'}):
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={scanQtyInput}
+                  onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value)))}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] font-mono font-black text-emerald-400 text-center"
+                />
+              </div>
+            </div>
+          </div>
 
+          {/* 3. DAFTAR BARANG FAKTUR PELANGGAN (TERINTEGRASI DATABASE BARANG GUDANG) */}
+          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between text-[11px] font-black uppercase text-slate-400">
+              <span>Daftar Barang Faktur ({activeInvoice.items.length} SKU):</span>
+              <span className="text-sky-400 font-mono">{activeInvoice.invoiceNumber}</span>
+            </div>
+
+            <div className="space-y-2">
               {activeInvoice.items.map(item => {
-                const isSelected = resolvedTargetItem?.id === item.id && targetScanMode !== 'CUSTOM_CODE';
+                const dbInfo = getIntegratedDbInfo(item);
+                const isSelected = resolvedTargetItem?.id === item.id;
+                const isLockedErrorItem = scanErrorLock?.lockedItemId === item.id;
+                const isBlockedByOtherError = Boolean(scanErrorLock && scanErrorLock.lockedItemId !== item.id);
                 const isExact = item.qtyLoaded === item.qtyOrdered && item.qtyOrdered > 0;
                 const isOver = item.qtyLoaded > item.qtyOrdered;
+
                 return (
                   <div
                     key={item.id}
-                    className={`p-3 rounded-2xl border text-xs space-y-2 ${
-                      isSelected
-                        ? 'bg-[#172554]/70 border-indigo-400 shadow-md'
-                        : 'bg-[#111827] border-[#1e293b]'
-                    }`}
+                    className={`p-3 rounded-2xl border text-xs space-y-2 transition-all ${
+                      isLockedErrorItem
+                        ? 'bg-rose-600 text-white border-2 border-rose-300 shadow-lg shadow-rose-600/30'
+                        : isOver
+                        ? 'bg-rose-950/60 border-2 border-rose-500 text-rose-100'
+                        : isSelected
+                        ? 'bg-indigo-950/60 border-2 border-indigo-400 shadow-md'
+                        : 'bg-slate-950 border-slate-800'
+                    } ${isBlockedByOtherError ? 'opacity-50' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 space-y-0.5">
+                      <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black">
-                            {item.skuCode}
+                          <span
+                            className={`px-2 py-0.5 rounded font-mono text-[10px] font-black ${
+                              isLockedErrorItem
+                                ? 'bg-black/30 text-white border border-white/30'
+                                : 'bg-indigo-500/20 text-indigo-300'
+                            }`}
+                          >
+                            {dbInfo.kodeBarang}
                           </span>
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                              isOver
+                              isLockedErrorItem
+                                ? 'bg-white text-rose-700'
+                                : isOver
                                 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                                 : isExact
                                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                                 : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                             }`}
                           >
-                            {item.qtyLoaded} / {item.qtyOrdered} {item.unit}
+                            {item.qtyLoaded} / {item.qtyOrdered} {dbInfo.satuan}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              isLockedErrorItem
+                                ? 'bg-black/30 text-amber-200'
+                                : dbInfo.isRegisteredInDb
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            }`}
+                          >
+                            {dbInfo.isRegisteredInDb ? '✓ DB Barang' : '⚠️ Tidak Ada di DB Barang'}
                           </span>
                         </div>
-                        <div className="font-bold text-white text-xs leading-snug break-words">
-                          {item.itemName}
+
+                        <div
+                          className={`font-bold text-xs leading-snug break-words ${
+                            isLockedErrorItem ? 'text-white' : 'text-slate-100'
+                          }`}
+                        >
+                          {dbInfo.deskripsiBarang}
                         </div>
+
+                        {isLockedErrorItem && scanErrorLock && (
+                          <div className="text-[10px] font-extrabold text-amber-200 bg-black/25 px-2 py-1 rounded-lg">
+                            🚨 SALAH / BERBEDA BARANG: {scanErrorLock.reason}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
                         {item.scans.length > 0 && (
                           <button
                             type="button"
-                            onClick={() => setPreviewPhotoModal({ itemName: item.itemName, scans: item.scans })}
-                            className="px-2 py-1 rounded-lg bg-[#1e293b] text-sky-300 text-[10px] font-bold cursor-pointer"
-                            title="Lihat Foto"
+                            onClick={() => setPreviewPhotoModal({ itemName: dbInfo.deskripsiBarang, scans: item.scans })}
+                            className="px-2 py-1 rounded-lg bg-slate-800 text-sky-400 text-[10px] font-bold cursor-pointer border border-slate-700"
+                            title="Lihat Bukti Foto"
                           >
                             📷 {item.scans.length}
                           </button>
                         )}
                         <button
                           type="button"
+                          disabled={isBlockedByOtherError}
                           onClick={() => handleSelectSpecificItemToScan(item)}
-                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black cursor-pointer shadow-xs flex items-center gap-1"
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black shadow-xs flex items-center gap-1 transition ${
+                            isLockedErrorItem
+                              ? 'bg-white text-rose-700 hover:bg-rose-50 cursor-pointer'
+                              : isBlockedByOtherError
+                              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                          }`}
                         >
                           <Camera className="w-3 h-3" />
-                          <span>Pilih Scan</span>
+                          <span>
+                            {isLockedErrorItem
+                              ? 'Foto Ulang'
+                              : isBlockedByOtherError
+                              ? '🔒 Terkunci'
+                              : 'Pilih Scan'}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -3745,325 +3888,429 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
               })}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ================================================================= */}
-        {/* HALAMAN 2: BARANG SUDAH TERMUAT, BARANG SISA & RINGKASAN AUDIT   */}
-        {/* ================================================================= */}
-        {scannerPage === 'halaman2' && (
-          <div className="p-3.5 bg-[#0b1120] space-y-3 max-h-[520px] overflow-y-auto">
-            {/* Ringkasan Progres Muat */}
-            <div className="p-3 bg-[#0f172a] rounded-2xl border border-[#1e293b] space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-[#cbd5e1]">Progres Muat Faktur:</span>
-                <span className="font-mono font-black text-emerald-400">
-                  {evalActive.totalLoaded} / {evalActive.totalOrdered} Kemasan ({progressPercentage}%)
-                </span>
-              </div>
-              <div className="w-full h-3 rounded-full bg-[#060a14] border border-[#334155] overflow-hidden p-0.5">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    evalActive.overloadItems.length > 0
-                      ? 'bg-rose-500'
-                      : progressPercentage === 100
-                      ? 'bg-emerald-500'
-                      : 'bg-sky-500'
-                  }`}
-                  style={{ width: `${Math.min(100, progressPercentage)}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[10px] font-bold text-[#94a3b8] pt-0.5">
-                <span>Target: {evalActive.totalOrdered} ({activeInvoice.items.length} SKU)</span>
-                <span className="text-sky-400">Termuat: {evalActive.totalLoaded}</span>
-                <span className={totalSisaCount > 0 ? 'text-amber-400' : 'text-emerald-400'}>
-                  {totalSisaCount > 0 ? `Sisa: ${totalSisaCount} SKU` : '✓ 100% Lengkap'}
-                </span>
-              </div>
+      {/* ===================================================================== */}
+      {/* HALAMAN 2: TERMUAT & SISA (PROGRES MUAT, BARANG SISA, BARANG SESUAI)  */}
+      {/* ===================================================================== */}
+      {scannerPage === 'halaman2' && (
+        <div className="p-3.5 space-y-3 flex-1">
+          {/* Ringkasan Progres Muat */}
+          <div className="p-3.5 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-300">Progres Muat Faktur:</span>
+              <span className="font-mono font-black text-emerald-400">
+                {evalActive.totalLoaded} / {evalActive.totalOrdered} Kemasan ({progressPercentage}%)
+              </span>
             </div>
+            <div className="w-full h-3 rounded-full bg-slate-950 border border-slate-800 overflow-hidden p-0.5">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  evalActive.overloadItems.length > 0 || scanErrorLock
+                    ? 'bg-rose-500'
+                    : progressPercentage === 100
+                    ? 'bg-emerald-500'
+                    : 'bg-sky-500'
+                }`}
+                style={{ width: `${Math.min(100, progressPercentage)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 pt-0.5">
+              <span>Target: {evalActive.totalOrdered} ({activeInvoice.items.length} SKU)</span>
+              <span className="text-sky-400">Termuat: {evalActive.totalLoaded}</span>
+              <span className={totalSisaCount > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+                {totalSisaCount > 0 ? `Sisa: ${totalSisaCount} SKU` : '✓ 100% Lengkap'}
+              </span>
+            </div>
+          </div>
 
-            {/* Warning Banner jika ada Overload (Lebih Muat) */}
-            {evalActive.overloadItems.length > 0 && (
-              <div className="rounded-2xl bg-[#991b1b] border border-rose-400 p-3 text-white space-y-1.5">
-                <div className="text-[10px] font-black uppercase tracking-wider text-rose-200 flex items-center gap-1">
-                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-                  <span>⚠️ PERINGATAN BARANG LEBIH MUAT ({evalActive.overloadItems.length} SKU)</span>
-                </div>
-                {evalActive.overloadItems.map(item => (
-                  <div key={item.id} className="flex items-center justify-between gap-2 text-[11px] bg-black/25 px-2.5 py-1.5 rounded-lg">
-                    <span className="truncate font-semibold">
-                      [{item.skuCode}] {item.qtyLoaded}/{item.qtyOrdered} {item.unit} (+{item.qtyLoaded - item.qtyOrdered})
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
-                      className="px-2 py-0.5 rounded bg-white text-rose-900 font-extrabold text-[10px] shrink-0 cursor-pointer"
-                    >
-                      Sesuaikan ({item.qtyOrdered})
-                    </button>
-                  </div>
-                ))}
+          {/* Warning Banner jika ada Overload (Lebih Muat) */}
+          {evalActive.overloadItems.length > 0 && (
+            <div className="rounded-2xl bg-rose-600 border border-rose-400 p-3 text-white space-y-1.5">
+              <div className="text-[10px] font-black uppercase tracking-wider text-rose-100 flex items-center gap-1">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>⚠️ PERINGATAN BARANG LEBIH MUAT ({evalActive.overloadItems.length} SKU)</span>
               </div>
-            )}
+              {evalActive.overloadItems.map(item => (
+                <div key={item.id} className="flex items-center justify-between gap-2 text-[11px] bg-black/25 px-2.5 py-1.5 rounded-lg">
+                  <span className="truncate font-semibold">
+                    [{item.skuCode}] {item.qtyLoaded}/{item.qtyOrdered} {item.unit} (+{item.qtyLoaded - item.qtyOrdered})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustLoadedQty(item, item.qtyOrdered)}
+                    className="px-2 py-0.5 rounded bg-white text-rose-900 font-extrabold text-[10px] shrink-0 cursor-pointer"
+                  >
+                    Sesuaikan ({item.qtyOrdered})
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
-            {/* 1. DETEKSI BARANG SISA / BELUM TERMUAT */}
-            <div className="space-y-2 text-xs">
-              <div className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                <span>1. Deteksi Barang Sisa / Belum Termuat ({totalSisaCount} SKU):</span>
+          {/* 1. DETEKSI BARANG SISA / BELUM TERMUAT */}
+          <div className="space-y-2 text-xs">
+            <div className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>1. Deteksi Barang Sisa / Belum Termuat ({totalSisaCount} SKU):</span>
+            </div>
+            {totalSisaCount === 0 ? (
+              <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>Semua barang pada Surat Jalan ini sudah termuat 100%!</span>
               </div>
-              {totalSisaCount === 0 ? (
-                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>Semua barang pada Surat Jalan ini sudah termuat 100%!</span>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {evalActive.unloadedItems.map(item => (
+            ) : (
+              <div className="space-y-2">
+                {evalActive.unloadedItems.map(item => {
+                  const dbInfo = getIntegratedDbInfo(item);
+                  return (
                     <div
                       key={item.id}
                       className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
-                        <div className="text-[11px] text-amber-300 font-medium">Status: BELUM TERMUAT SAMA SEKALI &mdash; Sisa {item.qtyOrdered} {item.unit}</div>
+                        <div className="font-bold text-slate-100 truncate">
+                          [{dbInfo.kodeBarang}] {dbInfo.deskripsiBarang}
+                        </div>
+                        <div className="text-[11px] text-amber-400 font-medium">
+                          Status: BELUM TERMUAT SAMA SEKALI &mdash; Sisa {item.qtyOrdered} {dbInfo.satuan}
+                        </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          handleSelectSpecificItemToScan(item);
-                          setScannerPage('halaman1');
-                        }}
+                        onClick={() => handleSelectSpecificItemToScan(item)}
                         className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
                       >
                         Foto Sekarang
                       </button>
                     </div>
-                  ))}
-                  {evalActive.shortageItems.map(item => {
-                    const sisa = item.qtyOrdered - item.qtyLoaded;
-                    return (
-                      <div
-                        key={item.id}
-                        className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
-                          <div className="text-[11px] text-amber-300 font-medium">
-                            Status: KURANG MUAT ({item.qtyLoaded}/{item.qtyOrdered} {item.unit}) &mdash; Sisa {sisa} {item.unit}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleSelectSpecificItemToScan(item);
-                            setScannerPage('halaman1');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
-                        >
-                          Foto Sisa ({sisa})
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* 2. BARANG TERMUAT SESUAI FAKTUR */}
-            <div className="space-y-2 text-xs pt-1">
-              <div className="text-[11px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>2. Barang Termuat Sesuai Faktur ({evalActive.matchedItems.length} SKU):</span>
-              </div>
-              {evalActive.matchedItems.length === 0 ? (
-                <div className="py-3 px-3 text-[#64748b] text-[11px] border border-dashed border-[#1e293b] rounded-xl text-center">
-                  Belum ada barang yang termuat 100% sesuai target faktur.
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {evalActive.matchedItems.map((item: SalesOrderItem) => (
+                  );
+                })}
+                {evalActive.shortageItems.map(item => {
+                  const dbInfo = getIntegratedDbInfo(item);
+                  const sisa = item.qtyOrdered - item.qtyLoaded;
+                  return (
                     <div
                       key={item.id}
-                      className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2"
+                      className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <div className="font-bold text-white truncate">[{item.skuCode}] {item.itemName}</div>
-                        <div className="text-[11px] text-emerald-300 font-medium">Termuat Lengkap ({item.qtyLoaded}/{item.qtyOrdered} {item.unit})</div>
+                        <div className="font-bold text-slate-100 truncate">
+                          [{dbInfo.kodeBarang}] {dbInfo.deskripsiBarang}
+                        </div>
+                        <div className="text-[11px] text-amber-400 font-medium">
+                          Status: KURANG MUAT ({item.qtyLoaded}/{item.qtyOrdered} {dbInfo.satuan}) &mdash; Sisa {sisa} {dbInfo.satuan}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSpecificItemToScan(item)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
+                      >
+                        Foto Sisa ({sisa})
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 2. BARANG TERMUAT SESUAI FAKTUR & DATABASE BARANG */}
+          <div className="space-y-2 text-xs pt-1">
+            <div className="text-[11px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>2. Barang Termuat Sesuai Faktur ({evalActive.matchedItems.length} SKU):</span>
+            </div>
+            {evalActive.matchedItems.length === 0 ? (
+              <div className="py-4 px-3 text-slate-500 text-[11px] border border-dashed border-slate-800 rounded-xl text-center">
+                Belum ada barang yang termuat 100% sesuai target faktur.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {evalActive.matchedItems.map((item: SalesOrderItem) => {
+                  const dbInfo = getIntegratedDbInfo(item);
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-100 truncate">
+                          [{dbInfo.kodeBarang}] {dbInfo.deskripsiBarang}
+                        </div>
+                        <div className="text-[11px] text-emerald-400 font-medium">
+                          Termuat Lengkap ({item.qtyLoaded}/{item.qtyOrdered} {dbInfo.satuan})
+                        </div>
                       </div>
                       <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black border border-emerald-500/30 shrink-0">
                         ✓ 100% Sesuai
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 3. RIWAYAT SNAPSHOT SCAN FOTO TERAKHIR */}
-            <div className="space-y-2 text-xs pt-1 border-t border-[#1e293b]">
-              <div className="flex items-center justify-between text-[11px] font-black uppercase text-[#94a3b8]">
-                <span>Riwayat 5 Scan Foto Terakhir:</span>
-                {recentScansLog.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecentScansLog([]);
-                      localStorage.removeItem(SCAN_HISTORY_STORAGE_KEY);
-                    }}
-                    className="text-[10px] text-rose-400 hover:underline font-bold cursor-pointer"
-                  >
-                    Bersihkan
-                  </button>
-                )}
+                  );
+                })}
               </div>
-
-              {latestFiveScans.length === 0 ? (
-                <div className="py-4 text-center text-xs text-[#64748b] border border-dashed border-[#1e293b] rounded-xl">
-                  Belum ada riwayat foto. Ambil foto di Halaman 1.
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {latestFiveScans.map(log => (
-                    <div
-                      key={log.id}
-                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#111827] border border-[#1e293b] text-xs font-mono"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <img
-                          src={log.photoDataUrl}
-                          alt={log.extractedCode}
-                          className="w-8 h-8 rounded-lg object-cover border border-[#334155] shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <div className="truncate font-bold text-[#f8fafc] text-[11px]">
-                            {log.displayTime.replace(' WIB', '')} - {log.extractedCode}
-                          </div>
-                          <div className="truncate text-[10px] text-[#94a3b8] font-sans">
-                            {log.productName}
-                          </div>
-                        </div>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
-                          log.status === 'success'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                        }`}
-                      >
-                        {log.status === 'success' ? `(OK ${log.itemLoaded}/${log.itemTarget})` : '(ERROR)'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ===================================================================== */}
-        {/* PORTAL DRIVER & HELPER STYLE MOBILE BOTTOM NAVIGATION BAR             */}
-        {/* ===================================================================== */}
-        <div className="bg-[#0f172a] border-t border-[#1e293b] px-2 py-1.5 relative z-20 shadow-2xl">
-          <div className="grid grid-cols-5 items-center text-center">
-            {/* 1. Kamera & List Faktur (Halaman 1) */}
-            <button
-              type="button"
-              onClick={() => setScannerPage('halaman1')}
-              className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl transition cursor-pointer relative ${
-                scannerPage === 'halaman1'
-                  ? 'text-emerald-400 font-extrabold'
-                  : 'text-[#94a3b8] hover:text-[#f8fafc]'
-              }`}
-            >
-              <Camera className={`w-5 h-5 transition-transform ${scannerPage === 'halaman1' ? 'scale-110 text-emerald-400' : ''}`} />
-              <span className="text-[10px] tracking-tighter leading-none">Kamera &amp; List</span>
-              {scannerPage === 'halaman1' && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-xs shadow-emerald-400/50 mt-0.5 animate-pulse" />
-              )}
-            </button>
-
-            {/* 2. Termuat & Sisa (Halaman 2) */}
-            <button
-              type="button"
-              onClick={() => setScannerPage('halaman2')}
-              className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl transition cursor-pointer relative ${
-                scannerPage === 'halaman2'
-                  ? 'text-sky-400 font-extrabold'
-                  : 'text-[#94a3b8] hover:text-[#f8fafc]'
-              }`}
-            >
-              <div className="relative">
-                <Package className={`w-5 h-5 transition-transform ${scannerPage === 'halaman2' ? 'scale-110 text-sky-400' : ''}`} />
-                {totalSisaCount > 0 ? (
-                  <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black border border-[#0b1120] animate-bounce">
-                    {totalSisaCount}
-                  </span>
-                ) : (
-                  <span className="absolute -top-1 -right-2 px-0.5 rounded-full bg-emerald-500 text-slate-950 text-[8px] font-black">
-                    ✓
-                  </span>
-                )}
+      {/* ===================================================================== */}
+      {/* HALAMAN 3 (TAB DEDIKASI): RIWAYAT SCAN FOTO & VERIFIKASI DB BARANG     */}
+      {/* ===================================================================== */}
+      {scannerPage === 'riwayat' && (
+        <div className="p-3.5 space-y-3 flex-1">
+          <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-black uppercase tracking-wider text-slate-100">
+                  Riwayat Foto &amp; Verifikasi Database Barang
+                </h2>
+                <p className="text-[11px] text-slate-400">
+                  Total {recentScansLog.length} rekaman aktivitas kamera muat ({selectedGate})
+                </p>
               </div>
-              <span className="text-[10px] tracking-tighter leading-none">Termuat &amp; Sisa</span>
-              {scannerPage === 'halaman2' && (
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-xs shadow-sky-400/50 mt-0.5 animate-pulse" />
+              {recentScansLog.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecentScansLog([]);
+                    localStorage.removeItem(SCAN_HISTORY_STORAGE_KEY);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 text-[10px] font-bold cursor-pointer"
+                >
+                  Bersihkan Riwayat
+                </button>
               )}
-            </button>
+            </div>
 
-            {/* 3. Central Floating Action Button (Jepret & Verifikasi / Quick Snap) */}
-            <div className="flex flex-col items-center justify-center relative">
+            {/* Filter Riwayat: Semua / Valid / Error Merah */}
+            <div className="grid grid-cols-3 gap-1.5 pt-1">
               <button
                 type="button"
-                onClick={() => {
-                  if (scannerPage !== 'halaman1') {
-                    setScannerPage('halaman1');
-                  }
-                  void executeCaptureAndVerify();
-                }}
-                className="w-12 h-12 -mt-6 rounded-full bg-gradient-to-tr from-emerald-600 via-indigo-600 to-indigo-500 text-white shadow-xl shadow-indigo-500/30 border-4 border-[#0b1120] hover:scale-105 active:scale-95 transition-transform flex items-center justify-center cursor-pointer group"
-                title="Ambil Foto & Verifikasi Sekarang"
+                onClick={() => setHistoryFilter('ALL')}
+                className={`py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer border transition ${
+                  historyFilter === 'ALL'
+                    ? 'bg-indigo-600 text-white border-indigo-500'
+                    : 'bg-slate-950 text-slate-400 border-slate-800'
+                }`}
               >
-                <Camera className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                Semua ({recentScansLog.length})
               </button>
-              <span className="text-[9px] font-bold text-emerald-400 mt-0.5 tracking-tighter">Scan Foto</span>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('SUCCESS')}
+                className={`py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer border transition ${
+                  historyFilter === 'SUCCESS'
+                    ? 'bg-emerald-600 text-white border-emerald-500'
+                    : 'bg-slate-950 text-emerald-400 border-slate-800'
+                }`}
+              >
+                ✓ Sesuai ({recentScansLog.filter(l => l.status === 'success').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('ERROR')}
+                className={`py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer border transition ${
+                  historyFilter === 'ERROR'
+                    ? 'bg-rose-600 text-white border-rose-500'
+                    : 'bg-slate-950 text-rose-400 border-slate-800'
+                }`}
+              >
+                🚨 Merah/Error ({recentScansLog.filter(l => l.status === 'error').length})
+              </button>
             </div>
+          </div>
 
-            {/* 4. Riwayat Scan */}
+          {filteredHistoryLogs.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-2xl bg-slate-900/50 space-y-2">
+              <FileText className="w-8 h-8 text-slate-600 mx-auto" />
+              <div className="font-bold text-slate-400">Belum Ada Riwayat Scan Foto</div>
+              <p className="text-[11px] text-slate-500">
+                Silakan ambil foto barang pada tab <strong>Kamera &amp; List</strong>.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredHistoryLogs.map(log => (
+                <div
+                  key={log.id}
+                  className={`p-3 rounded-2xl border text-xs space-y-2 ${
+                    log.status === 'error'
+                      ? 'bg-rose-600 text-white border-rose-300 shadow-md'
+                      : 'bg-slate-900 border-slate-800 text-slate-100'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <img
+                        src={log.photoDataUrl}
+                        alt={log.extractedCode}
+                        className="w-12 h-12 rounded-xl object-cover border border-slate-700 shrink-0 bg-slate-950"
+                      />
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black ${
+                              log.status === 'error'
+                                ? 'bg-black/30 text-white'
+                                : 'bg-indigo-500/20 text-indigo-300'
+                            }`}
+                          >
+                            {log.extractedCode}
+                          </span>
+                          <span
+                            className={`text-[10px] font-mono ${
+                              log.status === 'error' ? 'text-rose-100' : 'text-slate-400'
+                            }`}
+                          >
+                            {log.displayTime} &bull; {log.gate}
+                          </span>
+                        </div>
+                        <div className="font-bold text-xs leading-snug break-words">
+                          {log.productName}
+                        </div>
+                        <div
+                          className={`text-[11px] leading-snug ${
+                            log.status === 'error' ? 'text-amber-100 font-semibold' : 'text-slate-400'
+                          }`}
+                        >
+                          {log.message}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
+                        log.status === 'success'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-white text-rose-700'
+                      }`}
+                    >
+                      {log.status === 'success'
+                        ? `OK ${log.itemLoaded}/${log.itemTarget} ${log.unit}`
+                        : 'MERAH / DITOLAK'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* FLOATING BOTTOM NAVIGATION BAR (SAMA PERSIS DENGAN PORTAL DRIVER)      */}
+      {/* ===================================================================== */}
+      <nav className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-auto sm:w-[420px] max-w-md mx-auto z-40">
+        <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl px-2 py-2 shadow-2xl shadow-black/70 grid grid-cols-4 items-center">
+          {/* 1. Kamera & List */}
+          <button
+            type="button"
+            onClick={() => setScannerPage('halaman1')}
+            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+              scannerPage === 'halaman1'
+                ? 'text-cyan-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Camera
+              className={`w-5 h-5 transition-transform ${
+                scannerPage === 'halaman1' ? 'scale-110 text-cyan-400' : ''
+              }`}
+            />
+            <span className="text-[10px] tracking-tight">Kamera &amp; List</span>
+            {scannerPage === 'halaman1' && (
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
+            )}
+          </button>
+
+          {/* 2. Termuat & Sisa */}
+          <button
+            type="button"
+            onClick={() => setScannerPage('halaman2')}
+            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+              scannerPage === 'halaman2'
+                ? 'text-cyan-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <div className="relative">
+              <Package
+                className={`w-5 h-5 transition-transform ${
+                  scannerPage === 'halaman2' ? 'scale-110 text-cyan-400' : ''
+                }`}
+              />
+              {totalSisaCount > 0 ? (
+                <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black">
+                  {totalSisaCount}
+                </span>
+              ) : (
+                <span className="absolute -top-1 -right-2 px-0.5 rounded-full bg-emerald-500 text-slate-950 text-[8px] font-black">
+                  ✓
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] tracking-tight">Termuat &amp; Sisa</span>
+            {scannerPage === 'halaman2' && (
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
+            )}
+          </button>
+
+          {/* 3. Central Floating Action Button (Scan Foto) */}
+          <div className="flex flex-col items-center justify-center relative">
             <button
               type="button"
               onClick={() => {
-                setScannerPage('halaman2');
+                if (scannerPage !== 'halaman1') {
+                  setScannerPage('halaman1');
+                }
+                void executeCaptureAndVerify(undefined, undefined, false);
               }}
-              className="flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl text-[#94a3b8] hover:text-[#f8fafc] transition cursor-pointer relative"
+              className={`w-12 h-12 -mt-6 rounded-full text-white shadow-xl border-4 border-slate-950 hover:scale-105 active:scale-95 transition-transform flex items-center justify-center cursor-pointer group ${
+                scanErrorLock
+                  ? 'bg-rose-600 shadow-rose-500/40'
+                  : 'bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 shadow-indigo-500/30'
+              }`}
+              title="Ambil Foto & Verifikasi Sekarang"
             >
-              <div className="relative">
-                <FileText className="w-5 h-5" />
-                {recentScansLog.length > 0 && (
-                  <span className="absolute -top-1 -right-2 px-1 py-0.2 rounded-full bg-indigo-500 text-white text-[9px] font-black">
-                    {recentScansLog.length}
-                  </span>
-                )}
-              </div>
-              <span className="text-[10px] tracking-tighter leading-none">Riwayat</span>
+              <Camera className="w-6 h-6 group-hover:rotate-12 transition-transform" />
             </button>
-
-            {/* 5. Blueprint Kode & SQL */}
-            <button
-              type="button"
-              onClick={() => setIsBlueprintsModalOpen(true)}
-              className="flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-xl text-[#94a3b8] hover:text-[#f8fafc] transition cursor-pointer"
-            >
-              <Layers className="w-5 h-5 text-amber-400" />
-              <span className="text-[10px] tracking-tighter leading-none text-amber-300">Blueprint</span>
-            </button>
+            <span className="text-[9px] font-bold text-indigo-400 mt-0.5 tracking-tight">
+              Scan Foto
+            </span>
           </div>
-        </div>
 
-        {/* Home Indicator Bar Smartphone */}
-        <div className="p-2 bg-[#060a14] border-t border-[#1e293b] flex justify-center">
-          <div className="w-28 h-1 rounded-full bg-[#334155]" />
+          {/* 4. Riwayat (Tab Dedikasi Sendiri - Tidak Kembali ke Termuat & Sisa) */}
+          <button
+            type="button"
+            onClick={() => setScannerPage('riwayat')}
+            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+              scannerPage === 'riwayat'
+                ? 'text-cyan-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <div className="relative">
+              <FileText
+                className={`w-5 h-5 transition-transform ${
+                  scannerPage === 'riwayat' ? 'scale-110 text-cyan-400' : ''
+                }`}
+              />
+              {recentScansLog.length > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-indigo-500 text-white text-[9px] font-black">
+                  {recentScansLog.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] tracking-tight">Riwayat</span>
+            {scannerPage === 'riwayat' && (
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
+            )}
+          </button>
         </div>
-      </div>
+      </nav>
 
       {/* ===================================================================== */}
       {/* POPUP MODAL WARNING KETIKA TERJADI LEBIH MUAT BARANG                   */}
@@ -4082,7 +4329,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             </h3>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">
               Item <strong>[{overloadWarningAlert.skuCode}] {overloadWarningAlert.itemName}</strong> pada faktur hanya berjumlah{' '}
-              <strong>{overloadWarningAlert.qtyOrdered} {overloadWarningAlert.unit}</strong>, namun terdeteksi termuat sebanyak{' '}
+              <strong>{overloadWarningAlert.qtyOrdered} {overloadWarningAlert.unit}</strong>, namun terdeteksi akan dimuat sebanyak{' '}
               <strong className="text-rose-600 dark:text-rose-400">
                 {overloadWarningAlert.qtyLoaded} {overloadWarningAlert.unit}
               </strong>{' '}
@@ -4144,14 +4391,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           </div>
         </div>
       )}
-
-      {/* ===================================================================== */}
-      {/* MODAL SKRIP SQL HOSTINGER, PYTHON ULTRALYTICS YOLO & STANDALONE HTML5  */}
-      {/* ===================================================================== */}
-      <WmsPureVisualBlueprintsModal
-        isOpen={isBlueprintsModalOpen}
-        onClose={() => setIsBlueprintsModalOpen(false)}
-      />
     </div>
   );
 };

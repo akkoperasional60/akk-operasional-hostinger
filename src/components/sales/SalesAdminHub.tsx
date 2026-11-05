@@ -30,6 +30,15 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
   const [selectedRfidInvoiceId, setSelectedRfidInvoiceId] = useState<string | null>(null);
   const effectiveTab: SalesAdminSubTab = activeSubTab === 'dashboard' ? 'activities' : activeSubTab;
 
+  if (effectiveTab === 'rfid_scanner') {
+    return (
+      <SalesRfidScannerAppTab
+        initialInvoiceId={selectedRfidInvoiceId}
+        onNavigateToInvoiceInput={() => onSelectSubTab('invoice_so')}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       {effectiveTab === 'activities' && (
@@ -47,12 +56,6 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
             setSelectedRfidInvoiceId(invoiceId);
             onSelectSubTab('rfid_scanner');
           }}
-        />
-      )}
-      {effectiveTab === 'rfid_scanner' && (
-        <SalesRfidScannerAppTab
-          initialInvoiceId={selectedRfidInvoiceId}
-          onNavigateToInvoiceInput={() => onSelectSubTab('invoice_so')}
         />
       )}
       {effectiveTab === 'skill_matrix' && (

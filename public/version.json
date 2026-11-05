@@ -1,8 +1,8 @@
 {
-  "versionCode": 10010,
-  "versionName": "1.0.10",
-  "updatedAt": "2026-11-05T13:10:00.000000",
-  "changelog": "Sinkronisasi V22 AI Studio ke Hostinger: Sinkronisasi Cloud Database Barang PC & HP (wms_database_barang), Tampilan Mobile Card Database Barang Tanpa Scroll Horizontal, Navigasi 2 Halaman Handheld WMS Scanner (Kamera Utuh + Termuat & Sisa), Mode Hanya Lihat (ReadOnlyModuleBoundary), serta Sinkronisasi Skema MySQL.",
+  "versionCode": 10011,
+  "versionName": "1.0.11",
+  "updatedAt": "2026-11-05T17:50:00.000000",
+  "changelog": "Sinkronisasi V23 AI Studio ke Hostinger: Verifikasi Ketat AI Vision & Kunci Error Merah pada WMS Scanner Muat Armada (Ram 1-3, Kamera Otomatis Aktif, 3 Halaman Mobile identik Portal Driver), serta Sinkronisasi Cloud Database Barang PC & HP.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live."
 }

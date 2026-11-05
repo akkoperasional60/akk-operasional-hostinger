@@ -2565,34 +2565,52 @@ Tugas Anda:
         }
       }
 
-      // 1B. Jika Gemini AI Vision tersedia dan gambar bukan SVG placeholder, jalankan OCR Vision untuk membaca kode/label fisik
+      // 1B. Jika Gemini AI Vision tersedia dan gambar bukan SVG placeholder, SELALU jalankan verifikasi visual terhadap Database Barang & Faktur
       const isSvgDataUrl = rawImagePayload.startsWith('data:image/svg+xml');
-      if (genAI && cleanBase64.length > 100 && !isSvgDataUrl && (!extractedCode || extractedCode === 'AUTO')) {
+      const forceMismatch = Boolean(req.body?.force_mismatch);
+      let visionRejectedReason = '';
+
+      if (forceMismatch) {
+        extractedCode = String(req.body?.simulated_wrong_code || 'BRG-SALAH-999').toUpperCase();
+        extractedName = String(req.body?.simulated_wrong_name || 'Kemasan Barang Berbeda / Tidak Sesuai Database Barang');
+        visionRejectedReason = `Barang yang terfoto [${extractedCode}] (${extractedName}) TIDAK SESUAI dengan target barang pada Database Barang & Faktur!`;
+      } else if (genAI && cleanBase64.length > 100 && !isSvgDataUrl) {
         try {
           const catalogContext = normalizedExpected
-            .map((it: any) => `- Kode: ${it.skuCode || it.code || it.noBarang} | Nama: ${it.itemName || it.name || it.keteranganBarang} | Target: ${it.qtyOrdered || it.targetQty || 0} ${it.unit || 'Box'}`)
+            .map((it: any) => `- Kode: ${it.skuCode || it.code || it.noBarang} | Deskripsi: ${it.itemName || it.name || it.keteranganBarang || it.deskripsiBarang} | Satuan: ${it.unit || it.satuan || 'Box'} | Target: ${it.qtyOrdered || it.targetQty || 0}`)
             .join('\n');
 
-          const ocrPrompt = `Anda adalah sistem Pure Visual Identification (Ultralytics YOLO ROI + AI Vision OCR) Gudang & Muat Armada PT Anugrah Kemasan Kreatif (WMS Scanner).
-Tugas Anda: Lokalisasi area label kemasan (Bounding Box ROI) dan baca teks label, nomor batch/seri fisik, kode SKU, atau nama produk kemasan pada foto kamera muat ini.
-Surat Jalan / Faktur Aktif: ${surat_jalan_id} (${resolvedGate})
-Daftar Barang pada Surat Jalan / Faktur ini:
-${catalogContext || '(Gunakan pembacaan visual murni)'}
-${extractedCode ? `Petunjuk item yang dipilih operator: ${extractedCode}` : ''}
+          const dbBarangContext = normalizedMaster
+            .slice(0, 80)
+            .map((m: any) => `- Kode: ${m.noBarang || m.skuCode} | Deskripsi: ${m.deskripsiBarang || m.keteranganBarang} | Satuan: ${m.satuan || m.unit1 || 'PCS'}`)
+            .join('\n');
 
-Instruksi:
-1. Jika pada foto terlihat kode barang/SKU/label teks yang cocok dengan salah satu barang di daftar Surat Jalan, kembalikan kode SKU dan nama produknya secara presisi.
-2. Jika terlihat kode barang lain yang TIDAK ada di Surat Jalan, ekstrak kode tersebut apa adanya.
-3. Jika foto menampilkan produk kemasan/karton box fisik dan operator telah memilih petunjuk item (${extractedCode || 'AUTO'}), gunakan kode item yang paling sesuai.
+          const ocrPrompt = `Anda adalah sistem AI Vision Verifikasi Ketat Gudang & Muat Armada PT Anugrah Kemasan Kreatif (WMS Scanner) yang terintegrasi langsung dengan Database Barang.
+Tugas Anda: Periksa apakah objek di dalam foto kamera benar-benar kemasan barang / karton box / label produk yang sesuai dengan target barang di Database Barang dan Faktur aktif.
+Surat Jalan / Faktur Aktif: ${surat_jalan_id} (${resolvedGate})
+Target Kode Barang yang sedang harus difoto: ${extractedCode || 'AUTO'}
+
+Daftar Barang pada Faktur Aktif:
+${catalogContext || '-'}
+
+Contoh Katalog Database Barang Gudang:
+${dbBarangContext || '-'}
+
+Instruksi Verifikasi Ketat:
+1. Periksa objek pada foto secara jujur. Jika foto menampilkan objek BUKAN kemasan barang gudang (misalnya keyboard komputer, layar monitor, meja, tangan kosong, lantai, dinding, wajah, atau benda acak lainnya), WAJIB set "is_valid_packaging": false, "is_matching_target": false, "extracted_code": "BUKAN-KEMASAN", dan jelaskan objek apa yang terlihat pada "product_name" serta "mismatch_reason".
+2. Jika foto menampilkan kemasan/label barang, baca kode barang/SKU atau nama deskripsi barangnya. Jika berbeda dengan Target Kode Barang (${extractedCode || 'AUTO'}) atau tidak sesuai dengan daftar Faktur & Database Barang, WAJIB set "is_matching_target": false dan isi "extracted_code" dengan kode yang terbaca (atau "BARANG-BERBEDA") beserta alasan di "mismatch_reason".
+3. Hanya set "is_valid_packaging": true dan "is_matching_target": true jika foto benar-benar menunjukkan kemasan/produk/label yang sesuai dengan barang di Database Barang & Faktur.
 Kembalikan HANYA JSON valid:
 {
-  "extracted_code": "string (kode barang/SKU huruf besar)",
-  "product_name": "string (nama barang/kemasan)",
+  "extracted_code": "string",
+  "product_name": "string",
   "detected_qty": number,
   "raw_text": "string",
   "confidence": number,
   "bbox": [number, number, number, number],
-  "is_valid_packaging": boolean
+  "is_valid_packaging": boolean,
+  "is_matching_target": boolean,
+  "mismatch_reason": "string"
 }`;
 
           const aiResp = await genAI.models.generateContent({
@@ -2617,16 +2635,25 @@ Kembalikan HANYA JSON valid:
           const rawJsonText = (aiResp.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
           if (rawJsonText) {
             const parsedOcr = JSON.parse(rawJsonText);
-            if (parsedOcr?.extracted_code && String(parsedOcr.extracted_code).trim() !== '') {
-              extractedCode = String(parsedOcr.extracted_code).trim().toUpperCase();
-            }
-            if (parsedOcr?.product_name) {
-              extractedName = String(parsedOcr.product_name).trim();
-            }
             ocrConfidence = Number(parsedOcr?.confidence || 0.962);
             ocrRawText = String(parsedOcr?.raw_text || '');
             if (Array.isArray(parsedOcr?.bbox) && parsedOcr.bbox.length === 4) {
               yoloBbox = parsedOcr.bbox;
+            }
+            if (parsedOcr?.is_valid_packaging === false || parsedOcr?.is_matching_target === false) {
+              extractedCode = String(parsedOcr?.extracted_code || 'OBJEK-TIDAK-SESUAI').trim().toUpperCase();
+              extractedName = String(parsedOcr?.product_name || 'Objek / Barang Tidak Sesuai Database Barang').trim();
+              visionRejectedReason = String(
+                parsedOcr?.mismatch_reason ||
+                  `Objek terfoto (${extractedName}) tidak sesuai dengan Database Barang & Faktur [${target_item_code || 'Target'}]!`
+              );
+            } else {
+              if (parsedOcr?.extracted_code && String(parsedOcr.extracted_code).trim() !== '') {
+                extractedCode = String(parsedOcr.extracted_code).trim().toUpperCase();
+              }
+              if (parsedOcr?.product_name) {
+                extractedName = String(parsedOcr.product_name).trim();
+              }
             }
           }
         } catch (ocrErr: any) {
@@ -2634,18 +2661,20 @@ Kembalikan HANYA JSON valid:
         }
       }
 
-      // 2. Pencocokan dengan item pada Surat Jalan / Faktur (DO/SO) aktif
+      // 2. Pencocokan dengan item pada Surat Jalan / Faktur (DO/SO) aktif & Database Barang
       const cleanQty = Math.max(1, Number(qty_scanned) || 1);
-      let matchedExpected = normalizedExpected.find((it: any) => {
-        const code = String(it.skuCode || it.code || it.noBarang || '').trim().toUpperCase();
-        const name = String(it.itemName || it.name || it.keteranganBarang || '').trim().toLowerCase();
-        if (extractedCode && code === extractedCode) return true;
-        if (extractedCode && (code.includes(extractedCode) || extractedCode.includes(code)) && code.length >= 4) return true;
-        if (extractedName && name && (name.includes(extractedName.toLowerCase()) || extractedName.toLowerCase().includes(name))) return true;
-        return false;
-      });
+      let matchedExpected = visionRejectedReason
+        ? undefined
+        : normalizedExpected.find((it: any) => {
+            const code = String(it.skuCode || it.code || it.noBarang || '').trim().toUpperCase();
+            const name = String(it.itemName || it.name || it.keteranganBarang || '').trim().toLowerCase();
+            if (extractedCode && code === extractedCode) return true;
+            if (extractedCode && (code.includes(extractedCode) || extractedCode.includes(code)) && code.length >= 4) return true;
+            if (extractedName && name && (name.includes(extractedName.toLowerCase()) || extractedName.toLowerCase().includes(name))) return true;
+            return false;
+          });
 
-      if (!matchedExpected && (!extractedCode || extractedCode === 'AUTO') && normalizedExpected.length > 0) {
+      if (!visionRejectedReason && !matchedExpected && (!extractedCode || extractedCode === 'AUTO') && normalizedExpected.length > 0) {
         matchedExpected =
           normalizedExpected.find((it: any) => Number(it.qtyLoaded || 0) < Number(it.qtyOrdered || 0)) ||
           normalizedExpected[0];
@@ -2699,9 +2728,11 @@ Kembalikan HANYA JSON valid:
             matched_rows: 0,
             status_muat: 'REJECTED'
           },
-          message: matchedInMaster
-            ? `SALAH TUJUAN / SALAH DO: [${extractedCode}] ${matchedInMaster.keteranganBarang} tidak terdaftar pada Surat Jalan ${surat_jalan_id}!`
-            : `Tidak Dikenali / Salah Tujuan: Kode kemasan [${extractedCode || 'UNKNOWN'}] tidak ditemukan pada Surat Jalan ${surat_jalan_id}.`
+          message: visionRejectedReason
+            ? visionRejectedReason
+            : matchedInMaster
+            ? `SALAH TUJUAN / SALAH DO: [${extractedCode}] ${matchedInMaster.keteranganBarang || matchedInMaster.deskripsiBarang} tidak terdaftar pada Surat Jalan ${surat_jalan_id}!`
+            : `Tidak Dikenali / Berbeda dengan Database Barang: Kode kemasan [${extractedCode || 'UNKNOWN'}] tidak ditemukan pada Faktur ${surat_jalan_id}.`
         });
       }
 
