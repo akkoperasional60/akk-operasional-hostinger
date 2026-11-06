@@ -69,7 +69,7 @@ export interface SalesOrderItem {
   id: string;
   skuCode: string;
   itemName: string;
-  unit: 'Box' | 'Ikat' | 'Bal' | 'Pack' | 'Roll' | 'Pcs';
+  unit: string;
   qtyOrdered: number;
   qtyLoaded: number;
   scans: ItemPhotoScanLog[];
@@ -524,31 +524,51 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   }>>([]);
 
   const normalizeUnit = (rawUnit: string): SalesOrderItem['unit'] => {
-    const clean = (rawUnit || '').trim().toLowerCase();
-    if (clean.includes('ikat')) return 'Ikat';
-    if (clean.includes('bal')) return 'Bal';
-    if (clean.includes('pack') || clean.includes('pak')) return 'Pack';
-    if (clean.includes('roll') || clean.includes('rol')) return 'Roll';
-    if (clean.includes('pcs') || clean.includes('buah') || clean.includes('biji')) return 'Pcs';
-    return 'Box';
+    const clean = (rawUnit || '').trim();
+    if (!clean) return 'CRT';
+    return clean.toUpperCase();
   };
 
   const openCreateModal = () => {
     setEditingInvoiceId(null);
-    setInvoiceNumber('');
+    const seq = String(invoices.length + 1).padStart(3, '0');
+    const defaultNoFaktur = `FKT/AKK/2026/11/${seq}`;
+    const defaultArea = OFFICIAL_DESTINATION_AREAS[0] || 'Banyuwangi Kota';
+    setInvoiceNumber(defaultNoFaktur);
     setSoNumber('');
     setDate(new Date().toISOString().split('T')[0]);
     setCustomerName('');
-    // Kosongkan areaName saat awal agar user wajib memilih Nama Area Kirim terlebih dahulu sebelum upload file
-    setAreaName('');
+    setAreaName(defaultArea);
     const initialFleet = fleetOptions[0] || defaultFleet;
     setFleetLabel(initialFleet);
     setSelectedFleets([initialFleet]);
     setAdminPic(adminNames[0] || defaultAdmin);
     setNotes('');
     setUploadedFileName('');
-    setHasReviewedFile(false);
-    setReviewRows([]);
+    setHasReviewedFile(true);
+    const firstDb = dbBarangList[0];
+    const firstFallback = MASTER_PACKAGING_CATALOG[0];
+    const resolvedNo = firstDb?.noBarang || firstFallback?.skuCode || '7GPJA001';
+    const resolvedKet =
+      firstDb?.keteranganBarang ||
+      firstFallback?.itemName ||
+      'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)';
+    const resolvedSat = normalizeUnit(firstDb?.unit3 || firstDb?.satuan || 'CRT');
+    const resolvedDoc =
+      firstDb?.dokumentasiUrl || createDefaultBarangThumbnail(resolvedNo, resolvedKet, resolvedSat);
+    setReviewRows([
+      {
+        id: `rev-${Date.now()}-1`,
+        noFaktur: defaultNoFaktur,
+        namaPelanggan: `TK MAKMUR JAYA (${defaultArea.toUpperCase()})`,
+        itemBarang: resolvedKet,
+        qty: 1,
+        satuan: resolvedSat,
+        skuCode: resolvedNo,
+        dokumentasiUrl: resolvedDoc,
+        compressedSizeKb: firstDb?.compressedSizeKb || estimateDataUrlSizeKb(resolvedDoc)
+      }
+    ]);
     if (importFileInputRef.current) {
       importFileInputRef.current.value = '';
     }
@@ -589,28 +609,28 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   };
 
   const handleDownloadTemplateExcel = (format: 'xlsx' | 'csv' = 'xlsx') => {
-    const sampleArea = areaName || 'GENTENG RETAIL';
+    const sampleArea = (areaName || 'GENTENG RETAIL').toUpperCase();
     const templateRows = [
       {
         'No Faktur': 'FKT/AKK/2026/11/001',
         'Nama Pelanggan': `TK MAKMUR JAYA (${sampleArea})`,
-        'Item Barang': 'Karton Box Corrugated B-Flute 60x40x40 Polos',
-        Qty: 20,
-        Satuan: 'Ikat'
+        'Item Barang': 'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)',
+        Qty: 1,
+        Satuan: 'CRT'
       },
       {
         'No Faktur': 'FKT/AKK/2026/11/001',
         'Nama Pelanggan': `TK MAKMUR JAYA (${sampleArea})`,
-        'Item Barang': 'Karton Box Duplex Cetak Custom 30x20x15',
-        Qty: 15,
-        Satuan: 'Box'
+        'Item Barang': 'CUP PLST JAGUAR BR 14 OZ NAT @50 (40SLP/CRT)',
+        Qty: 1,
+        Satuan: 'CRT'
       },
       {
-        'No Faktur': 'FKT/AKK/2026/11/002',
-        'Nama Pelanggan': `UD SUMBER BERKAH (${sampleArea})`,
-        'Item Barang': 'Box Kemasan Roti & Kue Ivory 22x22x8',
-        Qty: 25,
-        Satuan: 'Bal'
+        'No Faktur': 'FKT/AKK/2026/11/001',
+        'Nama Pelanggan': `TK MAKMUR JAYA (${sampleArea})`,
+        'Item Barang': 'KR BAJA (HJ) 40X68 KN @40 (60PAK/ZAK)',
+        Qty: 1,
+        Satuan: 'ZAK'
       }
     ];
 
@@ -650,10 +670,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const activeArea = areaName.trim() || OFFICIAL_DESTINATION_AREAS[0] || 'Banyuwangi Kota';
     if (!areaName.trim()) {
-      showToast('Pilih Nama Area Kirim terlebih dahulu sebelum mengunggah file faktur!', 'error');
-      e.target.value = '';
-      return;
+      setAreaName(activeArea);
     }
 
     const reader = new FileReader();
@@ -707,7 +726,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               matchedCatalog?.skuCode ||
               `AKK-BRG-${String(idx + 1).padStart(3, '0')}`;
             const resolvedKeterangan = matchedDb?.keteranganBarang || itemBarangVal;
-            const resolvedSatuan = normalizeUnit(satuanRaw || matchedDb?.satuan || 'Box');
+            const resolvedSatuan = satuanRaw.trim()
+              ? satuanRaw.trim().toUpperCase()
+              : normalizeUnit(matchedDb?.unit3 || matchedDb?.satuan || 'CRT');
             const resolvedDocUrl =
               matchedDb?.dokumentasiUrl ||
               createDefaultBarangThumbnail(resolvedNoBarang, resolvedKeterangan, resolvedSatuan);
@@ -718,7 +739,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               noFaktur: noFakturVal.toUpperCase(),
               namaPelanggan: namaPelangganVal.toUpperCase(),
               itemBarang: resolvedKeterangan,
-              qty: qtyNum > 0 ? qtyNum : 10,
+              qty: qtyNum > 0 ? qtyNum : 1,
               satuan: resolvedSatuan,
               skuCode: resolvedNoBarang,
               dokumentasiUrl: resolvedDocUrl,
@@ -739,7 +760,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         setReviewRows(parsedRows);
         setHasReviewedFile(true);
         showToast(
-          `File "${file.name}" berhasil dibaca (${parsedRows.length} baris item untuk area ${areaName}). Silakan periksa pada tabel Review File di bawah.`,
+          `File "${file.name}" berhasil dibaca (${parsedRows.length} baris item).`,
           'success'
         );
       } catch {
@@ -750,51 +771,50 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   };
 
   const handleLoadSampleImportForArea = () => {
+    const activeArea = areaName.trim() || OFFICIAL_DESTINATION_AREAS[0] || 'GENTENG RETAIL';
     if (!areaName.trim()) {
-      showToast('Pilih Nama Area Kirim terlebih dahulu pada Langkah 1!', 'error');
-      return;
+      setAreaName(activeArea);
     }
     const seq1 = String(invoices.length + 1).padStart(3, '0');
-    const seq2 = String(invoices.length + 2).padStart(3, '0');
     const sampleRows: typeof reviewRows = [
       {
         id: `smp-${Date.now()}-1`,
         noFaktur: `FKT/AKK/2026/11/${seq1}`,
-        namaPelanggan: `TK SINAR KEMASAN (${areaName})`,
-        itemBarang: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
-        qty: 25,
-        satuan: 'Ikat',
-        skuCode: 'RFID-KB-001'
+        namaPelanggan: `TK MAKMUR JAYA (${activeArea.toUpperCase()})`,
+        itemBarang: 'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)',
+        qty: 1,
+        satuan: 'CRT',
+        skuCode: '7GPJA001'
       },
       {
         id: `smp-${Date.now()}-2`,
         noFaktur: `FKT/AKK/2026/11/${seq1}`,
-        namaPelanggan: `TK SINAR KEMASAN (${areaName})`,
-        itemBarang: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
-        qty: 15,
-        satuan: 'Box',
-        skuCode: '7AFBG453'
+        namaPelanggan: `TK MAKMUR JAYA (${activeArea.toUpperCase()})`,
+        itemBarang: 'CUP PLST JAGUAR BR 14 OZ NAT @50 (40SLP/CRT)',
+        qty: 1,
+        satuan: 'CRT',
+        skuCode: '7GPJA011'
       },
       {
         id: `smp-${Date.now()}-3`,
-        noFaktur: `FKT/AKK/2026/11/${seq2}`,
-        namaPelanggan: `UD MITRA MANDIRI (${areaName})`,
-        itemBarang: 'ALU TRAY OX-935 (100PCS/PAK)',
-        qty: 30,
-        satuan: 'Pack',
-        skuCode: '7AT00935'
+        noFaktur: `FKT/AKK/2026/11/${seq1}`,
+        namaPelanggan: `TK MAKMUR JAYA (${activeArea.toUpperCase()})`,
+        itemBarang: 'KR BAJA (HJ) 40X68 KN @40 (60PAK/ZAK)',
+        qty: 1,
+        satuan: 'ZAK',
+        skuCode: '7KRBJ406'
       }
     ];
-    setUploadedFileName(`Import_Faktur_${areaName.replace(/\s+/g, '_')}.xlsx`);
+    setUploadedFileName(`Import_Faktur_${activeArea.replace(/\s+/g, '_')}.xlsx`);
     setReviewRows(sampleRows);
     setHasReviewedFile(true);
-    showToast(`Data contoh file faktur untuk area ${areaName} siap di-review.`, 'info');
+    showToast(`Data contoh file faktur untuk area ${activeArea} siap di-review.`, 'info');
   };
 
   const handleAddReviewRow = () => {
+    const activeArea = areaName.trim() || OFFICIAL_DESTINATION_AREAS[0] || 'Banyuwangi Kota';
     if (!areaName.trim()) {
-      showToast('Pilih Nama Area Kirim terlebih dahulu!', 'error');
-      return;
+      setAreaName(activeArea);
     }
     const nextIdx = reviewRows.length;
     const seq = String(invoices.length + 1).padStart(3, '0');
@@ -803,7 +823,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     const fallbackPreset = MASTER_PACKAGING_CATALOG[nextIdx % MASTER_PACKAGING_CATALOG.length];
     const resolvedNo = dbPreset?.noBarang || fallbackPreset?.skuCode || `AKK-BRG-00${nextIdx + 1}`;
     const resolvedKet = dbPreset?.keteranganBarang || fallbackPreset?.itemName || '';
-    const resolvedSat = normalizeUnit(dbPreset?.satuan || fallbackPreset?.unit || 'Box');
+    const resolvedSat = normalizeUnit(dbPreset?.unit3 || dbPreset?.satuan || fallbackPreset?.unit || 'CRT');
     const resolvedDoc =
       dbPreset?.dokumentasiUrl || createDefaultBarangThumbnail(resolvedNo, resolvedKet, resolvedSat);
 
@@ -812,9 +832,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
       {
         id: `rev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         noFaktur: lastRow?.noFaktur || invoiceNumber || `FKT/AKK/2026/11/${seq}`,
-        namaPelanggan: lastRow?.namaPelanggan || customerName || `TOKO PELANGGAN ${areaName}`,
+        namaPelanggan: lastRow?.namaPelanggan || customerName || `TK MAKMUR JAYA (${activeArea.toUpperCase()})`,
         itemBarang: resolvedKet,
-        qty: 10,
+        qty: 1,
         satuan: resolvedSat,
         skuCode: resolvedNo,
         dokumentasiUrl: resolvedDoc,
@@ -823,7 +843,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     ]);
     setHasReviewedFile(true);
     if (!uploadedFileName) {
-      setUploadedFileName(`Input_Terstruktur_${areaName.replace(/\s+/g, '_')}.xlsx`);
+      setUploadedFileName(`Input_Terstruktur_${activeArea.replace(/\s+/g, '_')}.xlsx`);
     }
   };
 
@@ -1996,83 +2016,48 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     </>
   )}
 
-      {/* Modal Import & Review File Faktur / Sales Order (Pilih Area -> Upload File -> Review File) */}
+      {/* Modal Ringkas Input & Upload File Faktur / Sales Order (SO) */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs overflow-y-auto flex items-start justify-center p-3 sm:p-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full p-5 sm:p-6 shadow-2xl my-auto">
-            <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">
-                  <FileSpreadsheet className="w-5 h-5" />
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs overflow-y-auto flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-6xl w-full p-4 sm:p-5 shadow-2xl">
+            {/* Compact Header */}
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <FileSpreadsheet className="w-4 h-4" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                      {editingInvoiceId
-                        ? `Edit & Review Faktur (${invoiceNumber})`
-                        : 'Import File Faktur / Sales Order (SO) Muat Armada Baru'}
-                    </h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30">
-                      Pilih Area &rarr; Upload File &rarr; Review File
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Pilih <strong>Nama Area Kirim</strong> terlebih dahulu, lalu unggah file faktur sesuai template (<strong>No Faktur, Nama Pelanggan, Item Barang, Qty, Satuan</strong>) dan lakukan review sebelum disimpan.
-                  </p>
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate">
+                    {editingInvoiceId
+                      ? `Edit Faktur (${invoiceNumber})`
+                      : 'Input & Upload Faktur / Sales Order (SO)'}
+                  </h2>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer shrink-0"
+                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveInvoice} className="space-y-4 mt-4">
-              {/* ================================================================= */}
-              {/* LANGKAH 1: PILIH NAMA AREA KIRIM TERLEBIH DAHULU                   */}
-              {/* ================================================================= */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white text-xs font-black flex items-center justify-center">
-                      1
-                    </span>
-                    <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                      Langkah 1: Pilih Nama Area Kirim &amp; Armada Tujuan Terlebih Dahulu
-                    </span>
-                  </div>
-                  {areaName ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Area Terpilih: {areaName}</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>Wajib Pilih Nama Area Kirim Sebelum Upload File</span>
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <form onSubmit={handleSaveInvoice} className="space-y-3 mt-3">
+              {/* Baris 1: Area Kirim, Tanggal, Admin PIC & Tambah Armada Simple */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-bold uppercase text-indigo-600 dark:text-indigo-400 mb-1">
-                      1. Pilih Nama Area Kirim *
+                    <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                      Area Kirim *
                     </label>
                     <select
                       required
                       value={areaName}
                       onChange={e => setAreaName(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-bold cursor-pointer focus:outline-none ${
-                        areaName
-                          ? 'bg-white dark:bg-slate-900 border-emerald-500/60 text-slate-900 dark:text-white ring-2 ring-emerald-500/10'
-                          : 'bg-white dark:bg-slate-900 border-indigo-500/60 text-slate-900 dark:text-white ring-2 ring-indigo-500/15'
-                      }`}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:border-indigo-500"
                     >
-                      <option value="">-- Pilih Nama Area Kirim --</option>
+                      <option value="">-- Pilih Area Kirim --</option>
                       {OFFICIAL_DESTINATION_AREAS.map(ar => (
                         <option key={ar} value={ar}>
                           {ar}
@@ -2082,7 +2067,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                       Tanggal Muat *
                     </label>
                     <input
@@ -2090,18 +2075,18 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       required
                       value={date}
                       onChange={e => setDate(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                       Admin Penjualan PIC *
                     </label>
                     <select
                       value={adminPic}
                       onChange={e => setAdminPic(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
                     >
                       {adminNames.map(adm => (
                         <option key={adm} value={adm}>
@@ -2112,145 +2097,65 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                   </div>
                 </div>
 
-                {/* Multi-Armada Box Selector (Fitur Lebih Dari 1 Armada) */}
-                <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <label className="text-[11px] font-bold uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Truck className="w-3.5 h-3.5 text-sky-500" />
-                      <span>Alokasi Armada Box Pengiriman (Mendukung &gt; 1 Armada / Multi-Armada) *</span>
-                    </label>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-                      {selectedFleets.length} Armada Box Dipilih
-                    </span>
-                  </div>
+                {/* Simple Inline Armada Selector */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200/70 dark:border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-1 mr-1">
+                    <Truck className="w-3.5 h-3.5 text-sky-500" />
+                    Armada:
+                  </span>
 
-                  {/* Chips for Selected Fleets */}
-                  <div className="flex flex-wrap gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 min-h-[46px] items-center">
-                    {selectedFleets.map((fl, fIdx) => (
-                      <div
-                        key={fIdx}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/80 border border-sky-300 dark:border-sky-800 text-xs font-semibold text-slate-900 dark:text-white shadow-2xs"
-                      >
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-600 text-white">
-                          {fIdx === 0 ? 'Armada Utama' : `Armada #${fIdx + 1}`}
-                        </span>
-                        <span className="truncate max-w-[240px]" title={fl}>
-                          {fl}
-                        </span>
-                        {selectedFleets.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = selectedFleets.filter((_, i) => i !== fIdx);
-                              setSelectedFleets(next);
-                              if (next[0]) setFleetLabel(next[0]);
-                            }}
-                            className="text-slate-400 hover:text-rose-500 p-0.5 rounded cursor-pointer transition"
-                            title="Hapus armada ini dari faktur"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Dropdown to add another armada */}
-                  <div className="flex items-center gap-2">
-                    <select
-                      value=""
-                      onChange={e => {
-                        const val = e.target.value;
-                        if (val && !selectedFleets.includes(val)) {
-                          const updated = [...selectedFleets, val];
-                          setSelectedFleets(updated);
-                          setFleetLabel(updated[0]);
-                        }
-                      }}
-                      className="w-full sm:w-auto flex-1 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-dashed border-sky-300 dark:border-sky-700 text-xs font-semibold text-sky-700 dark:text-sky-300 cursor-pointer hover:border-sky-500"
+                  {selectedFleets.map((fl, fIdx) => (
+                    <span
+                      key={fIdx}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-800 text-[11px] font-bold text-slate-800 dark:text-slate-200"
                     >
-                      <option value="">+ Tambahkan Armada Box Lainnya (Jika Muatan Dibagi ke &gt; 1 Armada)...</option>
-                      {fleetOptions
-                        .filter(fl => !selectedFleets.includes(fl))
-                        .map(fl => (
-                          <option key={fl} value={fl}>
-                            {fl}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                    ℹ️ Gunakan opsi ini jika pesanan faktur ini membutuhkan lebih dari 1 armada box (misal volume barang besar atau armada pendamping).
-                  </p>
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                      <span className="truncate max-w-[180px]" title={fl}>
+                        {fl}
+                      </span>
+                      {selectedFleets.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = selectedFleets.filter((_, i) => i !== fIdx);
+                            setSelectedFleets(next);
+                            if (next[0]) setFleetLabel(next[0]);
+                          }}
+                          className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                          title="Hapus armada"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+
+                  <select
+                    value=""
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val && !selectedFleets.includes(val)) {
+                        const updated = [...selectedFleets, val];
+                        setSelectedFleets(updated);
+                        setFleetLabel(updated[0]);
+                      }
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-[11px] font-bold text-sky-700 dark:text-sky-300 cursor-pointer hover:border-sky-400"
+                  >
+                    <option value="">+ Tambah Armada</option>
+                    {fleetOptions
+                      .filter(fl => !selectedFleets.includes(fl))
+                      .map(fl => (
+                        <option key={fl} value={fl}>
+                          {fl}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               </div>
 
-              {/* ================================================================= */}
-              {/* LANGKAH 2: FORMAT TEMPLATE & UPLOAD FILE FAKTUR                    */}
-              {/* ================================================================= */}
-              <div
-                className={`p-4 rounded-2xl border space-y-3 transition ${
-                  areaName
-                    ? 'bg-slate-50 dark:bg-slate-950/70 border-slate-200 dark:border-slate-800'
-                    : 'bg-slate-100/70 dark:bg-slate-950/40 border-slate-200/70 dark:border-slate-800/60 opacity-85'
-                }`}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center ${
-                        areaName ? 'bg-indigo-600 text-white' : 'bg-slate-300 dark:bg-slate-800 text-slate-500'
-                      }`}
-                    >
-                      2
-                    </span>
-                    <div>
-                      <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white block">
-                        Langkah 2: Template &amp; Upload File Faktur (.xlsx / .xls / .csv)
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Kolom wajib pada file: <strong>No Faktur</strong>, <strong>Nama Pelanggan</strong>, <strong>Item Barang</strong>, <strong>Qty</strong>, <strong>Satuan</strong>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Download Template Buttons */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadTemplateExcel('xlsx')}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold shadow-2xs transition cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Download Template (.xlsx)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadTemplateExcel('csv')}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>Template (.csv)</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Visual Template Column Preview */}
-                <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                  <div className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    <span>Format Kolom Standar Template Import Faktur</span>
-                    <span>5 Kolom Wajib</span>
-                  </div>
-                  <div className="grid grid-cols-5 divide-x divide-slate-200 dark:divide-slate-800 text-[11px] text-center font-bold bg-slate-50/70 dark:bg-slate-950/60">
-                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">1. No Faktur</div>
-                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">2. Nama Pelanggan</div>
-                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">3. Item Barang</div>
-                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">4. Qty</div>
-                    <div className="py-2 px-2 text-indigo-600 dark:text-indigo-400">5. Satuan</div>
-                  </div>
-                </div>
-
-                {/* File Upload Dropzone */}
+              {/* Baris 2: Toolbar Upload File & Tambah Baris Input Manual (Selalu Tampil & Aktif) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/60">
                 <input
                   ref={importFileInputRef}
                   type="file"
@@ -2259,212 +2164,109 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                   className="hidden"
                 />
 
-                {!areaName ? (
-                  <div className="p-4 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 flex items-center justify-center gap-2.5 text-xs text-amber-600 dark:text-amber-300 font-bold">
-                    <Lock className="w-4 h-4 shrink-0" />
-                    <span>
-                      Silakan pilih <strong>Nama Area Kirim</strong> pada Langkah 1 di atas terlebih dahulu untuk membuka fitur Upload File Faktur.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-xl border-2 border-dashed border-indigo-500/40 bg-indigo-500/5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-black text-slate-900 dark:text-white truncate">
-                          {uploadedFileName
-                            ? `File Terunggah: ${uploadedFileName}`
-                            : `Upload File Faktur untuk Area ${areaName}`}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Mendukung file Excel (.xlsx, .xls) atau CSV (.csv) sesuai template 5 kolom di atas
-                        </div>
-                      </div>
-                    </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => importFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-2xs cursor-pointer transition"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{uploadedFileName ? 'Ganti File Faktur' : 'Upload File (.xlsx / .csv)'}</span>
+                  </button>
 
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => importFileInputRef.current?.click()}
-                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>{uploadedFileName ? 'Ganti / Upload Ulang File' : 'Pilih & Upload File Faktur'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleLoadSampleImportForArea}
-                        className="px-3 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer transition"
-                      >
-                        Muat Contoh File Area Ini
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ================================================================= */}
-              {/* LANGKAH 3: REVIEW FILE FAKTUR SEBELUM DISIMPAN                     */}
-              {/* ================================================================= */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center ${
-                        reviewRows.length > 0
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-300 dark:bg-slate-800 text-slate-500'
-                      }`}
-                    >
-                      3
-                    </span>
-                    <div>
-                      <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white block">
-                        Langkah 3: Review File Faktur ({reviewRows.length} Baris Item)
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Periksa kembali <strong>No Faktur, Nama Pelanggan, Item Barang, Qty, dan Satuan</strong> sebelum disimpan ke Aplikasi RFID
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {reviewRows.length > 0 && (
-                      <div className="flex items-center gap-1.5 text-[11px] font-bold">
-                        <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25">
-                          {new Set(reviewRows.map(r => r.noFaktur.trim().toUpperCase())).size} No Faktur
-                        </span>
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25">
-                          Total Qty: {reviewRows.reduce((acc, r) => acc + (Number(r.qty) || 0), 0)} Kemasan
-                        </span>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleAddReviewRow}
-                      disabled={!areaName}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-40 disabled:pointer-events-none text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 text-xs font-bold cursor-pointer transition"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Tambah Baris Review</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadTemplateExcel('xlsx')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer transition"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Template .xlsx</span>
+                  </button>
                 </div>
 
-                {!hasReviewedFile && reviewRows.length === 0 ? (
-                  <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-1.5">
-                    <FileSpreadsheet className="w-7 h-7 text-slate-400 mx-auto" />
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                      Belum Ada File Faktur yang Diunggah untuk Di-Review
-                    </div>
-                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                      Pilih <strong>Nama Area Kirim</strong> di Langkah 1, lalu klik <strong>Pilih &amp; Upload File Faktur</strong> (atau klik <em>Muat Contoh File Area Ini</em>) di Langkah 2 untuk menampilkan tabel review di sini.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-                    <div className="overflow-x-auto max-h-72">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead className="bg-slate-100 dark:bg-slate-950 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10">
-                          <tr>
-                            <th className="py-2.5 px-2.5 w-8 text-center">#</th>
-                            <th className="py-2.5 px-2.5">No Faktur *</th>
-                            <th className="py-2.5 px-2.5">Nama Pelanggan *</th>
-                            <th className="py-2.5 px-2.5">Item Barang (Terintegrasi Database Barang) *</th>
-                            <th className="py-2.5 px-2.5 w-20 text-center">Qty *</th>
-                            <th className="py-2.5 px-2.5 w-24">Satuan *</th>
-                            <th className="py-2.5 px-2.5 w-28">Dokumentasi</th>
-                            <th className="py-2.5 px-2.5 w-10 text-center">Aksi</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                          {reviewRows.map((row, idx) => {
-                            const matchedDb =
-                              dbBarangList.find(
-                                d =>
-                                  d.noBarang.toLowerCase() === row.skuCode.toLowerCase() ||
-                                  d.keteranganBarang.toLowerCase() === row.itemBarang.toLowerCase()
-                              ) || databaseBarangService.findMatch(row.skuCode, row.itemBarang);
-                            const docUrl =
-                              row.dokumentasiUrl ||
-                              matchedDb?.dokumentasiUrl ||
-                              createDefaultBarangThumbnail(row.skuCode, row.itemBarang, row.satuan);
-                            const docKb =
-                              row.compressedSizeKb ||
-                              matchedDb?.compressedSizeKb ||
-                              estimateDataUrlSizeKb(docUrl);
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    {reviewRows.length} Baris ({ reviewRows.reduce((acc, r) => acc + (Number(r.qty) || 0), 0) } Qty)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleAddReviewRow}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-indigo-50 text-indigo-600 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 text-xs font-bold cursor-pointer transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Tambah Baris</span>
+                  </button>
+                </div>
+              </div>
 
-                            return (
-                              <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                                <td className="py-2 px-2.5 text-center font-mono font-bold text-slate-400">
-                                  {idx + 1}
-                                </td>
-                                <td className="py-2 px-2.5">
-                                  <input
-                                    type="text"
-                                    required
-                                    value={row.noFaktur}
-                                    onChange={e =>
-                                      setReviewRows(prev =>
-                                        prev.map(r => (r.id === row.id ? { ...r, noFaktur: e.target.value } : r))
-                                      )
-                                    }
-                                    placeholder="FKT/AKK/..."
-                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
-                                  />
-                                </td>
-                                <td className="py-2 px-2.5">
-                                  <input
-                                    type="text"
-                                    required
-                                    value={row.namaPelanggan}
-                                    onChange={e =>
-                                      setReviewRows(prev =>
-                                        prev.map(r => (r.id === row.id ? { ...r, namaPelanggan: e.target.value } : r))
-                                      )
-                                    }
-                                    placeholder="Nama Pelanggan / Toko"
-                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
-                                  />
-                                </td>
-                                <td className="py-2 px-2.5 space-y-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[10px] shrink-0">
-                                      {row.skuCode}
-                                    </span>
-                                    <select
-                                      value=""
-                                      onChange={e => {
-                                        const picked = dbBarangList.find(d => d.id === e.target.value);
-                                        if (!picked) return;
-                                        setReviewRows(prev =>
-                                          prev.map(r =>
-                                            r.id === row.id
-                                              ? {
-                                                  ...r,
-                                                  skuCode: picked.noBarang,
-                                                  itemBarang: picked.keteranganBarang,
-                                                  satuan: normalizeUnit(picked.satuan),
-                                                  dokumentasiUrl: picked.dokumentasiUrl,
-                                                  compressedSizeKb: picked.compressedSizeKb
-                                                }
-                                              : r
-                                          )
-                                        );
-                                      }}
-                                      className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 cursor-pointer max-w-[170px] truncate"
-                                      title="Pilih dari Database Barang Gudang"
-                                    >
-                                      <option value="">Pilih dari Database Barang...</option>
-                                      {dbBarangList.map(dbItem => (
-                                        <option key={dbItem.id} value={dbItem.id}>
-                                          [{dbItem.noBarang}] {dbItem.keteranganBarang} ({dbItem.satuan})
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
+              {/* Baris 3: Tabel Input / Review Faktur (Langsung Tampil Tanpa Terkunci) */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                <div className="overflow-x-auto max-h-64">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100 dark:bg-slate-950 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10">
+                      <tr>
+                        <th className="py-2 px-2 w-8 text-center">#</th>
+                        <th className="py-2 px-2 w-48 min-w-[175px]">No Faktur *</th>
+                        <th className="py-2 px-2 w-64 min-w-[235px]">Nama Pelanggan *</th>
+                        <th className="py-2 px-2 min-w-[320px]">Item Barang (Database Barang) *</th>
+                        <th className="py-2 px-2 w-18 text-center">Qty *</th>
+                        <th className="py-2 px-2 w-24">Satuan *</th>
+                        <th className="py-2 px-2 w-10 text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {reviewRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-6 text-center text-xs text-slate-500">
+                            Belum ada baris item. Klik <strong>Upload File (.xlsx / .csv)</strong> atau <strong>+ Tambah Baris</strong> untuk mulai input.
+                          </td>
+                        </tr>
+                      ) : (
+                        reviewRows.map((row, idx) => {
+                          const standardUnits = ['CRT', 'ZAK', 'SLP', 'PAK', 'PCS', 'BAL', 'IKAT', 'BOX', 'ROLL', 'KG', 'DUS'];
+                          const currentUnit = (row.satuan || 'CRT').trim().toUpperCase();
+                          const unitOptions = standardUnits.includes(currentUnit)
+                            ? standardUnits
+                            : [currentUnit, ...standardUnits];
+
+                          return (
+                            <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                              <td className="py-1.5 px-2 text-center font-mono font-bold text-slate-400">
+                                {idx + 1}
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <input
+                                  type="text"
+                                  required
+                                  value={row.noFaktur}
+                                  onChange={e =>
+                                    setReviewRows(prev =>
+                                      prev.map(r => (r.id === row.id ? { ...r, noFaktur: e.target.value } : r))
+                                    )
+                                  }
+                                  placeholder="FKT/AKK/..."
+                                  className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <input
+                                  type="text"
+                                  required
+                                  value={row.namaPelanggan}
+                                  onChange={e =>
+                                    setReviewRows(prev =>
+                                      prev.map(r => (r.id === row.id ? { ...r, namaPelanggan: e.target.value } : r))
+                                    )
+                                  }
+                                  placeholder="Nama Pelanggan / Toko"
+                                  className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[10px] shrink-0">
+                                    {row.skuCode}
+                                  </span>
                                   <input
                                     type="text"
                                     required
@@ -2479,7 +2281,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                                                 ...r,
                                                 itemBarang: val,
                                                 skuCode: match?.noBarang || r.skuCode,
-                                                satuan: match ? normalizeUnit(match.satuan) : r.satuan,
+                                                satuan: match
+                                                  ? normalizeUnit(match.unit3 || match.satuan || r.satuan)
+                                                  : r.satuan,
                                                 dokumentasiUrl: match?.dokumentasiUrl || r.dokumentasiUrl,
                                                 compressedSizeKb: match?.compressedSizeKb || r.compressedSizeKb
                                               }
@@ -2487,110 +2291,88 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                                         )
                                       );
                                     }}
-                                    placeholder="Keterangan Barang / Item Barang..."
-                                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
+                                    placeholder="Ketik / cari nama barang..."
+                                    className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white"
                                   />
-                                </td>
-                                <td className="py-2 px-2.5">
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    required
-                                    value={row.qty}
-                                    onChange={e =>
-                                      setReviewRows(prev =>
-                                        prev.map(r =>
-                                          r.id === row.id ? { ...r, qty: Math.max(1, Number(e.target.value)) } : r
-                                        )
+                                </div>
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  required
+                                  value={row.qty}
+                                  onChange={e =>
+                                    setReviewRows(prev =>
+                                      prev.map(r =>
+                                        r.id === row.id ? { ...r, qty: Math.max(1, Number(e.target.value)) } : r
                                       )
-                                    }
-                                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-center text-slate-900 dark:text-white"
-                                  />
-                                </td>
-                                <td className="py-2 px-2.5">
-                                  <select
-                                    value={row.satuan}
-                                    onChange={e =>
-                                      setReviewRows(prev =>
-                                        prev.map(r =>
-                                          r.id === row.id
-                                            ? { ...r, satuan: e.target.value as SalesOrderItem['unit'] }
-                                            : r
-                                        )
+                                    )
+                                  }
+                                  className="w-full px-1.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-center text-slate-900 dark:text-white"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <select
+                                  value={currentUnit}
+                                  onChange={e =>
+                                    setReviewRows(prev =>
+                                      prev.map(r =>
+                                        r.id === row.id
+                                          ? { ...r, satuan: e.target.value }
+                                          : r
                                       )
-                                    }
-                                    className="w-full px-2 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
-                                  >
-                                    <option value="Box">Box</option>
-                                    <option value="Ikat">Ikat</option>
-                                    <option value="Bal">Bal</option>
-                                    <option value="Pack">Pack</option>
-                                    <option value="Roll">Roll</option>
-                                    <option value="Pcs">Pcs</option>
-                                  </select>
-                                </td>
-                                <td className="py-2 px-2.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <img
-                                      src={docUrl}
-                                      alt={row.itemBarang}
-                                      className="w-10 h-7 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
-                                    />
-                                    <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                      {docKb} KB
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="py-2 px-2.5 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => setReviewRows(prev => prev.filter(r => r.id !== row.id))}
-                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                                    title="Hapus Baris"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                                    )
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                                >
+                                  {unitOptions.map(u => (
+                                    <option key={u} value={u}>
+                                      {u}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="py-1.5 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setReviewRows(prev => prev.filter(r => r.id !== row.id))}
+                                  className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                  title="Hapus Baris"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex-wrap">
+              {/* Footer Actions */}
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex-wrap">
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {areaName ? (
-                    <span>
-                      Target Area Kirim: <strong className="text-slate-900 dark:text-white">{areaName}</strong> •{' '}
-                      <strong>{reviewRows.length}</strong> baris item siap disinkronkan
-                    </span>
-                  ) : (
-                    <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                      * Pilih Nama Area Kirim pada Langkah 1 terlebih dahulu
-                    </span>
-                  )}
+                  Target: <strong className="text-slate-900 dark:text-white">{areaName || 'Pilih Area'}</strong> •{' '}
+                  <strong>{selectedFleets.length}</strong> Armada • <strong>{reviewRows.length}</strong> Item
                 </div>
 
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
                     disabled={!areaName || reviewRows.length === 0}
-                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-sm cursor-pointer transition"
+                    className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-sm cursor-pointer transition"
                   >
-                    {editingInvoiceId
-                      ? 'Simpan Perubahan & Sinkronkan ke Aplikasi RFID'
-                      : 'Simpan Hasil Review & Sinkronkan ke Aplikasi RFID'}
+                    {editingInvoiceId ? 'Simpan Perubahan' : 'Simpan & Sinkronkan'}
                   </button>
                 </div>
               </div>

@@ -1,9 +1,9 @@
 {
-  "versionCode": 10012,
-  "versionName": "1.0.12",
-  "updatedAt": "2026-11-06T11:20:00.000000",
+  "versionCode": 10013,
+  "versionName": "1.0.13",
+  "updatedAt": "2026-11-06T13:55:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V24: Sistem Rancangan & Visual Designer Formulir Armada (Service, Cuci, Pengadaan), standarisasi urutan kanonik armada (N1-DS5) & manajemen BBM modern, multi-photo capture & non-contiguous search Database Barang, serta pembaruan 5-tab navigasi Aplikasi Scan & Foto Muat beserta sinkronisasi penuh Hostinger MySQL."
+  "releaseNotes": "Update V25: Penyederhanaan Modal Ringkas Input & Upload Faktur / Sales Order (SO) (langsung aktif tanpa kunci langkah, selector multi-armada inline, serta standarisasi satuan gudang CRT/ZAK/SLP/PAK/PCS/BAL/IKAT/BOX/ROLL/KG/DUS) beserta sinkronisasi penuh Hostinger MySQL."
 }
