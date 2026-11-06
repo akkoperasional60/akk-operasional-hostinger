@@ -21,9 +21,15 @@ import {
   Calendar,
   Layers,
   Eye,
-  Trash2
+  Trash2,
+  ChevronDown,
+  CalendarDays,
+  X,
+  Play,
+  Filter
 } from 'lucide-react';
 import { LeafletMap } from './LeafletMap';
+import { GpsFleetTripsMap } from './GpsFleetTripsMap';
 import { logisticsStore } from '../services/store';
 import {
   TrackingEvaluation,
@@ -1212,10 +1218,17 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [selectedDateGroup, setSelectedDateGroup] = useState<string>('all');
+  const [calendarScopeMode, setCalendarScopeMode] = useState<
+    'harian' | 'mingguan' | 'bulanan' | 'tahunan' | 'semua'
+  >('semua');
   const [activityFilter, setActivityFilter] = useState<
     'all' | 'customer_stop' | 'long_non_customer' | 'moving_only'
   >('all');
   const [searchFilter, setSearchFilter] = useState('');
+  const [isFleetDropdownOpen, setIsFleetDropdownOpen] = useState(false);
+  const [fleetSearchQuery, setFleetSearchQuery] = useState('');
+  const [isUploadFleetDropdownOpen, setIsUploadFleetDropdownOpen] = useState(false);
+  const [uploadFleetSearchQuery, setUploadFleetSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Current active evaluation based on selectedFleetPlate
@@ -1794,7 +1807,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
     }
 
     if (stagedFiles.length === 0) {
-      setErrorMessage('Pilih file Excel (.xls, .xlsx, .csv) Tracksolid / Wanway terlebih dahulu.');
+      setErrorMessage('Pilih file Excel (.xls, .xlsx, .csv) rute GPS terlebih dahulu.');
       return;
     }
 
@@ -1834,9 +1847,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       setSuccessMessage(
         `Berhasil memproses ${newEvaluations.length} armada (${newEvaluations
           .map(e => e.plateNumber)
-          .join(', ')}) dari platform ${
-          gpsPlatform === 'tracksolid' ? 'Tracksolid Pro' : 'WanwayTrack'
-        } periode ${uploadMonth} ${uploadYear}.`
+          .join(', ')}) periode ${uploadMonth} ${uploadYear}.`
       );
     } catch (err: any) {
       setErrorMessage(err.message || 'Gagal memproses file Excel GPS.');
@@ -1845,7 +1856,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
     }
   };
 
-  // Download template Excel (Tracksolid or Wanway) without Fuel columns
+  // Download template Excel without Fuel columns
   const handleDownloadTemplate = () => {
     const sheetData: any[][] = [
       [
@@ -1909,14 +1920,10 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       { wch: 18 }
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      wb,
-      ws,
-      gpsPlatform === 'tracksolid' ? 'Template_Tracksolid' : 'Template_Wanway'
-    );
+    XLSX.utils.book_append_sheet(wb, ws, 'Template_Rute_GPS');
     XLSX.writeFile(
       wb,
-      `Template_Evaluasi_${gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway'}_AKK.xlsx`
+      `Template_Evaluasi_Rute_GPS_AKK.xlsx`
     );
   };
 
@@ -1924,7 +1931,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   const handleExportUnifiedAnalysis = () => {
     const rows = unifiedRows.map(item => ({
       Armada: `${item.fleetPlate} [${item.fleetInitial}]`,
-      Platform: item.gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway',
+      'Status GPS': 'Terhubung',
       Ritase: `#${item.legNumber}`,
       Tanggal: item.dateGroup,
       'Jam Mulai Gerak': item.startTime,
@@ -1972,7 +1979,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   const subtotals = activeEvaluation?.dateSubtotals || DEFAULT_TRACKSOLID_DATE_SUBTOTALS;
 
   // ============================================================================
-  // RENDER UPLOAD FORM SCREEN (MATCHING IMAGE 2 + TRACKSOLID/WANWAY + FLEET SPEC)
+  // RENDER UPLOAD FORM SCREEN (MATCHING IMAGE 2 + FLEET SPEC)
   // ============================================================================
   if (viewMode === 'upload_form') {
     return (
@@ -1982,13 +1989,13 @@ export const ExcelTrackingEvaluator: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2.5">
-                <FileSpreadsheet className="w-5 h-5 text-blue-400" />
+                <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
                 <h2 className="text-lg font-bold text-white">
                   Unggah File Evaluasi Rute GPS Armada
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Pilih periode bulan, platform GPS (Tracksolid / Wanway), spesifikasi armada (1 atau beberapa armada), dan unggah file Excel (.xls, .xlsx, .csv).
+                Pilih periode bulan, format data log GPS, spesifikasi armada (1 atau beberapa armada), dan unggah file Excel (.xls, .xlsx, .csv).
               </p>
             </div>
 
@@ -2051,31 +2058,31 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             </div>
           </div>
 
-          {/* Row 2: PILIHAN PLATFORM GPS (TRACKSOLID ATAU WANWAY) */}
+          {/* Row 2: PILIHAN FORMAT STRUKTUR DATA GPS */}
           <div className="space-y-2">
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-              Platform Sumber Data GPS (Tracksolid / Wanway)
+              Format Struktur Data Log GPS
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div
                 onClick={() => setGpsPlatform('tracksolid')}
                 className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
                   gpsPlatform === 'tracksolid'
-                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    ? 'bg-indigo-600/15 border-indigo-500 text-white shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
                 <div
                   className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
-                    gpsPlatform === 'tracksolid' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                    gpsPlatform === 'tracksolid' ? 'border-indigo-400 bg-indigo-600' : 'border-slate-600'
                   }`}
                 >
                   {gpsPlatform === 'tracksolid' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">Tracksolid Pro (Format Trips / Track)</div>
+                  <div className="text-xs font-bold text-white">Format Log Trips &amp; Ritase Perjalanan</div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
-                    Unggah file export perjalanan GPS dari platform Tracksolid.
+                    Mendukung file log ritase lengkap dengan kolom tanggal, waktu tempuh, titik berangkat, tiba, dan durasi berhenti.
                   </div>
                 </div>
               </div>
@@ -2084,21 +2091,21 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 onClick={() => setGpsPlatform('wanway')}
                 className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
                   gpsPlatform === 'wanway'
-                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    ? 'bg-indigo-600/15 border-indigo-500 text-white shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
                 <div
                   className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
-                    gpsPlatform === 'wanway' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                    gpsPlatform === 'wanway' ? 'border-indigo-400 bg-indigo-600' : 'border-slate-600'
                   }`}
                 >
                   {gpsPlatform === 'wanway' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">WanwayTrack (Wanway GPS)</div>
+                  <div className="text-xs font-bold text-white">Format Log Koordinat &amp; Jejak GPS</div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
-                    Unggah file histori perjalanan & koordinat dari platform Wanway GPS.
+                    Mendukung file histori koordinat latitude, longitude, kecepatan berkendara, dan status mesin armada.
                   </div>
                 </div>
               </div>
@@ -2115,13 +2122,13 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 onClick={() => setFleetScopeMode('single')}
                 className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
                   fleetScopeMode === 'single'
-                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    ? 'bg-indigo-600/15 border-indigo-500 text-white shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
                 <div
                   className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
-                    fleetScopeMode === 'single' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                    fleetScopeMode === 'single' ? 'border-indigo-400 bg-indigo-600' : 'border-slate-600'
                   }`}
                 >
                   {fleetScopeMode === 'single' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
@@ -2138,13 +2145,13 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 onClick={() => setFleetScopeMode('multiple')}
                 className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
                   fleetScopeMode === 'multiple'
-                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    ? 'bg-indigo-600/15 border-indigo-500 text-white shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
                 <div
                   className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
-                    fleetScopeMode === 'multiple' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                    fleetScopeMode === 'multiple' ? 'border-indigo-400 bg-indigo-600' : 'border-slate-600'
                   }`}
                 >
                   {fleetScopeMode === 'multiple' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
@@ -2167,11 +2174,11 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 <select
                   value={selectedSingleFleetId}
                   onChange={e => setSelectedSingleFleetId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   {fleets.map(f => (
                     <option key={f.id} value={f.id}>
-                      {f.plateNumber} {f.initialCode ? `[Inisial: ${f.initialCode}]` : ''} — {f.brand || 'Armada'} ({f.vehicleType})
+                      [{f.initialCode || 'UNIT'}] {f.plateNumber} • {f.vehicleType} ({f.brand || 'Armada'})
                     </option>
                   ))}
                 </select>
@@ -2288,20 +2295,15 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             </div>
           </div>
 
-          {/* Row 5: FILE UPLOAD DASHED BOX (Matching Image 2) */}
+          {/* Row 5: FILE UPLOAD DASHED BOX */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                File Evaluasi GPS ({gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway'})
+                File Evaluasi GPS (.xlsx / .xls / .csv)
               </label>
-              <button
-                type="button"
-                onClick={handleDownloadTemplate}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Template Excel</span>
-              </button>
+              <span className="text-[11px] text-slate-400">
+                Pilih file histori koordinat atau ritase
+              </span>
             </div>
 
             <div className="border-2 border-dashed border-slate-800 rounded-2xl p-4 bg-slate-950/60 space-y-2.5">
@@ -2371,7 +2373,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                   <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800">
                     <tr>
                       <th className="py-2.5 px-3">Armada</th>
-                      <th className="py-2.5 px-3">Platform</th>
+                      <th className="py-2.5 px-3">Status GPS</th>
                       <th className="py-2.5 px-3">Periode</th>
                       <th className="py-2.5 px-3">Total Ritase</th>
                       <th className="py-2.5 px-3">Total Jarak</th>
@@ -2385,8 +2387,8 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                           {ev.plateNumber} {ev.initialCode ? `[${ev.initialCode}]` : ''}
                         </td>
                         <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] font-bold uppercase">
-                            {ev.gpsPlatform || 'tracksolid'}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> GPS Aktif
                           </span>
                         </td>
                         <td className="py-2.5 px-3">
@@ -2428,16 +2430,16 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   return (
     <div className="space-y-5">
       {/* Top Header Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-1.5">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium mb-1.5">
             <Truck className="w-3.5 h-3.5" />
-            <span>Evaluasi Rute GPS Tracksolid & Wanway • Terintegrasi Jaringan Toko & Mitra</span>
+            <span>Rute GPS &amp; Analisa Ritase • Terintegrasi Jaringan Toko &amp; Mitra</span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
-            Peta Rute GPS & Analisa Armada Kirim ke Pelanggan
+            Peta Rute GPS &amp; Analisa Armada Kirim ke Pelanggan
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-300 mt-1">
             Rincian perjalanan setiap armada (ritase, jarak tempuh, durasi per hari, rata-rata kecepatan harian, kecepatan maksimal) serta analisa berhenti di toko pelanggan vs berhenti lama non-mitra.
           </p>
         </div>
@@ -2445,20 +2447,11 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            onClick={handleDownloadTemplate}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-blue-400" />
-            <span>Unduh Template Excel</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setViewMode('upload_form')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-sm transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition cursor-pointer"
           >
             <Upload className="w-4 h-4" />
-            <span>Unggah File Excel (Tracksolid / Wanway)</span>
+            <span>Unggah File Excel Rute GPS</span>
           </button>
 
           <button
@@ -2501,43 +2494,140 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400">
+            <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
               <Truck className="w-4 h-4" />
             </div>
             <div>
               <span className="text-xs font-bold text-white uppercase tracking-wider block">
-                Pilih Unit Armada Evaluasi GPS
+                Pilih Unit Armada GPS
               </span>
-              <span className="text-[11px] text-slate-400">
-                Pilih salah satu armada dari daftar dropdown untuk menampilkan rincian rute &amp; analisa unit tersebut
+              <span className="text-[11px] text-slate-300">
+                Pilih armada untuk menganalisa jejak trips rute &amp; performa pengiriman
               </span>
             </div>
           </div>
 
-          {/* Dropdown List Armada */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <label className="text-xs font-semibold text-slate-300 whitespace-nowrap">
-              Unit Armada:
-            </label>
-            <select
-              value={selectedFleetPlate === 'all' ? (fleetEvaluations[0]?.plateNumber || 'P 8381 VE') : selectedFleetPlate}
-              onChange={(e) => setSelectedFleetPlate(e.target.value)}
-              className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer shadow-xs"
-            >
-              {fleetEvaluations.map(ev => {
-                const fleetSpec = fleets.find(
-                  f => f.id === ev.fleetId || f.plateNumber === ev.plateNumber
-                );
-                const initLabel = ev.initialCode || fleetSpec?.initialCode || 'UNIT';
-                const vType = fleetSpec?.vehicleType ? ` • ${fleetSpec.vehicleType}` : '';
-                const plat = ev.gpsPlatform === 'wanway' ? 'WANWAY' : 'TRACKSOLID';
-                return (
-                  <option key={ev.plateNumber} value={ev.plateNumber}>
-                    [{initLabel}] {ev.plateNumber}{vType} ({plat})
-                  </option>
-                );
-              })}
-            </select>
+          {/* Enhanced Dropdown List Armada (Clean, Modern, No Tracksolid/Wanway) */}
+          <div className="relative w-full sm:w-auto">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-slate-300 whitespace-nowrap hidden sm:inline">
+                Unit Armada:
+              </label>
+              
+              <div className="relative w-full sm:w-80">
+                <button
+                  type="button"
+                  onClick={() => setIsFleetDropdownOpen(!isFleetDropdownOpen)}
+                  className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 hover:border-indigo-500 text-xs font-bold text-white transition cursor-pointer shadow-xs"
+                >
+                  {(() => {
+                    const selEv = fleetEvaluations.find(e => e.plateNumber === selectedFleetPlate) || fleetEvaluations[0];
+                    const selSpec = fleets.find(f => f.id === selEv?.fleetId || f.plateNumber === selEv?.plateNumber);
+                    const initLabel = selEv?.initialCode || selSpec?.initialCode || 'UNIT';
+                    const vType = selSpec?.vehicleType ? ` • ${selSpec.vehicleType}` : '';
+                    return (
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                          [{initLabel}]
+                        </span>
+                        <span className="truncate text-white font-mono">{selEv?.plateNumber || 'P 8381 VE'}</span>
+                        <span className="text-slate-400 text-[11px] font-normal truncate hidden sm:inline">{vType}</span>
+                      </div>
+                    );
+                  })()}
+                  <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isFleetDropdownOpen ? 'rotate-180 text-indigo-400' : ''}`} />
+                </button>
+
+                {isFleetDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsFleetDropdownOpen(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-full sm:w-96 bg-slate-950 border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1.5 animate-in fade-in zoom-in-95 duration-100">
+                      {fleetEvaluations.length > 5 && (
+                        <div className="p-1.5">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              placeholder="Cari armada..."
+                              value={fleetSearchQuery}
+                              onChange={e => setFleetSearchQuery(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                              onClick={e => e.stopPropagation()}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+                        {fleetEvaluations
+                          .filter(ev => {
+                            if (!fleetSearchQuery.trim()) return true;
+                            const q = fleetSearchQuery.toLowerCase();
+                            return (
+                              (ev.plateNumber && ev.plateNumber.toLowerCase().includes(q)) ||
+                              (ev.initialCode && ev.initialCode.toLowerCase().includes(q))
+                            );
+                          })
+                          .map(ev => {
+                            const plateStr = ev.plateNumber || 'P 8381 VE';
+                            const fleetSpec = fleets.find(
+                              f => f.id === ev.fleetId || f.plateNumber === ev.plateNumber
+                            );
+                            const initLabel = ev.initialCode || fleetSpec?.initialCode || 'UNIT';
+                            const vType = fleetSpec?.vehicleType ? ` • ${fleetSpec.vehicleType}` : '';
+                            const isSelected = (selectedFleetPlate === 'all' ? fleetEvaluations[0]?.plateNumber : selectedFleetPlate) === plateStr;
+                            const tripCount = ev.tripLegs?.length || 0;
+                            const totalKm = ev.totalDistanceKm || ev.bottomSummary?.totalMileageKm || 0;
+
+                            return (
+                              <button
+                                key={plateStr}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedFleetPlate(plateStr);
+                                  setIsFleetDropdownOpen(false);
+                                  setFleetSearchQuery('');
+                                }}
+                                className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-indigo-600/20 border border-indigo-500/50 text-white'
+                                    : 'hover:bg-slate-900 text-slate-300 border border-transparent'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 truncate">
+                                  <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                                    [{initLabel}]
+                                  </span>
+                                  <div className="truncate">
+                                    <div className="font-mono font-bold text-xs text-white">
+                                      {ev.plateNumber}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 truncate">
+                                      {fleetSpec?.vehicleType || 'Armada Box'} {fleetSpec?.brand ? `• ${fleetSpec.brand}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="text-right shrink-0 ml-2">
+                                  <div className="font-mono text-[11px] font-bold text-indigo-300">
+                                    {tripCount} Rit
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-mono">
+                                    {typeof totalKm === 'number' ? totalKm.toFixed(1) : totalKm} km
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2569,131 +2659,74 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                   <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 font-mono text-xs font-black">
                     {currentEv.initialCode || fleetSpec?.initialCode || 'UNIT'}
                   </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-base text-white">
-                        {currentEv.plateNumber}
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-mono font-black text-lg text-white">
+                      {currentEv.plateNumber}
+                    </span>
+                    {fleetSpec?.vehicleType && (
+                      <span className="px-2.5 py-0.5 rounded-lg bg-slate-800 text-white text-xs font-bold border border-slate-700">
+                        {fleetSpec.vehicleType}
                       </span>
-                      {fleetSpec?.vehicleType && (
-                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-semibold">
-                          {fleetSpec.vehicleType}
-                        </span>
-                      )}
-                      <span className="px-2 py-0.5 rounded bg-blue-600/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold uppercase">
-                        {currentEv.gpsPlatform === 'wanway' ? 'Wanway GPS' : 'Tracksolid GPS'}
+                    )}
+                    {fleetSpec?.brand && (
+                      <span className="text-xs text-slate-300 font-medium">
+                        • {fleetSpec.brand} ({fleetSpec.year || '-'})
                       </span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Periode Evaluasi: <strong className="text-slate-200">{currentEv.uploadedMonth || 'Oktober'} {currentEv.uploadedYear || '2026'}</strong>
-                      {fleetSpec?.brand ? ` • ${fleetSpec.brand} (${fleetSpec.year || '-'})` : ''}
-                    </div>
+                    )}
                   </div>
                 </div>
-
-                {evSubtotals.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <span
-                        key={st.dateGroup}
-                        className="px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 font-mono text-[10px]"
-                      >
-                        {st.dateGroup}: <strong className="text-white">{st.tripCount} rit</strong> ({st.totalMileageKm} km &bull; {st.travelTime})
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
 
-              {/* 5 KPI Cards for the Selected Armada */}
+              {/* 5 KPI Cards for the Selected Armada (Simple, Clean, High Contrast) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 {/* Card 1: Trips */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-xs">
+                  <div className="flex items-center justify-between text-slate-300 text-xs uppercase font-bold tracking-wider mb-1.5">
                     <span>Trips (Ritase)</span>
-                    <Truck className="w-4 h-4 text-blue-400" />
+                    <Truck className="w-4 h-4 text-indigo-400" />
                   </div>
                   <div className="text-2xl font-black text-white">{evBottom.trips}</div>
-                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <div key={st.dateGroup} className="flex items-center justify-between">
-                        <span>{st.dateGroup}:</span>
-                        <strong className="text-slate-200">{st.tripCount} ritase</strong>
-                      </div>
-                    ))}
-                  </div>
                 </div>
 
                 {/* Card 2: Total KM */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-xs">
+                  <div className="flex items-center justify-between text-slate-300 text-xs uppercase font-bold tracking-wider mb-1.5">
                     <span>Total KM</span>
                     <MapPin className="w-4 h-4 text-emerald-400" />
                   </div>
-                  <div className="text-2xl font-black text-emerald-400">
-                    {evBottom.totalMileageKm} <span className="text-xs font-normal text-slate-400">km</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <div key={st.dateGroup} className="flex items-center justify-between">
-                        <span>{st.dateGroup}:</span>
-                        <strong className="text-emerald-300">{st.totalMileageKm} km</strong>
-                      </div>
-                    ))}
+                  <div className="text-2xl font-black text-emerald-300">
+                    {evBottom.totalMileageKm} <span className="text-xs font-normal text-slate-300">km</span>
                   </div>
                 </div>
 
                 {/* Card 3: Durasi Per Hari */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-xs">
+                  <div className="flex items-center justify-between text-slate-300 text-xs uppercase font-bold tracking-wider mb-1.5">
                     <span>Durasi Per Hari</span>
                     <Clock className="w-4 h-4 text-amber-400" />
                   </div>
-                  <div className="text-xl font-black text-white font-mono">{evBottom.duration}</div>
-                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <div key={st.dateGroup} className="flex items-center justify-between">
-                        <span>{st.dateGroup}:</span>
-                        <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
-                      </div>
-                    ))}
-                  </div>
+                  <div className="text-2xl font-black text-amber-300 font-mono">{evBottom.duration}</div>
                 </div>
 
-                {/* Card 4: Rata-Rata Kecepatan Per Hari */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                {/* Card 4: Rata-Rata Kecepatan */}
+                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-xs">
+                  <div className="flex items-center justify-between text-slate-300 text-xs uppercase font-bold tracking-wider mb-1.5">
                     <span>Rata-Rata Kecepatan</span>
-                    <Gauge className="w-4 h-4 text-blue-400" />
+                    <Gauge className="w-4 h-4 text-cyan-400" />
                   </div>
-                  <div className="text-2xl font-black text-white">
-                    {evBottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <div key={st.dateGroup} className="flex items-center justify-between">
-                        <span>{st.dateGroup}:</span>
-                        <strong className="text-blue-300">{st.avgSpeedKmh} km/h</strong>
-                      </div>
-                    ))}
+                  <div className="text-2xl font-black text-cyan-300">
+                    {evBottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-300">km/h</span>
                   </div>
                 </div>
 
                 {/* Card 5: Kecepatan Maksimal */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-xs">
+                  <div className="flex items-center justify-between text-slate-300 text-xs uppercase font-bold tracking-wider mb-1.5">
                     <span>Kecepatan Maksimal</span>
                     <TrendingUp className="w-4 h-4 text-rose-400" />
                   </div>
                   <div className="text-2xl font-black text-rose-300">
-                    {evBottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                    {evSubtotals.slice(0, 2).map(st => (
-                      <div key={st.dateGroup} className="flex items-center justify-between">
-                        <span>{st.dateGroup}:</span>
-                        <strong className="text-rose-300">{st.maxSpeedKmh} km/h</strong>
-                      </div>
-                    ))}
+                    {evBottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-300">km/h</span>
                   </div>
                 </div>
               </div>
@@ -2702,20 +2735,181 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         })()}
       </div>
 
-      {/* Tabs Navigation (NO Trips_Tracksolid_... text on the right!) */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+      {/* Compact Modern Filter Bar (Harian, 1 Minggu, 1 Bulan, 1 Tahun, Semua) */}
+      {(() => {
+        const currentEv =
+          fleetEvaluations.find(e => e.plateNumber === selectedFleetPlate) ||
+          fleetEvaluations[0];
+        const subtotalsList = currentEv?.dateSubtotals || [];
+        const totalTripsAll = subtotalsList.reduce((acc, s) => acc + (s.tripCount || 0), 0);
+        const totalKmAll = subtotalsList.reduce((acc, s) => acc + (s.totalMileageKm || 0), 0);
+
+        // Scope-based calculation
+        const scopeSubtotals = subtotalsList.filter(s => {
+          if (calendarScopeMode === 'harian') {
+            if (selectedDateGroup && selectedDateGroup !== 'all') {
+              return s.dateGroup === selectedDateGroup;
+            }
+            return s.dateGroup === (subtotalsList[0]?.dateGroup || '2026-10-26');
+          }
+          if (calendarScopeMode === 'mingguan') {
+            return s.dateGroup >= '2026-10-20' && s.dateGroup <= '2026-10-26';
+          }
+          if (calendarScopeMode === 'bulanan') {
+            const monthNames = [
+              'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+              'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+            ];
+            const mIdx = monthNames.indexOf(uploadMonth || 'Oktober') + 1;
+            const mStr = mIdx < 10 ? `0${mIdx}` : `${mIdx}`;
+            return s.dateGroup.startsWith(`${uploadYear || '2026'}-${mStr}`);
+          }
+          if (calendarScopeMode === 'tahunan') {
+            return s.dateGroup.startsWith(uploadYear || '2026');
+          }
+          return true; // 'semua'
+        });
+
+        const currentScopeTrips = scopeSubtotals.reduce((acc, s) => acc + (s.tripCount || 0), 0);
+        const currentScopeKm = scopeSubtotals.reduce((acc, s) => acc + (s.totalMileageKm || 0), 0);
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5 mr-1">
+                <Calendar className="w-4 h-4 text-indigo-400" />
+                Periode:
+              </span>
+
+              {/* Mode Buttons: Harian, 1 Minggu, 1 Bulan, 1 Tahun, Semua */}
+              <div className="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+                {(['harian', 'mingguan', 'bulanan', 'tahunan', 'semua'] as const).map(mode => {
+                  const label =
+                    mode === 'harian'
+                      ? 'Harian'
+                      : mode === 'mingguan'
+                      ? '1 Minggu'
+                      : mode === 'bulanan'
+                      ? '1 Bulan'
+                      : mode === 'tahunan'
+                      ? '1 Tahun'
+                      : 'Semua';
+                  const isActive = calendarScopeMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setCalendarScopeMode(mode);
+                        if (mode === 'semua' || mode === 'mingguan' || mode === 'bulanan' || mode === 'tahunan') {
+                          setSelectedDateGroup('all');
+                        } else if (mode === 'harian' && selectedDateGroup === 'all' && subtotalsList[0]) {
+                          setSelectedDateGroup(subtotalsList[0].dateGroup);
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-200 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Scope Detail: Harian */}
+              {calendarScopeMode === 'harian' && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={selectedDateGroup !== 'all' ? selectedDateGroup : (subtotalsList[0]?.dateGroup || '2026-10-26')}
+                    onChange={e => setSelectedDateGroup(e.target.value)}
+                    className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  />
+                  {subtotalsList.map(st => (
+                    <button
+                      key={st.dateGroup}
+                      type="button"
+                      onClick={() => setSelectedDateGroup(st.dateGroup)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition cursor-pointer border ${
+                        selectedDateGroup === st.dateGroup
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-xs'
+                          : 'bg-slate-950 text-slate-200 border-slate-800 hover:text-white hover:border-slate-700'
+                      }`}
+                    >
+                      {st.dateGroup}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Scope Detail: 1 Minggu */}
+              {calendarScopeMode === 'mingguan' && (
+                <span className="text-xs font-semibold text-slate-200 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800">
+                  Minggu Ini (20 - 26 Oktober 2026)
+                </span>
+              )}
+
+              {/* Scope Detail: 1 Bulan */}
+              {calendarScopeMode === 'bulanan' && (
+                <select
+                  value={uploadMonth}
+                  onChange={e => setUploadMonth(e.target.value)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  {['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'].map(m => (
+                    <option key={m} value={m} className="bg-slate-900 text-white">{m} 2026</option>
+                  ))}
+                </select>
+              )}
+
+              {/* Scope Detail: 1 Tahun */}
+              {calendarScopeMode === 'tahunan' && (
+                <span className="text-xs font-bold font-mono text-white px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800">
+                  Tahun 2026
+                </span>
+              )}
+            </div>
+
+            {/* Total KM & Trips Badge */}
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-mono font-bold text-xs">
+                {currentScopeTrips} Ritase • {currentScopeKm.toFixed(1)} km
+              </span>
+              {selectedDateGroup !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDateGroup('all');
+                    setCalendarScopeMode('semua');
+                  }}
+                  className="text-xs font-bold text-rose-400 hover:text-rose-300 cursor-pointer px-1.5 py-0.5 rounded hover:bg-rose-500/10"
+                  title="Tampilkan semua tanggal"
+                >
+                  ✕ Reset
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Tabs Navigation (Modern Sleek High Contrast - Crisp White Text) */}
+      <div className="bg-slate-950 border border-slate-800 p-1.5 rounded-2xl">
         <div className="flex items-center gap-2 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('map')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               activeTab === 'map'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
+                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
             }`}
           >
-            <MapPin className="w-3.5 h-3.5" />
-            <span>Peta Rute GPS & Rincian Harian Armada</span>
+            <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Peta Rute GPS &amp; Rincian Harian Armada</span>
           </button>
 
           <button
@@ -2723,14 +2917,14 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             onClick={() => setActiveTab('unified_stops_customer')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               activeTab === 'unified_stops_customer'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
+                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
             }`}
           >
-            <Store className="w-3.5 h-3.5" />
-            <span>Armada Bergerak, Berhenti & Analisa Kirim Pelanggan</span>
+            <Store className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Armada Bergerak, Berhenti &amp; Analisa Kirim Pelanggan</span>
             {unifiedStats.longNonCustomerCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold shadow-xs">
                 {unifiedStats.longNonCustomerCount} Non-Mitra
               </span>
             )}
@@ -2741,12 +2935,12 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             onClick={() => setActiveTab('speed_summary')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               activeTab === 'speed_summary'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
+                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
             }`}
           >
-            <Gauge className="w-3.5 h-3.5" />
-            <span>Profil Kecepatan & Rekapitulasi Per Hari</span>
+            <Gauge className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Profil Kecepatan &amp; Rekapitulasi Per Hari</span>
           </button>
         </div>
       </div>
@@ -2756,40 +2950,22 @@ export const ExcelTrackingEvaluator: React.FC = () => {
          ====================================================================== */}
       {activeTab === 'map' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <h3 className="text-sm font-bold text-white">
-                  Track Rute Aktual GPS Armada: {activeEvaluation?.plateNumber} (
-                  {activeEvaluation?.points.length || 0} Titik Track & {activeEvaluation?.stops.length || 0} Titik Berhenti)
-                </h3>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-                <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
-                  <span className="w-3 h-3 rounded-full bg-emerald-600 border border-white" /> Berhenti di Toko Mitra
-                </span>
-                <span className="flex items-center gap-1.5 font-semibold text-rose-400">
-                  <span className="w-3 h-3 rounded-full bg-rose-600 border border-amber-300" /> ⚠️ Berhenti Lama Non-Mitra
-                </span>
-                <span className="flex items-center gap-1.5 font-semibold text-blue-400">
-                  <span className="w-3 h-3 rounded-full bg-blue-600 border border-white" /> Dalam Kota (Biru)
-                </span>
-                <span className="flex items-center gap-1.5 font-semibold text-amber-300">
-                  <span className="w-3 h-3 rounded-full bg-amber-400 border border-slate-900" /> Luar Kota (Kuning)
-                </span>
-              </div>
-            </div>
-
-            <div className="h-[540px] rounded-xl overflow-hidden relative border border-slate-800">
-              <LeafletMap
-                stores={registeredStores}
-                trackingPoints={activeEvaluation?.points || []}
-                stops={activeEvaluation?.stops || []}
-                showWarehouse={true}
-              />
-            </div>
-          </div>
+          <GpsFleetTripsMap
+            plateNumber={activeEvaluation?.plateNumber || selectedFleetPlate}
+            initialCode={activeEvaluation?.initialCode || 'UNIT'}
+            vehicleType={fleets.find(f => f.plateNumber === (activeEvaluation?.plateNumber || selectedFleetPlate))?.vehicleType || 'Armada Box'}
+            tripLegs={activeEvaluation?.tripLegs || []}
+            points={activeEvaluation?.points || []}
+            stops={activeEvaluation?.stops || []}
+            stores={registeredStores}
+            selectedDateFilter={selectedDateGroup}
+            onSelectDateFilter={setSelectedDateGroup}
+            dateScopeMode={calendarScopeMode}
+            onSelectDateScopeMode={setCalendarScopeMode}
+            selectedMonth={uploadMonth}
+            selectedYear={uploadYear}
+            heightClass="h-[620px] w-full"
+          />
 
           {/* Rincian Setiap Armada & Per Hari Table (No Fuel!) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
@@ -2809,7 +2985,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 <thead className="bg-slate-950 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
                   <tr>
                     <th className="py-3 px-4">Armada</th>
-                    <th className="py-3 px-3">Platform GPS</th>
+                    <th className="py-3 px-3">Status GPS</th>
                     <th className="py-3 px-3">Tanggal (Hari)</th>
                     <th className="py-3 px-3 text-right">Trips (Ritase)</th>
                     <th className="py-3 px-3 text-right">Total KM</th>
@@ -2820,17 +2996,19 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {fleetEvaluations.flatMap(ev =>
-                    (ev.dateSubtotals || []).map(ds => (
-                      <tr key={`${ev.plateNumber}-${ds.dateGroup}`} className="hover:bg-slate-800/40">
+                    (ev.dateSubtotals || [])
+                      .filter(ds => selectedDateGroup === 'all' || ds.dateGroup === selectedDateGroup)
+                      .map(ds => (
+                      <tr key={`${ev.plateNumber}-${ds.dateGroup}`} className={`hover:bg-slate-800/40 ${selectedDateGroup === ds.dateGroup ? 'bg-indigo-950/20' : ''}`}>
                         <td className="py-3 px-4 font-bold text-white">
                           {ev.plateNumber}{' '}
                           {ev.initialCode && (
-                            <span className="text-[10px] font-mono text-blue-400">[{ev.initialCode}]</span>
+                            <span className="text-[10px] font-mono text-indigo-400">[{ev.initialCode}]</span>
                           )}
                         </td>
                         <td className="py-3 px-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-semibold uppercase">
-                            {ev.gpsPlatform === 'wanway' ? 'Wanway' : 'Tracksolid'}
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Terhubung
                           </span>
                         </td>
                         <td className="py-3 px-3 font-mono font-semibold text-slate-200">{ds.dateGroup}</td>
@@ -2841,7 +3019,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                           {ds.totalMileageKm.toFixed(2)} km
                         </td>
                         <td className="py-3 px-3 font-mono font-bold text-amber-300">{ds.travelTime}</td>
-                        <td className="py-3 px-3 font-mono text-right font-bold text-blue-300">
+                        <td className="py-3 px-3 font-mono text-right font-bold text-indigo-300">
                           {ds.avgSpeedKmh.toFixed(2)} km/h
                         </td>
                         <td className="py-3 px-3 font-mono text-right font-bold text-rose-300">
@@ -2906,15 +3084,15 @@ export const ExcelTrackingEvaluator: React.FC = () => {
               onClick={() => setActivityFilter('all')}
               className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
                 activityFilter === 'all'
-                  ? 'bg-blue-600/15 border-blue-500 text-white'
+                  ? 'bg-indigo-600/15 border-indigo-500 text-white'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
               <div>
-                <div className="text-xs font-bold text-white">Semua Aktivitas Bergerak & Berhenti</div>
+                <div className="text-xs font-bold text-white">Semua Aktivitas Bergerak &amp; Berhenti</div>
                 <div className="text-[10px] text-slate-400">Seluruh ritase perjalanan armada</div>
               </div>
-              <span className="text-lg font-black text-blue-400">{unifiedStats.totalLegs}</span>
+              <span className="text-lg font-black text-indigo-400">{unifiedStats.totalLegs}</span>
             </div>
 
             <div

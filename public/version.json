@@ -1,9 +1,9 @@
 {
-  "versionCode": 10015,
-  "versionName": "1.0.15",
-  "updatedAt": "2026-11-06T15:56:00.000000",
+  "versionCode": 10016,
+  "versionName": "1.0.16",
+  "updatedAt": "2026-11-06T18:00:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V27: Sinkronisasi Lintas Perangkat (PC/Web <-> HP Android) untuk Faktur & Scan Muat (/api/sales-rfid-invoices), isolasi data faktur per akun Admin Penjualan, filter kalender tanggal muat, penyederhanaan UI peringatan lebih muat, serta penyempurnaan tombol kamera YOLO & Flash Layar di mobile."
+  "releaseNotes": "Update V28: Peta Interaktif & Playback Rute GPS Armada (GpsFleetTripsMap), refaktor evaluator rute GPS (filter kalender harian/mingguan/bulanan & pencarian armada), serta pembaruan identitas aplikasi Sistem Terpadu Operasional PT. Anugrah Kemasan Kreatif."
 }

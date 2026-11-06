@@ -298,7 +298,7 @@ export default function App() {
     try {
       const currentPath = normalizePathname(window.location.pathname);
 
-      document.title = 'AKK Operasional - PT Anugrah Kemasan Kreatif';
+      document.title = 'Sistem Terpadu Operasional PT. Anugrah Kemasan Kreatif';
 
       if (!isAuthenticated) {
         const resolved = resolveTabFromUrl(window.location);
