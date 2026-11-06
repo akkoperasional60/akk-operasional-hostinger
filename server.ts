@@ -2931,6 +2931,57 @@ Kembalikan HANYA JSON valid:
   app.post('/wms-scanner/api/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
   app.post('/api/wms-scanner/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
 
+  // 🔄 Cross-Device Persistence for Sales RFID Invoices (PC / Web / HP Android)
+  let inMemorySalesRfidInvoices: any[] = [];
+
+  app.get('/api/sales-rfid-invoices', async (_req, res) => {
+    try {
+      if (isDatabaseConfigured()) {
+        try {
+          const rows = await mysqlQuery<any[]>(
+            `SELECT state_json FROM app_state WHERE state_key = 'sales_rfid_invoices' LIMIT 1`
+          );
+          if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+            const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              inMemorySalesRfidInvoices = parsed;
+              return res.json({ success: true, data: parsed });
+            }
+          }
+        } catch {
+          // fallback to memory
+        }
+      }
+      return res.json({ success: true, data: inMemorySalesRfidInvoices });
+    } catch (err: any) {
+      return res.json({ success: false, data: inMemorySalesRfidInvoices, message: err?.message });
+    }
+  });
+
+  app.post('/api/sales-rfid-invoices', express.json({ limit: '35mb' }), async (req, res) => {
+    try {
+      const invoices = req.body?.invoices;
+      if (Array.isArray(invoices)) {
+        inMemorySalesRfidInvoices = invoices;
+        if (isDatabaseConfigured()) {
+          try {
+            await mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('sales_rfid_invoices', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(invoices)]
+            );
+          } catch {
+            // MySQL write error, memory is preserved
+          }
+        }
+        return res.json({ success: true, count: invoices.length });
+      }
+      return res.status(400).json({ success: false, message: 'Invalid payload, expected invoices array.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message });
+    }
+  });
+
 
   // 📥 Server-side Spreadsheet Template Download Endpoint
   app.get('/api/download-schedule-template', (req, res) => {

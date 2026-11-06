@@ -1,9 +1,9 @@
 {
-  "versionCode": 10014,
-  "versionName": "1.0.14",
-  "updatedAt": "2026-11-06T14:35:00.000000",
+  "versionCode": 10015,
+  "versionName": "1.0.15",
+  "updatedAt": "2026-11-06T15:56:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V26: Standarisasi Hak Akses (Permissions) sebagai Single Source of Truth (Role sebagai keterangan jabatan), pembersihan kunci submenu modern per cabang, sinkronisasi real-time perubahan Hak Akses di Sidebar & Filter Admin Penjualan, serta penyelarasan penuh RBAC backend Hostinger MySQL."
+  "releaseNotes": "Update V27: Sinkronisasi Lintas Perangkat (PC/Web <-> HP Android) untuk Faktur & Scan Muat (/api/sales-rfid-invoices), isolasi data faktur per akun Admin Penjualan, filter kalender tanggal muat, penyederhanaan UI peringatan lebih muat, serta penyempurnaan tombol kamera YOLO & Flash Layar di mobile."
 }
