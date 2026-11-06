@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, UserRole, UserApprovalStatus, UserPermissions } from '../types';
 import { logisticsStore } from '../services/store';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { canAccess, getDefaultPermissionsForRole } from '../utils/rbac';
 import { branchStore, BranchRecord, UserBranchPermissionEntry } from '../services/branchStore';
 
 const MODULE_DEFINITIONS = [
@@ -968,19 +968,53 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     const role = (u.role || '').toLowerCase();
     switch (filterKey) {
       case 'logistics':
-        return role === 'spv_logistik' || role === 'operasional' || role === 'pengiriman' || role === 'driver' || role === 'crew_helper' || /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept);
+        return (
+          role === 'spv_logistik' ||
+          role === 'operasional' ||
+          role === 'pengiriman' ||
+          role === 'driver' ||
+          role === 'crew_helper' ||
+          /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'logistics'))
+        );
       case 'sales':
-        return role === 'sales_admin' || /sales|penjualan/i.test(dept);
+        return (
+          role === 'sales_admin' ||
+          /sales|penjualan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'sales_admin'))
+        );
       case 'warehouse':
-        return role === 'warehouse_admin' || /gudang|warehouse/i.test(dept);
+        return (
+          role === 'warehouse_admin' ||
+          /gudang|warehouse/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'warehouse'))
+        );
       case 'marketing':
-        return role === 'marketing_online' || role === 'marketing_offline' || /marketing|pemasaran/i.test(dept);
+        return (
+          role === 'marketing_online' ||
+          role === 'marketing_offline' ||
+          /marketing|pemasaran/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'marketing'))
+        );
       case 'purchasing':
-        return role === 'purchasing_admin' || /pembelian|purchasing|pengadaan/i.test(dept);
+        return (
+          role === 'purchasing_admin' ||
+          /pembelian|purchasing|pengadaan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'purchasing'))
+        );
       case 'finance':
-        return role === 'finance_tax_admin' || /finance|tax|keuangan|pajak/i.test(dept);
+        return (
+          role === 'finance_tax_admin' ||
+          /finance|tax|keuangan|pajak/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'finance_tax'))
+        );
       case 'hr':
-        return role === 'hr_admin' || role === 'security' || /hr|human|ga|personalia|general affair|satpam|keamanan/i.test(dept);
+        return (
+          role === 'hr_admin' ||
+          role === 'security' ||
+          /hr|human|ga|personalia|general affair|satpam|keamanan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'hr'))
+        );
       case 'super_admin':
         return role === 'super_admin' || /super|direksi|manajemen/i.test(dept);
       default:
@@ -1360,7 +1394,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                             const merged = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
                             branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
                             logisticsStore.updateUserProfile(selectedUser.id, {
-                              permissions: { modules: merged }
+                              permissions: { modules: merged, branchPermissions }
                             });
                           }
                           logisticsStore.switchCurrentUser(selectedUser.id);
@@ -2310,7 +2344,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <div className="space-y-1.5">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Shield className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Hak Akses (Role)</span>
+                    <span>Keterangan Role / Jabatan User</span>
                     <span className="text-rose-400">*</span>
                   </label>
                   <select

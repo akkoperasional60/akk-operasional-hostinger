@@ -207,11 +207,9 @@ export default function App() {
     // Safety guard: Pending users stay on their current requested tab with warning banner, avoid infinite redirect loop
     if (currentUser.status === 'pending') return;
 
-    const userOrRoleChanged =
-      prevUserRef.current.id !== currentUser.id ||
-      prevUserRef.current.role !== currentUser.role;
+    const userChanged = prevUserRef.current.id !== currentUser.id;
 
-    if (userOrRoleChanged) {
+    if (userChanged) {
       prevUserRef.current = { id: currentUser.id, role: currentUser.role };
       const requestedTab = initialRequestedTabRef.current;
       initialRequestedTabRef.current = null;
@@ -371,7 +369,7 @@ export default function App() {
             setCurrentTab(requestedTab);
             return;
           }
-          const defaultTab = getDefaultTabForRole(loggedInUser.role) as NavTab;
+          const defaultTab = getFirstAccessibleTabForUser(loggedInUser) as NavTab;
           setCurrentTab(defaultTab);
         }}
       />

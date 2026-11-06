@@ -110,7 +110,7 @@ import {
   INITIAL_FUEL_LOGS,
   FUEL_TARGET_RATIOS
 } from '../data/fuelMockData';
-import { canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
+import { canAccess, canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
 import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
@@ -1176,56 +1176,33 @@ class LogisticsStore {
   }
 
   /**
-   * RBAC Middleware Guard: Ensures users with 'driver' or 'crew_helper' roles cannot access or execute operational or administrative tasks outside of 'Portal Driver Mobile'.
+   * RBAC Middleware Guard: Evaluates user status rather than blocking by role label so users with custom Hak Akses can operate across modules.
    */
-  public verifyDriverAccess(actionCategory: string): void {
+  public verifyDriverAccess(_actionCategory: string): void {
     const user = this.getCurrentUser();
-    if (user && (user.role === 'driver' || user.role === 'crew_helper')) {
-      const allowedActions = [
-        'update_schedule_status',
-        'upload_pod',
-        'driver_report',
-        'checkin',
-        'vehicle_checklist',
-        'sign_waybill',
-        'get_schedules',
-        'get_fleets',
-        'get_crews',
-        'updateScheduleStatus',
-        'uploadPod',
-        'getSchedules',
-        'getStores'
-      ];
-      if (!allowedActions.includes(actionCategory)) {
-        throw new Error(`Akses Ditolak [RBAC Middleware]: Peran '${user.role}' (${user.fullName}) tidak diizinkan mengakses fungsi admin/operasional '${actionCategory}'. Akses dibatasi khusus Portal Driver Mobile.`);
-      }
+    if (user && (user.status === 'inactive' || user.status === 'rejected')) {
+      throw new Error(`Akses Ditolak: Akun '${user.fullName}' sedang berstatus nonaktif/ditolak.`);
     }
   }
 
   /**
-   * RBAC Helper: Checks if a role has access to specific sub-menu or operation
+   * RBAC Helper: Checks if a user has access to specific sub-menu or operation based on Hak Akses
    */
-  public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, accessLevel?: string): boolean {
+  public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, _accessLevel?: string): boolean {
+    const user = this.getCurrentUser();
+    if (user && module) {
+      return canAccess(user, module, subMenu);
+    }
     if (!role) return true;
-    const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
-      return true;
-    }
-    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
-      return subMenu === 'driver_mobile' || subMenu === 'driver_reports';
-    }
     return true;
   }
 
   public hasMenuAccess(role?: string, menuId?: string): boolean {
+    const user = this.getCurrentUser();
+    if (user && menuId) {
+      return canAccess(user, menuId);
+    }
     if (!role) return true;
-    const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
-      return true;
-    }
-    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
-      return menuId === 'driver_mobile' || menuId === 'driver_reports';
-    }
     return true;
   }
 
@@ -2753,9 +2730,9 @@ class LogisticsStore {
 
     const rawPermissions = data.permissions
       ? data.permissions
-      : (data.role && data.role !== existing.role)
-      ? { modules: getDefaultPermissionsForRole(data.role) }
-      : existing.permissions || { modules: getDefaultPermissionsForRole(targetRole) };
+      : existing.permissions && (existing.permissions.modules || existing.permissions.branchPermissions)
+      ? existing.permissions
+      : { modules: getDefaultPermissionsForRole(targetRole) };
 
     const nextPermissions = normalizeUserPermissions(targetRole, rawPermissions);
 

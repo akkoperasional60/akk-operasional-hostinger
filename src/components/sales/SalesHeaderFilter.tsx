@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { logisticsStore } from '../../services/store';
 import { UserProfile } from '../../types';
+import { canAccess } from '../../utils/rbac';
 
 export type SalesTopTab = 'checklist' | 'durasi_muat' | 'jadwal_admin' | 'aktivitas_view';
 
@@ -31,21 +32,29 @@ export interface SalesHeaderFilterProps {
 
 export function isSalesAdminUser(u: UserProfile): boolean {
   if (!u || u.status === 'rejected' || u.status === 'inactive') return false;
-  const roleMatch = u.role === 'sales_admin';
   const deptClean = (u.department || '').trim().toLowerCase();
   const deptMatch = deptClean === 'adm. penjualan' || deptClean === 'admin penjualan';
-  return roleMatch || deptMatch;
+  if (u.role === 'super_admin') {
+    return deptMatch;
+  }
+  const hasSalesAccess = canAccess(u, 'sales_admin');
+  return hasSalesAccess || u.role === 'sales_admin' || deptMatch;
 }
 
 export function useSalesAdminUsers(): UserProfile[] {
   const [users, setUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
 
   useEffect(() => {
-    setUsers(logisticsStore.getUsers());
-    const unsubscribe = logisticsStore.subscribe(() => {
+    const syncUsers = () => {
       setUsers([...logisticsStore.getUsers()]);
-    });
-    return unsubscribe;
+    };
+    syncUsers();
+    const unsubscribe = logisticsStore.subscribe(syncUsers);
+    window.addEventListener('akk-branch-updated', syncUsers);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('akk-branch-updated', syncUsers);
+    };
   }, []);
 
   return useMemo(() => {
@@ -137,7 +146,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
         <div className="flex items-center gap-2 self-start sm:self-auto text-xs text-slate-500 dark:text-slate-400">
           <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
           <span>
-            Terintegrasi User Manajemen (<strong className="text-slate-800 dark:text-slate-200">{salesAdminUsers.length} Adm. Penjualan</strong>)
+            Terintegrasi Hak Akses User (<strong className="text-slate-800 dark:text-slate-200">{salesAdminUsers.length} User Akses Penjualan</strong>)
           </span>
         </div>
       </div>
@@ -145,14 +154,14 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
       {/* Unified Filter Bar with Refreshed Modern Color Tone */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-          {/* Admin Selector (Integrated with User Management Role: Adm. Penjualan) */}
+          {/* Admin Selector (Integrated with User Management Hak Akses: Adm. Penjualan) */}
           <div className="lg:col-span-4">
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                 Filter Admin Pengguna (Adm. Penjualan)
               </label>
               <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                Role: Adm. Penjualan
+                Hak Akses: Adm. Penjualan
               </span>
             </div>
             <div className="relative">

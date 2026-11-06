@@ -1,9 +1,9 @@
 {
-  "versionCode": 10013,
-  "versionName": "1.0.13",
-  "updatedAt": "2026-11-06T13:55:00.000000",
+  "versionCode": 10014,
+  "versionName": "1.0.14",
+  "updatedAt": "2026-11-06T14:35:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V25: Penyederhanaan Modal Ringkas Input & Upload Faktur / Sales Order (SO) (langsung aktif tanpa kunci langkah, selector multi-armada inline, serta standarisasi satuan gudang CRT/ZAK/SLP/PAK/PCS/BAL/IKAT/BOX/ROLL/KG/DUS) beserta sinkronisasi penuh Hostinger MySQL."
+  "releaseNotes": "Update V26: Standarisasi Hak Akses (Permissions) sebagai Single Source of Truth (Role sebagai keterangan jabatan), pembersihan kunci submenu modern per cabang, sinkronisasi real-time perubahan Hak Akses di Sidebar & Filter Admin Penjualan, serta penyelarasan penuh RBAC backend Hostinger MySQL."
 }

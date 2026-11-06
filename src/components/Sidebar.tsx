@@ -189,7 +189,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           prev.fullName === nextUser.fullName &&
           prev.role === nextUser.role &&
           prev.status === nextUser.status &&
-          prev.email === nextUser.email
+          prev.email === nextUser.email &&
+          JSON.stringify(prev.permissions) === JSON.stringify(nextUser.permissions)
         ) {
           return prev;
         }
@@ -715,6 +716,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       shortLabel: 'HR',
       icon: <Users className="w-5 h-5" />,
       checkAccess: (user) =>
+        canAccess(user, 'hr', 'hr_dashboard') ||
         canAccess(user, 'hr', 'hr_data_karyawan') ||
         canAccess(user, 'hr', 'hr_gaji_kpi'),
       groups: [
@@ -772,6 +774,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       shortLabel: 'Training',
       icon: <Award className="w-5 h-5" />,
       checkAccess: (user) =>
+        canAccess(user, 'hr', 'training_videos') ||
+        canAccess(user, 'hr', 'training_karyawan') ||
         canAccess(user, 'hr', 'td_video_training') ||
         canAccess(user, 'hr', 'td_training_karyawan'),
       groups: [

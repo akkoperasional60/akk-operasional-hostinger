@@ -1,5 +1,5 @@
 import { UserPermissions, UserRole } from '../types';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { getDefaultPermissionsForRole, MODERN_SUBMENU_KEYS_BY_MODULE } from '../utils/rbac';
 
 export interface BranchRecord {
   id: string;
@@ -419,14 +419,21 @@ class BranchStoreService {
     this.getBranches().forEach(branch => {
       if (savedForUser[branch.id]) {
         const cloned = JSON.parse(JSON.stringify(savedForUser[branch.id])) as UserBranchPermissionEntry;
-        // Ensure any newly added module or submenu keys exist on cloned.modules
-        // and sync with existingUserModules if this came from a stale local cache without serverBranchPerms
         Object.keys(roleDefaults).forEach(modId => {
           const existingMod = existingUserModules?.[modId];
+          const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
           if (!cloned.modules[modId]) {
-            cloned.modules[modId] = JSON.parse(JSON.stringify(existingMod || roleDefaults[modId]));
+            const sourceMod = existingMod || roleDefaults[modId];
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              cleanSubs[subId] = sourceMod?.enabled ? (sourceMod?.subMenus?.[subId] || 'none') : 'none';
+            });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            cloned.modules[modId] = {
+              enabled: Boolean(sourceMod?.enabled && hasActive),
+              subMenus: cleanSubs
+            };
           } else {
-            // If user profile did not have serverBranchPerms, ensure top-level existingUserModules restrictions ('read_only' / 'none') are respected
             if (!hasServerBranchPerms && existingMod !== undefined) {
               if (!existingMod.enabled) {
                 cloned.modules[modId].enabled = false;
@@ -437,13 +444,21 @@ class BranchStoreService {
                 }
               });
             }
-            Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(subId => {
-              if (cloned.modules[modId].subMenus[subId] === undefined) {
-                cloned.modules[modId].subMenus[subId] =
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              let val = cloned.modules[modId].subMenus?.[subId];
+              if (val === undefined) {
+                val =
                   existingMod?.subMenus?.[subId] ??
                   (cloned.modules[modId].enabled ? (roleDefaults[modId]?.subMenus?.[subId] || 'none') : 'none');
               }
+              cleanSubs[subId] = cloned.modules[modId].enabled ? val : 'none';
             });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            cloned.modules[modId] = {
+              enabled: Boolean(cloned.modules[modId].enabled && hasActive),
+              subMenus: cleanSubs
+            };
           }
         });
         result[branch.id] = cloned;
@@ -454,12 +469,21 @@ class BranchStoreService {
         const baseModules: UserPermissions['modules'] = {};
 
         Object.keys(roleDefaults).forEach(modId => {
+          const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
           if (isDefaultEnabled) {
             const sourceMod = existingUserModules?.[modId] !== undefined ? existingUserModules[modId] : roleDefaults[modId];
-            baseModules[modId] = JSON.parse(JSON.stringify(sourceMod));
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              cleanSubs[subId] = sourceMod?.enabled ? (sourceMod?.subMenus?.[subId] || 'none') : 'none';
+            });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            baseModules[modId] = {
+              enabled: Boolean(sourceMod?.enabled && hasActive),
+              subMenus: cleanSubs
+            };
           } else {
             const emptySubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
-            Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(subId => {
+            modernKeys.forEach(subId => {
               emptySubs[subId] = 'none';
             });
             baseModules[modId] = {
@@ -527,9 +551,12 @@ class BranchStoreService {
 
   public countActiveModulesInBranch(modules: UserPermissions['modules']): number {
     if (!modules) return 0;
-    return Object.values(modules).filter(m => {
+    return Object.entries(modules).filter(([modId, m]) => {
       if (!m || !m.enabled) return false;
-      return Object.values(m.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
+      const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId];
+      const entries = Object.entries(m.subMenus || {});
+      const filtered = modernKeys ? entries.filter(([k]) => modernKeys.includes(k)) : entries;
+      return filtered.some(([, v]) => v === 'full_access' || v === 'read_only');
     }).length;
   }
 
@@ -538,7 +565,10 @@ class BranchStoreService {
     subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
   }): number {
     if (!mod || !mod.enabled) return 0;
-    return Object.values(mod.subMenus || {}).filter(v => v === 'full_access' || v === 'read_only').length;
+    const allModernKeys = new Set(Object.values(MODERN_SUBMENU_KEYS_BY_MODULE).flat());
+    return Object.entries(mod.subMenus || {}).filter(
+      ([k, v]) => allModernKeys.has(k) && (v === 'full_access' || v === 'read_only')
+    ).length;
   }
 
   public getUsersCountForBranch(

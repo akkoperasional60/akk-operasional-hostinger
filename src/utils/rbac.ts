@@ -383,8 +383,8 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   sales_activities: ['aktivitas_harian'],
   sales_schedules: ['jadwal_admin'],
   sales_loading_duration: ['durasi_muat'],
-  sales_invoice_so: ['input_faktur_so', 'durasi_muat', 'aktivitas_harian'],
-  sales_rfid_scanner: ['aplikasi_rfid_muat', 'durasi_muat', 'aktivitas_harian'],
+  sales_invoice_so: ['input_faktur_so'],
+  sales_rfid_scanner: ['aplikasi_rfid_muat'],
   sales_skill_matrix: ['matriks_skil'],
   sales_jobdesk: ['pengaturan_sop'],
   warehouse_scanner: ['stok_barang'],
@@ -423,7 +423,7 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   activity_log: ['log_aktivitas_sistem']
 };
 
-const MODERN_SUBMENU_KEYS_BY_MODULE: Record<string, string[]> = {
+export const MODERN_SUBMENU_KEYS_BY_MODULE: Record<string, string[]> = {
   logistics: [
     'operational_dashboard',
     'schedules',
@@ -480,8 +480,8 @@ const maxAccessLevel = (
 
 /**
  * Normalizes and synchronizes user permissions for both legacy/old accounts and newly created accounts.
- * Ensures modern submenu keys and legacy submenu keys never conflict, and that branchPermissions
- * and top-level modules remain strictly in sync without overwriting 'read_only' or 'none' back to 'full_access'.
+ * Ensures only canonical modern submenu keys are retained so badge counts and permission checks are 100% accurate,
+ * and ensures Hak Akses (permissions) is the single source of truth regardless of the user's descriptive role label.
  */
 export const normalizeUserPermissions = (
   role: UserRole | string,
@@ -489,13 +489,26 @@ export const normalizeUserPermissions = (
 ): UserPermissions => {
   const roleDefaults = getDefaultPermissionsForRole(role);
   if (!permissions || (!permissions.modules && !permissions.branchPermissions)) {
+    const cleanDefaultModules: UserPermissions['modules'] = {};
+    Object.keys(roleDefaults).forEach(modId => {
+      const defMod = roleDefaults[modId];
+      const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(defMod?.subMenus || {});
+      const nextSubs: Record<string, 'read_only' | 'full_access' | 'none'> = {};
+      modernKeys.forEach(subId => {
+        nextSubs[subId] = defMod?.enabled ? (defMod?.subMenus?.[subId] || 'none') : 'none';
+      });
+      const hasActive = modernKeys.some(k => nextSubs[k] === 'full_access' || nextSubs[k] === 'read_only');
+      cleanDefaultModules[modId] = {
+        enabled: Boolean(defMod?.enabled && hasActive),
+        subMenus: nextSubs
+      };
+    });
     return {
-      modules: JSON.parse(JSON.stringify(roleDefaults))
+      modules: cleanDefaultModules
     };
   }
 
   const rawModules = permissions.modules || {};
-  const isCrew = isDriverRole(role);
 
   const normalizeSingleModulesMap = (
     sourceModules: UserPermissions['modules'],
@@ -517,15 +530,6 @@ export const normalizeUserPermissions = (
 
       const nextSubs: Record<string, 'read_only' | 'full_access' | 'none'> = {};
       const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(defaultMod?.subMenus || {});
-
-      // Copy existing keys first
-      if (srcMod?.subMenus) {
-        Object.entries(srcMod.subMenus).forEach(([k, v]) => {
-          if (v === 'full_access' || v === 'read_only' || v === 'none') {
-            nextSubs[k] = v;
-          }
-        });
-      }
 
       modernKeys.forEach(subId => {
         if (!modEnabled) {
@@ -553,33 +557,7 @@ export const normalizeUserPermissions = (
         nextSubs[subId] = val;
       });
 
-      // Keep legacy keys synchronized with modern keys so old keys never override 'read_only' or 'none'
-      Object.entries(LEGACY_SUBMENU_KEY_MAP).forEach(([modernKey, legacyKeys]) => {
-        if (modernKeys.includes(modernKey) && nextSubs[modernKey] !== undefined) {
-          legacyKeys.forEach(lk => {
-            if (defaultMod?.subMenus && lk in defaultMod.subMenus) {
-              nextSubs[lk] = nextSubs[modernKey];
-            }
-          });
-        }
-      });
-
-      // Legacy crew guard
-      if (isCrew && modId === 'logistics' && !permissions.branchPermissions && srcMod?.subMenus) {
-        const activeKeys = Object.entries(srcMod.subMenus)
-          .filter(([, v]) => v === 'full_access' || v === 'read_only')
-          .map(([k]) => k);
-        if (activeKeys.length === 2 && activeKeys.includes('portal_driver') && activeKeys.includes('monitoring_sla')) {
-          nextSubs.monitoring_sla = 'none';
-          nextSubs.driver_reports = 'none';
-          nextSubs.crew_history = 'none';
-          nextSubs.tracking_eval = 'none';
-        }
-      }
-
-      const hasActiveSub = Object.entries(nextSubs)
-        .filter(([k]) => modernKeys.includes(k))
-        .some(([, v]) => v === 'full_access' || v === 'read_only');
+      const hasActiveSub = modernKeys.some(k => nextSubs[k] === 'full_access' || nextSubs[k] === 'read_only');
 
       normalized[modId] = {
         enabled: modEnabled && hasActiveSub,
@@ -613,9 +591,6 @@ export const normalizeUserPermissions = (
     Object.keys(roleDefaults).forEach(modId => {
       const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
       const subMenus: Record<string, 'read_only' | 'full_access' | 'none'> = {};
-      Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(k => {
-        subMenus[k] = 'none';
-      });
       modernKeys.forEach(k => {
         subMenus[k] = 'none';
       });
@@ -626,7 +601,7 @@ export const normalizeUserPermissions = (
         const m = bEntry.modules?.[modId];
         if (m?.enabled) {
           anyModEnabled = true;
-          Object.keys(subMenus).forEach(subKey => {
+          modernKeys.forEach(subKey => {
             const val = m.subMenus?.[subKey] || 'none';
             subMenus[subKey] = maxAccessLevel(subMenus[subKey], val);
           });
@@ -655,9 +630,7 @@ const resolveSubMenuLevelFromMod = (
   modulePerms: { enabled: boolean; subMenus: Record<string, 'read_only' | 'full_access' | 'none'> } | undefined,
   defaultMod: { enabled: boolean; subMenus: Record<string, 'read_only' | 'full_access' | 'none'> } | undefined,
   resolvedModuleId: string,
-  resolvedSubMenuId: string | undefined,
-  isCrew: boolean,
-  hasBranchPerms: boolean
+  resolvedSubMenuId: string | undefined
 ): 'full_access' | 'read_only' | 'none' => {
   if (!modulePerms || !modulePerms.enabled) return 'none';
   if (!resolvedSubMenuId) {
@@ -688,25 +661,6 @@ const resolveSubMenuLevelFromMod = (
     }
   }
 
-  if (
-    isCrew &&
-    resolvedModuleId === 'logistics' &&
-    resolvedSubMenuId === 'monitoring_sla' &&
-    modulePerms.subMenus &&
-    !hasBranchPerms
-  ) {
-    const activeKeys = Object.entries(modulePerms.subMenus)
-      .filter(([, v]) => v === 'full_access' || v === 'read_only')
-      .map(([k]) => k);
-    if (
-      activeKeys.length === 2 &&
-      activeKeys.includes('portal_driver') &&
-      activeKeys.includes('monitoring_sla')
-    ) {
-      subPerm = 'none';
-    }
-  }
-
   if (subPerm === 'full_access' || subPerm === 'read_only') {
     return subPerm;
   }
@@ -722,7 +676,6 @@ export const getAccessLevel = (
   if (!user) return 'none';
   if (user.status === 'inactive' || user.status === 'rejected') return 'none';
   if (isSuperAdminRole(user.role)) return 'full_access';
-  if (user.role === 'unassigned') return 'none';
 
   // Composite tab checks
   if (!subMenuId) {
@@ -767,7 +720,6 @@ export const getAccessLevel = (
 
   const defaultModules = getDefaultPermissionsForRole(user.role);
   const defaultMod = defaultModules[resolvedModuleId];
-  const isCrew = isDriverRole(user.role);
   const branchPerms = user.permissions?.branchPermissions;
   const hasBranchPerms = Boolean(branchPerms && Object.keys(branchPerms).length > 0);
 
@@ -777,7 +729,7 @@ export const getAccessLevel = (
       const bEntry = branchPerms[branchId];
       if (!bEntry.enabled) return 'none';
       const bMod = bEntry.modules?.[resolvedModuleId];
-      return resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, true);
+      return resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId);
     }
 
     // Aggregate across all enabled branches in branchPermissions
@@ -785,12 +737,10 @@ export const getAccessLevel = (
     for (const bEntry of Object.values(branchPerms)) {
       if (!bEntry?.enabled) continue;
       const bMod = bEntry.modules?.[resolvedModuleId];
-      const lvl = resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, true);
+      const lvl = resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId);
       branchAggregated = maxAccessLevel(branchAggregated, lvl);
     }
 
-    // Also check top-level user.permissions.modules if present; if top-level explicitly restricts to read_only or none
-    // while branchPermissions had stale legacy keys, respect the normalized intersection
     const userMod = user.permissions?.modules?.[resolvedModuleId];
     if (userMod !== undefined && resolvedSubMenuId && userMod.subMenus?.[resolvedSubMenuId] !== undefined) {
       const explicitTopLevel = userMod.subMenus[resolvedSubMenuId];
@@ -807,7 +757,7 @@ export const getAccessLevel = (
   const userMod = userModules?.[resolvedModuleId];
   const modulePerms = userMod !== undefined ? userMod : defaultMod;
 
-  return resolveSubMenuLevelFromMod(modulePerms, defaultMod, resolvedModuleId, resolvedSubMenuId, isCrew, false);
+  return resolveSubMenuLevelFromMod(modulePerms, defaultMod, resolvedModuleId, resolvedSubMenuId);
 };
 
 export const canAccess = (
@@ -863,8 +813,13 @@ export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
     'sales_skill_matrix',
     'sales_jobdesk',
     'sales_kpi_individual',
+    'sales_kpi_fines',
+    'sales_kpi_nusantara',
+    'sales_kpi_omset',
+    'warehouse_scanner',
     'warehouse_dashboard',
     'warehouse_inventory',
+    'warehouse_slotting',
     'warehouse_inbound',
     'warehouse_outbound',
     'warehouse_opname',
@@ -873,6 +828,7 @@ export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
     'customer_map',
     'purchasing_dashboard',
     'purchasing_stock_overview',
+    'purchasing_stock_forecast',
     'finance_dashboard',
     'hr_dashboard',
     'ga_security',
@@ -883,7 +839,9 @@ export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
     'dashboard',
     'users',
     'branches',
-    'activity_log'
+    'activity_log',
+    'e2e_testing',
+    'architecture'
   ];
   for (const tab of priorityTabs) {
     if (canAccess(user, tab)) {

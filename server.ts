@@ -474,10 +474,10 @@ async function startServer() {
     });
   };
 
-  // Server-side RBAC: Enforces both User Management permissions_json (blocking read_only/none) and role fallbacks.
+  // Server-side RBAC: Enforces both User Management permissions_json (Hak Akses single source of truth) and role fallbacks.
   const requireLogisticsWrite = requireModuleWrite(
     'logistics',
-    ['fleets', 'spareparts', 'fuel_efficiency', 'schedules', 'armada_ceklis'],
+    ['fleets', 'spareparts', 'fuel_efficiency', 'schedules', 'fleet_forms', 'warehouse_fleet_cubication', 'armada_ceklis'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman']
   );
   const requireScheduleWrite = requireModuleWrite(
@@ -485,7 +485,11 @@ async function startServer() {
     ['schedules', 'rencana_rute'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin']
   );
-  const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper');
+  const requireScheduleStatusWrite = requireModuleWrite(
+    'logistics',
+    ['schedules', 'portal_driver', 'driver_reports', 'rencana_rute'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper']
+  );
   const requireStoreWrite = requireModuleWrite(
     'marketing',
     ['customer_map', 'marketing_offline', 'laporan_kunjungan'],
@@ -496,7 +500,11 @@ async function startServer() {
     ['warehouse_scanner', 'warehouse_inventory', 'warehouse_inbound', 'warehouse_outbound', 'warehouse_opname', 'stok_barang'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin']
   );
-  const requireAttendanceWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper');
+  const requireAttendanceWrite = requireModuleWrite(
+    'hr',
+    ['attendance', 'hr_data_karyawan', 'hr_dashboard', 'absensi_kehadiran'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper']
+  );
 
   const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
     const lat = typeof rawLat === 'string' ? Number(rawLat.replace(',', '.').trim()) : Number(rawLat);
@@ -1574,10 +1582,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const role = String(req.authUser?.role || '');
       let schedules = Array.isArray(data?.schedules) ? data.schedules : [];
 
-      // Driver/helper hanya menerima jadwal yang memang ditugaskan kepadanya.
-      // Filtering dilakukan di server, bukan hanya di UI/browser.
+      // Driver/helper tanpa hak akses menu Jadwal & Rute hanya menerima jadwal yang ditugaskan kepadanya.
       if (role === 'driver' || role === 'crew_helper') {
-        schedules = schedules.filter((sch: any) => isScheduleAssignedToAuthUser(sch, req.authUser));
+        const scheduleMenuAccess = resolveServerSubMenuAccess(req.authUser, 'logistics', ['schedules', 'operational_dashboard', 'rencana_rute']);
+        if (scheduleMenuAccess !== 'full_access' && scheduleMenuAccess !== 'read_only') {
+          schedules = schedules.filter((sch: any) => isScheduleAssignedToAuthUser(sch, req.authUser));
+        }
       }
 
       return res.json({
@@ -2047,11 +2057,14 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
       const role = String((req as any).authUser?.role || '');
       if (role === 'driver' || role === 'crew_helper') {
-        const target = schedules.find((sch: any) =>
-          sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)
-        );
-        if (!target || !isScheduleAssignedToAuthUser(target, (req as any).authUser)) {
-          return res.status(403).json({ success: false, error: 'Jadwal ini bukan penugasan akun driver/helper yang sedang login' });
+        const scheduleWriteAccess = resolveServerSubMenuAccess((req as any).authUser, 'logistics', ['schedules', 'rencana_rute']);
+        if (scheduleWriteAccess !== 'full_access') {
+          const target = schedules.find((sch: any) =>
+            sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)
+          );
+          if (!target || !isScheduleAssignedToAuthUser(target, (req as any).authUser)) {
+            return res.status(403).json({ success: false, error: 'Jadwal ini bukan penugasan akun driver/helper yang sedang login' });
+          }
         }
       }
 

@@ -91,16 +91,20 @@ export function useRoleAccess(): UseRoleAccessReturn {
   const canManageFleet = useCallback(
     (targetUser?: UserProfile): boolean => {
       const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
-      if (!activeUser || activeUser.status !== 'approved' || activeUser.role === 'unassigned') {
-        return false;
-      }
-      if (isDriverRole(activeUser.role)) {
+      if (!activeUser || activeUser.status === 'inactive' || activeUser.status === 'rejected') {
         return false;
       }
       if (isSuperAdminRole(activeUser.role)) {
         return true;
       }
-      return canEdit(activeUser, 'fleets') || canEdit(activeUser, 'schedules');
+      return (
+        canAccess(activeUser, 'fleets') ||
+        canAccess(activeUser, 'schedules') ||
+        canAccess(activeUser, 'spareparts') ||
+        canAccess(activeUser, 'fuel_efficiency') ||
+        canAccess(activeUser, 'fleet_forms') ||
+        canAccess(activeUser, 'warehouse_fleet_cubication')
+      );
     },
     [user]
   );
