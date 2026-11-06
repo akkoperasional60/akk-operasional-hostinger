@@ -1017,6 +1017,40 @@ export const databaseBarangService = {
     return { count: finalRecords.length, saved: finalRecords };
   },
 
+  matchesSearchQuery(item: DatabaseBarangRecord, rawQuery: string): boolean {
+    const q = (rawQuery || '').trim().toLowerCase();
+    if (!q) return true;
+
+    const combinedRaw = [
+      item.noBarang || '',
+      item.deskripsiBarang || '',
+      item.keteranganBarang || '',
+      item.unit1 || '',
+      item.satuan || '',
+      item.unit2 || '',
+      item.unit3 || ''
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    // Direct substring match
+    if (combinedRaw.includes(q)) return true;
+
+    const combinedNormalized = normalizeText(combinedRaw);
+    const compactAlnum = combinedNormalized.replace(/\s+/g, '');
+
+    // Split query into tokens so non-contiguous words/numbers (e.g. "ola bola" or "bola 200") match in any position/order
+    const tokens = q.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return true;
+
+    return tokens.every(token => {
+      if (combinedRaw.includes(token)) return true;
+      const normToken = normalizeText(token);
+      if (!normToken) return true;
+      return combinedNormalized.includes(normToken) || compactAlnum.includes(normToken.replace(/\s+/g, ''));
+    });
+  },
+
   findMatch(queryNoOrName: string, optionalName?: string): DatabaseBarangRecord | undefined {
     const list = this.getAll();
     const q1 = normalizeText(queryNoOrName);
@@ -1035,15 +1069,23 @@ export const databaseBarangService = {
     });
     if (exact) return exact;
 
-    // 2. Partial match by deskripsiBarang
-    return list.find(item => {
+    // 2. Partial substring match by deskripsiBarang
+    const partial = list.find(item => {
       const descNorm = normalizeText(item.deskripsiBarang || item.keteranganBarang);
       const codeNorm = normalizeText(item.noBarang);
       return (
-        (q1.length >= 4 && (descNorm.includes(q1) || q1.includes(descNorm) || codeNorm.includes(q1))) ||
-        (q2.length >= 4 && (descNorm.includes(q2) || q2.includes(descNorm)))
+        (q1.length >= 3 && (descNorm.includes(q1) || q1.includes(descNorm) || codeNorm.includes(q1))) ||
+        (q2.length >= 3 && (descNorm.includes(q2) || q2.includes(descNorm)))
       );
     });
+    if (partial) return partial;
+
+    // 3. Non-contiguous multi-token match (e.g. "OLA BOLA" -> "CUP PLST OLALA 200ML BOLA @50")
+    const rawQuery = (optionalName || queryNoOrName || '').trim();
+    if (rawQuery.length >= 2) {
+      return list.find(item => this.matchesSearchQuery(item, rawQuery));
+    }
+    return undefined;
   },
 
   upsertItem(input: {

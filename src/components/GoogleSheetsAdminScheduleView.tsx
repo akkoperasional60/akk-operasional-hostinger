@@ -5814,10 +5814,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}
       {isUploadConfigModalOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-20 sm:pt-24 pb-6 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 max-w-xl w-full shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center py-4 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[86vh] overflow-hidden">
             {/* Modal Header (Sticky at Top so always visible at 80%-150% zoom) */}
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3.5 mb-4 shrink-0">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-3 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm shrink-0">
                   <Plus className="w-5 h-5" />
@@ -5838,7 +5838,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Form Body (Scrollable inside modal card) */}
-            <div className="space-y-4 text-xs flex-1 overflow-y-auto pr-1">
+            <div className="space-y-3 text-xs flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div className="w-full">
                   <ModernDatePicker

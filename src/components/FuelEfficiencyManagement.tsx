@@ -36,6 +36,7 @@ import {
   Activity,
   FileSpreadsheet,
   ChevronDown,
+  ChevronLeft,
   Check
 } from 'lucide-react';
 import {
@@ -68,6 +69,8 @@ import {
   STANDARD_FUEL_PRICES,
   COMMON_GAS_STATIONS
 } from '../data/fuelMockData';
+import { getCanonicalFleetOrderIndex, sortFleetsByCanonicalOrder } from '../data/mockData';
+import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { FuelConsumptionReportModal } from './FuelConsumptionReportModal';
 import { FuelWeeklyReportView } from './FuelWeeklyReportView';
 
@@ -91,12 +94,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [dailyChartMode, setDailyChartMode] = useState<'grouped' | 'stacked'>('grouped');
 
   // Liter per KM Unit Analysis Filter States
-  const [lKmSortBy, setLKmSortBy] = useState<'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'>('lKm_asc');
+  const [lKmSortBy, setLKmSortBy] = useState<'canonical_order' | 'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'>('canonical_order');
   const [lKmSearch, setLKmSearch] = useState<string>('');
+  const [comparisonSelectedFleetId, setComparisonSelectedFleetId] = useState<string>('all');
 
   // Interactive Converter Calculator
-  const [simKmL, setSimKmL] = useState<number>(7.5);
-  const [simLKm, setSimLKm] = useState<number>(0.1333);
+  const [simKmL, setSimKmL] = useState<number>(0);
+  const [simLKm, setSimLKm] = useState<number>(0);
 
   // Search & Filters for logs table
   const [searchQuery, setSearchQuery] = useState('');
@@ -115,7 +119,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [formFuelType, setFormFuelType] = useState<FuelType>('BioSolar');
   const [formLiters, setFormLiters] = useState<string>('');
-  const [formCostPerLiter, setFormCostPerLiter] = useState<number>(STANDARD_FUEL_PRICES['BioSolar']);
+  const [formCostPerLiter, setFormCostPerLiter] = useState<string>('');
   const [formStartOdo, setFormStartOdo] = useState<string>('');
   const [formEndOdo, setFormEndOdo] = useState<string>('');
   const [formGasStation, setFormGasStation] = useState<string>('SPBU Farly');
@@ -124,6 +128,28 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
+
+  // Modern Custom Popover Dropdown & Calendar States
+  const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
+  const [driverSearchFilter, setDriverSearchFilter] = useState<string>('');
+  const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
+  const [calendarViewMonth, setCalendarViewMonth] = useState<Date>(() => new Date());
+
+  // Tersinkronisasi 100% dengan daftar Area Tujuan pada Jadwal & Penugasan
+  const deliveryAreaOptions = useMemo(() => {
+    const set = new Set<string>(OFFICIAL_DESTINATION_AREAS);
+    try {
+      const schedules = logisticsStore.getSchedules?.() || [];
+      schedules.forEach((s: any) => {
+        if (s?.destination && typeof s.destination === 'string' && s.destination.trim()) {
+          set.add(s.destination.trim());
+        }
+      });
+    } catch {
+      // ignore
+    }
+    return Array.from(set);
+  }, []);
 
   // Daftar nama driver untuk dropdown pengisian manual BBM
   const driverDropdownOptions = useMemo(() => {
@@ -181,13 +207,16 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     });
   }, []);
 
-  // When formFleetId changes, autofill default odometer from fleet
+  // When formFleetId changes, autofill default odometer only if previous fuel log exists
   const handleFleetSelection = (fleetId: string) => {
     setFormFleetId(fleetId);
     const flt = fleets.find(f => f.id === fleetId);
     if (flt) {
-      if (flt.odometerKm) {
-        setFormStartOdo(flt.odometerKm.toString());
+      const latestFleetLog = fuelLogs.find(l => l.fleetId === flt.id || l.plateNumber === flt.plateNumber);
+      if (latestFleetLog && latestFleetLog.endOdometerKm > 0) {
+        setFormStartOdo(latestFleetLog.endOdometerKm.toString());
+      } else {
+        setFormStartOdo('');
       }
       // If driver is assigned to fleet or current crew
       const assignedCrew = crews.find(c => c.currentFleetId === flt.id);
@@ -198,10 +227,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     }
   };
 
-  // When fuel type changes in form, update standard price
+  // When fuel type changes in form
   const handleFuelTypeChange = (type: FuelType) => {
     setFormFuelType(type);
-    setFormCostPerLiter(STANDARD_FUEL_PRICES[type] || 6800);
   };
 
   // Live calculation for Add Form
@@ -213,7 +241,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   const liveFormTotalCost = useMemo(() => {
     const l = Number(formLiters) || 0;
-    return Math.round(l * formCostPerLiter);
+    const price = Number(formCostPerLiter) || 0;
+    return Math.round(l * price);
   }, [formLiters, formCostPerLiter]);
 
   const liveFormRatio = useMemo(() => {
@@ -241,7 +270,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const handleSaveFuelLog = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formFleetId || !formLiters || !formStartOdo || !formEndOdo || !formDriverName) {
-      alert('Mohon lengkapi armada, supir, volume liter, dan kilometer awal/akhir.');
       return;
     }
 
@@ -251,7 +279,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     const startKm = Number(formStartOdo);
     const endKm = Number(formEndOdo);
     if (endKm <= startKm) {
-      alert('Kilometer akhir harus lebih besar dari kilometer awal!');
       return;
     }
 
@@ -265,7 +292,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       date: formDate,
       fuelType: formFuelType,
       liters: Number(formLiters),
-      costPerLiter: formCostPerLiter,
+      costPerLiter: Number(formCostPerLiter) || 0,
       startOdometerKm: startKm,
       endOdometerKm: endKm,
       gasStation: formGasStation,
@@ -278,6 +305,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     // Reset form
     setIsAddModalOpen(false);
     setFormLiters('');
+    setFormCostPerLiter('');
     setFormStartOdo('');
     setFormEndOdo('');
     setFormNotes('');
@@ -478,30 +506,42 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     };
   }, [dailyConsumptionData]);
 
-  // 2. Unit Vehicles L/KM Calculation and In-depth Analysis
+  // 2. Unit Vehicles L/KM Calculation and In-depth Analysis (Sorted N1, A3, N3, N4, N5, N20, N21, N22, N23, S5, DS4, DS5)
   const unitLKmAnalysis = useMemo(() => {
-    const list = fleetSummaries.map(fs => {
-      const avgLKm = fs.avgLiterPerKm || (fs.totalDistanceKm > 0 ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : (fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0.1333));
-      const avgL100Km = fs.avgLiterPer100Km || (fs.totalDistanceKm > 0 ? Number(((fs.totalLiters / fs.totalDistanceKm) * 100).toFixed(2)) : (fs.targetRatio > 0 ? Number((100 / fs.targetRatio).toFixed(2)) : 13.33));
-      const targetLKm = fs.targetLiterPerKm || (fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0.1333);
-      const targetL100Km = fs.targetLiterPer100Km || (fs.targetRatio > 0 ? Number((100 / fs.targetRatio).toFixed(2)) : 13.33);
+    const orderedSummaries = [...fleetSummaries].sort(
+      (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
+    );
 
-      // In Liter/KM: Lower is more economical!
-      // Deviation % = ((targetLKm - avgLKm) / targetLKm) * 100
-      // Positive: saving vs factory target (more economical)
-      // Negative: wasteful vs factory target
-      const savingPct = targetLKm > 0 ? Number((((targetLKm - avgLKm) / targetLKm) * 100).toFixed(1)) : 0;
+    const list = orderedSummaries.map(fs => {
+      const hasData = fs.totalDistanceKm > 0 && fs.totalLiters > 0;
+      const avgLKm = hasData ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : 0;
+      const avgL100Km = hasData ? Number(((fs.totalLiters / fs.totalDistanceKm) * 100).toFixed(2)) : 0;
+      const targetLKm = hasData && fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
+      const targetL100Km = hasData && fs.targetRatio > 0 ? Number((100 / fs.targetRatio).toFixed(2)) : 0;
+
+      const savingPct = hasData && targetLKm > 0 ? Number((((targetLKm - avgLKm) / targetLKm) * 100).toFixed(1)) : 0;
       const isSaving = savingPct >= 0;
 
-      const avgCostPerKm = fs.totalDistanceKm > 0 ? Math.round(fs.totalCost / fs.totalDistanceKm) : 0;
-      let statusColor = 'text-blue-400 bg-blue-500/10 border-blue-500/30';
-      if (fs.status === 'Sangat Efisien') statusColor = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
-      else if (fs.status === 'Efisien / Normal') statusColor = 'text-blue-400 bg-blue-500/10 border-blue-500/30';
-      else if (fs.status === 'Boros') statusColor = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
-      else if (fs.status === 'Kritis / Potensi Anomali') statusColor = 'text-rose-400 bg-rose-500/10 border-rose-500/30';
+      const avgCostPerKm = hasData ? Math.round(fs.totalCost / fs.totalDistanceKm) : 0;
+      let statusColor = 'text-slate-400 bg-slate-800/60 border-slate-700';
+      if (hasData) {
+        if (fs.status === 'Sangat Efisien') statusColor = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
+        else if (fs.status === 'Efisien / Normal') statusColor = 'text-blue-400 bg-blue-500/10 border-blue-500/30';
+        else if (fs.status === 'Boros') statusColor = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
+        else if (fs.status === 'Kritis / Potensi Anomali') statusColor = 'text-rose-400 bg-rose-500/10 border-rose-500/30';
+      }
+
+      // Resolve latest driverName & areaKirim from fuelLogs for this unit
+      const unitLogs = fuelLogs.filter(
+        l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
+      );
+      const latestLog = unitLogs[0];
+      const driverName = latestLog?.driverName || '-';
+      const areaKirim = latestLog?.routeTrip || '-';
 
       return {
         ...fs,
+        hasData,
         avgLKm,
         avgL100Km,
         targetLKm,
@@ -509,7 +549,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         avgCostPerKm,
         statusColor,
         savingPct,
-        isSaving
+        isSaving,
+        driverName,
+        areaKirim
       };
     });
 
@@ -520,38 +562,58 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return (
         item.plateNumber.toLowerCase().includes(q) ||
         (item.initialCode && item.initialCode.toLowerCase().includes(q)) ||
-        item.vehicleType.toLowerCase().includes(q)
+        item.vehicleType.toLowerCase().includes(q) ||
+        item.driverName.toLowerCase().includes(q) ||
+        item.areaKirim.toLowerCase().includes(q)
       );
     });
 
-    // Apply sorting
+    // Apply sorting (default: canonical sequence N1, A3, N3, N4, N5, N20, N21, N22, N23, S5, DS4, DS5)
     return filtered.sort((a, b) => {
+      if (lKmSortBy === 'canonical_order') {
+        return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
+      }
       if (lKmSortBy === 'lKm_asc') return a.avgLKm - b.avgLKm;
       if (lKmSortBy === 'lKm_desc') return b.avgLKm - a.avgLKm;
       if (lKmSortBy === 'efficiency_desc') return b.efficiencyScore - a.efficiencyScore;
       if (lKmSortBy === 'distance_desc') return b.totalDistanceKm - a.totalDistanceKm;
-      return 0;
+      return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
     });
-  }, [fleetSummaries, lKmSearch, lKmSortBy]);
+  }, [fleetSummaries, fuelLogs, lKmSearch, lKmSortBy]);
 
-  // Chart data for comparing Liter per KM vs Target L/KM
+  // Chart data for comparing Liter per KM vs Target L/KM (Strictly ordered N1..DS5)
   const lKmComparisonChartData = useMemo(() => {
-    return fleetSummaries.map(fs => {
-      const avgLKm = fs.avgLiterPerKm || (fs.totalDistanceKm > 0 ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : (fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0.1333));
-      const targetLKm = fs.targetLiterPerKm || (fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0.1333);
+    const orderedSummaries = [...fleetSummaries].sort(
+      (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
+    );
+    const mapped = orderedSummaries.map(fs => {
+      const hasData = fs.totalDistanceKm > 0 && fs.totalLiters > 0;
+      const avgLKm = hasData ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : 0;
+      const targetLKm = hasData && fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
+      const unitLogs = fuelLogs.filter(
+        l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
+      );
+      const latestLog = unitLogs[0];
       return {
+        fleetId: fs.fleetId,
         unit: fs.initialCode || fs.plateNumber,
         plate: fs.plateNumber,
         tipe: fs.vehicleType,
+        driverName: latestLog?.driverName || '-',
+        areaKirim: latestLog?.routeTrip || '-',
         aktualLKm: avgLKm,
         targetLKm: targetLKm,
         aktualL100Km: Number((avgLKm * 100).toFixed(2)),
         targetL100Km: Number((targetLKm * 100).toFixed(2)),
-        aktualKmL: fs.avgKmPerLiter,
-        targetKmL: fs.targetRatio
+        aktualKmL: hasData ? fs.avgKmPerLiter : 0,
+        targetKmL: hasData ? fs.targetRatio : 0
       };
     });
-  }, [fleetSummaries]);
+    if (comparisonSelectedFleetId !== 'all') {
+      return mapped.filter(m => m.fleetId === comparisonSelectedFleetId);
+    }
+    return mapped;
+  }, [fleetSummaries, fuelLogs, comparisonSelectedFleetId]);
 
   // Filtered Fuel Logs
   const filteredLogs = useMemo(() => {
@@ -769,14 +831,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             </div>
             <div className="flex items-baseline gap-1.5">
               <span className="text-2xl font-black text-amber-400 font-mono">
-                {kpiSummary.overallAvgLiterPerKm || 0.1333}
+                {kpiSummary.overallAvgLiterPerKm || 0}
               </span>
               <span className="text-xs text-amber-300/80 font-bold">L / KM</span>
             </div>
             <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1 font-mono">
-              <span>{kpiSummary.overallAvgLiterPer100Km || 13.33} L/100 KM</span>
-              <span className="text-slate-500">&bull;</span>
-              <span className="text-slate-400">Target 0.1333</span>
+              <span>{kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM</span>
             </div>
           </div>
 
@@ -1302,7 +1362,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               </div>
               <div className="text-[11px] font-mono text-slate-400">
-                Rata-rata Seluruh Truk: <strong className="text-amber-400">{kpiSummary.overallAvgLiterPerKm || 0.1333} L/KM</strong> ({kpiSummary.overallAvgLiterPer100Km || 13.33} L/100 KM)
+                Rata-rata Seluruh Truk: <strong className="text-amber-400">{kpiSummary.overallAvgLiterPerKm || 0} L/KM</strong> ({kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM)
               </div>
             </div>
 
@@ -1317,53 +1377,122 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       <span>Komparasi Aktual L/KM vs Target Pabrikan</span>
                     </h4>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Semakin rendah bar realisasi dibanding target, semakin irit konsumsi BBM unit.
+                      Pilih armada dari daftar untuk membandingkan konsumsi BBM seluruh unit armada.
                     </p>
                   </div>
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-400 shrink-0">
-                    {lKmComparisonChartData.filter(d => d.aktualLKm <= d.targetLKm).length}/{lKmComparisonChartData.length} Unit Irit
+                    {unitLKmAnalysis.filter(d => d.hasData && d.avgLKm <= d.targetLKm).length}/{unitLKmAnalysis.length} Unit Irit
                   </span>
                 </div>
 
-                {/* Summary Pill Row */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                {/* Summary Pill Row + Modern List Armada Selector */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-stretch">
+                  <div className="sm:col-span-3 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-center">
                     <div className="text-[10px] text-slate-400">Rata-rata Aktual</div>
                     <div className="text-sm font-black text-emerald-400 font-mono mt-0.5">
-                      {kpiSummary.overallAvgLiterPerKm || 0.1333} <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                      {comparisonSelectedFleetId === 'all'
+                        ? (kpiSummary.overallAvgLiterPerKm || 0)
+                        : (unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId)?.avgLKm || 0)}{' '}
+                      <span className="text-[10px] font-normal text-slate-400">L/KM</span>
                     </div>
                   </div>
-                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                  <div className="sm:col-span-3 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-center">
                     <div className="text-[10px] text-slate-400">Standar Pabrik</div>
                     <div className="text-sm font-black text-slate-300 font-mono mt-0.5">
-                      0.1333 <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                      {comparisonSelectedFleetId === 'all'
+                        ? (fuelLogs.length > 0 ? 0.1333 : 0)
+                        : (unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId)?.targetLKm || 0)}{' '}
+                      <span className="text-[10px] font-normal text-slate-400">L/KM</span>
                     </div>
                   </div>
-                  <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
-                    <div className="text-[10px] text-slate-400">Unit Terbaik</div>
-                    <div className="text-sm font-black text-amber-400 font-mono mt-0.5 truncate">
-                      {unitLKmAnalysis[0]?.initialCode || unitLKmAnalysis[0]?.plateNumber || '-'}
+                  <div className="sm:col-span-6 bg-slate-900/90 p-2 rounded-xl border border-slate-800 relative">
+                    <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
+                      <span>List Armada</span>
+                      <span className="text-[9px] text-amber-400/90 font-semibold">Komparasi Unit</span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModalDropdown(activeModalDropdown === 'chart_fleet' ? null : 'chart_fleet')}
+                      className="w-full bg-slate-950 hover:bg-slate-900 border border-slate-700/80 hover:border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-400 flex items-center justify-between gap-2 transition cursor-pointer"
+                    >
+                      <span className="truncate flex items-center gap-1.5">
+                        <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        {comparisonSelectedFleetId === 'all'
+                          ? `Semua Armada (${unitLKmAnalysis.length} Unit)`
+                          : (() => {
+                              const found = unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId);
+                              return found ? `${found.initialCode || found.plateNumber} (${found.plateNumber})` : 'Semua Armada';
+                            })()}
+                      </span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${activeModalDropdown === 'chart_fleet' ? 'rotate-180 text-amber-400' : ''}`} />
+                    </button>
+
+                    {activeModalDropdown === 'chart_fleet' && (
+                      <div className="absolute right-0 left-0 top-full mt-1.5 z-40 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComparisonSelectedFleetId('all');
+                            setActiveModalDropdown(null);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between transition cursor-pointer ${
+                            comparisonSelectedFleetId === 'all'
+                              ? 'bg-amber-500/15 text-amber-300 font-bold'
+                              : 'text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span>Semua Armada ({unitLKmAnalysis.length} Unit)</span>
+                          {comparisonSelectedFleetId === 'all' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                        </button>
+                        {unitLKmAnalysis.map(u => {
+                          const isSel = comparisonSelectedFleetId === u.fleetId;
+                          return (
+                            <button
+                              key={u.fleetId}
+                              type="button"
+                              onClick={() => {
+                                setComparisonSelectedFleetId(u.fleetId);
+                                setActiveModalDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between border-t border-slate-800/60 transition cursor-pointer ${
+                                isSel ? 'bg-amber-500/15 text-amber-300 font-bold' : 'text-slate-200 hover:bg-slate-800'
+                              }`}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <div className="font-mono font-bold truncate">
+                                  {u.initialCode || u.plateNumber} <span className="text-slate-400 font-normal">({u.plateNumber})</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  {u.driverName} • {u.areaKirim}
+                                </div>
+                              </div>
+                              {isSel && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Horizontal Comparison Bars (Audience-Friendly Visual) */}
-                <div className="h-72 w-full">
+                {/* Horizontal Comparison Bars (All 12 Units Displayed in Order N1..DS5) */}
+                <div className="h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={lKmComparisonChartData}
                       layout="vertical"
-                      margin={{ top: 4, right: 18, left: 4, bottom: 4 }}
-                      barCategoryGap="22%"
+                      margin={{ top: 4, right: 18, left: 6, bottom: 4 }}
+                      barCategoryGap="18%"
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={true} vertical={false} />
                       <XAxis type="number" stroke="#94a3b8" fontSize={10} domain={[0, 0.22]} unit=" L" />
                       <YAxis
                         type="category"
                         dataKey="unit"
+                        interval={0}
                         stroke="#94a3b8"
                         fontSize={10}
-                        width={68}
+                        width={76}
                         tick={{ fontWeight: 700 }}
                       />
                       <Tooltip
@@ -1381,11 +1510,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         ]}
                         labelFormatter={(label, payload) => {
                           const p = payload?.[0]?.payload;
-                          return p ? `Armada ${label} (${p.plate} • ${p.tipe})` : `Armada ${label}`;
+                          return p
+                            ? `Armada ${label} (${p.plate} • ${p.tipe}) | Driver: ${p.driverName} | Area: ${p.areaKirim}`
+                            : `Armada ${label}`;
                         }}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px' }} />
-                      <Bar dataKey="aktualLKm" name="Realisasi L/KM" fill="#10b981" radius={[0, 4, 4, 0]} barSize={8}>
+                      <Bar dataKey="aktualLKm" name="Realisasi L/KM" fill="#10b981" radius={[0, 4, 4, 0]} barSize={7}>
                         {lKmComparisonChartData.map((entry, idx) => (
                           <Cell
                             key={`cell-akt-${idx}`}
@@ -1393,7 +1524,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           />
                         ))}
                       </Bar>
-                      <Bar dataKey="targetLKm" name="Target Pabrikan L/KM" fill="#64748b" radius={[0, 4, 4, 0]} barSize={8} />
+                      <Bar dataKey="targetLKm" name="Target Pabrikan L/KM" fill="#64748b" radius={[0, 4, 4, 0]} barSize={7} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1425,6 +1556,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     <thead className="bg-slate-900/90 text-slate-400 text-[11px] uppercase border-b border-slate-800">
                       <tr>
                         <th className="py-2.5 px-3">Unit Armada</th>
+                        <th className="py-2.5 px-3">Nama Driver</th>
+                        <th className="py-2.5 px-3">Area Kirim</th>
                         <th className="py-2.5 px-3">Tipe Truk</th>
                         <th className="py-2.5 px-3 text-right">Jarak (KM)</th>
                         <th className="py-2.5 px-3 text-right font-bold text-amber-300">Rata-rata L/KM</th>
@@ -1435,10 +1568,22 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
                       {unitLKmAnalysis.map((item) => (
-                        <tr key={item.fleetId} className="hover:bg-slate-900/40 transition">
+                        <tr
+                          key={item.fleetId}
+                          onClick={() => setComparisonSelectedFleetId(prev => prev === item.fleetId ? 'all' : item.fleetId)}
+                          className={`hover:bg-slate-900/40 transition cursor-pointer ${
+                            comparisonSelectedFleetId === item.fleetId ? 'bg-amber-500/10' : ''
+                          }`}
+                        >
                           <td className="py-2 px-3">
                             <div className="font-bold text-white font-sans">{item.initialCode || '-'}</div>
                             <div className="text-[10px] text-slate-400">{item.plateNumber}</div>
+                          </td>
+                          <td className="py-2 px-3 font-sans text-slate-200 text-[11px]">
+                            {item.driverName}
+                          </td>
+                          <td className="py-2 px-3 font-sans text-slate-300 text-[11px]">
+                            {item.areaKirim}
                           </td>
                           <td className="py-2 px-3 font-sans text-slate-300 text-[11px]">
                             {item.vehicleType}
@@ -1453,7 +1598,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             {item.avgL100Km} <span className="text-[10px] text-slate-500">L</span>
                           </td>
                           <td className="py-2 px-3 text-center font-sans">
-                            {item.isSaving ? (
+                            {!item.hasData ? (
+                              <span className="text-slate-500 text-[11px] font-semibold">0%</span>
+                            ) : item.isSaving ? (
                               <span className="text-emerald-400 text-[11px] font-bold flex items-center justify-center gap-0.5">
                                 <ArrowDown className="w-3 h-3 text-emerald-400" />
                                 +{item.savingPct}% Irit
@@ -1467,7 +1614,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </td>
                           <td className="py-2 px-3 text-center font-sans">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.statusColor}`}>
-                              {item.status.split(' ')[0]}
+                              {item.hasData ? item.status.split(' ')[0] : '-'}
                             </span>
                           </td>
                         </tr>
@@ -1902,6 +2049,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     onChange={(e) => setLKmSortBy(e.target.value as any)}
                     className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
                   >
+                    <option value="canonical_order" className="bg-slate-900">Urutan Standar (N1 - DS5)</option>
                     <option value="lKm_asc" className="bg-slate-900">L/KM Terendah (Paling Irit)</option>
                     <option value="lKm_desc" className="bg-slate-900">L/KM Tertinggi (Paling Boros)</option>
                     <option value="efficiency_desc" className="bg-slate-900">Skor Efisiensi Tertinggi</option>
@@ -2007,6 +2155,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase border-b border-slate-800">
                     <tr>
                       <th className="py-3 px-3.5">Unit Armada</th>
+                      <th className="py-3 px-3.5">Nama Driver</th>
+                      <th className="py-3 px-3.5">Area Kirim</th>
                       <th className="py-3 px-3.5">Tipe Kendaraan</th>
                       <th className="py-3 px-3 text-right">Jarak (KM)</th>
                       <th className="py-3 px-3 text-right">BBM (Liter)</th>
@@ -2041,6 +2191,14 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           <div className="text-[10px] text-slate-500 font-sans">{item.totalLogs} catatan pengisian</div>
                         </td>
 
+                        <td className="py-3 px-3.5 font-sans text-slate-200 text-xs">
+                          {item.driverName}
+                        </td>
+
+                        <td className="py-3 px-3.5 font-sans text-slate-300 text-xs">
+                          {item.areaKirim}
+                        </td>
+
                         <td className="py-3 px-3.5 font-sans text-slate-300">
                           <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[11px]">
                             {item.vehicleType}
@@ -2068,11 +2226,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                         <td className="py-3 px-3 text-right text-slate-400">
                           <div>{item.targetLKm} L/KM</div>
-                          <div className="text-[10px] text-slate-500 font-sans">({item.targetRatio} KM/L)</div>
+                          <div className="text-[10px] text-slate-500 font-sans">({item.hasData ? item.targetRatio : 0} KM/L)</div>
                         </td>
 
                         <td className="py-3 px-3.5 text-center font-sans">
-                          {item.isSaving ? (
+                          {!item.hasData ? (
+                            <span className="text-slate-500 text-xs font-semibold">0%</span>
+                          ) : item.isSaving ? (
                             <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
                               <ArrowDown className="w-3 h-3" />
                               <span>+{item.savingPct}% Lebih Irit</span>
@@ -2091,7 +2251,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                         <td className="py-3 px-3.5 text-center font-sans">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${item.statusColor}`}>
-                            {item.status}
+                            {item.hasData ? item.status : '-'}
                           </span>
                         </td>
                       </tr>
@@ -2678,89 +2838,455 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               </button>
             </div>
 
-            <form onSubmit={handleSaveFuelLog} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+            <form onSubmit={handleSaveFuelLog} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* 1. Custom Dropdown: Armada Truk */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Armada Truk <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    value={formFleetId}
-                    onChange={(e) => handleFleetSelection(e.target.value)}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet')}
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'fleet' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <option value="">-- Pilih Armada --</option>
-                    {fleets.map(f => (
-                      <option key={f.id} value={f.id}>
-                        {f.initialCode || f.plateNumber} ({f.plateNumber} - {f.vehicleType})
-                      </option>
-                    ))}
-                  </select>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                        <Truck className="w-3.5 h-3.5" />
+                      </span>
+                      {formFleetId ? (
+                        (() => {
+                          const f = fleets.find(fl => fl.id === formFleetId);
+                          return f ? (
+                            <span className="truncate font-bold text-white">
+                              {f.initialCode || f.plateNumber}{' '}
+                              <span className="text-slate-400 font-normal">({f.plateNumber})</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Pilih Armada...</span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-slate-400">-- Pilih Armada --</span>
+                      )}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'fleet' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'fleet' && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pilih Unit Armada (12 Unit)</span>
+                        <span className="text-[10px] text-amber-400 font-mono">N1 – DS5</span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto divide-y divide-slate-800/60">
+                        {sortFleetsByCanonicalOrder(fleets).map(f => {
+                          const isSelected = formFleetId === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => {
+                                handleFleetSelection(f.id);
+                                setActiveModalDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isSelected ? 'bg-amber-500/15 text-amber-300' : 'hover:bg-slate-800/80 text-slate-200'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold flex items-center gap-1.5">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono text-[10px] text-amber-400">
+                                    {f.initialCode || f.plateNumber}
+                                  </span>
+                                  <span className="truncate">{f.plateNumber}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                  {f.vehicleType} {f.brand ? `• ${f.brand}` : ''}
+                                </div>
+                              </div>
+                              {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                {/* 2. Custom Dropdown: Nama Driver */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Nama Driver <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    value={formDriverName}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFormDriverName(val);
-                      const matched = driverDropdownOptions.find(d => d.name === val);
-                      if (matched) setFormDriverId(matched.id);
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModalDropdown(activeModalDropdown === 'driver' ? null : 'driver');
+                      setDriverSearchFilter('');
                     }}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'driver' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <option value="">-- Pilih Nama Driver --</option>
-                    {driverDropdownOptions.map(d => (
-                      <option key={d.id} value={d.name}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                        <User className="w-3.5 h-3.5" />
+                      </span>
+                      {formDriverName ? (
+                        <span className="truncate font-bold text-white">{formDriverName}</span>
+                      ) : (
+                        <span className="text-slate-400">-- Pilih Nama Driver --</span>
+                      )}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'driver' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'driver' && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                      <div className="p-2 bg-slate-950/90 border-b border-slate-800">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={driverSearchFilter}
+                            onChange={(e) => setDriverSearchFilter(e.target.value)}
+                            placeholder="Cari nama driver..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                        {driverDropdownOptions
+                          .filter(d => !driverSearchFilter.trim() || d.name.toLowerCase().includes(driverSearchFilter.toLowerCase()))
+                          .map(d => {
+                            const isSelected = formDriverName === d.name;
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => {
+                                  setFormDriverName(d.name);
+                                  setFormDriverId(d.id);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isSelected ? 'bg-sky-500/15 text-sky-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-sky-400 shrink-0">
+                                    {d.name.charAt(0).toUpperCase()}
+                                  </span>
+                                  <span className="text-xs truncate">{d.name}</span>
+                                </div>
+                                {isSelected && <Check className="w-4 h-4 text-sky-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Custom Dropdown: Area Kirim (Tersinkronisasi dengan Jadwal & Penugasan) */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Area Kirim <span className="text-rose-400">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModalDropdown(activeModalDropdown === 'area' ? null : 'area');
+                      setAreaSearchFilter('');
+                    }}
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'area' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                        <MapPin className="w-3.5 h-3.5" />
+                      </span>
+                      {formRouteTrip ? (
+                        <span className="truncate font-bold text-white">{formRouteTrip}</span>
+                      ) : (
+                        <span className="text-slate-400">-- Pilih Area Kirim --</span>
+                      )}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'area' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'area' && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                      <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Area Jadwal & Penugasan</span>
+                          <span className="text-[10px] text-slate-400">{deliveryAreaOptions.length} Rute</span>
+                        </div>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={areaSearchFilter}
+                            onChange={(e) => {
+                              setAreaSearchFilter(e.target.value);
+                              setFormRouteTrip(e.target.value);
+                            }}
+                            placeholder="Cari atau ketik area kirim..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                        {deliveryAreaOptions
+                          .filter(area => !areaSearchFilter.trim() || area.toLowerCase().includes(areaSearchFilter.toLowerCase()))
+                          .map(area => {
+                            const isSelected = formRouteTrip.toLowerCase() === area.toLowerCase();
+                            return (
+                              <button
+                                key={area}
+                                type="button"
+                                onClick={() => {
+                                  setFormRouteTrip(area);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isSelected ? 'bg-emerald-500/15 text-emerald-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                                }`}
+                              >
+                                <span className="text-xs truncate flex items-center gap-2">
+                                  <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  {area}
+                                </span>
+                                {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                {/* 4. Modern Interactive Calendar Date Picker: Tanggal Isi */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Tanggal Isi <span className="text-rose-400">*</span>
                   </label>
-                  <input
-                    type="date"
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeModalDropdown !== 'date') {
+                        const parsed = formDate ? new Date(`${formDate}T00:00:00`) : new Date();
+                        if (!isNaN(parsed.getTime())) setCalendarViewMonth(parsed);
+                      }
+                      setActiveModalDropdown(activeModalDropdown === 'date' ? null : 'date');
+                    }}
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'date' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                        <Calendar className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="font-bold text-white truncate">
+                        {formDate
+                          ? new Date(`${formDate}T00:00:00`).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })
+                          : 'Pilih Tanggal'}
+                      </span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'date' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'date' && (() => {
+                    const year = calendarViewMonth.getFullYear();
+                    const month = calendarViewMonth.getMonth();
+                    const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+                    const firstDayIndex = new Date(year, month, 1).getDay();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const todayIso = new Date().toISOString().split('T')[0];
+                    const yesterdayDate = new Date();
+                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                    const yesterdayIso = yesterdayDate.toISOString().split('T')[0];
+
+                    const dayCells: (number | null)[] = [];
+                    for (let i = 0; i < firstDayIndex; i++) dayCells.push(null);
+                    for (let d = 1; d <= daysInMonth; d++) dayCells.push(d);
+
+                    return (
+                      <div className="absolute left-0 top-full mt-1.5 z-50 w-72 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-150">
+                        {/* Calendar Header */}
+                        <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setCalendarViewMonth(new Date(year, month - 1, 1))}
+                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition cursor-pointer"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <div className="text-xs font-extrabold text-white tracking-wide">
+                            {monthNames[month]} {year}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCalendarViewMonth(new Date(year, month + 1, 1))}
+                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition cursor-pointer"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Quick Select Pills */}
+                        <div className="flex items-center gap-1.5 mb-2.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormDate(todayIso);
+                              setActiveModalDropdown(null);
+                            }}
+                            className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                              formDate === todayIso
+                                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            Hari Ini
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormDate(yesterdayIso);
+                              setActiveModalDropdown(null);
+                            }}
+                            className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                              formDate === yesterdayIso
+                                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            Kemarin
+                          </button>
+                        </div>
+
+                        {/* Day Names */}
+                        <div className="grid grid-cols-7 gap-1 text-center mb-1">
+                          {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(d => (
+                            <div key={d} className="text-[9px] font-bold text-slate-500 uppercase">
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Calendar Grid */}
+                        <div className="grid grid-cols-7 gap-1">
+                          {dayCells.map((day, idx) => {
+                            if (day === null) {
+                              return <div key={`empty-${idx}`} className="h-7" />;
+                            }
+                            const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            const isSelected = formDate === iso;
+                            const isToday = todayIso === iso;
+                            return (
+                              <button
+                                key={iso}
+                                type="button"
+                                onClick={() => {
+                                  setFormDate(iso);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`h-7 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25'
+                                    : isToday
+                                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                                    : 'text-slate-200 hover:bg-slate-800'
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                {/* 5. Custom Dropdown: Jenis Bahan Bakar */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Jenis Bahan Bakar <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    value={formFuelType}
-                    onChange={(e) => handleFuelTypeChange(e.target.value as FuelType)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'fuel' ? null : 'fuel')}
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'fuel' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <option value="BioSolar">Solar</option>
-                  </select>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                        <Fuel className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="font-bold text-white truncate">
+                        {formFuelType === 'BioSolar' ? 'Solar (BioSolar Subsidi)' : formFuelType}
+                      </span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'fuel' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'fuel' && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                      {([
+                        { value: 'BioSolar' as FuelType, label: 'Solar (BioSolar)', price: STANDARD_FUEL_PRICES['BioSolar'] },
+                        { value: 'Dexlite' as FuelType, label: 'Dexlite', price: STANDARD_FUEL_PRICES['Dexlite'] },
+                        { value: 'Pertamina Dex' as FuelType, label: 'Pertamina Dex', price: STANDARD_FUEL_PRICES['Pertamina Dex'] }
+                      ]).map(opt => {
+                        const isSelected = formFuelType === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              handleFuelTypeChange(opt.value);
+                              setActiveModalDropdown(null);
+                            }}
+                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-800/60 transition cursor-pointer ${
+                              isSelected ? 'bg-amber-500/15 text-amber-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                            }`}
+                          >
+                            <div>
+                              <div className="text-xs font-bold">{opt.label}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">Rp {opt.price.toLocaleString('id-ID')}/L</div>
+                            </div>
+                            {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Harga per Liter (Rp)
                   </label>
                   <input
                     type="number"
+                    placeholder="misal 6800"
                     value={formCostPerLiter}
-                    onChange={(e) => setFormCostPerLiter(Number(e.target.value) || 0)}
+                    onChange={(e) => setFormCostPerLiter(e.target.value)}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -2862,21 +3388,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       <span className="font-bold text-white truncate">
                         {formGasStation.replace(/^SPBU\s+/i, '')}
                       </span>
-                      <span
-                        className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                          formGasStation.includes('Farly')
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : formGasStation.includes('Gajah Mada')
-                            ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-                            : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                        }`}
-                      >
-                        {formGasStation.includes('Farly')
-                          ? 'Mitra Utama'
-                          : formGasStation.includes('Gajah Mada')
-                          ? 'Mitra Kota'
-                          : 'Urgent'}
-                      </span>
+                      {!formGasStation.includes('Farly') && !formGasStation.includes('Gajah Mada') && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold border bg-rose-500/20 text-rose-300 border-rose-500/30">
+                          Urgent
+                        </span>
+                      )}
                     </div>
                     <ChevronDown
                       className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
@@ -2891,7 +3407,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         {
                           value: 'SPBU Farly',
                           label: 'Farly',
-                          badge: 'Mitra Utama',
+                          badge: '',
                           desc: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
                           badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
                           iconCls: 'text-amber-400 bg-amber-500/15 border-amber-500/30'
@@ -2899,7 +3415,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         {
                           value: 'SPBU Gajah Mada',
                           label: 'Gajah Mada',
-                          badge: 'Mitra Kota',
+                          badge: '',
                           desc: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
                           badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
                           iconCls: 'text-blue-400 bg-blue-500/15 border-blue-500/30'
@@ -2933,9 +3449,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-black text-white">{opt.label}</span>
-                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
-                                    {opt.badge}
-                                  </span>
+                                  {opt.badge && (
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
+                                      {opt.badge}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.desc}</div>
                               </div>

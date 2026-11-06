@@ -83,48 +83,74 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
   const numberOrFallback = (value: any, fallbackValue?: number): number | undefined => {
     if (value === null || value === undefined || value === '') return fallbackValue;
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallbackValue;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
   };
 
+  const nonEmptyStr = (...vals: any[]): string | undefined => {
+    for (const v of vals) {
+      if (typeof v === 'string' && v.trim() !== '') return v.trim();
+    }
+    return undefined;
+  };
+
+  const existingInStore = logisticsStore
+    .getFleets()
+    .find(
+      f =>
+        f.id === row?.id ||
+        (row?.plateNumber && f.plateNumber === row.plateNumber) ||
+        (row?.plate_number && f.plateNumber === row.plate_number)
+    );
+
+  const effFallback = fallback || existingInStore;
   const canonical =
-    resolveCanonicalFleetMeta(row?.plateNumber || row?.plate_number || row?.id) ||
-    fallback;
+    resolveCanonicalFleetMeta(row?.plateNumber || row?.plate_number || row?.id || effFallback) ||
+    effFallback;
+
+  const boxCap = numberOrFallback(
+    row.boxCapacityM3 ?? row.box_capacity_m3,
+    effFallback?.boxCapacityM3 ?? canonical?.boxCapacityM3
+  );
+  const mult = numberOrFallback(
+    row.boxInnerMultiplierPercent ?? row.box_inner_multiplier_percent,
+    effFallback?.boxInnerMultiplierPercent ?? canonical?.boxInnerMultiplierPercent ?? 90
+  );
+  const innerCap = numberOrFallback(
+    row.boxInnerCapacityM3 ?? row.box_inner_capacity_m3,
+    effFallback?.boxInnerCapacityM3 ??
+      canonical?.boxInnerCapacityM3 ??
+      (boxCap && mult ? Number((boxCap * (mult / 100)).toFixed(2)) : undefined)
+  );
 
   return {
-    ...(canonical || {} as Fleet),
-    ...(fallback || {} as Fleet),
-    id: row.id || fallback?.id || canonical?.id || `flt-${Date.now()}`,
-    plateNumber: row.plateNumber || row.plate_number || fallback?.plateNumber || canonical?.plateNumber || '',
-    vehicleType: (row.vehicleType || row.vehicle_type || fallback?.vehicleType || canonical?.vehicleType || 'Engkel STD') as VehicleType,
-    initialCode: row.initialCode || row.initial_code || fallback?.initialCode || canonical?.initialCode,
-    brand: row.brand ?? row.brand_name ?? fallback?.brand ?? canonical?.brand,
-    engineCc: row.engineCc ?? row.engine_cc ?? fallback?.engineCc ?? canonical?.engineCc,
-    boxCapacityM3: numberOrFallback(row.boxCapacityM3 ?? row.box_capacity_m3, fallback?.boxCapacityM3 ?? canonical?.boxCapacityM3),
-    boxDimensions: row.boxDimensions ?? row.box_dimensions ?? fallback?.boxDimensions ?? canonical?.boxDimensions,
-    boxInnerMultiplierPercent: numberOrFallback(
-      row.boxInnerMultiplierPercent ?? row.box_inner_multiplier_percent,
-      fallback?.boxInnerMultiplierPercent
-    ),
-    boxInnerCapacityM3: numberOrFallback(
-      row.boxInnerCapacityM3 ?? row.box_inner_capacity_m3,
-      fallback?.boxInnerCapacityM3
-    ),
-    boxInnerDimensions: row.boxInnerDimensions ?? row.box_inner_dimensions ?? fallback?.boxInnerDimensions,
-    driverId: row.driverId ?? row.driver_id ?? fallback?.driverId,
-    tonnageCapacity: Number(row.tonnageCapacity ?? row.tonnage_capacity ?? fallback?.tonnageCapacity ?? 0),
-    currentTonnage: Number(row.currentTonnage ?? row.current_tonnage ?? fallback?.currentTonnage ?? 0),
-    status: (row.status || fallback?.status || 'available') as FleetStatus,
-    gpsImei: row.gpsImei ?? row.gps_imei ?? fallback?.gpsImei,
-    fuelLevelPercent: Number(row.fuelLevelPercent ?? row.fuel_level_percent ?? fallback?.fuelLevelPercent ?? 100),
-    odometerKm: Number(row.odometerKm ?? row.odometer_km ?? fallback?.odometerKm ?? 0),
-    year: Number(row.year ?? fallback?.year ?? new Date().getFullYear()),
-    lastMaintenance: row.lastMaintenance ?? row.last_maintenance ?? fallback?.lastMaintenance,
-    kirDocUrl: row.kirDocUrl ?? row.kir_doc_url ?? fallback?.kirDocUrl,
-    kirDocFileName: row.kirDocFileName ?? row.kir_doc_file_name ?? fallback?.kirDocFileName,
-    kirDocUploadedAt: row.kirDocUploadedAt ?? row.kir_doc_uploaded_at ?? fallback?.kirDocUploadedAt,
-    taxDueDate: row.taxDueDate ?? row.tax_due_date ?? fallback?.taxDueDate,
-    stnkExpiryDate: row.stnkExpiryDate ?? row.stnk_expiry_date ?? fallback?.stnkExpiryDate,
-    kirExpiryDate: row.kirExpiryDate ?? row.kir_expiry_date ?? fallback?.kirExpiryDate
+    ...(canonical || ({} as Fleet)),
+    ...(effFallback || ({} as Fleet)),
+    id: nonEmptyStr(row.id, effFallback?.id, canonical?.id) || `flt-${Date.now()}`,
+    plateNumber: nonEmptyStr(row.plateNumber, row.plate_number, effFallback?.plateNumber, canonical?.plateNumber) || '',
+    vehicleType: (nonEmptyStr(row.vehicleType, row.vehicle_type, effFallback?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as VehicleType,
+    initialCode: nonEmptyStr(row.initialCode, row.initial_code, effFallback?.initialCode, canonical?.initialCode),
+    brand: nonEmptyStr(row.brand, row.brand_name, effFallback?.brand, canonical?.brand),
+    engineCc: nonEmptyStr(row.engineCc, row.engine_cc, effFallback?.engineCc, canonical?.engineCc),
+    boxCapacityM3: boxCap,
+    boxDimensions: nonEmptyStr(row.boxDimensions, row.box_dimensions, effFallback?.boxDimensions, canonical?.boxDimensions),
+    boxInnerMultiplierPercent: mult,
+    boxInnerCapacityM3: innerCap,
+    boxInnerDimensions: nonEmptyStr(row.boxInnerDimensions, row.box_inner_dimensions, effFallback?.boxInnerDimensions, canonical?.boxInnerDimensions),
+    driverId: nonEmptyStr(row.driverId, row.driver_id, effFallback?.driverId, canonical?.driverId),
+    tonnageCapacity: numberOrFallback(row.tonnageCapacity ?? row.tonnage_capacity, effFallback?.tonnageCapacity ?? canonical?.tonnageCapacity) ?? 0,
+    currentTonnage: Number(row.currentTonnage ?? row.current_tonnage ?? effFallback?.currentTonnage ?? canonical?.currentTonnage ?? 0),
+    status: (nonEmptyStr(row.status, effFallback?.status, canonical?.status) || 'available') as FleetStatus,
+    gpsImei: nonEmptyStr(row.gpsImei, row.gps_imei, effFallback?.gpsImei, canonical?.gpsImei) || '',
+    fuelLevelPercent: Number(row.fuelLevelPercent ?? row.fuel_level_percent ?? effFallback?.fuelLevelPercent ?? canonical?.fuelLevelPercent ?? 100),
+    odometerKm: numberOrFallback(row.odometerKm ?? row.odometer_km, effFallback?.odometerKm ?? canonical?.odometerKm) ?? 0,
+    year: numberOrFallback(row.year, effFallback?.year ?? canonical?.year) ?? new Date().getFullYear(),
+    lastMaintenance: nonEmptyStr(row.lastMaintenance, row.last_maintenance, effFallback?.lastMaintenance, canonical?.lastMaintenance),
+    kirDocUrl: nonEmptyStr(row.kirDocUrl, row.kir_doc_url, effFallback?.kirDocUrl, canonical?.kirDocUrl),
+    kirDocFileName: nonEmptyStr(row.kirDocFileName, row.kir_doc_file_name, effFallback?.kirDocFileName, canonical?.kirDocFileName),
+    kirDocUploadedAt: nonEmptyStr(row.kirDocUploadedAt, row.kir_doc_uploaded_at, effFallback?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+    taxDueDate: nonEmptyStr(row.taxDueDate, row.tax_due_date, effFallback?.taxDueDate, canonical?.taxDueDate),
+    stnkExpiryDate: nonEmptyStr(row.stnkExpiryDate, row.stnk_expiry_date, effFallback?.stnkExpiryDate, canonical?.stnkExpiryDate),
+    kirExpiryDate: nonEmptyStr(row.kirExpiryDate, row.kir_expiry_date, effFallback?.kirExpiryDate, canonical?.kirExpiryDate)
   } as Fleet;
 }
 
@@ -146,7 +172,16 @@ export function mapSupabaseRowToCrew(row: any, fallback?: Crew): Crew {
 export async function fetchFleetsFromSupabase(): Promise<{ success: boolean; data: Fleet[]; error?: string }> {
   try {
     const data = await apiJson('/api/fleets');
-    return { success: true, data: (data?.data || []).map((row: any) => mapSupabaseRowToFleet(row)) };
+    const localFleets = logisticsStore.getFleets();
+    return {
+      success: true,
+      data: (data?.data || []).map((row: any) => {
+        const fb = localFleets.find(
+          f => f.id === row?.id || (row?.plateNumber && f.plateNumber === row.plateNumber)
+        );
+        return mapSupabaseRowToFleet(row, fb);
+      })
+    };
   } catch (err: any) {
     return { success: false, data: logisticsStore.getFleets(), error: err?.message || 'Gagal membaca armada Hostinger MySQL' };
   }

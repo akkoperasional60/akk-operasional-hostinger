@@ -91,7 +91,8 @@ import {
   INITIAL_CREW_HISTORY,
   INITIAL_AREA_APPROVALS,
   INITIAL_SCANNED_DOCUMENTS,
-  resolveCanonicalFleetMeta
+  resolveCanonicalFleetMeta,
+  sortFleetsByCanonicalOrder
 } from '../data/mockData';
 import {
   INITIAL_SALES_ORDERS,
@@ -671,7 +672,14 @@ class LogisticsStore {
     this.jobdeskConfigs = this.loadFromStorage(STORAGE_KEYS.JOBDESK_CONFIGS, isProd ? [] : INITIAL_JOBDESK_CONFIGS);
     this.spareParts = this.loadFromStorage(STORAGE_KEYS.SPARE_PARTS, isProd ? [] : INITIAL_SPARE_PARTS);
     this.sparePartUsages = this.loadFromStorage(STORAGE_KEYS.SPARE_PART_USAGES, isProd ? [] : INITIAL_SPARE_PART_USAGES);
-    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, isProd ? [] : INITIAL_FUEL_LOGS);
+    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, []);
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_fuel_logs_empty_init_v2') !== 'true') {
+        this.fuelLogs = [];
+        this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, []);
+        localStorage.setItem('akk_fuel_logs_empty_init_v2', 'true');
+      }
+    } catch {}
     this.imageRecords = this.loadFromStorage(STORAGE_KEYS.IMAGES, []);
     this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, isProd ? [] : INITIAL_SCANNED_DOCUMENTS);
     this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, isProd ? [] : INITIAL_SECURITY_LOGS);
@@ -1113,28 +1121,22 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     }
 
-    // Jangan menyuntikkan fuel log contoh di production. Hanya migrasikan record yang memang sudah ada.
-    if (!import.meta.env.PROD && this.fuelLogs.length < INITIAL_FUEL_LOGS.length) {
-      this.fuelLogs = [...INITIAL_FUEL_LOGS];
-      this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
-    } else {
-      let updatedFuel = false;
-      this.fuelLogs = this.fuelLogs.map(l => {
-        if (l.literPerKm === undefined || l.literPer100Km === undefined) {
-          updatedFuel = true;
-          const dist = l.distanceKm > 0 ? l.distanceKm : Math.max(0, l.endOdometerKm - l.startOdometerKm);
-          return {
-            ...l,
-            distanceKm: dist,
-            literPerKm: dist > 0 ? Number((l.liters / dist).toFixed(4)) : 0,
-            literPer100Km: dist > 0 ? Number(((l.liters / dist) * 100).toFixed(2)) : 0
-          };
-        }
-        return l;
-      });
-      if (updatedFuel) {
-        this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+    let updatedFuel = false;
+    this.fuelLogs = this.fuelLogs.map(l => {
+      if (l.literPerKm === undefined || l.literPer100Km === undefined) {
+        updatedFuel = true;
+        const dist = l.distanceKm > 0 ? l.distanceKm : Math.max(0, l.endOdometerKm - l.startOdometerKm);
+        return {
+          ...l,
+          distanceKm: dist,
+          literPerKm: dist > 0 ? Number((l.liters / dist).toFixed(4)) : 0,
+          literPer100Km: dist > 0 ? Number(((l.liters / dist) * 100).toFixed(2)) : 0
+        };
       }
+      return l;
+    });
+    if (updatedFuel) {
+      this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
     }
 
     // Ensure GPS devices in development preview mode only (do not inject mock devices in production)
@@ -1790,14 +1792,55 @@ class LogisticsStore {
     return newLog;
   }
 
-  private enrichFleetItem(f: Fleet): Fleet {
-    const canonical = resolveCanonicalFleetMeta(f);
-    if (!canonical) return f;
+  private enrichFleetItem(f: Fleet, existingLocal?: Fleet): Fleet {
+    const canonical = resolveCanonicalFleetMeta(f) || resolveCanonicalFleetMeta(existingLocal);
+    const localRef = existingLocal || this.fleets.find(item => item.id === f.id || item.plateNumber === f.plateNumber);
+
+    const pickStr = (...vals: Array<string | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'string' && v.trim() !== '') return v.trim();
+      }
+      return undefined;
+    };
+
+    const pickNum = (...vals: Array<number | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+      }
+      return undefined;
+    };
+
+    const boxCapacityM3 = pickNum(f.boxCapacityM3, localRef?.boxCapacityM3, canonical?.boxCapacityM3) ?? 5.5;
+    const boxInnerMultiplierPercent = pickNum(f.boxInnerMultiplierPercent, localRef?.boxInnerMultiplierPercent, canonical?.boxInnerMultiplierPercent) ?? 90;
+    const boxInnerCapacityM3 =
+      pickNum(f.boxInnerCapacityM3, localRef?.boxInnerCapacityM3, canonical?.boxInnerCapacityM3) ??
+      Number((boxCapacityM3 * (boxInnerMultiplierPercent / 100)).toFixed(2));
+
     return {
+      ...(canonical || ({} as Fleet)),
+      ...(localRef || ({} as Fleet)),
       ...f,
-      initialCode: f.initialCode || canonical.initialCode,
-      vehicleType: f.vehicleType || canonical.vehicleType,
-      brand: f.brand || canonical.brand
+      id: pickStr(f.id, localRef?.id, canonical?.id) || f.id,
+      plateNumber: pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber,
+      initialCode: pickStr(f.initialCode, localRef?.initialCode, canonical?.initialCode),
+      vehicleType: (pickStr(f.vehicleType, localRef?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as Fleet['vehicleType'],
+      brand: pickStr(f.brand, localRef?.brand, canonical?.brand),
+      engineCc: pickStr(f.engineCc, localRef?.engineCc, canonical?.engineCc),
+      year: pickNum(f.year, localRef?.year, canonical?.year) ?? 2020,
+      boxCapacityM3,
+      boxDimensions: pickStr(f.boxDimensions, localRef?.boxDimensions, canonical?.boxDimensions),
+      boxInnerMultiplierPercent,
+      boxInnerCapacityM3,
+      lastMaintenance: pickStr(f.lastMaintenance, localRef?.lastMaintenance, canonical?.lastMaintenance),
+      taxDueDate: pickStr(f.taxDueDate, localRef?.taxDueDate, canonical?.taxDueDate),
+      stnkExpiryDate: pickStr(f.stnkExpiryDate, localRef?.stnkExpiryDate, canonical?.stnkExpiryDate),
+      kirExpiryDate: pickStr(f.kirExpiryDate, localRef?.kirExpiryDate, canonical?.kirExpiryDate),
+      kirDocUrl: pickStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
+      kirDocFileName: pickStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
+      kirDocUploadedAt: pickStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+      driverId: pickStr(f.driverId, localRef?.driverId, canonical?.driverId),
+      tonnageCapacity: pickNum(f.tonnageCapacity, localRef?.tonnageCapacity, canonical?.tonnageCapacity) ?? 3.5,
+      odometerKm: pickNum(f.odometerKm, localRef?.odometerKm, canonical?.odometerKm) ?? 0
     };
   }
 
@@ -1805,7 +1848,7 @@ class LogisticsStore {
     if (this.cachedFleets !== null) {
       return this.cachedFleets;
     }
-    this.cachedFleets = this.fleets.map(f => this.enrichFleetItem(f));
+    this.cachedFleets = sortFleetsByCanonicalOrder(this.fleets.map(f => this.enrichFleetItem(f)));
     return this.cachedFleets;
   }
 
@@ -1848,9 +1891,15 @@ class LogisticsStore {
   }
 
   public setFleets(fleets: Fleet[]): void {
-    const validFleets = fleets
-      .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
-      .map(f => this.enrichFleetItem(f));
+    const prevFleets = this.fleets || [];
+    const validFleets = sortFleetsByCanonicalOrder(
+      fleets
+        .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
+        .map(f => {
+          const prev = prevFleets.find(pf => pf.id === f.id || pf.plateNumber === f.plateNumber);
+          return this.enrichFleetItem(f, prev);
+        })
+    );
     this.fleets = validFleets;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     this.notify();
@@ -3137,7 +3186,13 @@ class LogisticsStore {
         ]);
 
         if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-          this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
+          const prevFleets = this.fleets || [];
+          this.fleets = sortFleetsByCanonicalOrder(
+            fleetPayload.data.map((f: Fleet) => {
+              const prev = prevFleets.find(pf => pf.id === f.id || pf.plateNumber === f.plateNumber);
+              return this.enrichFleetItem(f, prev);
+            })
+          );
           this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
         }
         if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
@@ -4382,13 +4437,15 @@ class LogisticsStore {
     this.verifyDriverAccess('updateFleet');
 
     let updatedFleet: Fleet | null = null;
-    this.fleets = this.fleets.map(f => {
-      if (f.id === id) {
-        updatedFleet = { ...f, ...updatedFields };
-        return updatedFleet;
-      }
-      return f;
-    });
+    this.fleets = sortFleetsByCanonicalOrder(
+      this.fleets.map(f => {
+        if (f.id === id) {
+          updatedFleet = this.enrichFleetItem({ ...f, ...updatedFields }, f);
+          return updatedFleet;
+        }
+        return f;
+      })
+    );
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     if (updatedFleet) {
@@ -5275,8 +5332,11 @@ class LogisticsStore {
   }
 
   public getFleetFuelSummary(): FleetFuelSummary[] {
-    return this.fleets.map(fleet => {
-      const logs = this.fuelLogs.filter(l => l.fleetId === fleet.id);
+    const orderedFleets = sortFleetsByCanonicalOrder(this.fleets);
+    return orderedFleets.map(fleet => {
+      const logs = this.fuelLogs.filter(
+        l => l.fleetId === fleet.id || (l.plateNumber && l.plateNumber.toUpperCase() === fleet.plateNumber.toUpperCase())
+      );
       const totalLogs = logs.length;
       const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
       const totalCost = logs.reduce((acc, l) => acc + l.totalCost, 0);
@@ -5284,23 +5344,30 @@ class LogisticsStore {
 
       const targetConfig = FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
       const targetRatio = targetConfig.target;
-      const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : targetRatio;
-      
-      // Rata-rata Konsumsi Liter per Kilometer
-      const avgLiterPerKm = totalDistanceKm > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : (targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0);
-      const avgLiterPer100Km = totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : (targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0);
+      const avgKmPerLiter = totalLiters > 0 && totalDistanceKm > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+
+      // Rata-rata Konsumsi Liter per Kilometer (0 jika belum ada data input BBM)
+      const avgLiterPerKm = totalDistanceKm > 0 && totalLiters > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
+      const avgLiterPer100Km = totalDistanceKm > 0 && totalLiters > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
       const targetLiterPerKm = targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0;
       const targetLiterPer100Km = targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0;
 
       const avgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
-      const efficiencyScore = targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 100;
+      const efficiencyScore = totalDistanceKm > 0 && targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 0;
       const anomaliesCount = logs.filter(l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali').length;
 
       let status: EfficiencyStatus = 'Efisien / Normal';
-      if (efficiencyScore >= 105) status = 'Sangat Efisien';
-      else if (efficiencyScore >= 90) status = 'Efisien / Normal';
-      else if (efficiencyScore >= 75) status = 'Boros';
-      else status = 'Kritis / Potensi Anomali';
+      if (totalLogs === 0 || totalDistanceKm === 0) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 105) {
+        status = 'Sangat Efisien';
+      } else if (efficiencyScore >= 90) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 75) {
+        status = 'Boros';
+      } else {
+        status = 'Kritis / Potensi Anomali';
+      }
 
       return {
         fleetId: fleet.id,

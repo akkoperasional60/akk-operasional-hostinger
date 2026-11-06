@@ -570,14 +570,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'sales_rfid_scanner',
-              label: 'Aplikasi Scan & Foto Muat (RFID)',
+              label: 'Aplikasi Scan & Foto Muat',
               icon: <QrCode className="w-4 h-4 text-emerald-500" />,
-              badge: (
-                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
-                  RFID App
-                </span>
-              ),
-              description: 'Foto item sesuai faktur, deteksi barang sisa & warning lebih muat'
+              description: 'Foto item sesuai faktur, deteksi otomatis YOLO & verifikasi muat'
             }
           ]
         },

@@ -46,7 +46,7 @@ const MODULE_DEFINITIONS = [
       { id: 'sales_schedules', name: 'Jadwal Admin & Produksi' },
       { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
       { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
-      { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat (RFID)' },
+      { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat' },
       { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
       { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
       { id: 'sales_kpi_individual', name: '1. KPI Individu Staf' },

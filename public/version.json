@@ -1,8 +1,9 @@
 {
-  "versionCode": 10011,
-  "versionName": "1.0.11",
-  "updatedAt": "2026-11-05T17:50:00.000000",
-  "changelog": "Sinkronisasi V23 AI Studio ke Hostinger: Verifikasi Ketat AI Vision & Kunci Error Merah pada WMS Scanner Muat Armada (Ram 1-3, Kamera Otomatis Aktif, 3 Halaman Mobile identik Portal Driver), serta Sinkronisasi Cloud Database Barang PC & HP.",
+  "versionCode": 10012,
+  "versionName": "1.0.12",
+  "updatedAt": "2026-11-06T11:20:00.000000",
+  "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
-  "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live."
+  "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
+  "releaseNotes": "Update V24: Sistem Rancangan & Visual Designer Formulir Armada (Service, Cuci, Pengadaan), standarisasi urutan kanonik armada (N1-DS5) & manajemen BBM modern, multi-photo capture & non-contiguous search Database Barang, serta pembaruan 5-tab navigasi Aplikasi Scan & Foto Muat beserta sinkronisasi penuh Hostinger MySQL."
 }

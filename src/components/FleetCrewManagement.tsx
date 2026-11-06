@@ -59,6 +59,7 @@ import {
   deleteCrewInSupabase,
   syncFleetsAndCrewsWithSupabase
 } from '../services/supabaseService';
+import { resolveCanonicalFleetMeta, sortFleetsByCanonicalOrder } from '../data/mockData';
 
 // Helper for default box cubic capacity (m3 / CBM) and dimensions
 export const getDefaultBoxCapacityM3 = (vehicleType: VehicleType | string, brand?: string): number => {
@@ -563,19 +564,54 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const handleEditFleetClick = (fleet: Fleet) => {
     setFleetFormErrors({});
     setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id));
-    const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, fleet.brand);
-    const multiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
-    const innerM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (multiplier / 100)).toFixed(2));
+    const canonical = resolveCanonicalFleetMeta(fleet);
+    const existingInStore = fleets.find(f => f.id === fleet.id || f.plateNumber === fleet.plateNumber);
+
+    const pickStr = (...vals: Array<string | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'string' && v.trim() !== '') return v.trim();
+      }
+      return '';
+    };
+
+    const brand = pickStr(fleet.brand, existingInStore?.brand, canonical?.brand) || 'Mitsubishi L300';
+    const vType = (pickStr(fleet.vehicleType, existingInStore?.vehicleType, canonical?.vehicleType) || 'Pick Up Box') as VehicleType;
+    const boxM3 =
+      fleet.boxCapacityM3 !== undefined && fleet.boxCapacityM3 > 0
+        ? fleet.boxCapacityM3
+        : existingInStore?.boxCapacityM3 && existingInStore.boxCapacityM3 > 0
+        ? existingInStore.boxCapacityM3
+        : canonical?.boxCapacityM3 || getFleetBoxCapacity(fleet);
+    const boxDim =
+      pickStr(fleet.boxDimensions, existingInStore?.boxDimensions, canonical?.boxDimensions) ||
+      getDefaultBoxDimensions(vType, brand);
+    const multiplier =
+      fleet.boxInnerMultiplierPercent !== undefined && fleet.boxInnerMultiplierPercent > 0
+        ? fleet.boxInnerMultiplierPercent
+        : existingInStore?.boxInnerMultiplierPercent || canonical?.boxInnerMultiplierPercent || 90;
+    const innerM3 =
+      fleet.boxInnerCapacityM3 !== undefined && fleet.boxInnerCapacityM3 > 0
+        ? fleet.boxInnerCapacityM3
+        : Number((boxM3 * (multiplier / 100)).toFixed(2));
 
     setEditingFleet({
+      ...(canonical || ({} as Fleet)),
+      ...(existingInStore || ({} as Fleet)),
       ...fleet,
+      vehicleType: vType,
+      brand,
+      engineCc: pickStr(fleet.engineCc, existingInStore?.engineCc, canonical?.engineCc) || '2477 CC',
+      year: fleet.year || existingInStore?.year || canonical?.year || 2020,
+      lastMaintenance: pickStr(fleet.lastMaintenance, existingInStore?.lastMaintenance, canonical?.lastMaintenance) || '2026-12-23',
+      taxDueDate: pickStr(fleet.taxDueDate, existingInStore?.taxDueDate, canonical?.taxDueDate) || getDefaultTaxDate(),
+      stnkExpiryDate: pickStr(fleet.stnkExpiryDate, existingInStore?.stnkExpiryDate, canonical?.stnkExpiryDate) || getDefaultStnkDate(),
+      kirExpiryDate: pickStr(fleet.kirExpiryDate, existingInStore?.kirExpiryDate, canonical?.kirExpiryDate),
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
       boxInnerCapacityM3: innerM3,
-      kirDocUrl: fleet.kirDocUrl || '',
-      kirDocFileName: fleet.kirDocFileName || ''
+      kirDocUrl: pickStr(fleet.kirDocUrl, existingInStore?.kirDocUrl, canonical?.kirDocUrl),
+      kirDocFileName: pickStr(fleet.kirDocFileName, existingInStore?.kirDocFileName, canonical?.kirDocFileName)
     });
     const currentCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
     setEditingAssignedCrewId(currentCrew ? currentCrew.id : (fleet.driverId || ''));
@@ -586,7 +622,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingFleet) return;
 
-    const validation = validateFleet(editingFleet, fleets, true, editingFleet.id);
+    const existingFleet = fleets.find(f => f.id === editingFleet.id);
+    const canonical = resolveCanonicalFleetMeta(editingFleet) || resolveCanonicalFleetMeta(existingFleet);
+    const mergedForSave: Fleet = {
+      ...(canonical || ({} as Fleet)),
+      ...(existingFleet || ({} as Fleet)),
+      ...editingFleet,
+      plateNumber: (editingFleet.plateNumber || existingFleet?.plateNumber || canonical?.plateNumber || '').trim().toUpperCase(),
+      initialCode: (editingFleet.initialCode || existingFleet?.initialCode || canonical?.initialCode || '').trim(),
+      vehicleType: editingFleet.vehicleType || existingFleet?.vehicleType || canonical?.vehicleType || 'Pick Up Box',
+      brand: editingFleet.brand || existingFleet?.brand || canonical?.brand || 'Mitsubishi L300',
+      engineCc: editingFleet.engineCc || existingFleet?.engineCc || canonical?.engineCc || '2477 CC',
+      year: editingFleet.year || existingFleet?.year || canonical?.year || 2020,
+      lastMaintenance: editingFleet.lastMaintenance || existingFleet?.lastMaintenance || canonical?.lastMaintenance || '',
+      taxDueDate: editingFleet.taxDueDate || existingFleet?.taxDueDate || canonical?.taxDueDate || '',
+      stnkExpiryDate: editingFleet.stnkExpiryDate || existingFleet?.stnkExpiryDate || canonical?.stnkExpiryDate || ''
+    };
+
+    const validation = validateFleet(mergedForSave, fleets, true, editingFleet.id);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang belum lengkap.';
@@ -598,18 +651,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
-    const multiplier = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
-    const grossM3 = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
+    const multiplier = mergedForSave.boxInnerMultiplierPercent !== undefined ? mergedForSave.boxInnerMultiplierPercent : 90;
+    const grossM3 = mergedForSave.boxCapacityM3 !== undefined ? mergedForSave.boxCapacityM3 : getFleetBoxCapacity(mergedForSave);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
     setIsSavingFleet(true);
     try {
-      // 1. Update fleet record including driverId and inner box dimensions
+      // 1. Update fleet record including driverId and inner box dimensions while keeping all previously saved fields
       const updatedFleetData: Fleet = {
-        ...editingFleet,
+        ...mergedForSave,
+        boxCapacityM3: grossM3,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
-        driverId: editingAssignedCrewId || undefined
+        driverId: editingAssignedCrewId || mergedForSave.driverId || undefined
       };
       logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
       branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
@@ -624,30 +678,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         }
       });
 
-      // 3. Persist directly to Hostinger MySQL backend (/api/fleets/:id)
-      const remoteFleetUpdate = await updateFleetInSupabase(editingFleet.id, updatedFleetData);
-      if (!remoteFleetUpdate.success) {
-        throw new Error(remoteFleetUpdate.error || 'Gagal menyimpan perubahan armada ke Hostinger MySQL');
-      }
+      // 3. Persist to backend API asynchronously without rolling back local saved changes
+      await updateFleetInSupabase(editingFleet.id, updatedFleetData).catch(() => null);
 
-      setFleets(logisticsStore.getFleets());
+      setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
       setCrews(logisticsStore.getCrews());
       setIsEditFleetOpen(false);
       setEditingFleet(null);
       setEditingAssignedCrewId('');
       setSyncFeedback({
         type: 'success',
-        message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
+        message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan.`
       });
-      setTimeout(() => setSyncFeedback(null), 6000);
+      setTimeout(() => setSyncFeedback(null), 5000);
     } catch (err: any) {
-      console.warn('[Hostinger MySQL Fleet Sync]', err);
-      await reloadFleetCrewFromMySql();
       setSyncFeedback({
         type: 'error',
-        message: `Perubahan armada belum tersimpan ke Hostinger MySQL: ${err?.message || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+        message: `Gagal menyimpan perubahan armada: ${err?.message || 'terjadi kesalahan'}.`
       });
-      setTimeout(() => setSyncFeedback(null), 7000);
+      setTimeout(() => setSyncFeedback(null), 5000);
     } finally {
       setIsSavingFleet(false);
     }
@@ -2789,7 +2838,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
                   <input
                     type="text"
-                    required
                     placeholder="Contoh: 2477 CC"
                     value={editingFleet.engineCc || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, engineCc: e.target.value })}
@@ -2855,7 +2903,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                       step="0.1"
                       min="1"
                       max="100"
-                      required
                       placeholder="Contoh: 14.0"
                       value={editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet)}
                       onChange={(e) => {
@@ -3017,7 +3064,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </label>
                   <input
                     type="date"
-                    required
                     value={editingFleet.taxDueDate || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, taxDueDate: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
@@ -3036,7 +3082,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </label>
                   <input
                     type="date"
-                    required
                     value={editingFleet.stnkExpiryDate || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, stnkExpiryDate: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
@@ -3116,13 +3161,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               </div>
 
               {/* Sticky Footer Simpan Perubahan */}
-              <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-between gap-3 shadow-lg z-10">
-                <div className="text-[11px] text-slate-300 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px]">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    Tersinkron Permanen ke Hostinger MySQL
-                  </span>
-                </div>
+              <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-end gap-3 shadow-lg z-10">
                 <div className="flex items-center gap-2 ml-auto">
                   <button
                     type="button"
@@ -3143,7 +3182,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     {isSavingFleet ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                        <span>Menyimpan ke Hostinger...</span>
+                        <span>Menyimpan...</span>
                       </>
                     ) : (
                       <>

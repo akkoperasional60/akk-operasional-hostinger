@@ -1088,21 +1088,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                           <span className="text-xs font-black text-white truncate">
                             {fuelLocation}
                           </span>
-                          <span
-                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                              fuelLocation === 'Farly'
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                                : fuelLocation === 'Gajah Mada'
-                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                            }`}
-                          >
-                            {fuelLocation === 'Farly'
-                              ? 'SPBU Mitra Utama'
-                              : fuelLocation === 'Gajah Mada'
-                              ? 'SPBU Mitra Kota'
-                              : 'Kondisi Urgent'}
-                          </span>
+                          {fuelLocation !== 'Farly' && fuelLocation !== 'Gajah Mada' && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold border bg-rose-500/20 text-rose-300 border-rose-500/30">
+                              Kondisi Urgent
+                            </span>
+                          )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-normal truncate">
                           {fuelLocation === 'Farly'
@@ -1127,7 +1117,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         {
                           value: 'Farly' as const,
                           title: 'Farly',
-                          badge: 'SPBU Mitra Utama',
+                          badge: '',
                           subtitle: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
                           iconBg: 'bg-amber-500/15 border-amber-500/40 text-amber-400',
                           badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
@@ -1136,7 +1126,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         {
                           value: 'Gajah Mada' as const,
                           title: 'Gajah Mada',
-                          badge: 'SPBU Mitra Kota',
+                          badge: '',
                           subtitle: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
                           iconBg: 'bg-blue-500/15 border-blue-500/40 text-blue-400',
                           badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
@@ -1174,9 +1164,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                                   <span className={`text-xs font-black ${isSelected ? 'text-white' : 'text-slate-200'}`}>
                                     {opt.title}
                                   </span>
-                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
-                                    {opt.badge}
-                                  </span>
+                                  {opt.badge && (
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
+                                      {opt.badge}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[10px] text-slate-400 truncate mt-0.5">
                                   {opt.subtitle}

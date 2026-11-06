@@ -140,9 +140,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraSessionCount, setCameraSessionCount] = useState<number>(0);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const nativeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
   const rowNativeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const rowGalleryInputRef = React.useRef<HTMLInputElement | null>(null);
   const [activeCameraRowItem, setActiveCameraRowItem] = useState<DatabaseBarangRecord | null>(null);
 
   const startCamera = async (facing: 'environment' | 'user' = cameraFacingMode) => {
@@ -181,6 +183,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
     setIsCameraModalOpen(false);
     setCameraTargetItem(null);
+    setCameraSessionCount(0);
   };
 
   const toggleCameraFacing = () => {
@@ -210,28 +213,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         });
 
         if (cameraTargetItem) {
-          const existingUrls = Array.isArray(cameraTargetItem.dokumentasiUrls)
-            ? cameraTargetItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-            : (cameraTargetItem.dokumentasiUrl && !cameraTargetItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [cameraTargetItem.dokumentasiUrl] : []);
+          const freshRecord = databaseBarangService.getAll().find(i => i.id === cameraTargetItem.id) || cameraTargetItem;
+          const existingUrls = Array.isArray(freshRecord.dokumentasiUrls)
+            ? freshRecord.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+            : (freshRecord.dokumentasiUrl && !freshRecord.dokumentasiUrl.startsWith('data:image/svg+xml') ? [freshRecord.dokumentasiUrl] : []);
           const updatedUrls = [...existingUrls, compressed.dataUrl];
-          databaseBarangService.upsertItem({
-            ...cameraTargetItem,
+          const savedItem = databaseBarangService.upsertItem({
+            ...freshRecord,
             dokumentasiUrls: updatedUrls,
             dokumentasiUrl: updatedUrls[0]
           });
           setItems(databaseBarangService.getAll());
-          setFeedbackModal({
-            title: 'Foto Kamera HP Disimpan',
-            message: `Foto dokumentasi barang ${cameraTargetItem.noBarang} berhasil diambil dan disimpan langsung!`
-          });
+          setCameraTargetItem(savedItem);
+          setPreviewDocItem(prev => (prev && prev.id === savedItem.id ? savedItem : prev));
+          setCameraSessionCount(prev => prev + 1);
         } else {
           setDokumentasiUrls(prev => {
             const combined = [...prev, compressed.dataUrl];
             if (!dokumentasiUrl) setDokumentasiUrl(compressed.dataUrl);
             return combined;
           });
+          setCameraSessionCount(prev => prev + 1);
         }
-        stopCamera();
       } catch (e) {
         console.error('Gagal kompres foto live camera:', e);
       }
@@ -239,6 +242,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   };
 
   const triggerCameraForRow = (item: DatabaseBarangRecord) => {
+    setCameraTargetItem(item);
+    setCameraSessionCount(0);
+    setIsCameraModalOpen(true);
+    void startCamera('environment');
+  };
+
+  const triggerNativeCameraInputForRow = (item: DatabaseBarangRecord) => {
     setActiveCameraRowItem(item);
     if (rowNativeCameraInputRef.current) {
       rowNativeCameraInputRef.current.value = '';
@@ -246,9 +256,50 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
   };
 
+  const triggerGalleryUploadForRow = (item: DatabaseBarangRecord) => {
+    setActiveCameraRowItem(item);
+    if (rowGalleryInputRef.current) {
+      rowGalleryInputRef.current.value = '';
+      rowGalleryInputRef.current.click();
+    }
+  };
+
+  const handleDeletePhotoFromPreview = (item: DatabaseBarangRecord, photoIdx: number) => {
+    const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    const updatedUrls = existingUrls.filter((_, idx) => idx !== photoIdx);
+    const saved = databaseBarangService.upsertItem({
+      ...item,
+      dokumentasiUrls: updatedUrls,
+      dokumentasiUrl: updatedUrls[0] || ''
+    });
+    setItems(databaseBarangService.getAll());
+    setPreviewDocItem(saved);
+    setActivePhotoIndex(prev => Math.max(0, Math.min(prev, updatedUrls.length - 1)));
+  };
+
+  const handleSetPrimaryPhotoInPreview = (item: DatabaseBarangRecord, photoIdx: number) => {
+    const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    if (photoIdx <= 0 || photoIdx >= existingUrls.length) return;
+    const chosen = existingUrls[photoIdx];
+    const reordered = [chosen, ...existingUrls.filter((_, idx) => idx !== photoIdx)];
+    const saved = databaseBarangService.upsertItem({
+      ...item,
+      dokumentasiUrls: reordered,
+      dokumentasiUrl: reordered[0] || ''
+    });
+    setItems(databaseBarangService.getAll());
+    setPreviewDocItem(saved);
+    setActivePhotoIndex(0);
+  };
+
   const handleRowCameraUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length === 0 || !activeCameraRowItem) return;
+    const targetItem = activeCameraRowItem || cameraTargetItem || previewDocItem;
+    if (files.length === 0 || !targetItem) return;
     try {
       const results = await Promise.all(
         files.map(f =>
@@ -260,20 +311,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         )
       );
       const newUrls = results.map(r => r.dataUrl);
-      const existingUrls = Array.isArray(activeCameraRowItem.dokumentasiUrls)
-        ? activeCameraRowItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-        : (activeCameraRowItem.dokumentasiUrl && !activeCameraRowItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [activeCameraRowItem.dokumentasiUrl] : []);
+      const freshRecord = databaseBarangService.getAll().find(i => i.id === targetItem.id) || targetItem;
+      const existingUrls = Array.isArray(freshRecord.dokumentasiUrls)
+        ? freshRecord.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+        : (freshRecord.dokumentasiUrl && !freshRecord.dokumentasiUrl.startsWith('data:image/svg+xml') ? [freshRecord.dokumentasiUrl] : []);
       const updatedUrls = [...existingUrls, ...newUrls];
 
-      databaseBarangService.upsertItem({
-        ...activeCameraRowItem,
+      const saved = databaseBarangService.upsertItem({
+        ...freshRecord,
         dokumentasiUrls: updatedUrls,
         dokumentasiUrl: updatedUrls[0]
       });
       setItems(databaseBarangService.getAll());
+      if (previewDocItem && previewDocItem.id === saved.id) {
+        setPreviewDocItem(saved);
+        setActivePhotoIndex(updatedUrls.length - 1);
+      }
+      if (cameraTargetItem && cameraTargetItem.id === saved.id) {
+        setCameraTargetItem(saved);
+      }
       setFeedbackModal({
-        title: 'Foto Kamera HP Berhasil Disimpan',
-        message: `Foto dokumentasi barang ${activeCameraRowItem.noBarang} (${activeCameraRowItem.deskripsiBarang}) berhasil diabadikan langsung dari kamera HP!`
+        title: `${newUrls.length} Foto Dokumentasi Berhasil Disimpan`,
+        message: `Total ${updatedUrls.length} foto dokumentasi untuk barang ${saved.noBarang} (${saved.deskripsiBarang}) telah tersimpan!`
       });
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
@@ -360,15 +419,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   }, [items]);
 
   const filteredItems = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
     const result = items.filter(item => {
-      const matchSearch =
-        !q ||
-        item.noBarang.toLowerCase().includes(q) ||
-        (item.deskripsiBarang || item.keteranganBarang || '').toLowerCase().includes(q) ||
-        (item.unit1 || '').toLowerCase().includes(q) ||
-        (item.unit2 || '').toLowerCase().includes(q) ||
-        (item.unit3 || '').toLowerCase().includes(q);
+      const matchSearch = databaseBarangService.matchesSearchQuery(item, searchQuery);
 
       const matchUnit =
         unitFilter === 'ALL' ||
@@ -1100,10 +1152,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
   return (
     <div className="space-y-4">
-      {/* Hidden Mobile Camera Input Trigger for Direct Row & Modal Capture */}
+      {/* Hidden Mobile Camera & Multi-Gallery Input Triggers for Direct Row & Modal Capture */}
       <input
         ref={nativeCameraInputRef}
         type="file"
+        multiple
         accept="image/*"
         capture="environment"
         onChange={handleModalPhotoUpload}
@@ -1112,8 +1165,17 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       <input
         ref={rowNativeCameraInputRef}
         type="file"
+        multiple
         accept="image/*"
         capture="environment"
+        onChange={handleRowCameraUpload}
+        className="hidden"
+      />
+      <input
+        ref={rowGalleryInputRef}
+        type="file"
+        multiple
+        accept="image/*"
         onChange={handleRowCameraUpload}
         className="hidden"
       />
@@ -1121,53 +1183,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       {/* Top Header Banner */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5" />
-              <span>Database Barang Gudang (WMS)</span>
-            </span>
-            <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold flex items-center gap-1">
-              <Link2 className="w-3 h-3" />
-              <span>Terintegrasi Input Faktur / Sales Order (SO)</span>
-            </span>
-            <span
-              className={`px-2.5 py-0.5 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 ${
-                syncStatus.isSyncing
-                  ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
-                  : items.length > 0
-                  ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              <Smartphone className="w-3 h-3" />
-              <span>
-                {syncStatus.isSyncing
-                  ? `Sinkronisasi PC & HP (${syncStatus.progressPct}%)...`
-                  : items.length > 0
-                  ? `Tersinkron PC & HP (${items.length.toLocaleString('id-ID')} SKU)`
-                  : 'Sinkronisasi Cloud PC & HP Aktif'}
-              </span>
-            </span>
-          </div>
           <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-            Database Barang &mdash; Spesifikasi Dimensi, Kubikasi, Satuan &amp; Rasio
+            Database Barang Gudang
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl">
-            Tabel database barang dengan format standar: <strong>No. Barang, Deskripsi Barang, Unit 1, Unit 2, Unit 3, Rasio 2, Rasio 3, Panjang(L)cm, Lebar(W)cm, Tinggi(H)cm, VOL(M3), Berat(kg)</strong>. Perubahan data dilakukan melalui kolom <strong>Aksi</strong>.
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Kelola master data barang gudang beserta spesifikasi dimensi, kubikasi, dan satuan konversi.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={handleManualServerSync}
-            disabled={syncStatus.isSyncing}
-            className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
-            title="Sinkronkan Database Barang antara Komputer (PC) dan Smartphone (HP)"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
-            <span>{syncStatus.isSyncing ? `Sinkron ${syncStatus.progressPct}%` : 'Sinkron PC & HP'}</span>
-          </button>
           <button
             type="button"
             onClick={handleExportDatabaseBarang}
@@ -1494,23 +1518,6 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                           <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-xs">
                             {item.noBarang}
                           </span>
-                          {hasCustomPhoto ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewDocItem(item);
-                                setActivePhotoIndex(0);
-                              }}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold"
-                            >
-                              <Camera className="w-2.5 h-2.5" />
-                              <span>{photoList.length} Foto</span>
-                            </button>
-                          ) : (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 text-[9px] font-medium">
-                              Tanpa Foto
-                            </span>
-                          )}
                         </div>
 
                         <div className="inline-flex items-center gap-1 shrink-0">
@@ -1529,10 +1536,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                 setPreviewDocItem(item);
                                 setActivePhotoIndex(0);
                               }}
-                              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                              title="Lihat Foto"
+                              className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/70"
+                              title={`Lihat ${photoList.length} Foto Dokumentasi`}
                             >
                               <Eye className="w-3.5 h-3.5" />
+                              {photoList.length > 1 && (
+                                <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
+                                  {photoList.length}
+                                </span>
+                              )}
                             </button>
                           )}
                           <button
@@ -1637,7 +1649,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition min-w-[260px]"
                     >
                       <div className="flex items-center gap-1.5">
-                        <span>Deskripsi Barang &amp; Foto</span>
+                        <span>Deskripsi Barang</span>
                         {sortBy === 'nama_asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : sortBy === 'nama_desc' ? <ArrowDown className="w-3 h-3 text-blue-600" /> : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                       </div>
                     </th>
@@ -1692,24 +1704,6 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                               <span className="font-semibold text-slate-900 dark:text-white leading-tight">
                                 {item.deskripsiBarang || item.keteranganBarang}
                               </span>
-                              {hasCustomPhoto ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewDocItem(item);
-                                    setActivePhotoIndex(0);
-                                  }}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[10px] font-bold hover:bg-blue-100 transition cursor-pointer shrink-0"
-                                  title="Klik untuk melihat foto dokumentasi"
-                                >
-                                  <Camera className="w-2.5 h-2.5" />
-                                  <span>{photoList.length} Foto</span>
-                                </button>
-                              ) : (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 text-slate-400 text-[9px] font-medium shrink-0">
-                                  Tanpa Foto
-                                </span>
-                              )}
                             </div>
                           </td>
                           <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
@@ -1767,10 +1761,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                     setPreviewDocItem(item);
                                     setActivePhotoIndex(0);
                                   }}
-                                  className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-                                  title="Lihat Foto Dokumentasi"
+                                  className="relative p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-700 dark:text-blue-300 transition cursor-pointer"
+                                  title={`Lihat ${photoList.length} Foto Dokumentasi`}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
+                                  {photoList.length > 1 && (
+                                    <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
+                                      {photoList.length}
+                                    </span>
+                                  )}
                                 </button>
                               )}
                               <button
@@ -1924,16 +1923,30 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             >
                               <Camera className="w-3.5 h-3.5" />
                             </button>
-                            {item.dokumentasiUrl && (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewDocItem(item)}
-                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-                                title="Lihat Foto Dokumentasi"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            {((Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0) || item.dokumentasiUrl) && (() => {
+                              const pList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+                                ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+                                : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+                              if (pList.length === 0) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewDocItem(item);
+                                    setActivePhotoIndex(0);
+                                  }}
+                                  className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
+                                  title={`Lihat ${pList.length} Foto Dokumentasi`}
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  {pList.length > 1 && (
+                                    <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
+                                      {pList.length}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })()}
                             <button
                               type="button"
                               onClick={() => openEditModal(item)}
@@ -2407,108 +2420,233 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Lightbox Modal Preview Dokumentasi (Mendukung Banyak Foto) */}
+      {/* Lightbox Modal Preview Dokumentasi Modern (Mendukung Multi-Foto, Galeri Interaktif & Tambah Foto Langsung) */}
       {previewDocItem && (() => {
         const photos = Array.isArray(previewDocItem.dokumentasiUrls) && previewDocItem.dokumentasiUrls.length > 0
           ? previewDocItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
           : (previewDocItem.dokumentasiUrl && !previewDocItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [previewDocItem.dokumentasiUrl] : []);
         const totalPhotos = photos.length;
-        const currentPhotoUrl = photos[activePhotoIndex] || databaseBarangService.getItemThumbnail(previewDocItem);
+        const safeIndex = totalPhotos > 0 ? Math.min(activePhotoIndex, totalPhotos - 1) : 0;
+        const currentPhotoUrl = photos[safeIndex] || databaseBarangService.getItemThumbnail(previewDocItem);
+        const hasDim = previewDocItem.panjangCm > 0 || previewDocItem.lebarCm > 0 || previewDocItem.tinggiCm > 0;
+        const calculatedVol = previewDocItem.volM3 > 0
+          ? previewDocItem.volM3
+          : (hasDim ? calculateVolM3(previewDocItem.panjangCm, previewDocItem.lebarCm, previewDocItem.tinggiCm) : 0);
 
         return (
           <div
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
             onClick={() => {
               setPreviewDocItem(null);
               setActivePhotoIndex(0);
             }}
           >
             <div
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-5 space-y-3.5 shadow-2xl"
+              className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh]"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-black text-blue-600 dark:text-blue-400">
+              {/* Modern Header */}
+              <div className="px-5 py-4 bg-gradient-to-r from-slate-50 via-white to-blue-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/30 border-b border-slate-200/80 dark:border-slate-800 flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-lg bg-blue-600 text-white font-mono text-xs font-black tracking-wide shadow-2xs">
                       {previewDocItem.noBarang}
                     </span>
-                    {totalPhotos > 1 && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
-                        Foto {activePhotoIndex + 1} dari {totalPhotos}
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                      <Camera className="w-3 h-3" />
+                      <span>
+                        {totalPhotos > 0 ? `Foto ${safeIndex + 1} dari ${totalPhotos}` : 'Belum Ada Foto'}
+                      </span>
+                    </span>
+                    {safeIndex === 0 && totalPhotos > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                        ★ Foto Utama
                       </span>
                     )}
                   </div>
-                  <h4 className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                  <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-snug break-words">
                     {previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
                   </h4>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewDocItem(null);
-                    setActivePhotoIndex(0);
-                  }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              {/* Main Photo Display */}
-              <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-4/3">
-                <img
-                  src={currentPhotoUrl}
-                  alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
-                  className="w-full h-full object-contain"
-                />
-
-                {totalPhotos > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : totalPhotos - 1))}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition cursor-pointer"
-                      title="Foto sebelumnya"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActivePhotoIndex(prev => (prev < totalPhotos - 1 ? prev + 1 : 0))}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition cursor-pointer"
-                      title="Foto berikutnya"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {/* Thumbnail Strip if Multiple Photos */}
-              {totalPhotos > 1 && (
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                  {photos.map((pUrl, pIdx) => (
-                    <button
-                      key={pIdx}
-                      type="button"
-                      onClick={() => setActivePhotoIndex(pIdx)}
-                      className={`relative w-14 h-11 rounded-lg overflow-hidden border-2 shrink-0 transition cursor-pointer ${
-                        activePhotoIndex === pIdx
-                          ? 'border-blue-600 ring-2 ring-blue-500/30'
-                          : 'border-slate-200 dark:border-slate-700 opacity-60 hover:opacity-100'
-                      }`}
-                    >
-                      <img src={pUrl} alt={`Thumb ${pIdx + 1}`} className="w-full h-full object-cover" />
-                    </button>
-                  ))}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => triggerCameraForRow(previewDocItem)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                    title="Ambil foto tambahan menggunakan kamera"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">+ Ambil Foto</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerGalleryUploadForRow(previewDocItem)}
+                    className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer"
+                    title="Upload beberapa foto sekaligus dari galeri"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">+ Galeri</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewDocItem(null);
+                      setActivePhotoIndex(0);
+                    }}
+                    className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-              )}
+              </div>
 
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span className="font-medium text-slate-700 dark:text-slate-300">Dimensi: {previewDocItem.panjangCm} &times; {previewDocItem.lebarCm} &times; {previewDocItem.tinggiCm} cm</span>
-                <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-sm tracking-wide shadow-2xs">
-                  VOL: {previewDocItem.volM3} M3
+              {/* Main Photo Stage */}
+              <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto">
+                <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-16/10 shadow-inner group">
+                  <img
+                    src={currentPhotoUrl}
+                    alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
+                    className="w-full h-full object-contain transition-all duration-200"
+                  />
+
+                  {/* Top Floating Overlay Actions inside Photo Stage */}
+                  {totalPhotos > 0 && (
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none">
+                      <span className="px-2.5 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 text-white text-[11px] font-bold">
+                        {totalPhotos > 1 ? `Galeri Multi-Foto (${safeIndex + 1}/${totalPhotos})` : '1 Foto Tersimpan'}
+                      </span>
+                      <div className="flex items-center gap-1.5 pointer-events-auto">
+                        {safeIndex > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleSetPrimaryPhotoInPreview(previewDocItem, safeIndex)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600/90 hover:bg-indigo-500 text-white text-[10px] font-bold shadow-md backdrop-blur-xs transition cursor-pointer"
+                            title="Jadikan sebagai Foto Utama"
+                          >
+                            ★ Set Utama
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
+                          className="p-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer"
+                          title="Hapus foto ini"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Left / Right Navigation Arrows for Multiple Photos */}
+                  {totalPhotos > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : totalPhotos - 1))}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer"
+                        title="Foto sebelumnya"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActivePhotoIndex(prev => (prev < totalPhotos - 1 ? prev + 1 : 0))}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer"
+                        title="Foto berikutnya"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+
+                      {/* Bottom Dot Indicators */}
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 flex items-center gap-1.5">
+                        {photos.map((_, dotIdx) => (
+                          <button
+                            key={dotIdx}
+                            type="button"
+                            onClick={() => setActivePhotoIndex(dotIdx)}
+                            className={`h-2 rounded-full transition-all cursor-pointer ${
+                              safeIndex === dotIdx ? 'w-5 bg-blue-400' : 'w-2 bg-white/40 hover:bg-white/70'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Modern Filmstrip Thumbnail Bar (Selalu tampil agar bisa lihat semua foto & tambah foto baru) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-slate-600 dark:text-slate-300">
+                      Daftar Foto Dokumentasi ({totalPhotos} Foto)
+                    </span>
+                    <span className="text-slate-400 text-[10px]">
+                      Klik thumbnail untuk beralih atau tambah foto baru
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pt-0.5">
+                    {photos.map((pUrl, pIdx) => (
+                      <button
+                        key={pIdx}
+                        type="button"
+                        onClick={() => setActivePhotoIndex(pIdx)}
+                        className={`relative w-20 h-14 rounded-xl overflow-hidden border-2 shrink-0 transition-all cursor-pointer group ${
+                          safeIndex === pIdx
+                            ? 'border-blue-600 ring-2 ring-blue-500/30 scale-[1.02]'
+                            : 'border-slate-200 dark:border-slate-700 opacity-65 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={pUrl} alt={`Foto ${pIdx + 1}`} className="w-full h-full object-cover" />
+                        <span
+                          className={`absolute bottom-1 left-1 px-1.5 py-0.2 rounded text-[9px] font-black ${
+                            pIdx === 0
+                              ? 'bg-emerald-600/90 text-white'
+                              : 'bg-slate-950/80 text-slate-200'
+                          }`}
+                        >
+                          {pIdx === 0 ? 'Utama' : `#${pIdx + 1}`}
+                        </span>
+                      </button>
+                    ))}
+
+                    {/* Add More Photo Tile inside Filmstrip */}
+                    <button
+                      type="button"
+                      onClick={() => triggerCameraForRow(previewDocItem)}
+                      className="w-20 h-14 rounded-xl border-2 border-dashed border-emerald-500/50 hover:border-emerald-500 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex flex-col items-center justify-center gap-0.5 shrink-0 transition cursor-pointer"
+                      title="Ambil foto tambahan dengan kamera"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span className="text-[9px] font-extrabold">Tambah Foto</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Info Bar */}
+              <div className="px-5 py-3 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-3 text-slate-600 dark:text-slate-300">
+                  <span>
+                    Satuan: <strong className="text-slate-900 dark:text-white">{previewDocItem.unit1 || previewDocItem.satuan || 'Pcs'}</strong>
+                    {previewDocItem.unit2 && previewDocItem.rasio2 ? ` (1 ${previewDocItem.unit2} = ${previewDocItem.rasio2} ${previewDocItem.unit1 || 'Pcs'})` : ''}
+                  </span>
+                  <span>&bull;</span>
+                  <span>
+                    Dimensi: <strong className="font-mono text-slate-900 dark:text-white">{previewDocItem.panjangCm || 0} &times; {previewDocItem.lebarCm || 0} &times; {previewDocItem.tinggiCm || 0} cm</strong>
+                  </span>
+                  {previewDocItem.beratKg > 0 && (
+                    <>
+                      <span>&bull;</span>
+                      <span>
+                        Berat: <strong className="font-mono text-slate-900 dark:text-white">{previewDocItem.beratKg} kg</strong>
+                      </span>
+                    </>
+                  )}
+                </div>
+                <span className="inline-flex items-center px-3 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/70 border border-blue-400 dark:border-blue-700 text-blue-900 dark:text-blue-100 font-black text-xs font-mono tracking-wide shadow-2xs">
+                  VOL: {calculatedVol} M3
                 </span>
               </div>
             </div>
@@ -2516,119 +2654,187 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         );
       })()}
 
-      {/* Live Camera Viewfinder Modal (Bisa Digunakan Langsung Melalui Kamera HP / Laptop) */}
-      {isCameraModalOpen && (
-        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            {/* Camera Header */}
-            <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-black text-white">
-                    {cameraTargetItem ? `Foto: ${cameraTargetItem.noBarang}` : 'Ambil Foto Dokumentasi Barang'}
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Arahkan kamera ke barang lalu tekan tombol jepret
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={stopCamera}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Live Camera Viewfinder Modal (Mendukung Pengambilan Lebih Dari 1 Foto Secara Beruntun) */}
+      {isCameraModalOpen && (() => {
+        const currentTargetPhotos = cameraTargetItem
+          ? (Array.isArray(cameraTargetItem.dokumentasiUrls) && cameraTargetItem.dokumentasiUrls.length > 0
+              ? cameraTargetItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+              : (cameraTargetItem.dokumentasiUrl && !cameraTargetItem.dokumentasiUrl.startsWith('data:image/svg+xml') ? [cameraTargetItem.dokumentasiUrl] : []))
+          : dokumentasiUrls;
 
-            {/* Video Viewfinder */}
-            <div className="relative bg-black aspect-4/3 flex items-center justify-center overflow-hidden">
-              {cameraError ? (
-                <div className="p-6 text-center space-y-3">
-                  <div className="text-amber-400 text-xs font-bold">{cameraError}</div>
-                  <p className="text-[11px] text-slate-400">
-                    Anda tetap bisa menggunakan tombol kamera bawaan HP di bawah:
-                  </p>
+        return (
+          <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+            <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+              {/* Camera Header */}
+              <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-white truncate">
+                        {cameraTargetItem ? `Foto: ${cameraTargetItem.noBarang}` : 'Ambil Multi-Foto Barang'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black shrink-0">
+                        {currentTargetPhotos.length} Foto
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {cameraTargetItem
+                        ? cameraTargetItem.deskripsiBarang
+                        : 'Tekan tombol jepret berulang kali untuk mengambil > 1 foto'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Video Viewfinder */}
+              <div className="relative bg-black aspect-4/3 flex items-center justify-center overflow-hidden">
+                {cameraError ? (
+                  <div className="p-6 text-center space-y-3">
+                    <div className="text-amber-400 text-xs font-bold">{cameraError}</div>
+                    <p className="text-[11px] text-slate-400">
+                      Gunakan kamera bawaan HP atau pilih beberapa foto sekaligus dari galeri:
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (cameraTargetItem) {
+                            triggerNativeCameraInputForRow(cameraTargetItem);
+                          } else {
+                            nativeCameraInputRef.current?.click();
+                          }
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                      >
+                        📸 Kamera Standar HP
+                      </button>
+                      {cameraTargetItem && (
+                        <button
+                          type="button"
+                          onClick={() => triggerGalleryUploadForRow(cameraTargetItem)}
+                          className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                        >
+                          📁 Pilih Multi-Foto Galeri
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    {/* Framing Overlay */}
+                    <div className="absolute inset-4 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-white bg-slate-950/75 px-2.5 py-0.5 rounded-full border border-white/15">
+                          Mode Multi-Foto Aktif (Bisa &gt; 1 Foto)
+                        </span>
+                        {cameraSessionCount > 0 && (
+                          <span className="text-[10px] font-black text-emerald-300 bg-emerald-950/85 px-2.5 py-0.5 rounded-full border border-emerald-400/40">
+                            +{cameraSessionCount} Terambil
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-center">
+                        <span className="text-[10px] font-bold text-white/90 bg-black/60 px-2.5 py-1 rounded-full">
+                          Jepret foto ke-{currentTargetPhotos.length + 1} &bull; Kamera tetap terbuka setelah jepret
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Live Thumbnail Strip of Captured Photos in Modal */}
+              {currentTargetPhotos.length > 0 && (
+                <div className="px-3.5 py-2.5 bg-slate-900 border-t border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+                    <span>Foto Tersimpan ({currentTargetPhotos.length} Foto):</span>
+                    <span className="text-emerald-400">✓ Otomatis Tersimpan</span>
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                    {currentTargetPhotos.map((u, idx) => (
+                      <div
+                        key={idx}
+                        className="relative w-14 h-11 rounded-lg overflow-hidden border border-emerald-500/50 shrink-0 bg-slate-950"
+                      >
+                        <img src={u} alt={`Shot ${idx + 1}`} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/75 text-white text-[8px] font-bold">
+                          #{idx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Camera Controls Footer */}
+              <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleCameraFacing}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
+                    title="Putar Kamera (Depan / Belakang)"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
-                      stopCamera();
                       if (cameraTargetItem) {
-                        triggerCameraForRow(cameraTargetItem);
+                        triggerGalleryUploadForRow(cameraTargetItem);
                       } else {
                         nativeCameraInputRef.current?.click();
                       }
                     }}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                    className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer text-[11px] font-bold flex items-center gap-1"
+                    title="Pilih beberapa foto sekaligus dari Galeri / Kamera HP"
                   >
-                    📸 Buka Kamera Standar HP
+                    <Upload className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Multi-File</span>
                   </button>
                 </div>
-              ) : (
-                <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                  {/* Framing Overlay */}
-                  <div className="absolute inset-4 border-2 border-dashed border-white/40 rounded-xl pointer-events-none flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-white/80 bg-black/50 px-2 py-0.5 rounded-full">
-                      Posisikan Barang di Dalam Kotak
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
 
-            {/* Camera Controls Footer */}
-            <div className="p-4 bg-slate-950 flex items-center justify-around gap-4">
-              <button
-                type="button"
-                onClick={toggleCameraFacing}
-                className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
-                title="Putar Kamera (Depan / Belakang)"
-              >
-                <RefreshCw className="w-5 h-5" />
-              </button>
-
-              {/* Shutter Button */}
-              <button
-                type="button"
-                onClick={capturePhotoFromLiveStream}
-                disabled={Boolean(cameraError)}
-                className="p-4 rounded-full bg-white text-slate-950 hover:bg-slate-200 active:scale-95 transition cursor-pointer shadow-lg ring-4 ring-white/30 disabled:opacity-50"
-                title="Jepret Foto"
-              >
-                <div className="w-8 h-8 rounded-full border-2 border-slate-950 flex items-center justify-center">
+                {/* Shutter Button (Can click multiple times!) */}
+                <button
+                  type="button"
+                  onClick={capturePhotoFromLiveStream}
+                  disabled={Boolean(cameraError)}
+                  className="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs active:scale-95 transition cursor-pointer shadow-lg ring-2 ring-emerald-400/40 disabled:opacity-50 flex items-center gap-1.5"
+                  title="Jepret Foto (Bisa berkali-kali)"
+                >
                   <Camera className="w-4 h-4" />
-                </div>
-              </button>
+                  <span>Jepret Foto #{currentTargetPhotos.length + 1}</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  stopCamera();
-                  if (cameraTargetItem) {
-                    triggerCameraForRow(cameraTargetItem);
-                  } else {
-                    nativeCameraInputRef.current?.click();
-                  }
-                }}
-                className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer text-xs font-bold"
-                title="Gunakan Aplikasi Kamera HP"
-              >
-                <Smartphone className="w-5 h-5" />
-              </button>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition cursor-pointer text-xs font-black"
+                >
+                  Selesai ({currentTargetPhotos.length})
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Custom Delete Confirmation Modal (Menggantikan window.confirm browser bawaan) */}
       {itemToDelete && (

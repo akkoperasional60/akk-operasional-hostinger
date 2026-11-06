@@ -11,27 +11,32 @@ import {
   BarChart3,
   Camera,
   Search,
-  Filter,
-  Sparkles,
   Eye,
   Trash2,
   Printer,
   CheckCircle2,
-  AlertCircle,
   Calendar,
   Truck,
   User,
   MapPin,
-  RefreshCw,
   FileCheck2,
   ClipboardCheck,
-  Tag,
-  ArrowUpDown
+  Settings2,
+  Layout
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { ServiceFormModal } from './ServiceFormModal';
-import { ProcurementFormModal } from './ProcurementFormModal';
+import {
+  FleetFormType,
+  FleetFormTemplateConfig,
+  FormPrintHistoryItem,
+  loadAllFleetFormTemplates,
+  loadFormPrintLogs,
+  appendFormPrintLog,
+  RancanganFormulirModal,
+  VisualReportDesignerModal,
+  FleetFormInteractiveModal
+} from './FleetFormDesignerSystem';
 import { DocumentScannerModal } from './DocumentScannerModal';
 import { DocumentDetailModal } from './DocumentDetailModal';
 import { ScannedDocumentLog, ScannedDocumentType } from '../types';
@@ -41,8 +46,19 @@ import { useToast } from '../context/ToastContext';
 export const FleetFormCenter: React.FC = () => {
   const { addNotification } = useToast();
 
-  // Modals state
-  const [activeModal, setActiveModal] = useState<string | null>(null);
+  // Active form & designer modal states
+  const [activeFormModal, setActiveFormModal] = useState<FleetFormType | null>(null);
+  const [rancanganModalOpen, setRancanganModalOpen] = useState(false);
+  const [rancanganTargetType, setRancanganTargetType] = useState<FleetFormType>('service');
+  const [designerModalOpen, setDesignerModalOpen] = useState(false);
+  const [designerTargetType, setDesignerTargetType] = useState<FleetFormType>('service');
+
+  // Templates & Print Logs state
+  const [templatesMap, setTemplatesMap] = useState<Record<FleetFormType, FleetFormTemplateConfig>>(() =>
+    loadAllFleetFormTemplates()
+  );
+  const [printLogs, setPrintLogs] = useState<FormPrintHistoryItem[]>(() => loadFormPrintLogs());
+
   const [showDropdown, setShowDropdown] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerInitialType, setScannerInitialType] = useState<ScannedDocumentType>('delivery_slip');
@@ -65,18 +81,13 @@ export const FleetFormCenter: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Filtered documents
   const filteredDocuments = useMemo(() => {
     return scannedDocuments.filter(doc => {
-      // Type filter
       if (typeFilter !== 'all' && doc.documentType !== typeFilter) return false;
-
-      // Status filter
       if (statusFilter !== 'all' && doc.status !== statusFilter) return false;
 
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const docNum = (doc.documentNumber || '').toLowerCase();
@@ -116,9 +127,9 @@ export const FleetFormCenter: React.FC = () => {
   const chartData = [
     { name: 'Surat Jalan', count: stats.slips, color: '#06b6d4' },
     { name: 'Inspeksi', count: stats.inspections, color: '#f59e0b' },
-    { name: 'Service', count: stats.services + 2, color: '#6366f1' },
-    { name: 'Cuci', count: 1, color: '#38bdf8' },
-    { name: 'Pengadaan', count: 1, color: '#10b981' }
+    { name: 'Service', count: stats.services + printLogs.filter(l => l.formType === 'service').length, color: '#6366f1' },
+    { name: 'Cuci', count: printLogs.filter(l => l.formType === 'washing').length, color: '#38bdf8' },
+    { name: 'Pengadaan', count: printLogs.filter(l => l.formType === 'procurement').length, color: '#10b981' }
   ];
 
   // Export Scanned Documents to Excel
@@ -155,7 +166,16 @@ export const FleetFormCenter: React.FC = () => {
     addNotification('sla_warning', 'Dokumen Dihapus', 'Data arsip dokumen telah dihapus dari log sistem.');
   };
 
-  const forms = [
+  const forms: Array<{
+    id: string;
+    formType?: FleetFormType;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+    color: string;
+    isScanner?: boolean;
+    scanType?: ScannedDocumentType;
+  }> = [
     {
       id: 'scanner_slip',
       title: 'Pindai Surat Jalan (Delivery Slip)',
@@ -163,7 +183,7 @@ export const FleetFormCenter: React.FC = () => {
       icon: <Camera className="w-8 h-8 text-amber-400" />,
       color: 'bg-amber-500/10 border-amber-500/25',
       isScanner: true,
-      scanType: 'delivery_slip' as ScannedDocumentType
+      scanType: 'delivery_slip'
     },
     {
       id: 'scanner_inspection',
@@ -172,10 +192,11 @@ export const FleetFormCenter: React.FC = () => {
       icon: <ClipboardCheck className="w-8 h-8 text-emerald-400" />,
       color: 'bg-emerald-500/10 border-emerald-500/25',
       isScanner: true,
-      scanType: 'inspection_form' as ScannedDocumentType
+      scanType: 'inspection_form'
     },
     {
       id: 'service',
+      formType: 'service',
       title: 'Formulir Service Armada',
       description: 'Input detail perbaikan dan maintenance rutin armada.',
       icon: <Wrench className="w-8 h-8 text-indigo-400" />,
@@ -183,6 +204,7 @@ export const FleetFormCenter: React.FC = () => {
     },
     {
       id: 'washing',
+      formType: 'washing',
       title: 'Formulir Cuci Armada',
       description: 'Input data pencucian armada untuk kebersihan dan perawatan.',
       icon: <Droplets className="w-8 h-8 text-sky-400" />,
@@ -190,6 +212,7 @@ export const FleetFormCenter: React.FC = () => {
     },
     {
       id: 'procurement',
+      formType: 'procurement',
       title: 'Formulir Pengadaan Armada',
       description: 'Input permintaan pengadaan armada, suku cadang & perlengkapan distribusi.',
       icon: <ShoppingCart className="w-8 h-8 text-emerald-400" />,
@@ -205,15 +228,27 @@ export const FleetFormCenter: React.FC = () => {
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-black text-white">Formulir Pengadaan Armada &amp; Pusat Dokumen Logistik</h2>
             <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-bold">
-              Pengadaan &amp; OCR
+              Rancangan Formulir &amp; OCR
             </span>
           </div>
           <p className="text-slate-400 text-sm mt-1">
-            Kelola formulir pengadaan armada, servis berkala, serta pindai Surat Jalan dan lembar inspeksi armada ke log digital.
+            Kelola formulir Service Armada, Cuci Armada, dan Pengadaan Armada lengkap dengan Rancangan Formulir &amp; Visual Designer.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Rancangan Formulir Button */}
+          <button
+            onClick={() => {
+              setRancanganTargetType('service');
+              setRancanganModalOpen(true);
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold px-3.5 py-2.5 rounded-xl transition cursor-pointer text-xs sm:text-sm"
+          >
+            <Settings2 size={17} />
+            <span>Rancangan Formulir</span>
+          </button>
+
           {/* Direct Camera Scan Button */}
           <button
             onClick={() => {
@@ -237,43 +272,58 @@ export const FleetFormCenter: React.FC = () => {
               <ChevronDown size={16} />
             </button>
             {showDropdown && (
-              <div className="absolute right-0 mt-2 w-64 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl z-30 overflow-hidden divide-y divide-slate-800 animate-in fade-in duration-150">
-                <div className="p-1">
-                  <button
-                    onClick={() => {
-                      setScannerInitialType('delivery_slip');
-                      setIsScannerOpen(true);
-                      setShowDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-amber-300 font-bold text-xs rounded-lg flex items-center gap-2"
+              <div className="absolute right-0 mt-2 w-72 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl z-30 overflow-hidden divide-y divide-slate-800 animate-in fade-in duration-150">
+                <div className="p-1.5">
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Isi &amp; Cetak Formulir Armada
+                  </div>
+                  <button 
+                    onClick={() => { setActiveFormModal('service'); setShowDropdown(false); }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-indigo-300 font-bold text-xs rounded-lg flex items-center justify-between"
                   >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Pindai Surat Jalan (Delivery Slip)</span>
+                    <span>1. Formulir Service Armada</span>
+                    <Wrench className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    onClick={() => {
-                      setScannerInitialType('inspection_form');
-                      setIsScannerOpen(true);
-                      setShowDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-2"
+                  <button 
+                    onClick={() => { setActiveFormModal('washing'); setShowDropdown(false); }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-sky-300 font-bold text-xs rounded-lg flex items-center justify-between"
                   >
-                    <ClipboardCheck className="w-3.5 h-3.5" />
-                    <span>Pindai Formulir Inspeksi Harian</span>
+                    <span>2. Formulir Cuci Armada</span>
+                    <Droplets className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onClick={() => { setActiveFormModal('procurement'); setShowDropdown(false); }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-emerald-300 font-bold text-xs rounded-lg flex items-center justify-between"
+                  >
+                    <span>3. Formulir Pengadaan Armada</span>
+                    <ShoppingCart className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <div className="p-1">
-                  <button 
-                    onClick={() => { setActiveModal('service'); setShowDropdown(false); }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-200 text-xs rounded-lg"
+                <div className="p-1.5">
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Modifikasi Template &amp; Desain
+                  </div>
+                  <button
+                    onClick={() => {
+                      setRancanganTargetType('service');
+                      setRancanganModalOpen(true);
+                      setShowDropdown(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-amber-300 text-xs rounded-lg flex items-center gap-2"
                   >
-                    Input Formulir Service Armada (SPK)
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>Pengaturan Rancangan Formulir</span>
                   </button>
-                  <button 
-                    onClick={() => { setActiveModal('procurement'); setShowDropdown(false); }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-200 text-xs rounded-lg"
+                  <button
+                    onClick={() => {
+                      setDesignerTargetType('service');
+                      setDesignerModalOpen(true);
+                      setShowDropdown(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-sky-300 text-xs rounded-lg flex items-center gap-2"
                   >
-                    Input Formulir Pengadaan Armada
+                    <Layout className="w-3.5 h-3.5" />
+                    <span>Lihat Visual Designer</span>
                   </button>
                 </div>
               </div>
@@ -334,31 +384,68 @@ export const FleetFormCenter: React.FC = () => {
                 <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800/80">
                   {form.icon}
                 </div>
-                {form.isScanner && (
+                {form.isScanner ? (
                   <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
                     SCAN KAMERA
                   </span>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (form.formType) {
+                          setRancanganTargetType(form.formType);
+                          setRancanganModalOpen(true);
+                        }
+                      }}
+                      className="px-2 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-slate-700/80 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                      title="Ubah Rancangan Formulir (Kepala, Detil, Kaki, Info Perusahaan)"
+                    >
+                      <Settings2 className="w-3 h-3" />
+                      <span>Rancangan</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (form.formType) {
+                          setDesignerTargetType(form.formType);
+                          setDesignerModalOpen(true);
+                        }
+                      }}
+                      className="p-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-sky-300 border border-slate-700/80 transition cursor-pointer"
+                      title="Lihat Tampilan Desain"
+                    >
+                      <Layout className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
+
               <div>
                 <h3 className="text-xs font-bold text-white line-clamp-1">{form.title}</h3>
+                {form.formType && (
+                  <div className="text-[10px] font-mono text-amber-400/90 mt-0.5 truncate">
+                    {templatesMap[form.formType]?.namaRancangan}
+                  </div>
+                )}
                 <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
                   {form.description}
                 </p>
               </div>
+
               <button 
                 onClick={() => {
                   if (form.isScanner) {
                     setScannerInitialType(form.scanType!);
                     setIsScannerOpen(true);
-                  } else {
-                    setActiveModal(form.id);
+                  } else if (form.formType) {
+                    setActiveFormModal(form.formType);
                   }
                 }}
                 className={`w-full py-2 rounded-xl font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 ${
                   form.isScanner
                     ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80'
                 }`}
               >
                 {form.isScanner ? (
@@ -401,12 +488,12 @@ export const FleetFormCenter: React.FC = () => {
             </ResponsiveContainer>
           </div>
           <div className="text-[11px] text-slate-400 text-center pt-2 border-t border-slate-800/80">
-            Total {stats.total + 4} berkas tercatat di database operasional AKK
+            Total {stats.total + printLogs.length} berkas tercatat di database operasional AKK
           </div>
         </div>
       </div>
 
-      {/* 📄 DEDICATED SEARCHABLE LOG SECTION (Core Requirement) */}
+      {/* 📄 DEDICATED SEARCHABLE LOG SECTION */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
         {/* Section Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -626,11 +713,7 @@ export const FleetFormCenter: React.FC = () => {
                       Lihat Detail
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Hapus arsip ${doc.documentNumber}?`)) {
-                          handleDeleteDocument(doc.id);
-                        }
-                      }}
+                      onClick={() => handleDeleteDocument(doc.id)}
                       className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition cursor-pointer"
                       title="Hapus Dokumen"
                     >
@@ -644,37 +727,131 @@ export const FleetFormCenter: React.FC = () => {
         )}
       </div>
 
-      {/* Legacy Print Log Section for Manual Forms */}
+      {/* Print Log Section for Manual Forms */}
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
           <div className="flex items-center gap-2">
-            <History className="text-slate-400" />
-            <h3 className="text-lg font-bold text-white">Log Riwayat Cetak Formulir Standar</h3>
+            <History className="text-amber-400 w-5 h-5" />
+            <h3 className="text-base font-bold text-white">Log Riwayat Cetak Formulir Standar (Service, Cuci &amp; Pengadaan)</h3>
           </div>
-          <span className="text-xs text-slate-400">Arsip Pengisian Manual</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRancanganTargetType('service');
+                setRancanganModalOpen(true);
+              }}
+              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              <span>Buka Rancangan Formulir</span>
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
-          {[
-            { id: 1, docType: 'Form Service Armada', timestamp: '2026-09-25 00:05', userId: 'BayuN791' },
-            { id: 2, docType: 'Form Pengadaan', timestamp: '2026-09-24 23:55', userId: 'BayuN791' },
-            { id: 3, docType: 'Form Cuci Armada', timestamp: '2026-09-24 22:00', userId: 'BayuN791' }
-          ].map(log => (
-            <div key={log.id} className="flex justify-between items-center bg-slate-800/80 p-3 rounded-lg text-sm text-slate-300">
-              <span>{log.docType} dicetak oleh {log.userId}</span>
-              <span className="text-slate-500 text-xs font-mono">{log.timestamp}</span>
+          {printLogs.map(log => (
+            <div
+              key={log.id}
+              className="flex flex-wrap justify-between items-center gap-2 bg-slate-950/90 border border-slate-800/90 p-3 rounded-xl text-xs text-slate-300"
+            >
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] border ${
+                    log.formType === 'service'
+                      ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                      : log.formType === 'washing'
+                      ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  }`}
+                >
+                  {log.nomorDokumen}
+                </span>
+                <div>
+                  <span className="font-bold text-white">{log.docType}</span>
+                  <span className="text-slate-400 ml-2">— {log.summary}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-slate-500 font-mono text-[11px]">
+                  Dicetak oleh {log.userId} • {log.timestamp}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveFormModal(log.formType)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <Printer className="w-3 h-3" />
+                  <span>Buka Formulir</span>
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* MODALS */}
-      <ServiceFormModal 
-        isOpen={activeModal === 'service'} 
-        onClose={() => setActiveModal(null)} 
+      {/* 1. INTERACTIVE FORM FILL & EXACT PAPER TEMPLATE MODAL (Images 9, 10, 11) */}
+      <FleetFormInteractiveModal
+        isOpen={Boolean(activeFormModal)}
+        formType={activeFormModal}
+        templateConfig={activeFormModal ? templatesMap[activeFormModal] : null}
+        onClose={() => setActiveFormModal(null)}
+        onOpenRancanganSetup={(ft) => {
+          setRancanganTargetType(ft);
+          setRancanganModalOpen(true);
+        }}
+        onOpenVisualDesigner={(ft) => {
+          setDesignerTargetType(ft);
+          setDesignerModalOpen(true);
+        }}
+        onRecordPrintLog={(newLog) => {
+          const updated = appendFormPrintLog(newLog);
+          setPrintLogs(updated);
+          addNotification(
+            'delivery',
+            'Formulir Tersimpan & Siap Cetak',
+            `${newLog.docType} (${newLog.nomorDokumen}) berhasil dicatat ke riwayat formulir.`
+          );
+        }}
       />
-      <ProcurementFormModal 
-        isOpen={activeModal === 'procurement'} 
-        onClose={() => setActiveModal(null)} 
+
+      {/* 2. RANCANGAN FORMULIR SETUP DIALOG */}
+      <RancanganFormulirModal
+        isOpen={rancanganModalOpen}
+        initialFormType={rancanganTargetType}
+        onClose={() => setRancanganModalOpen(false)}
+        onSaveTemplate={(ft, updatedCfg) => {
+          setTemplatesMap(prev => ({ ...prev, [ft]: updatedCfg }));
+          addNotification(
+            'delivery',
+            'Rancangan Formulir Disimpan',
+            `Perubahan template "${updatedCfg.namaRancangan}" telah diterapkan.`
+          );
+        }}
+        onOpenVisualDesigner={(ft, updatedCfg) => {
+          setTemplatesMap(prev => ({ ...prev, [ft]: updatedCfg }));
+          setRancanganModalOpen(false);
+          setDesignerTargetType(ft);
+          setDesignerModalOpen(true);
+        }}
+      />
+
+      {/* 3. MODERN VISUAL DESIGNER WINDOW */}
+      <VisualReportDesignerModal
+        isOpen={designerModalOpen}
+        formType={designerTargetType}
+        config={templatesMap[designerTargetType]}
+        onClose={() => setDesignerModalOpen(false)}
+        onUpdateConfig={(updatedCfg) => {
+          setTemplatesMap(prev => ({ ...prev, [designerTargetType]: updatedCfg }));
+        }}
+        onOpenLiveForm={(ft) => {
+          setDesignerModalOpen(false);
+          setActiveFormModal(ft);
+        }}
+        onOpenRancangan={(ft) => {
+          setRancanganTargetType(ft);
+          setRancanganModalOpen(true);
+        }}
       />
 
       {/* CAMERA SCANNER MODAL */}
@@ -702,3 +879,4 @@ export const FleetFormCenter: React.FC = () => {
     </div>
   );
 };
+

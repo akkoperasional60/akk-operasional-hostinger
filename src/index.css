@@ -831,40 +831,52 @@ html.light .from-indigo-600 * {
 
 html.light .bg-emerald-950\/30,
 html.light .bg-emerald-950\/40,
-html.light .bg-emerald-950\/50 {
+html.light .bg-emerald-950\/50,
+html.light .bg-emerald-950\/60 {
   background-color: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
+  border-color: #6ee7b7 !important;
 }
 
 html.light .bg-blue-950\/30,
 html.light .bg-blue-950\/40,
-html.light .bg-blue-950\/50 {
-  background-color: #eff6ff !important;
-  border-color: #bfdbfe !important;
+html.light .bg-blue-950\/50,
+html.light .bg-blue-950\/60,
+html.light .bg-sky-950\/40,
+html.light .bg-sky-950\/60 {
+  background-color: #f0f9ff !important;
+  border-color: #38bdf8 !important;
 }
 
 html.light .bg-amber-950\/30,
-html.light .bg-amber-950\/40 {
+html.light .bg-amber-950\/40,
+html.light .bg-amber-950\/60 {
   background-color: #fffbeb !important;
-  border-color: #fde68a !important;
+  border-color: #fcd34d !important;
 }
 
 html.light .bg-rose-950\/30,
-html.light .bg-rose-950\/40 {
+html.light .bg-rose-950\/40,
+html.light .bg-rose-950\/60 {
   background-color: #fff1f2 !important;
-  border-color: #fecdd3 !important;
+  border-color: #fda4af !important;
 }
 
 html.light .bg-indigo-950\/30,
-html.light .bg-indigo-950\/40 {
+html.light .bg-indigo-950\/40,
+html.light .bg-indigo-950\/50,
+html.light .bg-indigo-950\/60 {
   background-color: #eef2ff !important;
-  border-color: #c7d2fe !important;
+  border-color: #818cf8 !important;
 }
 
+html.light .bg-slate-950,
+html.light .bg-slate-950\/90,
+html.light .bg-slate-950\/80,
+html.light .bg-slate-950\/70,
 html.light .bg-slate-950\/50,
 html.light .bg-slate-950\/30 {
   background-color: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  border-color: #e2e8f0 !important;
 }
 
 /* Light Theme Inputs in Clean Modern style */

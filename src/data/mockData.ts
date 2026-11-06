@@ -479,6 +479,60 @@ export const INITIAL_FLEETS: Fleet[] = [
   }
 ];
 
+export const CANONICAL_FLEET_ORDER = [
+  'N1',
+  'A3',
+  'N3',
+  'N4',
+  'N5',
+  'N20',
+  'N21',
+  'N22',
+  'N23',
+  'S5',
+  'DS4',
+  'DS5'
+] as const;
+
+export function getCanonicalFleetOrderIndex(fleetOrCode?: Partial<Fleet> | string | null): number {
+  if (!fleetOrCode) return 999;
+  const rawCode = typeof fleetOrCode === 'string'
+    ? fleetOrCode
+    : `${fleetOrCode.initialCode || ''} ${fleetOrCode.plateNumber || ''} ${fleetOrCode.id || ''}`;
+  const upper = rawCode.toUpperCase();
+  const tokens = upper.split(/[\s\/\-_,()]+/).filter(Boolean);
+
+  for (let i = 0; i < CANONICAL_FLEET_ORDER.length; i++) {
+    const target = CANONICAL_FLEET_ORDER[i];
+    if (tokens.includes(target)) return i;
+  }
+
+  // Fallback by alias codes
+  if (tokens.includes('NP1') || upper.includes('8125')) return 0; // N1
+  if (tokens.includes('NP3') || upper.includes('8509')) return 1; // A3
+  if (tokens.includes('NS1') || upper.includes('8848')) return 2; // N3
+  if (tokens.includes('NS2') || upper.includes('9677')) return 3; // N4
+  if (tokens.includes('NS3') || upper.includes('8801')) return 4; // N5
+  if (tokens.includes('NL1') || upper.includes('8381')) return 5; // N20
+  if (tokens.includes('NL2') || upper.includes('8711')) return 6; // N21
+  if (tokens.includes('DS1') || upper.includes('9281')) return 7; // N22
+  if (tokens.includes('DS2') || upper.includes('8928')) return 8; // N23
+  if (tokens.includes('DS3') || upper.includes('9194')) return 9; // S5
+  if (upper.includes('8229')) return 10; // DS4
+  if (upper.includes('8603')) return 11; // DS5
+
+  return 999;
+}
+
+export function sortFleetsByCanonicalOrder<T extends Partial<Fleet>>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const idxA = getCanonicalFleetOrderIndex(a);
+    const idxB = getCanonicalFleetOrderIndex(b);
+    if (idxA !== idxB) return idxA - idxB;
+    return String(a.initialCode || a.plateNumber || '').localeCompare(String(b.initialCode || b.plateNumber || ''));
+  });
+}
+
 export function resolveCanonicalFleetMeta(
   fleetOrPlate?: Partial<Fleet> | string | null
 ): Fleet | undefined {
