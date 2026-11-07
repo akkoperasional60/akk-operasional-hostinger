@@ -1,9 +1,9 @@
 {
-  "versionCode": 10018,
-  "versionName": "1.0.18",
-  "updatedAt": "2026-11-07T09:56:00.000000",
+  "versionCode": 10019,
+  "versionName": "1.0.19",
+  "updatedAt": "2026-11-07T12:57:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V30: Otomatisasi Admin PIC sesuai akun yang login saat input/upload faktur SO, isolasi faktur per akun Admin Penjualan di Desktop & Mobile (kecuali Super Admin), serta penonjolan Nama Toko/Pelanggan pada dropdown Aplikasi Scan & Foto Muat."
+  "releaseNotes": "Update V31: Integrasi akses faktur dengan Hak Akses User Management (hasFullSalesAccess), penyederhanaan HUD atas kamera YOLO tanpa kotak tengah yang menghalangi pandangan kamera, serta dukungan penuh lingkungan E2E Test Runner CLI (setup_test_env.js)."
 }

@@ -537,7 +537,7 @@ class LogisticsStore {
   private offlineScheduleQueue: OfflineScheduleStatusUpdate[] = [];
 
   private isPreviewEnvironment(): boolean {
-    if (!import.meta.env.PROD) return true;
+    if (!import.meta?.env?.PROD) return true;
     if (typeof window !== 'undefined') {
       const host = (window.location.hostname || '').toLowerCase();
       if (host.endsWith('.run.app') || host === 'localhost' || host === '127.0.0.1') {
@@ -548,7 +548,7 @@ class LogisticsStore {
   }
 
   constructor() {
-    const isProd = Boolean(import.meta.env.PROD) && !this.isPreviewEnvironment();
+    const isProd = Boolean(import.meta?.env?.PROD) && !this.isPreviewEnvironment();
     this.offlineScheduleQueue = this.loadFromStorage('akk_offline_sync_queue', []);
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
@@ -743,7 +743,7 @@ class LogisticsStore {
   }
 
   private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
-    const isProd = Boolean(import.meta.env.PROD) && !this.isPreviewEnvironment();
+    const isProd = Boolean(import.meta?.env?.PROD) && !this.isPreviewEnvironment();
     let primarySuperAdmin: UserProfile | null = null;
     const seenIds = new Set<string>();
     const seenEmails = new Set<string>();
@@ -1140,7 +1140,7 @@ class LogisticsStore {
     }
 
     // Ensure GPS devices in development preview mode only (do not inject mock devices in production)
-    if (!import.meta.env.PROD) {
+    if (!import.meta?.env?.PROD) {
       const hasLeadDevice = this.devices.some(d => d.imei === '353701090461274');
       if (!hasLeadDevice || this.devices.length !== INITIAL_TRACKSOLID_DEVICES.length) {
         this.devices = [...INITIAL_TRACKSOLID_DEVICES];

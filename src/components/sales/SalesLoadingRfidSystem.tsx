@@ -41,6 +41,7 @@ import { useSalesAdminUsers } from './SalesHeaderFilter';
 import { AkkLogo } from '../AkkLogo';
 import { useToast } from '../../context/ToastContext';
 import { useRoleAccess } from '../../hooks/useRoleAccess';
+import { canAccess, canEdit } from '../../utils/rbac';
 import {
   ExifMetadataBadge,
   ExifTimestampMetadata,
@@ -524,11 +525,12 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
   const { user: currentUser } = useRoleAccess();
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const hasFullSalesAccess = isSuperAdmin || canEdit(currentUser, 'sales_admin') || canEdit(currentUser, 'sales_rfid_scanner');
   const currentUserName = (currentUser?.fullName || '').trim().toLowerCase();
 
-  // Desktop Invoice List User Isolation (Req 1 & 3): Hanya faktur akun ini yang tertampil, kecuali Super Admin
+  // Desktop Invoice List User Isolation (Req 2 & 3): Berdasarkan Hak Akses User Management
   const accessibleInvoices = useMemo(() => {
-    if (isSuperAdmin || !currentUserName) return invoices;
+    if (hasFullSalesAccess || !currentUserName) return invoices;
     return invoices.filter(inv => {
       const pic = (inv.adminPic || '').trim().toLowerCase();
       return (
@@ -537,7 +539,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         currentUserName.includes(pic)
       );
     });
-  }, [invoices, isSuperAdmin, currentUserName]);
+  }, [invoices, hasFullSalesAccess, currentUserName]);
 
   const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2602,11 +2604,12 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   // Header & Operational States
   const { user: currentUser } = useRoleAccess();
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const hasFullSalesAccess = isSuperAdmin || canEdit(currentUser, 'sales_admin') || canEdit(currentUser, 'sales_rfid_scanner');
   const currentUserName = (currentUser?.fullName || '').trim().toLowerCase();
 
-  // User Isolation (Req 3): Hanya faktur akun ini yang muncul di HP, kecuali super_admin
+  // User Isolation berdasarkan Hak Akses User Management (Req 2 & 3)
   const availableInvoices = useMemo(() => {
-    if (isSuperAdmin || !currentUserName) return invoices;
+    if (hasFullSalesAccess || !currentUserName) return invoices;
     return invoices.filter(inv => {
       const pic = (inv.adminPic || '').trim().toLowerCase();
       return (
@@ -2615,7 +2618,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         currentUserName.includes(pic)
       );
     });
-  }, [invoices, isSuperAdmin, currentUserName]);
+  }, [invoices, hasFullSalesAccess, currentUserName]);
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(() => {
     const savedId = localStorage.getItem(ACTIVE_INVOICE_KEY);
@@ -2639,8 +2642,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
   const [selectedGate, setSelectedGate] = useState<string>(LOADING_GATE_OPTIONS[0]);
-  const [scanAdminPic] = useState<string>(defaultAdmin);
-  const activeUserName = currentUser?.fullName?.trim() || scanAdminPic || defaultAdmin;
+  const activeUserName = currentUser?.fullName?.trim() || 'Bayu Novianto';
+  const scanAdminPic = activeUserName;
 
   // Live Viewfinder & Hardware Camera Controls
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
@@ -3765,67 +3768,35 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     }`}
                   />
 
-                  {/* Top HUD: Ultralytics YOLOv8x Telemetry */}
+                  {/* Top HUD: Ultralytics YOLO Real-Time Item Validation Status */}
                   <div className="w-full flex items-center justify-between gap-1 text-[9px] font-mono">
                     <span
-                      className={`px-2 py-0.5 rounded-md font-bold border flex items-center gap-1 ${
+                      className={`px-2.5 py-1 rounded-lg font-black border flex items-center gap-1.5 min-w-0 max-w-[80%] shadow-md ${
                         scanErrorLock
-                          ? 'bg-rose-600 text-white border-rose-300'
-                          : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
+                          ? 'bg-rose-600 text-white border-rose-300 animate-pulse'
+                          : 'bg-emerald-600 text-white border-emerald-300'
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full animate-ping ${scanErrorLock ? 'bg-rose-200' : 'bg-emerald-400'}`} />
-                      <span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 animate-ping ${scanErrorLock ? 'bg-rose-100' : 'bg-emerald-200'}`} />
+                      <span className="truncate">
                         {scanErrorLock
-                          ? '🚨 BARANG SALAH / MISMATCH • TERKUNCI'
-                          : `BARANG SESUAI • Ultralytics YOLOv8x (${yoloInferenceMs}ms)`}
+                          ? `🚨 [${scanErrorLock.expectedCode}] ${scanErrorLock.expectedName} • BARANG TIDAK SESUAI`
+                          : resolvedTargetItem
+                          ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName} • BARANG SESUAI`
+                          : `BARANG SESUAI (${yoloInferenceMs}ms)`}
                       </span>
                     </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-950/85 border border-emerald-500/40 text-emerald-300 font-bold">
-                      Conf {(yoloConfidence * 100).toFixed(1)}% • {selectedGate}
+                    <span
+                      className={`px-2 py-1 rounded-lg font-black shrink-0 border shadow-xs ${
+                        scanErrorLock
+                          ? 'bg-rose-950/95 border-rose-400 text-rose-200'
+                          : 'bg-emerald-950/95 border-emerald-400 text-emerald-200'
+                      }`}
+                    >
+                      {scanErrorLock ? '🔴 TIDAK SESUAI' : '🟢 SESUAI'} • {(yoloConfidence * 100).toFixed(0)}%
                     </span>
                   </div>
 
-                  {/* Center Ultralytics YOLO Live Bounding Box Overlay */}
-                  <div className="my-auto mx-auto w-[92%] max-w-[340px] pointer-events-auto">
-                    <div
-                      className={`relative rounded-xl border-2 border-dashed p-3 transition-all backdrop-blur-[2px] ${
-                        scanErrorLock
-                          ? 'border-rose-400 bg-rose-950/60 shadow-lg shadow-rose-500/30'
-                          : 'border-emerald-400 bg-emerald-950/40 shadow-lg shadow-emerald-500/20'
-                      }`}
-                    >
-                      {/* YOLO Top-Left Class & Confidence Tag */}
-                      <div
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-mono font-black uppercase tracking-tight mb-1.5 shadow-sm ${
-                          scanErrorLock
-                            ? 'bg-rose-600 text-white'
-                            : 'bg-emerald-400 text-slate-950'
-                        }`}
-                      >
-                        <span>
-                          {scanErrorLock
-                            ? `SALAH: [${scanErrorLock.detectedCode}]`
-                            : `BARANG SESUAI: [${activeDbInfo?.kodeBarang || '-'}] ${(yoloConfidence * 100).toFixed(1)}%`}
-                        </span>
-                      </div>
-
-                      <div className="text-xs font-extrabold text-white leading-snug drop-shadow-xs line-clamp-2">
-                        { activeDbInfo?.deskripsiBarang || 'Arahkan Kamera ke Kemasan / Label Barang' }
-                      </div>
-
-                      {resolvedTargetItem && activeDbInfo && (
-                        <div className="mt-2 pt-1.5 border-t border-white/15 flex items-center justify-between text-[10px] font-mono">
-                          <span className={scanErrorLock ? 'text-rose-300 font-bold' : 'text-emerald-300 font-bold'}>
-                            {scanErrorLock ? '✖ Barang Tidak Sesuai' : '✓ Barang Sesuai Database'}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-black/50 text-amber-300 font-black">
-                            Muat: {resolvedTargetItem.qtyLoaded}/{resolvedTargetItem.qtyOrdered} {activeDbInfo.satuan} (Scan +{scanQtyInput})
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
 

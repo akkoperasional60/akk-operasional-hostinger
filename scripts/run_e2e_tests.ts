@@ -1,8 +1,51 @@
-/**
- * PT ANUGRAH KEMASAN KREATIF (AKK) - CLI E2E TEST RUNNER
- * Dapat dijalankan via terminal atau GitHub Actions CI:
- * npx tsx scripts/run_e2e_tests.ts
- */
+// Node.js DOM & Browser Environment Polyfills for CLI / GitHub Actions CI Test Runner
+const dummyElement = {
+  appendChild: () => {},
+  removeChild: () => {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  setAttribute: () => {},
+  getAttribute: () => null,
+  style: {},
+  classList: { add: () => {}, remove: () => {} }
+};
+
+const win = {
+  location: { hostname: 'localhost', href: 'http://localhost' },
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  dispatchEvent: () => true,
+  requestAnimationFrame: (cb: any) => setTimeout(cb, 16),
+  cancelAnimationFrame: (id: any) => clearTimeout(id),
+  document: {
+    createElement: () => dummyElement,
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    body: dummyElement,
+    documentElement: dummyElement,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  },
+  navigator: { userAgent: 'Node.js Test Runner', onLine: true },
+  localStorage: {
+    _store: {} as Record<string, string>,
+    getItem(k: string) { return this._store[k] || null; },
+    setItem(k: string, v: string) { this._store[k] = String(v); },
+    removeItem(k: string) { delete this._store[k]; },
+    clear() { this._store = {}; }
+  }
+};
+
+(globalThis as any).window = win;
+(globalThis as any).document = win.document;
+(globalThis as any).navigator = win.navigator;
+(globalThis as any).localStorage = win.localStorage;
+
+(global as any).window = win;
+(global as any).document = win.document;
+(global as any).navigator = win.navigator;
+(global as any).localStorage = win.localStorage;
 
 import { E2ETestRunner } from '../src/services/e2eTestRunner';
 

@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet.markercluster';
-import 'leaflet.markercluster/dist/MarkerCluster.css';
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { Compass, RotateCcw, Maximize2, Minimize2, X, Layers, Phone, Navigation, MapPin, Star, Users, CheckCircle2, Building2, Store, ChevronDown, ChevronUp } from 'lucide-react';
 import { CENTRAL_WAREHOUSE } from '../data/mockData';
 import { RetailStore, TrackingPoint, RouteStop } from '../types';

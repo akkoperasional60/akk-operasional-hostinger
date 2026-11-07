@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { MapPin, Building2, Store, Navigation, Route, Compass } from 'lucide-react';
 import { Schedule, RetailStore } from '../types';
 import { CENTRAL_WAREHOUSE } from '../data/mockData';

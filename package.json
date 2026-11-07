@@ -15,7 +15,7 @@
     "start": "node server.js",
     "clean": "rm -rf dist dist-portal dist-driver",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/run_e2e_tests.ts"
+    "test": "NODE_OPTIONS='-r ./scripts/setup_test_env.js' tsx scripts/run_e2e_tests.ts"
   },
   "engines": {
     "node": "24.x"
