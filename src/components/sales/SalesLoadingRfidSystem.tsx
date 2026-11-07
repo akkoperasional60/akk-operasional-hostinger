@@ -138,6 +138,7 @@ function createSampleSvgPhoto(itemName: string, skuCode: string, qty: number, un
 }
 
 function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOrderInvoice[] {
+  const initialAdmin = 'BAYU NOVIANTO';
   return [
     {
       id: 'inv-rfid-1',
@@ -147,7 +148,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       customerName: 'TK HOLLY GENTENG',
       areaName: 'GENTENG RETAIL',
       fleetLabel: fleetDefault,
-      adminPic: adminDefault,
+      adminPic: initialAdmin,
       isLoadingFinished: false,
       notes: 'Order kemasan rutin mingguan — pastikan karton & tray di tumpukan aman',
       items: [
@@ -164,7 +165,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               timestamp: '08:15 WIB',
               qtyScanned: 20,
               photoDataUrl: createSampleSvgPhoto('Karton Box Corrugated B-Flute 60x40x40 Polos', 'RFID-KB-001', 20, 'Ikat', '08:15 WIB'),
-              scannedBy: adminDefault,
+              scannedBy: initialAdmin,
               notes: 'Kondisi ikatan rapi & lengkap'
             }
           ]
@@ -182,7 +183,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               timestamp: '08:22 WIB',
               qtyScanned: 10,
               photoDataUrl: createSampleSvgPhoto('ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', '7AFBG453', 10, 'Box', '08:22 WIB'),
-              scannedBy: adminDefault,
+              scannedBy: initialAdmin,
               notes: 'Kloter pertama 10 box masuk armada'
             }
           ]
@@ -206,7 +207,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       customerName: 'UD SUMBER KEMASAN BALI',
       areaName: 'DENPASAR 1',
       fleetLabel: fleetDefault,
-      adminPic: adminDefault,
+      adminPic: initialAdmin,
       isLoadingFinished: true,
       finishedAt: '09:10 WIB',
       notes: 'Pengiriman lintas pulau Denpasar 1',
@@ -525,10 +526,18 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const currentUserName = (currentUser?.fullName || '').trim().toLowerCase();
 
-  // Desktop Invoice List: Tampilkan seluruh faktur yang berhasil diimport/diupload
+  // Desktop Invoice List User Isolation (Req 1 & 3): Hanya faktur akun ini yang tertampil, kecuali Super Admin
   const accessibleInvoices = useMemo(() => {
-    return invoices;
-  }, [invoices]);
+    if (isSuperAdmin || !currentUserName) return invoices;
+    return invoices.filter(inv => {
+      const pic = (inv.adminPic || '').trim().toLowerCase();
+      return (
+        pic === currentUserName ||
+        pic.includes(currentUserName) ||
+        currentUserName.includes(pic)
+      );
+    });
+  }, [invoices, isSuperAdmin, currentUserName]);
 
   const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
@@ -546,7 +555,8 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const [areaName, setAreaName] = useState<string>('');
   const [fleetLabel, setFleetLabel] = useState(defaultFleet);
   const [selectedFleets, setSelectedFleets] = useState<string[]>([defaultFleet]);
-  const [adminPic, setAdminPic] = useState(defaultAdmin);
+  const activeUserPicName = (currentUser?.fullName || '').trim().toUpperCase() || defaultAdmin;
+  const [adminPic, setAdminPic] = useState(activeUserPicName);
   const [notes, setNotes] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [hasReviewedFile, setHasReviewedFile] = useState<boolean>(false);
@@ -603,7 +613,8 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     const initialFleet = fleetOptions[0] || defaultFleet;
     setFleetLabel(initialFleet);
     setSelectedFleets([initialFleet]);
-    setAdminPic(adminNames[0] || defaultAdmin);
+    const activeUserAdminName = (currentUser?.fullName || '').trim().toUpperCase() || defaultAdmin;
+    setAdminPic(activeUserAdminName);
     setNotes('');
     setUploadedFileName('');
     setHasReviewedFile(true);
@@ -3927,18 +3938,18 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
         return (
           <div className="p-3 space-y-3 flex-1">
-            {/* 1. BARIS PILIH URUTAN NAMA PELANGGAN (FAKTUR DO/SO) */}
-            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-1.5 shadow-xs">
+            {/* 1. BARIS PILIH NAMA TOKO / PELANGGAN (FAKTUR DO/SO) */}
+            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                  Urutan Nama Pelanggan (Faktur DO/SO):
+                  PILIH NAMA TOKO / PELANGGAN:
                 </span>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold truncate max-w-[180px]">
-                  {activeInvoice.customerName}
+                <span className="text-[10px] font-mono text-emerald-400 font-black truncate max-w-[180px]">
+                  {activeInvoice?.customerName || '-'}
                 </span>
               </div>
               <select
-                value={activeInvoice.id}
+                value={activeInvoice?.id || ''}
                 disabled={Boolean(scanErrorLock)}
                 onChange={e => {
                   if (scanErrorLock) return;
@@ -3946,10 +3957,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
                   setTargetScanMode('AUTO');
                 }}
-                className={`w-full px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-900 border text-xs font-extrabold text-slate-100 dark:text-slate-100 focus:outline-none ${
+                className={`w-full px-3 py-2.5 rounded-xl bg-slate-950 text-xs font-black text-white border shadow-sm focus:outline-none ${
                   scanErrorLock
-                    ? 'border-rose-500/60 opacity-60 cursor-not-allowed'
-                    : 'border-slate-700 focus:border-indigo-500 cursor-pointer'
+                    ? 'border-rose-500/60 opacity-60 cursor-not-allowed text-rose-300'
+                    : 'border-indigo-500/60 focus:border-indigo-400 text-white cursor-pointer'
                 }`}
               >
                 {availableInvoices.map(inv => {
@@ -3958,9 +3969,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     <option
                       key={inv.id}
                       value={inv.id}
-                      className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5"
+                      className="bg-slate-900 text-white font-bold py-1.5"
                     >
-                      {inv.invoiceNumber} ({inv.soNumber}) &mdash; {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
+                      🏬 {inv.customerName} &mdash; [{inv.invoiceNumber}] ({ev.totalLoaded}/{ev.totalOrdered} Muat)
                     </option>
                   );
                 })}

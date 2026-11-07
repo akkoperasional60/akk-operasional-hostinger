@@ -1,9 +1,9 @@
 {
-  "versionCode": 10017,
-  "versionName": "1.0.17",
-  "updatedAt": "2026-11-07T08:55:00.000000",
+  "versionCode": 10018,
+  "versionName": "1.0.18",
+  "updatedAt": "2026-11-07T09:56:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V29: Integrasi filter Multi-Cabang pada Manajemen Sparepart & indikator kondisi armada, penggunaan komponen AkkLogo resmi pada Aplikasi Scan & Foto Muat, penyempurnaan visual kamera YOLO (indikator Barang Sesuai/Salah & 1 tombol utama Scan), serta kontras dropdown faktur."
+  "releaseNotes": "Update V30: Otomatisasi Admin PIC sesuai akun yang login saat input/upload faktur SO, isolasi faktur per akun Admin Penjualan di Desktop & Mobile (kecuali Super Admin), serta penonjolan Nama Toko/Pelanggan pada dropdown Aplikasi Scan & Foto Muat."
 }
