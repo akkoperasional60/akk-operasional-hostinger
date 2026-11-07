@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { SparePart, SparePartUsage, SparePartCategory, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
+import { branchStore } from '../services/branchStore';
 
 interface SparePartManagementProps {
   initialFleetId?: string;
@@ -39,7 +40,23 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   const [activeTab, setActiveTab] = useState<'inventory' | 'fleet_health' | 'history'>('fleet_health');
   const [spareParts, setSpareParts] = useState<SparePart[]>(logisticsStore.getSpareParts());
   const [usages, setUsages] = useState<SparePartUsage[]>(logisticsStore.getSparePartUsages());
-  const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+  const [allFleets, setAllFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+
+  // Multi-Branch State
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  const branches = branchStore.getBranches();
+  const selectedBranch = branches.find((b: any) => b.id === selectedBranchId) || branches[0];
+
+  useEffect(() => {
+    return branchStore.subscribe(() => {
+      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
+    });
+  }, []);
+
+  // Filter fleets by selected branch
+  const fleets = selectedBranchId === 'ALL'
+    ? allFleets
+    : allFleets.filter(f => branchStore.getFleetBranch(f.id).id === selectedBranchId);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,7 +109,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     const unsubscribe = logisticsStore.subscribe(() => {
       setSpareParts(logisticsStore.getSpareParts());
       setUsages(logisticsStore.getSparePartUsages());
-      setFleets(logisticsStore.getFleets());
+      setAllFleets(logisticsStore.getFleets());
     });
     return unsubscribe;
   }, []);
@@ -344,23 +361,40 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-400 mb-1">
               <Warehouse className="w-4 h-4" />
-              <span>LOGISTIK & PEMELIHARAAN ARMADA BANYUWANGI</span>
+              <span>LOGISTIK &amp; PEMELIHARAAN ARMADA {selectedBranchId === 'ALL' ? 'SEMUA CABANG' : selectedBranch.name.toUpperCase()}</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-              <span>Manajemen Sparepart & Komponen Rutin</span>
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                Oli &bull; Ban &bull; Aki &bull; Filter
-              </span>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Manajemen Sparepart &amp; Komponen Rutin
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Pantau ketersediaan stok fisik sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada secara akurat berdasarkan tanggal & kilometer odometer.
+              Pantau ketersediaan stok fisik sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada secara akurat.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Cabang Selector */}
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-xs font-bold text-white">
+              <span className="text-[10px] text-slate-400 uppercase font-extrabold">CABANG:</span>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
+                className="bg-transparent text-xs font-bold text-amber-300 focus:outline-hidden cursor-pointer"
+              >
+                <option value="ALL" className="bg-slate-900 text-white">Semua Cabang ({allFleets.length} Unit)</option>
+                {branches.map((b: any) => {
+                  const cnt = allFleets.filter(f => branchStore.getFleetBranch(f.id).id === b.id).length;
+                  return (
+                    <option key={b.id} value={b.id} className="bg-slate-900 text-white">
+                      {b.name} ({cnt} Unit)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
             <button
               onClick={() => {
-                const defaultFleet = fleets[0];
+                const defaultFleet = fleets[0] || allFleets[0];
                 if (defaultFleet) handleOpenLogForFleet(defaultFleet, 'oli');
               }}
               className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"

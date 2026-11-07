@@ -1280,9 +1280,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         </div>
       )}
 
-      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Compact & Rapat) */}
+      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Filtered by Selected Branch) */}
       {activeTab === 'fleets' && (() => {
-        const liveInfos = fleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
+        const branchFilteredFleets = selectedBranchId === 'ALL'
+          ? fleets
+          : fleets.filter(f => branchStore.getFleetBranch(f.id).id === selectedBranchId);
+        const liveInfos = branchFilteredFleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
         const readyCount = liveInfos.filter(i => i.effectiveStatus === 'available').length;
         const kirimCount = liveInfos.filter(i => i.effectiveStatus === 'on-duty').length;
         const servisCount = liveInfos.filter(i => i.effectiveStatus === 'maintenance').length;

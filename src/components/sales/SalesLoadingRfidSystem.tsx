@@ -38,6 +38,7 @@ import { logisticsStore } from '../../services/store';
 import { Fleet } from '../../types';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
 import { useSalesAdminUsers } from './SalesHeaderFilter';
+import { AkkLogo } from '../AkkLogo';
 import { useToast } from '../../context/ToastContext';
 import { useRoleAccess } from '../../hooks/useRoleAccess';
 import {
@@ -524,18 +525,10 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const currentUserName = (currentUser?.fullName || '').trim().toLowerCase();
 
-  // User Isolation (Req 3): Hanya akun tersebut yang muncul, kecuali super_admin
+  // Desktop Invoice List: Tampilkan seluruh faktur yang berhasil diimport/diupload
   const accessibleInvoices = useMemo(() => {
-    if (isSuperAdmin || !currentUserName) return invoices;
-    return invoices.filter(inv => {
-      const pic = (inv.adminPic || '').trim().toLowerCase();
-      return (
-        pic === currentUserName ||
-        pic.includes(currentUserName) ||
-        currentUserName.includes(pic)
-      );
-    });
-  }, [invoices, isSuperAdmin, currentUserName]);
+    return invoices;
+  }, [invoices]);
 
   const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1263,13 +1256,13 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
               <FileText className="w-4 h-4" />
-              <span>Sub-Menu 1 • Pengeluaran Barang Admin Penjualan</span>
+              <span>Pengeluaran Barang Admin Penjualan</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-1">
-              Input Faktur / Sales Order (SO) Muatan Armada Box
+              Input Faktur / Sales Order (SO)
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-              Input rincian barang sesuai Faktur / Sales Order yang akan dikeluarkan dan dimuat ke armada box. Data faktur ini otomatis terintegrasi dengan <strong>Aplikasi Scan &amp; Foto Muat (RFID)</strong> untuk mendeteksi barang sisa (belum termuat), kurang muat, maupun peringatan lebih muat.
+              Input rincian Faktur / Sales Order muatan armada box yang terintegrasi dengan Aplikasi Scan &amp; Foto Muat RFID.
             </p>
           </div>
 
@@ -1308,7 +1301,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>+ Import File Faktur / SO Baru</span>
+              <span>Upload Faktur / SO</span>
             </button>
             <button
               type="button"
@@ -3515,18 +3508,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-2.5 shadow-sm shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 overflow-hidden bg-white p-0.5 border ${
-                scanErrorLock
-                  ? 'border-rose-500 ring-2 ring-rose-500/40 animate-pulse'
-                  : 'border-slate-700/60 shadow-xs'
-              }`}
-            >
-              <img
-                src="/assets/aistudio/image_c8ea86e5.png"
-                alt="PT Anugrah Kemasan Kreatif"
-                className="w-full h-full object-contain"
-              />
+            <div className="shrink-0">
+              <AkkLogo size="md" showText={false} />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
@@ -3721,8 +3704,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
               {/* Viewport Kamera Satu Layar Penuh dengan Ultralytics YOLO Real-Time Bounding Box */}
               <div
-                className={`relative w-full flex-1 min-h-[160px] rounded-2xl bg-slate-950 border-2 overflow-hidden flex flex-col justify-between p-2.5 ${
-                  scanErrorLock ? 'border-rose-500' : 'border-emerald-500/70'
+                className={`relative w-full flex-1 min-h-[160px] rounded-2xl bg-slate-950 transition-all overflow-hidden flex flex-col justify-between p-2.5 ${
+                  scanErrorLock
+                    ? 'border-4 border-rose-500 ring-4 ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.6)]'
+                    : 'border-4 border-emerald-500 ring-4 ring-emerald-500/40 shadow-[0_0_35px_rgba(16,185,129,0.5)]'
                 }`}
               >
                 {isCameraActive ? (
@@ -3775,14 +3760,14 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                       className={`px-2 py-0.5 rounded-md font-bold border flex items-center gap-1 ${
                         scanErrorLock
                           ? 'bg-rose-600 text-white border-rose-300'
-                          : 'bg-slate-950/85 text-cyan-300 border-cyan-500/40'
+                          : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
                       }`}
                     >
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                      <span className={`w-1.5 h-1.5 rounded-full animate-ping ${scanErrorLock ? 'bg-rose-200' : 'bg-emerald-400'}`} />
                       <span>
                         {scanErrorLock
-                          ? '🚨 YOLO MISMATCH • TERKUNCI'
-                          : `Ultralytics YOLOv8x • ${yoloInferenceMs}ms`}
+                          ? '🚨 BARANG SALAH / MISMATCH • TERKUNCI'
+                          : `BARANG SESUAI • Ultralytics YOLOv8x (${yoloInferenceMs}ms)`}
                       </span>
                     </span>
                     <span className="px-2 py-0.5 rounded-md bg-slate-950/85 border border-emerald-500/40 text-emerald-300 font-bold">
@@ -3795,8 +3780,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     <div
                       className={`relative rounded-xl border-2 border-dashed p-3 transition-all backdrop-blur-[2px] ${
                         scanErrorLock
-                          ? 'border-rose-400 bg-rose-950/45 shadow-lg shadow-rose-500/20'
-                          : 'border-cyan-400/90 bg-slate-950/35 shadow-lg shadow-cyan-500/15'
+                          ? 'border-rose-400 bg-rose-950/60 shadow-lg shadow-rose-500/30'
+                          : 'border-emerald-400 bg-emerald-950/40 shadow-lg shadow-emerald-500/20'
                       }`}
                     >
                       {/* YOLO Top-Left Class & Confidence Tag */}
@@ -3804,13 +3789,13 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-mono font-black uppercase tracking-tight mb-1.5 shadow-sm ${
                           scanErrorLock
                             ? 'bg-rose-600 text-white'
-                            : 'bg-cyan-400 text-slate-950'
+                            : 'bg-emerald-400 text-slate-950'
                         }`}
                       >
                         <span>
                           {scanErrorLock
-                            ? `MISMATCH [${scanErrorLock.detectedCode}]`
-                            : `YOLO DETECT: [${activeDbInfo?.kodeBarang || '-'}] ${(yoloConfidence * 100).toFixed(1)}%`}
+                            ? `SALAH: [${scanErrorLock.detectedCode}]`
+                            : `BARANG SESUAI: [${activeDbInfo?.kodeBarang || '-'}] ${(yoloConfidence * 100).toFixed(1)}%`}
                         </span>
                       </div>
 
@@ -3820,8 +3805,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
                       {resolvedTargetItem && activeDbInfo && (
                         <div className="mt-2 pt-1.5 border-t border-white/15 flex items-center justify-between text-[10px] font-mono">
-                          <span className="text-emerald-300 font-bold">
-                            ✓ Terdaftar di Database Barang
+                          <span className={scanErrorLock ? 'text-rose-300 font-bold' : 'text-emerald-300 font-bold'}>
+                            {scanErrorLock ? '✖ Barang Tidak Sesuai' : '✓ Barang Sesuai Database'}
                           </span>
                           <span className="px-1.5 py-0.5 rounded bg-black/50 text-amber-300 font-black">
                             Muat: {resolvedTargetItem.qtyLoaded}/{resolvedTargetItem.qtyOrdered} {activeDbInfo.satuan} (Scan +{scanQtyInput})
@@ -3904,36 +3889,26 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   </div>
                 )}
 
-                {/* 7. Baris Tombol Scan YOLO & Uji Salah (Tampil Utuh, Responsif, Tidak Terpotong) */}
-                <div className="flex items-stretch gap-2">
+                {/* 7. Baris Tombol Scan YOLO & Verifikasi (Satu Tombol Utama) */}
+                <div className="w-full">
                   <button
                     type="button"
                     disabled={isVerifyingScan}
                     onClick={() => void executeCaptureAndVerify(undefined, undefined, false)}
-                    className={`flex-1 py-3 px-3 rounded-xl font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border ${
+                    className={`w-full py-3.5 px-4 rounded-xl font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border ${
                       scanErrorLock
-                        ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-300'
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-300 animate-pulse'
                         : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white border-emerald-400/50'
                     }`}
                   >
-                    <Camera className="w-4 h-4 shrink-0" />
+                    <Camera className="w-4.5 h-4.5 shrink-0" />
                     <span className="truncate">
                       {isVerifyingScan
                         ? 'YOLO MEMVERIFIKASI...'
                         : scanErrorLock
                         ? '📸 FOTO ULANG BARANG YANG BENAR'
-                        : `⚡ SCAN YOLO & VERIFIKASI (+${scanQtyInput})`}
+                        : `⚡ SCAN & VERIFIKASI BARANG (YOLO) (+${scanQtyInput})`}
                     </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isVerifyingScan}
-                    onClick={() => void executeCaptureAndVerify(undefined, undefined, true)}
-                    className="py-3 px-3.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-black text-xs shadow-lg border border-rose-400/60 shrink-0 cursor-pointer transition flex items-center justify-center gap-1"
-                    title="Simulasi jika barang terfoto berbeda (Otomatis Merah & Terkunci)"
-                  >
-                    <span>⚠️ Uji Salah</span>
                   </button>
                 </div>
               </div>
@@ -3971,7 +3946,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
                   setTargetScanMode('AUTO');
                 }}
-                className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-xs font-bold text-slate-100 focus:outline-none ${
+                className={`w-full px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-900 border text-xs font-extrabold text-slate-100 dark:text-slate-100 focus:outline-none ${
                   scanErrorLock
                     ? 'border-rose-500/60 opacity-60 cursor-not-allowed'
                     : 'border-slate-700 focus:border-indigo-500 cursor-pointer'
@@ -3980,7 +3955,11 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 {availableInvoices.map(inv => {
                   const ev = evaluateInvoiceStatus(inv);
                   return (
-                    <option key={inv.id} value={inv.id}>
+                    <option
+                      key={inv.id}
+                      value={inv.id}
+                      className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5"
+                    >
                       {inv.invoiceNumber} ({inv.soNumber}) &mdash; {inv.customerName} [{ev.totalLoaded}/{ev.totalOrdered}]
                     </option>
                   );
@@ -4002,7 +3981,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </span>
               </div>
 
-              {/* Pencarian Fleksibel Master Barang (Tidak harus sesuai urutan huruf/angka, misal: "ola bola") */}
+              {/* Pencarian Fleksibel Master Barang */}
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -4013,7 +3992,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     setMasterSearchQuery(e.target.value);
                     setIsMasterSearchOpen(true);
                   }}
-                  placeholder='Cari Master Barang (Ketik acak misal: "ola bola" / "200ml bola")...'
+                  placeholder="Cari Master Barang..."
                   className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 text-xs font-semibold text-white placeholder-slate-500 focus:outline-none"
                 />
                 {masterSearchQuery && (
@@ -4095,19 +4074,19 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                         setScanQtyInput(Math.min(10, rem));
                       }
                     }}
-                    className={`w-full px-2.5 py-2 rounded-xl bg-slate-950 border text-xs font-bold text-slate-100 ${
+                    className={`w-full px-2.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-900 border text-xs font-bold text-slate-100 dark:text-slate-100 ${
                       scanErrorLock
                         ? 'border-rose-500 text-rose-300 cursor-not-allowed opacity-75'
                         : 'border-slate-700 cursor-pointer'
                     }`}
                   >
-                    <option value="AUTO">
+                    <option value="AUTO" className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5">
                       🤖 Auto YOLO: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 32) || ''}
                     </option>
                     {activeInvoice.items.map(it => {
                       const dbIt = getIntegratedDbInfo(it);
                       return (
-                        <option key={it.id} value={it.id}>
+                        <option key={it.id} value={it.id} className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5">
                           [{dbIt.kodeBarang}] {dbIt.deskripsiBarang} ({it.qtyLoaded}/{it.qtyOrdered} {dbIt.satuan})
                         </option>
                       );
