@@ -819,7 +819,7 @@ html.light .bg-blue-900 *,
 html.light .bg-emerald-600 *,
 html.light .bg-emerald-700 *,
 html.light .bg-emerald-800 *,
-html.light .bg-rose-600 *,
+html.light .bg-rose-600 *:not(.bg-white):not(.bg-white *),
 html.light .bg-amber-600 *,
 html.light .bg-purple-600 *,
 html.light .bg-indigo-600 *,
@@ -827,6 +827,11 @@ html.light .from-emerald-600 *,
 html.light .from-blue-600 *,
 html.light .from-indigo-600 * {
   color: #ffffff !important;
+}
+
+html.light .bg-rose-600 .bg-white,
+html.light .bg-rose-600 .bg-white * {
+  color: #be123c !important;
 }
 
 html.light .bg-emerald-950\/30,

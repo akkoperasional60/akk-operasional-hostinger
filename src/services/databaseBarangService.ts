@@ -461,30 +461,41 @@ function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
       localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(records));
       localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
     } else {
-      // Untuk ribuan baris (cth. 4075 baris), simpan versi ringan tanpa foto base64 di localStorage
-      // agar pembukaan halaman secara sinkron langsung menampilkan data bersih (foto tetap utuh di IndexedDB & Server)
-      const lightweight = records.map((r, idx) => ({
-        id: r.id,
-        orderIndex: idx,
-        noBarang: r.noBarang,
-        deskripsiBarang: r.deskripsiBarang,
-        keteranganBarang: r.keteranganBarang,
-        unit1: r.unit1,
-        satuan: r.satuan,
-        unit2: r.unit2 || '',
-        unit3: r.unit3 || '',
-        rasio2: r.rasio2 || 0,
-        rasio3: r.rasio3 || 0,
-        panjangCm: r.panjangCm || 0,
-        lebarCm: r.lebarCm || 0,
-        tinggiCm: r.tinggiCm || 0,
-        volM3: r.volM3 || 0,
-        beratKg: r.beratKg || 0,
-        kategoriBarang: r.kategoriBarang,
-        stokTersedia: r.stokTersedia,
-        cabang: r.cabang,
-        updatedAt: r.updatedAt
-      }));
+      // Untuk ribuan baris (cth. 4075 baris), tetap simpan foto dokumentasi pada barang yang memiliki foto (hingga batas aman ~60 barang berfoto)
+      // agar pembacaan sinkron getAll() di kamera YOLO langsung memiliki akses ke dokumentasiUrl & dokumentasiUrls
+      let preservedPhotoCount = 0;
+      const MAX_INLINE_PHOTO_ITEMS = 60;
+      const lightweight = records.map((r, idx) => {
+        const hasPhoto =
+          Boolean(r.dokumentasiUrl && !r.dokumentasiUrl.startsWith('data:image/svg+xml')) ||
+          Boolean(r.dokumentasiUrls && r.dokumentasiUrls.length > 0);
+        const keepPhoto = hasPhoto && preservedPhotoCount < MAX_INLINE_PHOTO_ITEMS;
+        if (keepPhoto) preservedPhotoCount++;
+        return {
+          id: r.id,
+          orderIndex: idx,
+          noBarang: r.noBarang,
+          deskripsiBarang: r.deskripsiBarang,
+          keteranganBarang: r.keteranganBarang,
+          unit1: r.unit1,
+          satuan: r.satuan,
+          unit2: r.unit2 || '',
+          unit3: r.unit3 || '',
+          rasio2: r.rasio2 || 0,
+          rasio3: r.rasio3 || 0,
+          panjangCm: r.panjangCm || 0,
+          lebarCm: r.lebarCm || 0,
+          tinggiCm: r.tinggiCm || 0,
+          volM3: r.volM3 || 0,
+          beratKg: r.beratKg || 0,
+          dokumentasiUrl: keepPhoto ? r.dokumentasiUrl || '' : '',
+          dokumentasiUrls: keepPhoto ? (r.dokumentasiUrls || []).slice(0, 3) : [],
+          kategoriBarang: r.kategoriBarang,
+          stokTersedia: r.stokTersedia,
+          cabang: r.cabang,
+          updatedAt: r.updatedAt
+        };
+      });
       localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(lightweight));
       localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
     }
@@ -512,8 +523,8 @@ function mergeLocalAndRemoteRecords(
     return { merged: localRecords, shouldPushToServer: true, shouldSaveLocally: false };
   }
 
-  // Jika keduanya ada data, pilih sumber yang lebih lengkap sebagai basis namun tetap gabungkan foto dokumentasi dari kedua sisi
-  const useLocalAsPrimary = localRecords.length > remoteRecords.length;
+  // Jika keduanya ada data, pilih sumber yang lebih lengkap sebagai basis dan gabungkan seluruh SKU & foto dokumentasi dari kedua sisi
+  const useLocalAsPrimary = localRecords.length >= remoteRecords.length;
   const primary = useLocalAsPrimary ? localRecords : remoteRecords;
   const secondary = useLocalAsPrimary ? remoteRecords : localRecords;
 
@@ -522,22 +533,28 @@ function mergeLocalAndRemoteRecords(
     secondaryByCode.set(item.noBarang.trim().toUpperCase(), item);
   });
 
+  const primaryCodes = new Set<string>();
   let shouldPush = localRecords.length > remoteRecords.length;
   let shouldSaveLocal = remoteRecords.length > localRecords.length;
 
   const merged = primary.map((item, idx) => {
     const code = item.noBarang.trim().toUpperCase();
+    primaryCodes.add(code);
     const sec = secondaryByCode.get(code);
     if (!sec) return sanitizeRecord(item, idx);
 
     const primaryPhotos = Array.isArray(item.dokumentasiUrls)
       ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
+      ? [item.dokumentasiUrl]
       : [];
     const secPhotos = Array.isArray(sec.dokumentasiUrls)
       ? sec.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : sec.dokumentasiUrl && !sec.dokumentasiUrl.startsWith('data:image/svg+xml')
+      ? [sec.dokumentasiUrl]
       : [];
 
-    const combinedPhotos = Array.from(new Set([...primaryPhotos, ...secPhotos]));
+    const combinedPhotos = Array.from(new Set([...secPhotos, ...primaryPhotos]));
     if (combinedPhotos.length > primaryPhotos.length) {
       if (useLocalAsPrimary) shouldSaveLocal = true;
       else shouldPush = true;
@@ -550,17 +567,30 @@ function mergeLocalAndRemoteRecords(
     return sanitizeRecord(
       {
         ...item,
+        deskripsiBarang: sec.deskripsiBarang || item.deskripsiBarang,
+        keteranganBarang: sec.keteranganBarang || item.keteranganBarang,
         panjangCm: hasPrimaryDim ? item.panjangCm : (hasSecDim ? sec.panjangCm : item.panjangCm),
         lebarCm: hasPrimaryDim ? item.lebarCm : (hasSecDim ? sec.lebarCm : item.lebarCm),
         tinggiCm: hasPrimaryDim ? item.tinggiCm : (hasSecDim ? sec.tinggiCm : item.tinggiCm),
         volM3: hasPrimaryDim ? item.volM3 : (hasSecDim ? sec.volM3 : item.volM3),
         beratKg: (item.beratKg || 0) > 0 ? item.beratKg : ((sec.beratKg || 0) > 0 ? sec.beratKg : item.beratKg),
         dokumentasiUrls: combinedPhotos,
-        dokumentasiUrl: combinedPhotos[0] || item.dokumentasiUrl || sec.dokumentasiUrl || ''
+        dokumentasiUrl: combinedPhotos[0] || sec.dokumentasiUrl || item.dokumentasiUrl || ''
       },
       idx
     );
   });
+
+  // Tambahkan item dari secondary yang belum ada di primary agar item baru dari PC/Server tidak pernah hilang
+  for (const secItem of secondary) {
+    const code = secItem.noBarang.trim().toUpperCase();
+    if (code && !primaryCodes.has(code)) {
+      primaryCodes.add(code);
+      merged.push(sanitizeRecord(secItem, merged.length));
+      if (useLocalAsPrimary) shouldSaveLocal = true;
+      else shouldPush = true;
+    }
+  }
 
   return { merged, shouldPushToServer: shouldPush, shouldSaveLocally: shouldSaveLocal };
 }
