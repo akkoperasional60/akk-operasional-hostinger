@@ -31,7 +31,10 @@ import {
   PieChart,
   Activity,
   Gauge,
-  Boxes
+  Boxes,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import * as ort from 'onnxruntime-web';
@@ -2836,16 +2839,52 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const lastAutoVerifyCooldownUntilRef = useRef<number>(0);
   const lastValidPackagingTimeRef = useRef<number>(0);
   const dbPhotoSignaturesRef = useRef<
-    Map<string, Array<{ chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number }>>
+    Map<
+      string,
+      {
+        urlCount: number;
+        sigs: Array<{
+          chroma: Float32Array;
+          lum: Float32Array;
+          hist: Float32Array;
+          edgeRatio: number;
+          darkRatio: number;
+          warmRatio: number;
+          meanR: number;
+          meanG: number;
+          meanB: number;
+        }>;
+      }
+    >
   >(new Map());
 
   // 4 Dedicated Mobile Pages: 'kamera' (Kamera Satu Layar), 'list' (Urutan Pelanggan & List Barang), 'termuat_sisa' (Termuat & Sisa), 'riwayat' (Riwayat Scan)
   const [scannerPage, setScannerPage] = useState<'kamera' | 'list' | 'termuat_sisa' | 'riwayat'>('kamera');
   const [openCustomDropdown, setOpenCustomDropdown] = useState<'cam_store' | 'cam_item' | 'list_store' | 'list_item' | null>(null);
+  const [cameraZoomLevel, setCameraZoomLevel] = useState<number>(1);
+  const [modalPhotoZoom, setModalPhotoZoom] = useState<number>(1);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const autoScanTimerRef = useRef<number | null>(null);
+
+  const handleSetCameraZoom = (zoomVal: number) => {
+    setCameraZoomLevel(zoomVal);
+    try {
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      if (track && typeof track.getCapabilities === 'function') {
+        const caps = track.getCapabilities() as Record<string, any>;
+        if (caps && 'zoom' in caps) {
+          const minZ = Number(caps.zoom?.min ?? 1);
+          const maxZ = Number(caps.zoom?.max ?? 4);
+          const clamped = Math.max(minZ, Math.min(maxZ, zoomVal));
+          void track.applyConstraints({ advanced: [{ zoom: clamped } as any] }).catch(() => {});
+        }
+      }
+    } catch {
+      // Digital center-crop zoom handles devices without hardware zoom capability
+    }
+  };
 
   // Online / Offline Listener
   useEffect(() => {
@@ -3085,19 +3124,27 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
       const rawW = videoRef.current.videoWidth;
       const rawH = videoRef.current.videoHeight;
-      const maxWidth = 1280;
+      const maxWidth = 1440;
       const scale = rawW > maxWidth ? maxWidth / rawW : 1;
       const targetW = Math.round(rawW * scale);
       const targetH = Math.round(rawH * scale);
+
+      const z = Math.max(1, cameraZoomLevel);
+      const cropW = rawW / z;
+      const cropH = rawH / z;
+      const sx = (rawW - cropW) / 2;
+      const sy = (rawH - cropH) / 2;
 
       const canvas = document.createElement('canvas');
       canvas.width = targetW;
       canvas.height = targetH;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, targetW, targetH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(videoRef.current, sx, sy, cropW, cropH, 0, 0, targetW, targetH);
         drawExifMetadataOnCanvas(ctx, targetW, targetH, exifMeta);
-        const compressedJpeg = canvas.toDataURL('image/jpeg', 0.8);
+        const compressedJpeg = canvas.toDataURL('image/jpeg', 0.90);
         return { base64: compressedJpeg, exif: exifMeta };
       }
     }
@@ -3113,21 +3160,30 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   };
 
-  // Helper: Ekstraksi signature visual 16x16 dari Canvas / Image untuk pencocokan terhadap Dokumentasi Database Barang
+  // Helper: Ekstraksi signature visual 16x16 + 24-bin Color/Luminance Histogram dari Canvas / Image untuk pencocokan akurat terhadap Dokumentasi Database Barang
   const extractVisualSignatureFromImageData = (rgba: Uint8ClampedArray, width: number, height: number) => {
     const GRID = 16;
     const total = GRID * GRID;
     const chroma = new Float32Array(total * 3);
     const lum = new Float32Array(total);
+    const hist = new Float32Array(24); // 8 bin R, 8 bin G, 8 bin B (tahan getaran & rotasi kamera)
     let sumR = 0;
     let sumG = 0;
     let sumB = 0;
     let edges = 0;
+    let darkCells = 0;
+    let warmOrBrightCells = 0;
+
+    // Fokus pada area tengah (80% tengah frame) agar pinggiran latar belakang tidak mendominasi
+    const marginX = Math.floor(width * 0.08);
+    const marginY = Math.floor(height * 0.08);
+    const effW = Math.max(16, width - marginX * 2);
+    const effH = Math.max(16, height - marginY * 2);
 
     for (let gy = 0; gy < GRID; gy++) {
-      const sy = Math.min(height - 1, Math.floor(((gy + 0.5) / GRID) * height));
+      const sy = Math.min(height - 1, marginY + Math.floor(((gy + 0.5) / GRID) * effH));
       for (let gx = 0; gx < GRID; gx++) {
-        const sx = Math.min(width - 1, Math.floor(((gx + 0.5) / GRID) * width));
+        const sx = Math.min(width - 1, marginX + Math.floor(((gx + 0.5) / GRID) * effW));
         const pIdx = (sy * width + sx) * 4;
         const r = rgba[pIdx];
         const g = rgba[pIdx + 1];
@@ -3137,7 +3193,25 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         chroma[cellIdx * 3] = r / s;
         chroma[cellIdx * 3 + 1] = g / s;
         chroma[cellIdx * 3 + 2] = b / s;
-        lum[cellIdx] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+        const l = 0.299 * r + 0.587 * g + 0.114 * b;
+        lum[cellIdx] = l / 255.0;
+
+        const rBin = Math.min(7, Math.floor((r / 256) * 8));
+        const gBin = Math.min(7, Math.floor((g / 256) * 8));
+        const bBin = Math.min(7, Math.floor((b / 256) * 8));
+        hist[rBin] += 1 / total;
+        hist[8 + gBin] += 1 / total;
+        hist[16 + bBin] += 1 / total;
+
+        // Keyboard laptop / layar HP mati / benda hitam memiliki luminance rendah (< 62) atau abu-abu gelap dingin
+        if (l < 62 || (l < 92 && Math.abs(r - b) < 10 && Math.abs(r - g) < 10)) {
+          darkCells++;
+        }
+        // Kemasan kardus coklat (R > G > B) atau kemasan/karung/cup terang memiliki karakter hangat/terang
+        if ((r > b + 10 && l >= 65 && l <= 235) || (l >= 125 && Math.abs(r - b) <= 45)) {
+          warmOrBrightCells++;
+        }
+
         sumR += r;
         sumG += g;
         sumB += b;
@@ -3148,14 +3222,17 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       for (let x = 1; x < GRID - 1; x++) {
         const idx = y * GRID + x;
         const diff = Math.abs(lum[idx + 1] - lum[idx - 1]) + Math.abs(lum[idx + GRID] - lum[idx - GRID]);
-        if (diff > 0.07) edges++;
+        if (diff > 0.065) edges++;
       }
     }
 
     return {
       chroma,
       lum,
+      hist,
       edgeRatio: edges / total,
+      darkRatio: darkCells / total,
+      warmRatio: warmOrBrightCells / total,
       meanR: sumR / total,
       meanG: sumG / total,
       meanB: sumB / total
@@ -3163,23 +3240,58 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   };
 
   const compareVisualSignatures = (
-    a: { chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number },
-    b: { chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number }
+    a: {
+      chroma: Float32Array;
+      lum: Float32Array;
+      hist: Float32Array;
+      edgeRatio: number;
+      darkRatio: number;
+      warmRatio: number;
+      meanR: number;
+      meanG: number;
+      meanB: number;
+    },
+    b: {
+      chroma: Float32Array;
+      lum: Float32Array;
+      hist: Float32Array;
+      edgeRatio: number;
+      darkRatio: number;
+      warmRatio: number;
+      meanR: number;
+      meanG: number;
+      meanB: number;
+    }
   ): number => {
+    // 1. Histogram intersection (sangat stabil terhadap getaran tangan, jarak, dan pergeseran posisi objek)
+    let histIntersection = 0;
+    for (let i = 0; i < 24; i++) {
+      histIntersection += Math.min(a.hist[i], b.hist[i]);
+    }
+    const histSim = Math.min(1, histIntersection / 3.0);
+
+    // 2. Spatial Chromaticity similarity
     let chromaDiff = 0;
     for (let i = 0; i < a.chroma.length; i++) {
       chromaDiff += Math.abs(a.chroma[i] - b.chroma[i]);
     }
     const meanChromaDiff = chromaDiff / a.chroma.length;
-    const chromaSim = Math.max(0, 1 - meanChromaDiff * 3.2);
+    const chromaSim = Math.max(0, 1 - meanChromaDiff * 3.0);
+
+    // 3. Mean RGB & Warmth similarity
     const colorMeanDiff =
       (Math.abs(a.meanR - b.meanR) + Math.abs(a.meanG - b.meanG) + Math.abs(a.meanB - b.meanB)) / (3 * 255);
     const colorMeanSim = Math.max(0, 1 - colorMeanDiff * 2.2);
-    const edgeSim = Math.max(0, 1 - Math.abs(a.edgeRatio - b.edgeRatio) * 1.5);
-    return Number((chromaSim * 0.5 + colorMeanSim * 0.35 + edgeSim * 0.15).toFixed(4));
+
+    // 4. Penalti tegas jika perbedaan rasio gelap/hitam (misal keyboard hitam vs kardus coklat/cup) terlalu jauh
+    const darkPenalty = Math.abs(a.darkRatio - b.darkRatio) > 0.24 ? Math.abs(a.darkRatio - b.darkRatio) * 0.55 : 0;
+    const warmDiffPenalty = Math.abs(a.warmRatio - b.warmRatio) > 0.35 ? Math.abs(a.warmRatio - b.warmRatio) * 0.35 : 0;
+
+    const rawScore = histSim * 0.45 + chromaSim * 0.3 + colorMeanSim * 0.25 - darkPenalty - warmDiffPenalty;
+    return Number(Math.max(0, Math.min(1, rawScore)).toFixed(4));
   };
 
-  // Precompute & cache fitur visual untuk foto dokumentasi barang di Database Barang (mendukung WebP, JPEG, PNG)
+  // Precompute & cache fitur visual untuk SELURUH foto dokumentasi barang di Database Barang (tanpa batas 60 item, otomatis update real-time)
   useEffect(() => {
     let cancelled = false;
     const buildSignatures = async () => {
@@ -3188,10 +3300,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml')) ||
           (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml')))
       );
-      for (const item of itemsWithPhotos.slice(0, 60)) {
+      for (const item of itemsWithPhotos) {
         if (cancelled) return;
         const sku = item.noBarang.trim().toUpperCase();
-        if (!sku || dbPhotoSignaturesRef.current.has(sku)) continue;
+        if (!sku) continue;
         const urls = Array.from(
           new Set(
             [
@@ -3199,9 +3311,24 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
               item.dokumentasiUrl || ''
             ].filter(u => u && !u.startsWith('data:image/svg+xml'))
           )
-        ).slice(0, 3);
+        ).slice(0, 4);
 
-        const sigs: Array<{ chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number }> = [];
+        const existingEntry = dbPhotoSignaturesRef.current.get(sku);
+        if (existingEntry && existingEntry.urlCount === urls.length && existingEntry.sigs.length > 0) {
+          continue;
+        }
+
+        const sigs: Array<{
+          chroma: Float32Array;
+          lum: Float32Array;
+          hist: Float32Array;
+          edgeRatio: number;
+          darkRatio: number;
+          warmRatio: number;
+          meanR: number;
+          meanG: number;
+          meanB: number;
+        }> = [];
         for (const url of urls) {
           try {
             const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -3212,20 +3339,22 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
               el.src = url;
             });
             const c = document.createElement('canvas');
-            c.width = 64;
-            c.height = 64;
+            c.width = 96;
+            c.height = 96;
             const ctx = c.getContext('2d');
             if (ctx) {
-              ctx.drawImage(img, 0, 0, 64, 64);
-              const imgData = ctx.getImageData(0, 0, 64, 64);
-              sigs.push(extractVisualSignatureFromImageData(imgData.data, 64, 64));
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img, 0, 0, 96, 96);
+              const imgData = ctx.getImageData(0, 0, 96, 96);
+              sigs.push(extractVisualSignatureFromImageData(imgData.data, 96, 96));
             }
           } catch {
             // Skip unreadable image
           }
         }
         if (sigs.length > 0 && !cancelled) {
-          dbPhotoSignaturesRef.current.set(sku, sigs);
+          dbPhotoSignaturesRef.current.set(sku, { urlCount: urls.length, sigs });
         }
       }
     };
@@ -3235,7 +3364,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   }, [dbBarangList]);
 
-  // Helper: Analyze live video frame to check if camera is pointing at a real packaging/label with printed text/lines vs floor/shoe/wall/blank
+  // Helper: Analyze live video frame to check if camera is pointing at a real packaging/label vs keyboard/laptop/phone/floor/blank
   const analyzeVideoFrameForPackaging = (): {
     hasPackaging: boolean;
     edgeConfidence: number;
@@ -3244,6 +3373,14 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     if (!videoRef.current || videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
       return { hasPackaging: false, edgeConfidence: 0, previewBase64: null };
     }
+    const rawW = videoRef.current.videoWidth;
+    const rawH = videoRef.current.videoHeight;
+    const z = Math.max(1, cameraZoomLevel);
+    const cropW = rawW / z;
+    const cropH = rawH / z;
+    const sx = (rawW - cropW) / 2;
+    const sy = (rawH - cropH) / 2;
+
     const sampleW = 240;
     const sampleH = 180;
     const canvas = document.createElement('canvas');
@@ -3254,7 +3391,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       return { hasPackaging: false, edgeConfidence: 0, previewBase64: null };
     }
 
-    ctx.drawImage(videoRef.current, 0, 0, sampleW, sampleH);
+    ctx.drawImage(videoRef.current, sx, sy, cropW, cropH, 0, 0, sampleW, sampleH);
     const imgData = ctx.getImageData(20, 16, sampleW - 40, sampleH - 32);
     const data = imgData.data;
     const w = imgData.width;
@@ -3264,6 +3401,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     let sumSqLum = 0;
     let sumChromaDiff = 0;
     let sharpEdges = 0;
+    let darkOrNeutralBlackPixels = 0;
     const totalPixels = w * h;
     const lum = new Float32Array(totalPixels);
     const rbDiff = new Float32Array(totalPixels);
@@ -3275,23 +3413,26 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       const b = data[idx + 2];
       const l = 0.299 * r + 0.587 * g + 0.114 * b;
       lum[i] = l;
-      // Kardus coklat (R>B) dengan cetakan tinta biru/hitam memiliki kontras R-B yang kuat meskipun luminance berdekatan
       const rb = r - b;
       rbDiff[i] = rb;
       sumLum += l;
       sumSqLum += l * l;
       sumChromaDiff += Math.abs(r - g) + Math.abs(g - b);
+      // Tombol keyboard hitam/abu-abu gelap atau layar HP mati memiliki luminance rendah dan saturasi netral/dingin
+      if (l < 65 || (l < 95 && Math.abs(r - b) < 12 && Math.abs(r - g) < 12)) {
+        darkOrNeutralBlackPixels++;
+      }
     }
 
     const meanLum = sumLum / Math.max(1, totalPixels);
     const variance = Math.max(0, sumSqLum / Math.max(1, totalPixels) - meanLum * meanLum);
     const stdDev = Math.sqrt(variance);
     const meanChroma = sumChromaDiff / Math.max(1, totalPixels);
+    const darkRatio = darkOrNeutralBlackPixels / Math.max(1, totalPixels);
 
     for (let y = 2; y < h - 2; y++) {
       for (let x = 2; x < w - 2; x++) {
         const idx = y * w + x;
-        // Gunakan gradien 1-piksel dan 2-piksel agar tetap stabil & tahan terhadap getaran tangan (motion blur) saat memindai kardus/barang
         const gx = Math.max(Math.abs(lum[idx + 1] - lum[idx - 1]), Math.abs(lum[idx + 2] - lum[idx - 2]) * 0.85);
         const gy = Math.max(Math.abs(lum[idx + w] - lum[idx - w]), Math.abs(lum[idx + w * 2] - lum[idx - w * 2]) * 0.85);
         const cgx = Math.max(Math.abs(rbDiff[idx + 1] - rbDiff[idx - 1]), Math.abs(rbDiff[idx + 2] - rbDiff[idx - 2]) * 0.85);
@@ -3303,17 +3444,15 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
 
     const edgeRatio = sharpEdges / Math.max(1, totalPixels);
-    // Toleran terhadap getaran tangan & pencahayaan gudang pada kardus coklat/putih/karung, namun tetap menolak kamera tertutup/lantai polos
+    // Tolak objek gelap/elektronik seperti keyboard laptop hitam, layar HP, atau kamera tertutup (darkRatio > 0.34 atau meanLum < 68)
+    const isDarkElectronicOrCovered = darkRatio > 0.34 || meanLum < 68;
     const hasPackaging =
-      edgeRatio >= 0.0045 &&
-      (stdDev >= 4.2 || meanChroma >= 5.5) &&
-      meanLum > 10 &&
-      meanLum < 252;
-    const edgeConfidence = hasPackaging ? Math.min(0.99, 0.86 + edgeRatio * 1.4) : 0;
-
-    if (hasPackaging) {
-      lastValidPackagingTimeRef.current = Date.now();
-    }
+      !isDarkElectronicOrCovered &&
+      edgeRatio >= 0.005 &&
+      (stdDev >= 4.5 || meanChroma >= 6.0) &&
+      meanLum > 68 &&
+      meanLum < 250;
+    const edgeConfidence = hasPackaging ? Math.min(0.95, 0.82 + edgeRatio * 1.2) : 0;
 
     let previewBase64: string | null = null;
     if (hasPackaging) {
@@ -3402,7 +3541,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           return;
         }
 
-        // Deteksi apakah best.onnx adalah model base COCO 80-class (seperti yolo11n.onnx / yolov8n.onnx yang menghasilkan class 73 = book)
+        // Deteksi apakah best.onnx adalah model base COCO 80-class (seperti yolo11n.onnx / yolov8n.onnx)
         try {
           const decoder = new TextDecoder('latin1');
           const textContent = decoder.decode(bytes);
@@ -3442,13 +3581,26 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   }, []);
 
+  // Daftar class COCO non-kemasan yang WAJIB DITOLAK (tidak boleh dianggap barang gudang):
+  // 0:person, 1..8:kendaraan, 14..23:hewan, 56..61:kursi/sofa/meja/kasur, 62:tv/monitor, 63:laptop, 64:mouse, 65:remote, 66:keyboard, 67:cell phone, 68..72:elektronik dapur
+  const NON_PACKAGING_COCO_CLASSES = useMemo(
+    () =>
+      new Set([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72
+      ]),
+    []
+  );
+
   // Helper Jalur A: Inferensi lokal YOLO26 End-to-End ONNX (nms=True, 640x640, output [1, 300, 6] -> [x1, y1, x2, y2, score, class_id])
-  // Terintegrasi langsung dengan analisa Foto Dokumentasi Database Barang & classes.json
+  // Terintegrasi ketat dengan pencocokan Foto Dokumentasi Database Barang & penolakan objek non-barang (keyboard/HP/laptop/meja)
   const runJalurALocalOnnxDetection = async (
     confThreshold: number = 0.2
   ): Promise<{
     loaded: boolean;
     inferenceMs: number;
+    rejectedNonPackaging?: boolean;
+    rejectedReason?: string;
     best: {
       x1: number;
       y1: number;
@@ -3464,7 +3616,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     const t0 = performance.now();
     const session = ortSessionRef.current;
     if (
-      !session ||
       !videoRef.current ||
       videoRef.current.videoWidth === 0 ||
       videoRef.current.videoHeight === 0
@@ -3473,6 +3624,122 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
 
     try {
+      const rawW = videoRef.current.videoWidth;
+      const rawH = videoRef.current.videoHeight;
+      const z = Math.max(1, cameraZoomLevel);
+      const cropW = rawW / z;
+      const cropH = rawH / z;
+      const sx = (rawW - cropW) / 2;
+      const sy = (rawH - cropH) / 2;
+
+      // 1. Ekstraksi cepat signature visual 96x96 (< 1ms) yang identik skalanya dengan Foto Dokumentasi Database Barang (96x96)
+      const sigCanvas = document.createElement('canvas');
+      sigCanvas.width = 96;
+      sigCanvas.height = 96;
+      const sigCtx = sigCanvas.getContext('2d', { willReadFrequently: true });
+      if (!sigCtx) {
+        return { loaded: true, inferenceMs: 0, best: null };
+      }
+      sigCtx.imageSmoothingEnabled = true;
+      sigCtx.imageSmoothingQuality = 'high';
+      sigCtx.drawImage(videoRef.current, sx, sy, cropW, cropH, 0, 0, 96, 96);
+      const rgba96 = sigCtx.getImageData(0, 0, 96, 96).data;
+      const frameSig = extractVisualSignatureFromImageData(rgba96, 96, 96);
+
+      const currentTarget = resolvedTargetItem || activeInvoice?.items[0] || null;
+      const activeTargetSku = currentTarget
+        ? getIntegratedDbInfo(currentTarget).kodeBarang.trim().toUpperCase()
+        : '';
+
+      let bestDocMatchSku = '';
+      let bestDocMatchScore = 0;
+      let targetDocScore = 0;
+      let targetDocDarkRatio = 0.1;
+      const targetDocEntry = activeTargetSku ? dbPhotoSignaturesRef.current.get(activeTargetSku) : undefined;
+      const targetHasDocPhotos = Boolean(targetDocEntry && targetDocEntry.sigs.length > 0);
+
+      dbPhotoSignaturesRef.current.forEach((entry, skuKey) => {
+        for (const docSig of entry.sigs) {
+          const sim = compareVisualSignatures(frameSig, docSig);
+          if (skuKey === activeTargetSku && sim > targetDocScore) {
+            targetDocScore = sim;
+            targetDocDarkRatio = docSig.darkRatio;
+          }
+          if (sim > bestDocMatchScore) {
+            bestDocMatchScore = sim;
+            bestDocMatchSku = skuKey;
+          }
+        }
+      });
+
+      // Tolak langsung (< 2ms) jika frame didominasi warna gelap/hitam (seperti keyboard laptop hitam / layar HP) yang tidak sesuai dengan foto dokumentasi barang
+      if (
+        frameSig.darkRatio > 0.32 &&
+        (!targetHasDocPhotos || Math.abs(frameSig.darkRatio - targetDocDarkRatio) > 0.2)
+      ) {
+        return {
+          loaded: true,
+          inferenceMs: Math.max(4, Math.round(performance.now() - t0)),
+          rejectedNonPackaging: true,
+          rejectedReason: 'Objek bukan kemasan barang (terdeteksi objek gelap/elektronik/non-kardus)',
+          best: null
+        };
+      }
+
+      const classesList =
+        yoloClassesRef.current.length > 0
+          ? yoloClassesRef.current
+          : dbBarangList.map(d => d.noBarang.trim().toUpperCase());
+
+      // FAST-PATH INSTAN (< 6ms): Apabila model base COCO aktif dan kemiripan visual terhadap Foto Dokumentasi Database Barang tinggi (>= 0.56)
+      // serta permukaan hangat/terang khas kemasan kardus/barang (bukan keyboard/elektronik gelap), langsung konfirmasi tanpa tertahan antrian 640x640 WASM!
+      if (
+        yoloIsCocoBaseRef.current &&
+        frameSig.darkRatio <= 0.26 &&
+        frameSig.warmRatio >= 0.42 &&
+        frameSig.edgeRatio >= 0.015
+      ) {
+        const fastVerifiedSku =
+          targetHasDocPhotos && targetDocScore >= 0.56 && bestDocMatchScore - targetDocScore <= 0.08
+            ? activeTargetSku
+            : bestDocMatchSku && bestDocMatchScore >= 0.64
+            ? bestDocMatchSku
+            : '';
+
+        if (fastVerifiedSku) {
+          const matchedScore = fastVerifiedSku === activeTargetSku ? targetDocScore : bestDocMatchScore;
+          const dbMatch = databaseBarangService.resolveBySkuOrClassName(fastVerifiedSku);
+          const manifestMatch = activeInvoice?.items.find(
+            it =>
+              it.skuCode.trim().toUpperCase() === fastVerifiedSku ||
+              getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === fastVerifiedSku
+          );
+          return {
+            loaded: true,
+            inferenceMs: Math.max(5, Math.round(performance.now() - t0)),
+            best: {
+              x1: 68,
+              y1: 64,
+              x2: 572,
+              y2: 576,
+              score: Number(Math.min(0.97, 0.82 + (matchedScore - 0.56) * 0.42).toFixed(3)),
+              classId: Math.max(0, classesList.indexOf(fastVerifiedSku)),
+              skuCode: dbMatch?.noBarang || manifestMatch?.skuCode || fastVerifiedSku,
+              itemName:
+                dbMatch?.deskripsiBarang ||
+                dbMatch?.keteranganBarang ||
+                manifestMatch?.itemName ||
+                `Barang SKU ${fastVerifiedSku}`,
+              unit: manifestMatch?.unit || dbMatch?.unit2 || dbMatch?.satuan || dbMatch?.unit1 || 'CRT'
+            }
+          };
+        }
+      }
+
+      if (!session) {
+        return { loaded: false, inferenceMs: Math.round(performance.now() - t0), best: null };
+      }
+
       const INPUT_SIZE = 640;
       if (!yoloCanvasRef.current) {
         yoloCanvasRef.current = document.createElement('canvas');
@@ -3485,8 +3752,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         return { loaded: true, inferenceMs: 0, best: null };
       }
 
-      ctx.drawImage(videoRef.current, 0, 0, INPUT_SIZE, INPUT_SIZE);
+      ctx.drawImage(videoRef.current, sx, sy, cropW, cropH, 0, 0, INPUT_SIZE, INPUT_SIZE);
       const rgba = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data;
+
       const numPixels = INPUT_SIZE * INPUT_SIZE;
       const float32Data = new Float32Array(3 * numPixels);
 
@@ -3497,27 +3765,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         float32Data[2 * numPixels + i] = rgba[idx + 2] / 255.0;
       }
 
-      // Hitung signature visual frame kamera untuk dibandingkan dengan Foto Dokumentasi Database Barang
-      const frameSig = extractVisualSignatureFromImageData(rgba, INPUT_SIZE, INPUT_SIZE);
-      let bestDocMatchSku = '';
-      let bestDocMatchScore = 0;
-      const currentTarget = resolvedTargetItem || activeInvoice?.items[0] || null;
-      const activeTargetSku = currentTarget
-        ? getIntegratedDbInfo(currentTarget).kodeBarang.trim().toUpperCase()
-        : '';
-
-      dbPhotoSignaturesRef.current.forEach((sigs, skuKey) => {
-        for (const docSig of sigs) {
-          const sim = compareVisualSignatures(frameSig, docSig);
-          // Beri sedikit bobot prioritas jika SKU adalah target aktif yang sedang dipindai
-          const weightedSim = skuKey === activeTargetSku ? sim + 0.04 : sim;
-          if (weightedSim > bestDocMatchScore) {
-            bestDocMatchScore = weightedSim;
-            bestDocMatchSku = skuKey;
-          }
-        }
-      });
-
       const inputName = session.inputNames[0] || 'images';
       const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
       const outputMap = await session.run({ [inputName]: inputTensor });
@@ -3526,50 +3773,26 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       const outData = outputTensor.data as Float32Array | number[];
       const dims = outputTensor.dims || [1, 300, 6];
 
-      // Parse End-to-End YOLO26 output tensor [1, 300, 6] dengan urutan [x1, y1, x2, y2, score, class_id]
       const numRows = dims.length === 3 ? dims[1] : Math.floor(outData.length / 6);
       const stride = dims.length === 3 ? dims[2] : 6;
-      const classesList =
-        yoloClassesRef.current.length > 0
-          ? yoloClassesRef.current
-          : dbBarangList.map(d => d.noBarang.trim().toUpperCase());
 
-      const resolveSkuFromClassAndDocs = (classId: number): string => {
-        const isCustomClass = !yoloIsCocoBaseRef.current && classId >= 0 && classId < classesList.length;
-        const directSku = isCustomClass ? classesList[classId] : '';
-
-        // Jika ada target aktif (misal 7GPJA001) dan model mendeteksi SKU dari keluarga kemasan/kardus yang sama (misal 7GPJA011 pada kardus Jaguar yang identik)
-        // atau dokumentasi visual cocok dengan target aktif, prioritaskan target aktif agar responsif dan tidak salah menolak ukuran pada kardus sejenis
-        if (activeTargetSku) {
-          const isSameCartonFamily =
-            directSku.length >= 5 &&
-            activeTargetSku.length >= 5 &&
-            directSku.slice(0, 5) === activeTargetSku.slice(0, 5);
-          if (
-            directSku === activeTargetSku ||
-            isSameCartonFamily ||
-            (bestDocMatchSku === activeTargetSku && bestDocMatchScore >= 0.38)
-          ) {
-            return activeTargetSku;
+      // Jika best.onnx adalah model base COCO 80-class, cek terlebih dahulu apakah kamera mengarah ke laptop (63), keyboard (66), HP (67), monitor (62), orang (0), dll.
+      if (yoloIsCocoBaseRef.current) {
+        for (let r = 0; r < numRows; r++) {
+          const offset = r * stride;
+          const score = Number(outData[offset + 4]);
+          const classId = Math.round(Number(outData[offset + 5]));
+          if (score >= 0.22 && NON_PACKAGING_COCO_CLASSES.has(classId)) {
+            return {
+              loaded: true,
+              inferenceMs: Math.max(6, Math.round(performance.now() - t0)),
+              rejectedNonPackaging: true,
+              rejectedReason: 'Kamera mengarah ke objek non-kemasan (terdeteksi perangkat/objek lain, bukan barang target)',
+              best: null
+            };
           }
         }
-
-        if (bestDocMatchSku && bestDocMatchScore >= 0.48) {
-          return bestDocMatchSku;
-        }
-        if (
-          activeTargetSku &&
-          (classesList.includes(activeTargetSku) ||
-            dbBarangList.some(d => d.noBarang.trim().toUpperCase() === activeTargetSku) ||
-            activeInvoice?.items.some(it => it.skuCode.trim().toUpperCase() === activeTargetSku))
-        ) {
-          return activeTargetSku;
-        }
-        if (directSku) {
-          return directSku;
-        }
-        return classesList[0] || activeTargetSku || '7GPJA001';
-      };
+      }
 
       let bestDet: {
         x1: number;
@@ -3593,13 +3816,48 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         const classId = Math.round(Number(outData[offset + 5]));
 
         if (score >= confThreshold && classId >= 0) {
-          const resolvedSku = resolveSkuFromClassAndDocs(classId);
-          const effectiveScore =
-            resolvedSku === activeTargetSku || (bestDocMatchSku === resolvedSku && bestDocMatchScore >= 0.4)
-              ? Math.min(0.99, Math.max(score, 0.88 + Math.min(0.1, bestDocMatchScore * 0.12)))
-              : score;
+          let resolvedSku = '';
+          let effectiveScore = score;
 
-          if (!bestDet || effectiveScore > bestDet.score) {
+          if (!yoloIsCocoBaseRef.current) {
+            // Model ONNX custom yang dilatih khusus pada SKU gudang
+            const directSku = classId < classesList.length ? classesList[classId] : '';
+            if (!directSku) continue;
+            const isSameCartonFamily =
+              activeTargetSku &&
+              directSku.length >= 5 &&
+              activeTargetSku.length >= 5 &&
+              directSku.slice(0, 5) === activeTargetSku.slice(0, 5);
+            if (isSameCartonFamily && (!targetHasDocPhotos || targetDocScore >= 0.62)) {
+              resolvedSku = activeTargetSku;
+            } else {
+              resolvedSku = directSku;
+            }
+            effectiveScore = Number(Math.min(0.97, Math.max(score, targetDocScore * 0.95)).toFixed(3));
+          } else {
+            // Model base COCO: WAJIB terverifikasi oleh kemiripan visual terhadap Foto Dokumentasi Database Barang (>= 0.65)
+            if (targetHasDocPhotos && targetDocScore >= 0.65 && bestDocMatchScore - targetDocScore <= 0.08) {
+              resolvedSku = activeTargetSku;
+              effectiveScore = Number(Math.min(0.96, 0.78 + (targetDocScore - 0.65) * 0.55).toFixed(3));
+            } else if (bestDocMatchSku && bestDocMatchScore >= 0.68) {
+              resolvedSku = bestDocMatchSku;
+              effectiveScore = Number(Math.min(0.95, 0.76 + (bestDocMatchScore - 0.68) * 0.55).toFixed(3));
+            } else if (
+              !targetHasDocPhotos &&
+              activeTargetSku &&
+              frameSig.darkRatio <= 0.22 &&
+              frameSig.warmRatio >= 0.58 &&
+              frameSig.edgeRatio >= 0.025
+            ) {
+              resolvedSku = activeTargetSku;
+              effectiveScore = Number(Math.min(0.91, Math.max(score, 0.84)).toFixed(3));
+            } else {
+              // Objek tidak cocok dengan dokumentasi foto barang mana pun -> tolak
+              continue;
+            }
+          }
+
+          if (resolvedSku && (!bestDet || effectiveScore > bestDet.score)) {
             const dbMatch = databaseBarangService.resolveBySkuOrClassName(resolvedSku);
             const manifestMatch = activeInvoice?.items.find(
               it =>
@@ -3625,36 +3883,51 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         }
       }
 
-      // Jika best.onnx belum mengeluarkan bbox di atas threshold namun kamera mengarah ke kemasan barang nyata (frameSig memiliki tepi cetakan/kardus):
-      const hasValidCardboardFrame =
-        frameSig.edgeRatio >= 0.015 || (bestDocMatchSku && bestDocMatchScore >= 0.42);
-      if (!bestDet && hasValidCardboardFrame) {
-        const fallbackSku =
-          (bestDocMatchSku && bestDocMatchScore >= 0.48 ? bestDocMatchSku : '') ||
-          activeTargetSku ||
-          classesList[0] ||
-          '7GPJA001';
-        const dbMatch = databaseBarangService.resolveBySkuOrClassName(fallbackSku);
-        const manifestMatch = activeInvoice?.items.find(
-          it =>
-            it.skuCode.trim().toUpperCase() === fallbackSku ||
-            getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === fallbackSku
-        );
-        bestDet = {
-          x1: 72,
-          y1: 68,
-          x2: 568,
-          y2: 572,
-          score: Math.min(0.98, Number((0.86 + Math.max(0.05, bestDocMatchScore * 0.12)).toFixed(3))),
-          classId: Math.max(0, classesList.indexOf(fallbackSku)),
-          skuCode: dbMatch?.noBarang || manifestMatch?.skuCode || fallbackSku,
-          itemName:
-            dbMatch?.deskripsiBarang ||
-            dbMatch?.keteranganBarang ||
-            manifestMatch?.itemName ||
-            `Barang SKU ${fallbackSku}`,
-          unit: manifestMatch?.unit || dbMatch?.unit2 || dbMatch?.satuan || dbMatch?.unit1 || 'CRT'
-        };
+      // Jika best.onnx belum mengeluarkan bbox di atas threshold, HANYA izinkan fallback apabila kemiripan visual terhadap Foto Dokumentasi Database Barang benar-benar tinggi (>= 0.66) dan bukan benda gelap/elektronik
+      if (!bestDet && frameSig.darkRatio <= 0.26 && frameSig.edgeRatio >= 0.015) {
+        let verifiedDocSku = '';
+        let verifiedDocSim = 0;
+
+        if (targetHasDocPhotos && targetDocScore >= 0.66 && bestDocMatchScore - targetDocScore <= 0.08) {
+          verifiedDocSku = activeTargetSku;
+          verifiedDocSim = targetDocScore;
+        } else if (bestDocMatchSku && bestDocMatchScore >= 0.70) {
+          verifiedDocSku = bestDocMatchSku;
+          verifiedDocSim = bestDocMatchScore;
+        } else if (
+          !targetHasDocPhotos &&
+          activeTargetSku &&
+          frameSig.darkRatio <= 0.18 &&
+          frameSig.warmRatio >= 0.65 &&
+          frameSig.edgeRatio >= 0.03
+        ) {
+          verifiedDocSku = activeTargetSku;
+          verifiedDocSim = 0.72;
+        }
+
+        if (verifiedDocSku) {
+          const dbMatch = databaseBarangService.resolveBySkuOrClassName(verifiedDocSku);
+          const manifestMatch = activeInvoice?.items.find(
+            it =>
+              it.skuCode.trim().toUpperCase() === verifiedDocSku ||
+              getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === verifiedDocSku
+          );
+          bestDet = {
+            x1: 72,
+            y1: 68,
+            x2: 568,
+            y2: 572,
+            score: Number(Math.min(0.95, 0.78 + (verifiedDocSim - 0.65) * 0.5).toFixed(3)),
+            classId: Math.max(0, classesList.indexOf(verifiedDocSku)),
+            skuCode: dbMatch?.noBarang || manifestMatch?.skuCode || verifiedDocSku,
+            itemName:
+              dbMatch?.deskripsiBarang ||
+              dbMatch?.keteranganBarang ||
+              manifestMatch?.itemName ||
+              `Barang SKU ${verifiedDocSku}`,
+            unit: manifestMatch?.unit || dbMatch?.unit2 || dbMatch?.satuan || dbMatch?.unit1 || 'CRT'
+          };
+        }
       }
 
       return {
@@ -3687,8 +3960,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       const tStart = performance.now();
       const frameAnalysis = analyzeVideoFrameForPackaging();
 
-      // Stabilizer anti-getaran: jangan langsung mereset ke merah jika baru saja mendeteksi kemasan dalam 1.8 detik terakhir
-      const recentlyHadPackaging = Date.now() - lastValidPackagingTimeRef.current < 1800;
+      // Stabilizer anti-getaran singkat (800ms) hanya jika sebelumnya benar-benar terverifikasi cocok dengan barang
+      const recentlyHadPackaging = Date.now() - lastValidPackagingTimeRef.current < 800;
 
       if (!frameAnalysis.hasPackaging && !recentlyHadPackaging) {
         if (!cancelled) {
@@ -3697,14 +3970,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           setLiveVisionStatus({
             state: 'no_packaging',
             confidence: 0,
-            reason: 'Kamera tidak mengarah ke label barang'
+            reason: 'Kamera tidak mengarah ke kemasan barang target'
           });
         }
-        return;
-      }
-
-      if (!frameAnalysis.hasPackaging && recentlyHadPackaging) {
-        // Pertahankan status terakhir saat tangan bergetar sesaat
         return;
       }
 
@@ -3714,10 +3982,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         const currentTarget = resolvedTargetItem || activeInvoice.items[0];
         const dbInfo = currentTarget ? getIntegratedDbInfo(currentTarget) : null;
         const targetCode = (dbInfo?.kodeBarang || currentTarget?.skuCode || 'AUTO').trim().toUpperCase();
-        const targetName = dbInfo?.deskripsiBarang || currentTarget?.itemName || '';
 
-        // 1. Jalankan JALUR A (onnxruntime-web lokal di browser HP) terlebih dahulu
-        const localRes = await runJalurALocalOnnxDetection(0.15);
+        // Jalankan JALUR A (onnxruntime-web lokal + verifikasi visual Dokumentasi Database Barang)
+        const localRes = await runJalurALocalOnnxDetection(0.18);
         if (cancelled) return;
 
         if (localRes.loaded && localRes.best) {
@@ -3735,6 +4002,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             inManifest &&
             (targetScanMode === 'AUTO' || detectedSku === targetCode);
 
+          if (isMatch) {
+            lastValidPackagingTimeRef.current = Date.now();
+          }
+
           setLiveVisionStatus({
             state: isMatch ? 'matching' : 'mismatch',
             confidence: localRes.best.score,
@@ -3746,11 +4017,11 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
               : `Terdeteksi [${detectedSku}] ${localRes.best.itemName}, target: [${targetCode}]`
           });
 
-          // Jika YOLO Auto: ON dan status SESUAI (confidence >= 0.75) serta di luar masa cooldown 2 detik:
+          // Jika YOLO Auto: ON dan status SESUAI (confidence >= 0.78) serta di luar masa cooldown 2 detik:
           if (
             autoScanEnabled &&
             isMatch &&
-            localRes.best.score >= 0.75 &&
+            localRes.best.score >= 0.78 &&
             !scanErrorLock &&
             frameAnalysis.previewBase64 &&
             Date.now() >= lastAutoVerifyCooldownUntilRef.current
@@ -3768,31 +4039,17 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           return;
         }
 
-        // 2. Respons instan lokal apabila kemasan barang terdeteksi jelas di viewfinder dan target terdaftar di Database Barang
-        if (dbInfo && dbInfo.isRegisteredInDb && frameAnalysis.hasPackaging) {
-          const fastConf = Math.max(0.92, frameAnalysis.edgeConfidence);
-          setYoloConfidence(fastConf);
-          setYoloInferenceMs(Math.max(10, Math.round(performance.now() - tStart)));
-          setLiveVisionStatus({
-            state: 'matching',
-            confidence: fastConf,
-            detectedCode: targetCode,
-            detectedSummary: targetName
-          });
-
-          if (
-            autoScanEnabled &&
-            !scanErrorLock &&
-            frameAnalysis.previewBase64 &&
-            currentTarget &&
-            currentTarget.qtyLoaded < currentTarget.qtyOrdered &&
-            Date.now() >= lastAutoVerifyCooldownUntilRef.current
-          ) {
-            lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
-            void executeCaptureAndVerify(frameAnalysis.previewBase64, undefined, false);
-          }
-          return;
-        }
+        // Jika objek di kamera ditolak (misal keyboard, laptop, HP, meja, lantai, atau tidak cocok dengan foto dokumentasi barang):
+        // Tampilkan TIDAK SESUAI (jangan pernah memberikan fallback 99% palsu!)
+        setYoloConfidence(0);
+        setYoloInferenceMs(Math.max(10, Math.round(performance.now() - tStart)));
+        setLiveVisionStatus({
+          state: 'no_packaging',
+          confidence: 0,
+          reason:
+            localRes.rejectedReason ||
+            `Objek di kamera tidak sesuai dengan dokumentasi [${targetCode}]`
+        });
       } catch {
         // Keep last state on transient error
       } finally {
@@ -3801,8 +4058,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
 
     void runLiveCheck();
-    // Interval cepat 250ms agar indikator kamera langsung responsif begitu diarahkan ke kardus/kemasan
-    const intervalMs = 250;
+    // Interval sangat responsif 160ms agar indikator kamera langsung hijau begitu diarahkan ke kardus/kemasan
+    const intervalMs = 160;
     const timer = window.setInterval(() => {
       void runLiveCheck();
     }, intervalMs);
@@ -3811,7 +4068,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isCameraActive, scannerPage, activeInvoice, resolvedTargetItem, selectedGate, isVerifyingScan, autoScanEnabled, targetScanMode, scanErrorLock]);
+  }, [isCameraActive, scannerPage, activeInvoice, resolvedTargetItem, selectedGate, isVerifyingScan, autoScanEnabled, targetScanMode, scanErrorLock, cameraZoomLevel]);
 
   // Tambah Foto Tambahan (>1 Foto per Barang) langsung dari Kamera tanpa menambah beban antrian atau saat ingin multi-angle dokumentasi
   const handleCaptureExtraPhotoOnly = (overrideItem?: SalesOrderItem) => {
@@ -4023,8 +4280,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     );
   };
 
-  // Core Ultralytics YOLO + Gemini Vision Verification Workflow:
-  // Verifikasi visual nyata terhadap gambar kamera, ukuran (OZ/dimensi), dan Database Barang
+  // Core Ultralytics YOLO + Visual Documentation Verification Workflow:
+  // Verifikasi visual nyata terhadap gambar kamera, ukuran (OZ/dimensi), dan Dokumentasi Database Barang
   const executeCaptureAndVerify = async (
     customImageBase64?: string,
     customExif?: ExifTimestampMetadata,
@@ -4052,14 +4309,12 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         : dbInfo?.deskripsiBarang || currentTarget?.itemName || 'Kemasan Faktur';
     const desiredUnit = dbInfo?.satuan || currentTarget?.unit || 'Box';
 
-    // Cek apakah kamera mengarah ke barang (dengan toleransi getaran tangan 2.2 detik terakhir agar tidak gagal saat tombol ditekan)
     const rawFrameCheck = !customImageBase64 && isCameraActive
       ? analyzeVideoFrameForPackaging()
-      : { hasPackaging: true, edgeConfidence: 0.98, previewBase64: null };
+      : { hasPackaging: true, edgeConfidence: 0.94, previewBase64: null };
     const hasSteadyPackaging =
       rawFrameCheck.hasPackaging ||
-      Date.now() - lastValidPackagingTimeRef.current < 2200 ||
-      liveVisionStatus.state === 'matching';
+      Date.now() - lastValidPackagingTimeRef.current < 1200;
 
     const captured = customImageBase64
       ? { base64: customImageBase64, exif: customExif || createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR') }
@@ -4085,7 +4340,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         serverRejected = true;
         serverExtractedCode = 'BUKAN-BARANG';
         serverExtractedName = 'Kamera Tidak Mengarah ke Kemasan Barang';
-        serverRejectionReason = 'Kamera tidak mengarah ke kemasan barang (terdeteksi lantai/objek kosong). Arahkan kamera ke label kardus/barang terlebih dahulu!';
+        serverRejectionReason = 'Kamera tidak mengarah ke kemasan barang (terdeteksi objek non-kemasan/gelap/kosong). Arahkan kamera ke kardus/barang target terlebih dahulu!';
         setLiveVisionStatus({
           state: 'no_packaging',
           confidence: 0,
@@ -4093,11 +4348,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         });
         setYoloConfidence(0);
       } else if (!simulateMismatch) {
-        // VERIFIKASI INSTAN & RESPONSIF:
-        // Jalankan Jalur A lokal terlebih dahulu; jika target terdaftar di Database Barang dan kemasan valid, langsung konfirmasi
-        // sambil mencatat log ke server /api/scan-muat di latar belakang (non-blocking) agar tidak perlu menunggu jaringan lama!
         const jalurAResult = !customImageBase64
-          ? await runJalurALocalOnnxDetection(0.15)
+          ? await runJalurALocalOnnxDetection(0.18)
           : { loaded: false, inferenceMs: 0, best: null };
 
         if (jalurAResult.loaded && jalurAResult.best) {
@@ -4106,35 +4358,55 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           setYoloConfidence(jalurAResult.best.score);
           serverExtractedCode = jalurAResult.best.skuCode.trim().toUpperCase();
           serverExtractedName = jalurAResult.best.itemName.trim();
-        } else {
-          setYoloConfidence(Math.max(0.95, rawFrameCheck.edgeConfidence));
+
+          const isMatchTarget =
+            activeInvoice.items.some(
+              it =>
+                it.skuCode.trim().toUpperCase() === serverExtractedCode ||
+                getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === serverExtractedCode
+            ) &&
+            (desiredCode === 'AUTO' || serverExtractedCode === desiredCode.toUpperCase());
+
+          if (!isMatchTarget) {
+            serverRejected = true;
+            serverRejectionReason = `TIDAK SESUAI: Terdeteksi [${serverExtractedCode}] ${serverExtractedName}, sedangkan target aktif adalah [${desiredCode}] ${desiredName}!`;
+          }
+
+          setLiveVisionStatus({
+            state: isMatchTarget ? 'matching' : 'mismatch',
+            confidence: jalurAResult.best.score,
+            detectedCode: serverExtractedCode,
+            detectedSummary: serverExtractedName,
+            bbox: [jalurAResult.best.x1, jalurAResult.best.y1, jalurAResult.best.x2, jalurAResult.best.y2],
+            reason: serverRejectionReason || undefined
+          });
+        } else if (customImageBase64) {
+          // Untuk unggah foto manual dari galeri yang sudah divalidasi
+          setYoloConfidence(0.94);
           serverExtractedCode = desiredCode.toUpperCase();
           serverExtractedName = desiredName;
-        }
-
-        const isMatchTarget =
-          activeInvoice.items.some(
-            it =>
-              it.skuCode.trim().toUpperCase() === serverExtractedCode ||
-              getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === serverExtractedCode
-          ) &&
-          (desiredCode === 'AUTO' || serverExtractedCode === desiredCode.toUpperCase());
-
-        if (!isMatchTarget) {
+          setLiveVisionStatus({
+            state: 'matching',
+            confidence: 0.94,
+            detectedCode: serverExtractedCode,
+            detectedSummary: serverExtractedName,
+            bbox: [80, 72, 560, 568]
+          });
+        } else {
+          // Kamera aktif namun objek tidak cocok dengan ONNX maupun Dokumentasi Database Barang (misal mengarah ke keyboard/HP/meja)
           serverRejected = true;
-          serverRejectionReason = `TIDAK SESUAI: Terdeteksi [${serverExtractedCode}] ${serverExtractedName}, sedangkan target aktif adalah [${desiredCode}] ${desiredName}!`;
+          serverExtractedCode = 'OBJEK-TIDAK-SESUAI';
+          serverExtractedName = 'Objek Tidak Sesuai Dokumentasi Barang';
+          serverRejectionReason =
+            jalurAResult.rejectedReason ||
+            `TIDAK SESUAI: Kamera tidak menampilkan kemasan [${desiredCode}] ${desiredName}. Pastikan kamera mengarah langsung ke barang/kardus yang sesuai!`;
+          setYoloConfidence(0);
+          setLiveVisionStatus({
+            state: 'no_packaging',
+            confidence: 0,
+            reason: serverRejectionReason
+          });
         }
-
-        setLiveVisionStatus({
-          state: isMatchTarget ? 'matching' : 'mismatch',
-          confidence: jalurAResult.best?.score || 0.96,
-          detectedCode: serverExtractedCode,
-          detectedSummary: serverExtractedName,
-          bbox: jalurAResult.best
-            ? [jalurAResult.best.x1, jalurAResult.best.y1, jalurAResult.best.x2, jalurAResult.best.y2]
-            : [80, 72, 560, 568],
-          reason: serverRejectionReason || undefined
-        });
 
         // Sinkronisasi log verifikasi ke server MySQL di background tanpa menahan respons tombol kamera
         void fetch('/api/scan-muat', {
@@ -4905,7 +5177,11 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 {isCameraActive ? (
                   <video
                     ref={videoRef}
-                    className="absolute inset-0 w-full h-full object-cover"
+                    style={{
+                      transform: `scale(${cameraZoomLevel})`,
+                      transformOrigin: 'center center'
+                    }}
+                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-150"
                     playsInline
                     muted
                     autoPlay
@@ -4923,7 +5199,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   <div className="absolute inset-0 border-4 border-amber-300/80 shadow-[inset_0_0_90px_rgba(255,255,255,0.75)] pointer-events-none z-20 animate-pulse" />
                 )}
 
-                {/* Badge Deteksi Terbaik di Atas Bingkai Kamera: [KODE_SKU] NAMA_BARANG + SESUAI • 98% / TIDAK SESUAI */}
+                {/* Badge Deteksi Terbaik di Atas Bingkai Kamera: [KODE_SKU] NAMA_BARANG + SESUAI • 98% / TIDAK SESUAI + Kontrol Zoom */}
                 <div className="relative z-10 w-full h-full rounded-xl flex flex-col justify-between p-1 pointer-events-none">
                   <div className="flex items-start justify-between gap-1.5 px-1 pt-0.5">
                     <div
@@ -4952,9 +5228,31 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                       />
                       <span>
                         {isVisuallyValid
-                          ? `SESUAI • ${Math.round((liveVisionStatus.confidence || yoloConfidence || 0.98) * 100)}%`
+                          ? `SESUAI • ${Math.round((liveVisionStatus.confidence || yoloConfidence || 0.96) * 100)}%`
                           : 'TIDAK SESUAI'}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Floating Camera Zoom Control Bar (1x, 1.5x, 2x, 3x) */}
+                  <div className="flex items-center justify-end px-1.5 pb-1 pointer-events-auto">
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950/80 backdrop-blur-md border border-white/20 shadow-md">
+                      <ZoomIn className="w-3 h-3 text-sky-400 mr-0.5" />
+                      {[1, 1.5, 2, 3].map(zVal => (
+                        <button
+                          key={zVal}
+                          type="button"
+                          onClick={() => handleSetCameraZoom(zVal)}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black transition cursor-pointer ${
+                            cameraZoomLevel === zVal
+                              ? 'bg-sky-500 text-slate-950 shadow-2xs'
+                              : 'text-slate-200 hover:bg-white/15'
+                          }`}
+                          title={`Zoom Kamera ${zVal}x`}
+                        >
+                          {zVal}x
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -6006,12 +6304,48 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </button>
               </div>
 
-              {/* Action Bar to Add More Photos (>1 Photo Support) */}
+              {/* Action Bar to Add More Photos (>1 Photo Support) + Zoom Controls */}
               {targetInvoiceItem && (
                 <div className="px-5 py-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-[11px] text-slate-400 font-semibold">
-                    Tambah foto dokumentasi untuk barang ini:
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-400 font-semibold mr-1">Zoom:</span>
+                    <button
+                      type="button"
+                      onClick={() => setModalPhotoZoom(prev => Math.max(1, Number((prev - 0.5).toFixed(2))))}
+                      disabled={modalPhotoZoom <= 1}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white disabled:opacity-40 cursor-pointer transition"
+                      title="Zoom Out"
+                    >
+                      <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalPhotoZoom(1)}
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 font-mono text-[10px] font-black cursor-pointer transition"
+                      title="Reset Zoom 100%"
+                    >
+                      {Math.round(modalPhotoZoom * 100)}%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalPhotoZoom(prev => Math.min(4, Number((prev + 0.5).toFixed(2))))}
+                      disabled={modalPhotoZoom >= 4}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white disabled:opacity-40 cursor-pointer transition"
+                      title="Zoom In"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    {modalPhotoZoom > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setModalPhotoZoom(1)}
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer transition"
+                        title="Reset Zoom"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -6019,7 +6353,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                       className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>+ Ambil Foto Kamera</span>
+                      <span>Ambil Foto</span>
                     </button>
                     <button
                       type="button"
@@ -6030,20 +6364,27 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                       className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
                     >
                       <Upload className="w-3.5 h-3.5" />
-                      <span>+ Upload Multi-Foto</span>
+                      <span>Galeri</span>
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Active Photo Hero Viewer with Prev/Next Carousel */}
+              {/* Active Photo Hero Viewer with Prev/Next Carousel & Zoom */}
               {activeScan ? (
                 <div className="p-4 space-y-3">
-                  <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-[4/3] flex items-center justify-center group">
+                  <div
+                    className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-[4/3] flex items-center justify-center group cursor-zoom-in"
+                    onDoubleClick={() => setModalPhotoZoom(prev => (prev > 1 ? 1 : 2))}
+                  >
                     <img
                       src={activeScan.photoDataUrl}
                       alt={`Foto ${safeIdx + 1}`}
-                      className="w-full h-full object-contain"
+                      style={{
+                        transform: `scale(${modalPhotoZoom})`,
+                        transformOrigin: 'center center'
+                      }}
+                      className="w-full h-full object-contain transition-transform duration-150"
                     />
 
                     {/* Counter Badge Top-Left */}

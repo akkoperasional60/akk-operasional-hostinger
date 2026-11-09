@@ -1,9 +1,9 @@
 {
-  "versionCode": 10022,
-  "versionName": "1.0.22",
-  "updatedAt": "2026-11-09T11:42:00.000000",
+  "versionCode": 10023,
+  "versionName": "1.0.23",
+  "updatedAt": "2026-11-09T13:25:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V34: Stabilizer anti-getaran kamera YOLO (250ms real-time & verifikasi non-blocking instan), proteksi satuan kemasan luar (CRT/ZAK agar tidak tertimpa SLP), tampilan utuh nama & ukuran Master Barang tanpa terpotong di kamera/list, serta penghapusan floating HelpDeskChat."
+  "releaseNotes": "Update V35: Sinkronisasi Real-Time Dua Arah Foto Dokumentasi Database Barang (HP <-> PC via /api/database-barang/photos-sync), penyimpanan foto resolusi HD tajam (1600px, q=0.92), fitur Zoom & Pan interaktif (1x-4x) pada kamera & preview foto, serta penolakan ketat objek non-kemasan (keyboard/laptop/HP/monitor) pada kamera YOLO."
 }

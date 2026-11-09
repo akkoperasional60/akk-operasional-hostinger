@@ -3352,6 +3352,74 @@ Kembalikan HANYA JSON valid:
     };
   };
 
+  // Helper: Deduplikasi baris Database Barang berdasarkan noBarang sekaligus menggabungkan seluruh foto dokumentasi dari berbagai perangkat
+  const deduplicateAndMergeDatabaseBarangRows = (rawItems: any[]): any[] => {
+    const byCode = new Map<string, any>();
+    for (let i = 0; i < rawItems.length; i++) {
+      const item = rawItems[i];
+      const code = String(item?.noBarang || '').trim().toUpperCase();
+      if (!code) continue;
+
+      const itemPhotos: string[] = [];
+      if (Array.isArray(item.dokumentasiUrls)) {
+        for (const u of item.dokumentasiUrls) {
+          if (typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !itemPhotos.includes(u.trim())) {
+            itemPhotos.push(u.trim());
+          }
+        }
+      }
+      if (
+        typeof item.dokumentasiUrl === 'string' &&
+        item.dokumentasiUrl.trim() &&
+        !item.dokumentasiUrl.startsWith('data:image/svg+xml') &&
+        !itemPhotos.includes(item.dokumentasiUrl.trim())
+      ) {
+        itemPhotos.unshift(item.dokumentasiUrl.trim());
+      }
+
+      const existing = byCode.get(code);
+      if (!existing) {
+        byCode.set(code, {
+          ...item,
+          noBarang: code,
+          dokumentasiUrls: itemPhotos,
+          dokumentasiUrl: itemPhotos[0] || ''
+        });
+      } else {
+        const existingPhotos: string[] = Array.isArray(existing.dokumentasiUrls) ? existing.dokumentasiUrls : [];
+        const mergedPhotos = Array.from(new Set([...itemPhotos, ...existingPhotos]));
+        const hasNewDim = (Number(item.panjangCm) || 0) > 0 || (Number(item.volM3) || 0) > 0;
+        const hasOldDim = (Number(existing.panjangCm) || 0) > 0 || (Number(existing.volM3) || 0) > 0;
+
+        byCode.set(code, {
+          ...existing,
+          ...item,
+          id: existing.id || item.id,
+          orderIndex: Math.min(existing.orderIndex ?? i, item.orderIndex ?? i),
+          noBarang: code,
+          deskripsiBarang: item.deskripsiBarang || existing.deskripsiBarang,
+          keteranganBarang: item.keteranganBarang || existing.keteranganBarang,
+          unit1: existing.unit1 || item.unit1 || 'Pcs',
+          satuan: existing.satuan || item.satuan || 'Pcs',
+          unit2: existing.unit2 || item.unit2 || '',
+          unit3: existing.unit3 || item.unit3 || '',
+          rasio2: existing.rasio2 || item.rasio2 || 0,
+          rasio3: existing.rasio3 || item.rasio3 || 0,
+          panjangCm: hasOldDim ? existing.panjangCm : (hasNewDim ? item.panjangCm : existing.panjangCm),
+          lebarCm: hasOldDim ? existing.lebarCm : (hasNewDim ? item.lebarCm : existing.lebarCm),
+          tinggiCm: hasOldDim ? existing.tinggiCm : (hasNewDim ? item.tinggiCm : existing.tinggiCm),
+          volM3: hasOldDim ? existing.volM3 : (hasNewDim ? item.volM3 : existing.volM3),
+          beratKg: (Number(existing.beratKg) || 0) > 0 ? existing.beratKg : item.beratKg,
+          dokumentasiUrls: mergedPhotos,
+          dokumentasiUrl: mergedPhotos[0] || ''
+        });
+      }
+    }
+    return Array.from(byCode.values()).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  };
+
+  const preservedServerPhotosByCode = new Map<string, string[]>();
+
   app.get('/api/database-barang', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     if (isDatabaseConfigured()) {
@@ -3364,21 +3432,84 @@ Kembalikan HANYA JSON valid:
            ORDER BY order_index ASC, no_barang ASC`
         );
         if (Array.isArray(rows) && rows.length > 0) {
-          const items = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
-          memoryDatabaseBarang = items;
-          return res.json({ success: true, source: 'mysql', count: items.length, items });
+          const mapped = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
+          const deduped = deduplicateAndMergeDatabaseBarangRows(mapped);
+          memoryDatabaseBarang = deduped;
+          deduped.forEach(it => {
+            if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
+              preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
+            }
+          });
+          return res.json({ success: true, source: 'mysql', count: deduped.length, items: deduped });
         }
         return res.json({ success: true, source: 'mysql', count: memoryDatabaseBarang.length, items: memoryDatabaseBarang });
       } catch {
         console.log('[GET /api/database-barang] MySQL host unavailable, using in-memory database storage');
       }
     }
+    const dedupedMem = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang);
+    memoryDatabaseBarang = dedupedMem;
     return res.json({
       success: true,
       source: 'memory',
-      count: memoryDatabaseBarang.length,
-      items: memoryDatabaseBarang
+      count: dedupedMem.length,
+      items: dedupedMem
     });
+  });
+
+  // Endpoint ringan Real-Time Multi-Device Sync khusus untuk menyinkronkan foto dokumentasi & perubahan barang antar HP dan PC
+  app.get('/api/database-barang/photos-sync', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      let allItems = memoryDatabaseBarang;
+      if (isDatabaseConfigured()) {
+        try {
+          const rows = await mysqlQuery<any[]>(
+            `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                    panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
+                    payload_json, updated_at
+             FROM wms_database_barang
+             ORDER BY order_index ASC, no_barang ASC`
+          );
+          if (Array.isArray(rows) && rows.length > 0) {
+            allItems = deduplicateAndMergeDatabaseBarangRows(rows.map((r, i) => mapRowToDatabaseBarang(r, i)));
+            memoryDatabaseBarang = allItems;
+          }
+        } catch {
+          // Gunakan memoryDatabaseBarang jika MySQL sedang sibuk
+        }
+      } else {
+        allItems = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang);
+        memoryDatabaseBarang = allItems;
+      }
+
+      const photoItems = allItems.filter(
+        it =>
+          (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
+          (typeof it.dokumentasiUrl === 'string' &&
+            it.dokumentasiUrl.trim() !== '' &&
+            !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
+      );
+
+      photoItems.forEach(it => {
+        if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
+          preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
+        }
+      });
+
+      return res.json({
+        success: true,
+        totalCount: allItems.length,
+        photoCount: photoItems.length,
+        photoItems,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Gagal memuat sinkronisasi foto real-time'
+      });
+    }
   });
 
   app.post('/api/database-barang/sync', async (req: any, res: any) => {
@@ -3400,16 +3531,57 @@ Kembalikan HANYA JSON valid:
       const chunkIndex = Number(req.body?.chunkIndex ?? 0);
       const chunkOffset = Number(req.body?.chunkOffset ?? 0);
 
-      if (chunkIndex === 0 && mode === 'replace_all') {
-        memoryDatabaseBarang = [];
-        if (isDatabaseConfigured()) {
-          try {
-            await ensureDatabaseSchema();
-            await mysqlQuery(`DELETE FROM wms_database_barang`);
-          } catch {
-            console.log('[Database Barang Sync] MySQL host unavailable, operating in-memory storage mode');
+      // Sebelum replace_all, amankan seluruh foto dokumentasi yang sudah ada di server/MySQL agar tidak pernah terhapus oleh device lain!
+      if (chunkIndex === 0) {
+        for (const existing of memoryDatabaseBarang) {
+          const c = String(existing?.noBarang || '').trim().toUpperCase();
+          const urls = Array.isArray(existing?.dokumentasiUrls)
+            ? existing.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+            : existing?.dokumentasiUrl && !String(existing.dokumentasiUrl).startsWith('data:image/svg+xml')
+            ? [existing.dokumentasiUrl]
+            : [];
+          if (c && urls.length > 0) {
+            const prev = preservedServerPhotosByCode.get(c) || [];
+            preservedServerPhotosByCode.set(c, Array.from(new Set([...urls, ...prev])));
           }
         }
+        if (isDatabaseConfigured()) {
+          try {
+            const existingPhotoRows = await mysqlQuery<any[]>(
+              `SELECT no_barang, dokumentasi_url, dokumentasi_urls_json
+               FROM wms_database_barang
+               WHERE (dokumentasi_url IS NOT NULL AND dokumentasi_url != '')
+                  OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json != '')`
+            );
+            if (Array.isArray(existingPhotoRows)) {
+              for (const r of existingPhotoRows) {
+                const c = String(r.no_barang || '').trim().toUpperCase();
+                if (!c) continue;
+                let urls: string[] = [];
+                if (r.dokumentasi_urls_json) {
+                  try {
+                    const parsed = typeof r.dokumentasi_urls_json === 'string' ? JSON.parse(r.dokumentasi_urls_json) : r.dokumentasi_urls_json;
+                    if (Array.isArray(parsed)) {
+                      urls = parsed.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'));
+                    }
+                  } catch {}
+                }
+                const single = String(r.dokumentasi_url || '').trim();
+                if (single && !single.startsWith('data:image/svg+xml') && !urls.includes(single)) {
+                  urls.unshift(single);
+                }
+                if (urls.length > 0) {
+                  const prev = preservedServerPhotosByCode.get(c) || [];
+                  preservedServerPhotosByCode.set(c, Array.from(new Set([...urls, ...prev])));
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      if (chunkIndex === 0 && mode === 'replace_all' && rawItems.length === 0) {
+        return res.json({ success: true, count: memoryDatabaseBarang.length });
       }
 
       if (rawItems.length === 0) {
@@ -3430,13 +3602,24 @@ Kembalikan HANYA JSON valid:
         const t = Number(item?.tinggiCm) || 0;
         const v = Number(item?.volM3) || 0;
         const b = Number(item?.beratKg) || 0;
-        const urls = Array.isArray(item?.dokumentasiUrls)
+        const incomingUrls = Array.isArray(item?.dokumentasiUrls)
           ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
           : [];
-        const docUrl = String(item?.dokumentasiUrl || urls[0] || '');
+        const docUrl = String(item?.dokumentasiUrl || incomingUrls[0] || '');
         const cleanDocUrl = docUrl.startsWith('data:image/svg+xml') ? '' : docUrl;
+        if (cleanDocUrl && !incomingUrls.includes(cleanDocUrl)) {
+          incomingUrls.unshift(cleanDocUrl);
+        }
+
+        // Gabungkan dengan foto yang sudah tersimpan di server agar foto dari device lain (misal 69 foto dari HP) tidak pernah hilang
+        const serverSavedUrls = preservedServerPhotosByCode.get(code) || [];
+        const mergedUrls = Array.from(new Set([...incomingUrls, ...serverSavedUrls]));
+        if (mergedUrls.length > 0) {
+          preservedServerPhotosByCode.set(code, mergedUrls);
+        }
+
         return {
-          id: String(item?.id || `dbb-${code}-${orderIndex}`),
+          id: String(item?.id || `dbb-${code}`),
           orderIndex,
           noBarang: code,
           deskripsiBarang: desc,
@@ -3452,8 +3635,8 @@ Kembalikan HANYA JSON valid:
           tinggiCm: t,
           volM3: v,
           beratKg: b,
-          dokumentasiUrl: cleanDocUrl,
-          dokumentasiUrls: urls,
+          dokumentasiUrl: mergedUrls[0] || '',
+          dokumentasiUrls: mergedUrls,
           compressedSizeKb: Number(item?.compressedSizeKb || 0),
           originalSizeKb: Number(item?.originalSizeKb || 0),
           compressionSavingsPct: Number(item?.compressionSavingsPct || 0),
@@ -3472,13 +3655,17 @@ Kembalikan HANYA JSON valid:
       for (const item of normalizedChunk) {
         const existingIdx = byCode.get(item.noBarang);
         if (existingIdx !== undefined) {
-          memoryDatabaseBarang[existingIdx] = item;
+          memoryDatabaseBarang[existingIdx] = {
+            ...memoryDatabaseBarang[existingIdx],
+            ...item,
+            id: memoryDatabaseBarang[existingIdx].id || item.id
+          };
         } else {
           byCode.set(item.noBarang, memoryDatabaseBarang.length);
           memoryDatabaseBarang.push(item);
         }
       }
-      memoryDatabaseBarang.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+      memoryDatabaseBarang = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang);
 
       if (isDatabaseConfigured()) {
         try {
@@ -3578,51 +3765,87 @@ Kembalikan HANYA JSON valid:
       }
 
       const item = req.body?.item || req.body;
+      const replacePhotos = Boolean(req.body?.replacePhotos || item?.replacePhotos);
       if (!item || !item.noBarang) {
         return res.status(400).json({ success: false, error: 'Data barang tidak lengkap' });
       }
 
       const code = String(item.noBarang).trim().toUpperCase();
       const existingIdx = memoryDatabaseBarang.findIndex(
-        x => x.id === item.id || String(x.noBarang).toUpperCase() === code
+        x => String(x.noBarang).toUpperCase() === code || x.id === item.id
       );
+      const existingMem = existingIdx >= 0 ? memoryDatabaseBarang[existingIdx] : null;
       const orderIndex = typeof item.orderIndex === 'number'
         ? item.orderIndex
-        : existingIdx >= 0
-        ? memoryDatabaseBarang[existingIdx].orderIndex
+        : existingMem
+        ? existingMem.orderIndex
         : memoryDatabaseBarang.length;
 
-      const urls = Array.isArray(item.dokumentasiUrls)
+      const incomingUrls = Array.isArray(item.dokumentasiUrls)
         ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
         : [];
-      const rawDoc = String(item.dokumentasiUrl || urls[0] || '');
+      const rawDoc = String(item.dokumentasiUrl || incomingUrls[0] || '');
       const cleanDocUrl = rawDoc.startsWith('data:image/svg+xml') ? '' : rawDoc;
+      if (cleanDocUrl && !incomingUrls.includes(cleanDocUrl)) {
+        incomingUrls.unshift(cleanDocUrl);
+      }
+
+      const prevUrls = !replacePhotos && existingMem && Array.isArray(existingMem.dokumentasiUrls)
+        ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+        : [];
+      const finalUrls = replacePhotos ? incomingUrls : Array.from(new Set([...incomingUrls, ...prevUrls]));
+      if (finalUrls.length > 0) {
+        preservedServerPhotosByCode.set(code, finalUrls);
+      } else if (replacePhotos) {
+        preservedServerPhotosByCode.delete(code);
+      }
+
+      let canonicalId = String(existingMem?.id || item.id || `dbb-${code}`);
+
+      if (isDatabaseConfigured()) {
+        try {
+          await ensureDatabaseSchema();
+          const existingDbRows = await mysqlQuery<any[]>(
+            `SELECT id, order_index FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC`,
+            [code]
+          );
+          if (Array.isArray(existingDbRows) && existingDbRows.length > 0) {
+            canonicalId = String(existingDbRows[0].id);
+            if (existingDbRows.length > 1) {
+              const dupIds = existingDbRows.slice(1).map(r => String(r.id));
+              for (const dupId of dupIds) {
+                await mysqlQuery(`DELETE FROM wms_database_barang WHERE id = ?`, [dupId]);
+              }
+            }
+          }
+        } catch {}
+      }
 
       const rec = {
-        id: String(item.id || (existingIdx >= 0 ? memoryDatabaseBarang[existingIdx].id : `dbb-${Date.now()}`)),
+        id: canonicalId,
         orderIndex,
         noBarang: code,
-        deskripsiBarang: String(item.deskripsiBarang || item.keteranganBarang || ''),
-        keteranganBarang: String(item.deskripsiBarang || item.keteranganBarang || ''),
-        unit1: String(item.unit1 || item.satuan || 'Pcs'),
-        satuan: String(item.unit1 || item.satuan || 'Pcs'),
-        unit2: String(item.unit2 ?? ''),
-        unit3: String(item.unit3 ?? ''),
-        rasio2: item.rasio2 ?? 0,
-        rasio3: item.rasio3 ?? 0,
-        panjangCm: Number(item.panjangCm) || 0,
-        lebarCm: Number(item.lebarCm) || 0,
-        tinggiCm: Number(item.tinggiCm) || 0,
-        volM3: Number(item.volM3) || 0,
-        beratKg: Number(item.beratKg) || 0,
-        dokumentasiUrl: cleanDocUrl,
-        dokumentasiUrls: urls,
-        compressedSizeKb: Number(item.compressedSizeKb || 0),
-        originalSizeKb: Number(item.originalSizeKb || 0),
-        compressionSavingsPct: Number(item.compressionSavingsPct || 0),
-        kategoriBarang: String(item.kategoriBarang || 'Karton Box Corrugated'),
-        stokTersedia: Number(item.stokTersedia ?? 1000),
-        cabang: String(item.cabang || 'Banyuwangi'),
+        deskripsiBarang: String(item.deskripsiBarang || item.keteranganBarang || existingMem?.deskripsiBarang || ''),
+        keteranganBarang: String(item.deskripsiBarang || item.keteranganBarang || existingMem?.keteranganBarang || ''),
+        unit1: String(item.unit1 || item.satuan || existingMem?.unit1 || 'Pcs'),
+        satuan: String(item.unit1 || item.satuan || existingMem?.satuan || 'Pcs'),
+        unit2: String(item.unit2 ?? existingMem?.unit2 ?? ''),
+        unit3: String(item.unit3 ?? existingMem?.unit3 ?? ''),
+        rasio2: item.rasio2 ?? existingMem?.rasio2 ?? 0,
+        rasio3: item.rasio3 ?? existingMem?.rasio3 ?? 0,
+        panjangCm: Number(item.panjangCm ?? existingMem?.panjangCm) || 0,
+        lebarCm: Number(item.lebarCm ?? existingMem?.lebarCm) || 0,
+        tinggiCm: Number(item.tinggiCm ?? existingMem?.tinggiCm) || 0,
+        volM3: Number(item.volM3 ?? existingMem?.volM3) || 0,
+        beratKg: Number(item.beratKg ?? existingMem?.beratKg) || 0,
+        dokumentasiUrl: finalUrls[0] || '',
+        dokumentasiUrls: finalUrls,
+        compressedSizeKb: Number(item.compressedSizeKb || existingMem?.compressedSizeKb || 0),
+        originalSizeKb: Number(item.originalSizeKb || existingMem?.originalSizeKb || 0),
+        compressionSavingsPct: Number(item.compressionSavingsPct || existingMem?.compressionSavingsPct || 0),
+        kategoriBarang: String(item.kategoriBarang || existingMem?.kategoriBarang || 'Karton Box Corrugated'),
+        stokTersedia: Number(item.stokTersedia ?? existingMem?.stokTersedia ?? 1000),
+        cabang: String(item.cabang || existingMem?.cabang || 'Banyuwangi'),
         updatedAt: String(item.updatedAt || new Date().toISOString().split('T')[0])
       };
 
@@ -3634,7 +3857,6 @@ Kembalikan HANYA JSON valid:
 
       if (isDatabaseConfigured()) {
         try {
-          await ensureDatabaseSchema();
           await mysqlQuery(
             `INSERT INTO wms_database_barang (
               id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,

@@ -94,9 +94,9 @@ export async function compressDocumentationPhoto(
     initialQuality?: number;
   }
 ): Promise<CompressedPhotoResult> {
-  const maxDimension = options?.maxDimension ?? 320;
-  const targetMaxKb = options?.targetMaxKb ?? 14;
-  const initialQuality = options?.initialQuality ?? 0.48;
+  // Pertahankan ukuran & ketajaman asli (HD hingga 1600px, kualitas 0.92) agar tulisan ukuran/OZ pada kardus tetap tajam dan verifikasi kamera sangat responsif
+  const maxDimension = Math.max(options?.maxDimension ?? 1600, 1440);
+  const initialQuality = Math.max(options?.initialQuality ?? 0.92, 0.90);
 
   let originalSizeKb = 0;
   let sourceDataUrl = '';
@@ -122,69 +122,56 @@ export async function compressDocumentationPhoto(
     image.src = sourceDataUrl;
   });
 
-  const renderAtScale = (limitPx: number, quality: number, mimeType: string): { url: string; w: number; h: number } => {
-    const origW = img.naturalWidth || img.width || 320;
-    const origH = img.naturalHeight || img.height || 240;
-    const ratio = Math.min(1, limitPx / Math.max(origW, origH));
-    const width = Math.max(64, Math.round(origW * ratio));
-    const height = Math.max(48, Math.round(origH * ratio));
+  const origW = img.naturalWidth || img.width || 1280;
+  const origH = img.naturalHeight || img.height || 960;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, 0, width, height);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, width, height);
-    }
-    const url = canvas.toDataURL(mimeType, quality);
-    return { url, w: width, h: height };
-  };
-
-  let preferredMime = 'image/webp';
-  const testWebp = renderAtScale(64, 0.5, 'image/webp').url;
-  if (!testWebp.startsWith('data:image/webp')) {
-    preferredMime = 'image/jpeg';
+  // Jika ukuran gambar sudah wajar (<= 1600px dan <= 900 KB), langsung gunakan gambar ukuran semula (tanpa kompresi yang membuat buram)
+  if (Math.max(origW, origH) <= maxDimension && originalSizeKb <= 900) {
+    return {
+      dataUrl: sourceDataUrl,
+      originalSizeKb,
+      compressedSizeKb: originalSizeKb,
+      savingsPercent: 0,
+      width: origW,
+      height: origH,
+      format: sourceDataUrl.startsWith('data:image/png')
+        ? 'PNG'
+        : sourceDataUrl.startsWith('data:image/webp')
+        ? 'WebP'
+        : 'JPEG'
+    };
   }
 
-  const steps = [
-    { dim: maxDimension, q: initialQuality },
-    { dim: maxDimension, q: 0.36 },
-    { dim: Math.round(maxDimension * 0.85), q: 0.30 },
-    { dim: Math.round(maxDimension * 0.72), q: 0.24 },
-    { dim: 200, q: 0.20 }
-  ];
+  const ratio = Math.min(1, maxDimension / Math.max(origW, origH));
+  const width = Math.max(320, Math.round(origW * ratio));
+  const height = Math.max(240, Math.round(origH * ratio));
 
-  let bestResult = renderAtScale(maxDimension, initialQuality, preferredMime);
-  let bestSizeKb = estimateDataUrlSizeKb(bestResult.url);
-
-  for (const step of steps) {
-    const candidate = renderAtScale(step.dim, step.q, preferredMime);
-    const sizeKb = estimateDataUrlSizeKb(candidate.url);
-    bestResult = candidate;
-    bestSizeKb = sizeKb;
-    if (sizeKb <= targetMaxKb) {
-      break;
-    }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, width, height);
   }
 
-  const effectiveOriginalKb = Math.max(originalSizeKb, bestSizeKb);
+  const highResUrl = canvas.toDataURL('image/jpeg', initialQuality);
+  const finalSizeKb = estimateDataUrlSizeKb(highResUrl);
+  const effectiveOriginalKb = Math.max(originalSizeKb, finalSizeKb);
   const savingsPercent =
-    effectiveOriginalKb > bestSizeKb
-      ? Math.min(99, Math.max(1, Math.round(((effectiveOriginalKb - bestSizeKb) / effectiveOriginalKb) * 100)))
+    effectiveOriginalKb > finalSizeKb
+      ? Math.min(99, Math.max(0, Math.round(((effectiveOriginalKb - finalSizeKb) / effectiveOriginalKb) * 100)))
       : 0;
 
   return {
-    dataUrl: bestResult.url,
+    dataUrl: highResUrl,
     originalSizeKb: effectiveOriginalKb,
-    compressedSizeKb: bestSizeKb,
+    compressedSizeKb: finalSizeKb,
     savingsPercent,
-    width: bestResult.w,
-    height: bestResult.h,
-    format: preferredMime === 'image/webp' ? 'WebP' : 'JPEG'
+    width,
+    height,
+    format: 'JPEG'
   };
 }
 
@@ -461,10 +448,9 @@ function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
       localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(records));
       localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
     } else {
-      // Untuk ribuan baris (cth. 4075 baris), tetap simpan foto dokumentasi pada barang yang memiliki foto (hingga batas aman ~60 barang berfoto)
-      // agar pembacaan sinkron getAll() di kamera YOLO langsung memiliki akses ke dokumentasiUrl & dokumentasiUrls
+      // Untuk ribuan baris (cth. 4075 baris), tetap simpan foto dokumentasi pada barang yang memiliki foto (hingga 160 barang berfoto di localStorage, sedangkan IndexedDB & memory menyimpan 100% tanpa batas)
       let preservedPhotoCount = 0;
-      const MAX_INLINE_PHOTO_ITEMS = 60;
+      const MAX_INLINE_PHOTO_ITEMS = 160;
       const lightweight = records.map((r, idx) => {
         const hasPhoto =
           Boolean(r.dokumentasiUrl && !r.dokumentasiUrl.startsWith('data:image/svg+xml')) ||
@@ -698,14 +684,18 @@ export const databaseBarangService = {
     }
   },
 
-  async pushItemToServer(record: DatabaseBarangRecord, orderIndex?: number): Promise<void> {
+  async pushItemToServer(
+    record: DatabaseBarangRecord,
+    orderIndex?: number,
+    replacePhotos = false
+  ): Promise<void> {
     if (typeof window === 'undefined') return;
     try {
       await fetch('/api/database-barang/item', {
         method: 'POST',
         credentials: 'include',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ item: { ...record, orderIndex } })
+        body: JSON.stringify({ item: { ...record, orderIndex }, replacePhotos })
       });
       updateSyncStatus({
         lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
@@ -728,9 +718,123 @@ export const databaseBarangService = {
     }
   },
 
+  // Sinkronisasi Real-Time Dua Arah untuk Foto Dokumentasi & Item antar Device (HP <-> PC)
+  async syncRealtimePhotosFromServer(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      const res = await fetch('/api/database-barang/photos-sync', {
+        method: 'GET',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        cache: 'no-store'
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data || !data.success || !Array.isArray(data.photoItems)) return false;
+
+      const localList = this.getAll();
+      // Jika device ini masih kosong sedangkan server sudah memiliki ribuan barang, tarik penuh dari server
+      if (localList.length === 0 && Number(data.totalCount) > 0) {
+        hasHydratedFromIdb = false;
+        await this.ensureHydrated();
+        return true;
+      }
+
+      const remotePhotoByCode = new Map<string, DatabaseBarangRecord>();
+      for (const rawItem of data.photoItems) {
+        const clean = sanitizeRecord(rawItem, rawItem.orderIndex ?? 0);
+        if (clean.noBarang) {
+          remotePhotoByCode.set(clean.noBarang.trim().toUpperCase(), clean);
+        }
+      }
+
+      let localChanged = false;
+      const localItemsToPushToServer: Array<{ record: DatabaseBarangRecord; idx: number }> = [];
+
+      const updatedLocal = localList.map((item, idx) => {
+        const code = item.noBarang.trim().toUpperCase();
+        const localUrls = Array.isArray(item.dokumentasiUrls)
+          ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+          : item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
+          ? [item.dokumentasiUrl]
+          : [];
+
+        const remoteMatch = remotePhotoByCode.get(code);
+        const remoteUrls = remoteMatch
+          ? Array.isArray(remoteMatch.dokumentasiUrls)
+            ? remoteMatch.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+            : remoteMatch.dokumentasiUrl && !remoteMatch.dokumentasiUrl.startsWith('data:image/svg+xml')
+            ? [remoteMatch.dokumentasiUrl]
+            : []
+          : [];
+
+        if (localUrls.length === 0 && remoteUrls.length === 0) {
+          return item;
+        }
+
+        const mergedUrls = Array.from(new Set([...remoteUrls, ...localUrls]));
+        if (mergedUrls.length > localUrls.length || (mergedUrls[0] && mergedUrls[0] !== item.dokumentasiUrl)) {
+          localChanged = true;
+        }
+        if (mergedUrls.length > remoteUrls.length) {
+          const mergedRec: DatabaseBarangRecord = {
+            ...item,
+            dokumentasiUrls: mergedUrls,
+            dokumentasiUrl: mergedUrls[0] || ''
+          };
+          localItemsToPushToServer.push({ record: mergedRec, idx });
+          return mergedRec;
+        }
+
+        if (mergedUrls.length !== localUrls.length || mergedUrls[0] !== item.dokumentasiUrl) {
+          return {
+            ...item,
+            dokumentasiUrls: mergedUrls,
+            dokumentasiUrl: mergedUrls[0] || ''
+          };
+        }
+        return item;
+      });
+
+      // Jika ada item berfoto dari server yang belum ada sama sekali di localList
+      const existingCodes = new Set(updatedLocal.map(i => i.noBarang.trim().toUpperCase()));
+      remotePhotoByCode.forEach((remoteItem, code) => {
+        if (!existingCodes.has(code)) {
+          updatedLocal.push(remoteItem);
+          localChanged = true;
+        }
+      });
+
+      if (localChanged) {
+        inMemoryItems = updatedLocal;
+        hasHydratedFromIdb = true;
+        await saveRecordsToIndexedDb(updatedLocal);
+        writeSafeLocalStorageCache(updatedLocal);
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+      }
+
+      // Jika device ini memiliki foto dokumentasi yang belum masuk ke server (misal 69 foto di HP), dorong ke server
+      if (localItemsToPushToServer.length > 0) {
+        for (const entry of localItemsToPushToServer.slice(0, 25)) {
+          await this.pushItemToServer(entry.record, entry.idx, false);
+        }
+      }
+
+      updateSyncStatus({
+        serverCount: Number(data.totalCount) || updatedLocal.length,
+        lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        error: null
+      });
+      return localChanged;
+    } catch {
+      return false;
+    }
+  },
+
   async forceSyncNow(): Promise<{ count: number; items: DatabaseBarangRecord[] }> {
     hasHydratedFromIdb = false;
     hydrationPromise = null;
+    await this.syncRealtimePhotosFromServer();
     const localList = this.getAll();
     const remoteList = await this.fetchFromServer();
 
@@ -1166,9 +1270,9 @@ export const databaseBarangService = {
       ? Number(input.beratKg) || 0
       : (prev?.beratKg ?? 0);
 
-    // Kumpulkan foto-foto dokumentasi
+    const explicitPhotoReplace = Array.isArray(input.dokumentasiUrls);
     let urls: string[] = [];
-    if (Array.isArray(input.dokumentasiUrls) && input.dokumentasiUrls.length > 0) {
+    if (Array.isArray(input.dokumentasiUrls)) {
       urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'));
     } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml')) {
       urls = [input.dokumentasiUrl];
@@ -1178,7 +1282,7 @@ export const databaseBarangService = {
       urls = [prev.dokumentasiUrl];
     }
 
-    const docUrl = urls[0] || (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') ? input.dokumentasiUrl : '');
+    const docUrl = urls[0] || (!explicitPhotoReplace && input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') ? input.dokumentasiUrl : '');
     const compKb = input.compressedSizeKb ?? (urls.length > 0 ? urls.reduce((acc, u) => acc + estimateDataUrlSizeKb(u), 0) : 0);
 
     const record: DatabaseBarangRecord = {
@@ -1220,7 +1324,7 @@ export const databaseBarangService = {
     }
 
     this.saveAll(list, false);
-    void this.pushItemToServer(record, targetOrderIdx);
+    void this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace);
     return record;
   },
 
@@ -1275,5 +1379,27 @@ export const databaseBarangService = {
     }
   }
 };
+
+// Aktifkan sinkronisasi Real-Time otomatis antar perangkat (PC <-> HP) setiap 3.5 detik & saat tab kembali aktif
+if (typeof window !== 'undefined') {
+  let isRealtimeSyncRunning = false;
+  const triggerRealtimePhotoSync = () => {
+    if (isRealtimeSyncRunning || document.visibilityState === 'hidden') return;
+    isRealtimeSyncRunning = true;
+    void databaseBarangService
+      .syncRealtimePhotosFromServer()
+      .finally(() => {
+        isRealtimeSyncRunning = false;
+      });
+  };
+
+  window.setInterval(triggerRealtimePhotoSync, 3500);
+  window.addEventListener('focus', triggerRealtimePhotoSync);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      triggerRealtimePhotoSync();
+    }
+  });
+}
 
 

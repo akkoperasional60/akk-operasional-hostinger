@@ -31,7 +31,10 @@ import {
   Camera,
   Smartphone,
   Video,
-  AlertTriangle
+  AlertTriangle,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -122,8 +125,18 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [dokumentasiUrl, setDokumentasiUrl] = useState('');
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
 
-  // Lightbox preview for photo if clicked
+  // Lightbox preview for photo if clicked + interactive Zoom & Pan states
   const [previewDocItem, setPreviewDocItem] = useState<DatabaseBarangRecord | null>(null);
+  const [previewZoom, setPreviewZoom] = useState<number>(1);
+  const [previewPan, setPreviewPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingPan, setIsDraggingPan] = useState<boolean>(false);
+  const panDragStartRef = React.useRef<{ x: number; y: number; panX: number; panY: number }>({
+    x: 0,
+    y: 0,
+    panX: 0,
+    panY: 0
+  });
+  const [liveCameraZoom, setLiveCameraZoom] = useState<number>(1);
 
   // Custom Delete Confirmation Popup & Feedback Popup
   const [itemToDelete, setItemToDelete] = useState<DatabaseBarangRecord | null>(null);
@@ -195,21 +208,30 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const capturePhotoFromLiveStream = async () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+    const rawW = video.videoWidth || 1280;
+    const rawH = video.videoHeight || 720;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = rawW;
+    canvas.height = rawH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const z = Math.max(1, liveCameraZoom);
+    const cropW = rawW / z;
+    const cropH = rawH / z;
+    const sx = (rawW - cropW) / 2;
+    const sy = (rawH - cropH) / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, rawW, rawH);
 
     canvas.toBlob(async blob => {
       if (!blob) return;
       const file = new File([blob], `kamera_${Date.now()}.jpg`, { type: 'image/jpeg' });
       try {
         const compressed = await compressDocumentationPhoto(file, {
-          maxDimension: 380,
-          targetMaxKb: 14,
-          initialQuality: 0.55
+          maxDimension: 1600,
+          initialQuality: 0.92
         });
 
         if (cameraTargetItem) {
@@ -236,9 +258,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           setCameraSessionCount(prev => prev + 1);
         }
       } catch (e) {
-        console.error('Gagal kompres foto live camera:', e);
+        console.error('Gagal menyimpan foto live camera:', e);
       }
-    }, 'image/jpeg', 0.8);
+    }, 'image/jpeg', 0.92);
   };
 
   const triggerCameraForRow = (item: DatabaseBarangRecord) => {
@@ -304,9 +326,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       const results = await Promise.all(
         files.map(f =>
           compressDocumentationPhoto(f, {
-            maxDimension: 380,
-            targetMaxKb: 14,
-            initialQuality: 0.55
+            maxDimension: 1600,
+            initialQuality: 0.92
           })
         )
       );
@@ -564,9 +585,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       const results = await Promise.all(
         files.map(f =>
           compressDocumentationPhoto(f, {
-            maxDimension: 360,
-            targetMaxKb: 14,
-            initialQuality: 0.5
+            maxDimension: 1600,
+            initialQuality: 0.92
           })
         )
       );
@@ -2420,7 +2440,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Lightbox Modal Preview Dokumentasi Modern (Mendukung Multi-Foto, Galeri Interaktif & Tambah Foto Langsung) */}
+      {/* Lightbox Modal Preview Dokumentasi Modern (Mendukung Zoom Interaktif, Multi-Foto, Galeri & Ambil Foto Langsung) */}
       {previewDocItem && (() => {
         const photos = Array.isArray(previewDocItem.dokumentasiUrls) && previewDocItem.dokumentasiUrls.length > 0
           ? previewDocItem.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
@@ -2433,12 +2453,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           ? previewDocItem.volM3
           : (hasDim ? calculateVolM3(previewDocItem.panjangCm, previewDocItem.lebarCm, previewDocItem.tinggiCm) : 0);
 
+        const handleZoomIn = () => {
+          setPreviewZoom(prev => Math.min(4, Number((prev + 0.5).toFixed(2))));
+        };
+        const handleZoomOut = () => {
+          setPreviewZoom(prev => {
+            const next = Math.max(1, Number((prev - 0.5).toFixed(2)));
+            if (next === 1) setPreviewPan({ x: 0, y: 0 });
+            return next;
+          });
+        };
+        const handleResetZoom = () => {
+          setPreviewZoom(1);
+          setPreviewPan({ x: 0, y: 0 });
+        };
+
         return (
           <div
             className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
             onClick={() => {
               setPreviewDocItem(null);
               setActivePhotoIndex(0);
+              handleResetZoom();
             }}
           >
             <div
@@ -2474,25 +2510,26 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     type="button"
                     onClick={() => triggerCameraForRow(previewDocItem)}
                     className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
-                    title="Ambil foto tambahan menggunakan kamera"
+                    title="Ambil foto menggunakan kamera"
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">+ Ambil Foto</span>
+                    <span>Ambil Foto</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => triggerGalleryUploadForRow(previewDocItem)}
-                    className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer"
-                    title="Upload beberapa foto sekaligus dari galeri"
+                    className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                    title="Upload foto dari galeri"
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">+ Galeri</span>
+                    <span>Galeri</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setPreviewDocItem(null);
                       setActivePhotoIndex(0);
+                      handleResetZoom();
                     }}
                     className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
                   >
@@ -2501,22 +2538,107 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 </div>
               </div>
 
-              {/* Main Photo Stage */}
+              {/* Main Photo Stage with Interactive Zoom & Pan */}
               <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto">
-                <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-16/10 shadow-inner group">
+                <div
+                  className={`relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-16/10 shadow-inner group select-none ${
+                    previewZoom > 1 ? (isDraggingPan ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'
+                  }`}
+                  onWheel={e => {
+                    e.preventDefault();
+                    if (e.deltaY < 0) {
+                      handleZoomIn();
+                    } else {
+                      handleZoomOut();
+                    }
+                  }}
+                  onMouseDown={e => {
+                    if (previewZoom <= 1) return;
+                    setIsDraggingPan(true);
+                    panDragStartRef.current = {
+                      x: e.clientX,
+                      y: e.clientY,
+                      panX: previewPan.x,
+                      panY: previewPan.y
+                    };
+                  }}
+                  onMouseMove={e => {
+                    if (!isDraggingPan || previewZoom <= 1) return;
+                    const dx = e.clientX - panDragStartRef.current.x;
+                    const dy = e.clientY - panDragStartRef.current.y;
+                    setPreviewPan({
+                      x: Math.max(-320, Math.min(320, panDragStartRef.current.panX + dx)),
+                      y: Math.max(-240, Math.min(240, panDragStartRef.current.panY + dy))
+                    });
+                  }}
+                  onMouseUp={() => setIsDraggingPan(false)}
+                  onMouseLeave={() => setIsDraggingPan(false)}
+                  onDoubleClick={() => {
+                    if (previewZoom > 1) {
+                      handleResetZoom();
+                    } else {
+                      setPreviewZoom(2);
+                    }
+                  }}
+                >
                   <img
                     src={currentPhotoUrl}
                     alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
-                    className="w-full h-full object-contain transition-all duration-200"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom})`,
+                      transformOrigin: 'center center'
+                    }}
+                    className={`w-full h-full object-contain ${isDraggingPan ? '' : 'transition-transform duration-150'}`}
                   />
 
                   {/* Top Floating Overlay Actions inside Photo Stage */}
                   {totalPhotos > 0 && (
-                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none">
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none z-10">
                       <span className="px-2.5 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 text-white text-[11px] font-bold">
                         {totalPhotos > 1 ? `Galeri Multi-Foto (${safeIndex + 1}/${totalPhotos})` : '1 Foto Tersimpan'}
                       </span>
                       <div className="flex items-center gap-1.5 pointer-events-auto">
+                        {/* Interactive Zoom Control Bar */}
+                        <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md border border-white/20 text-white shadow-md">
+                          <button
+                            type="button"
+                            onClick={handleZoomOut}
+                            disabled={previewZoom <= 1}
+                            className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
+                            title="Perkecil (Zoom Out)"
+                          >
+                            <ZoomOut className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetZoom}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black text-sky-300 hover:bg-white/10 transition cursor-pointer"
+                            title="Klik untuk Reset Zoom (100%)"
+                          >
+                            {Math.round(previewZoom * 100)}%
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleZoomIn}
+                            disabled={previewZoom >= 4}
+                            className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
+                            title="Perbesar (Zoom In)"
+                          >
+                            <ZoomIn className="w-3.5 h-3.5" />
+                          </button>
+                          {previewZoom > 1 && (
+                            <button
+                              type="button"
+                              onClick={handleResetZoom}
+                              className="p-1 rounded-lg hover:bg-white/15 text-amber-300 transition cursor-pointer"
+                              title="Reset Posisi & Zoom"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
                         {safeIndex > 0 && (
                           <button
                             type="button"
@@ -2544,28 +2666,37 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     <>
                       <button
                         type="button"
-                        onClick={() => setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : totalPhotos - 1))}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer"
+                        onClick={() => {
+                          handleResetZoom();
+                          setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : totalPhotos - 1));
+                        }}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer z-10"
                         title="Foto sebelumnya"
                       >
                         <ChevronLeft className="w-5 h-5" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActivePhotoIndex(prev => (prev < totalPhotos - 1 ? prev + 1 : 0))}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer"
+                        onClick={() => {
+                          handleResetZoom();
+                          setActivePhotoIndex(prev => (prev < totalPhotos - 1 ? prev + 1 : 0));
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-blue-600 text-white border border-white/20 flex items-center justify-center shadow-lg transition cursor-pointer z-10"
                         title="Foto berikutnya"
                       >
                         <ChevronRight className="w-5 h-5" />
                       </button>
 
                       {/* Bottom Dot Indicators */}
-                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 flex items-center gap-1.5">
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 flex items-center gap-1.5 z-10">
                         {photos.map((_, dotIdx) => (
                           <button
                             key={dotIdx}
                             type="button"
-                            onClick={() => setActivePhotoIndex(dotIdx)}
+                            onClick={() => {
+                              handleResetZoom();
+                              setActivePhotoIndex(dotIdx);
+                            }}
                             className={`h-2 rounded-full transition-all cursor-pointer ${
                               safeIndex === dotIdx ? 'w-5 bg-blue-400' : 'w-2 bg-white/40 hover:bg-white/70'
                             }`}
@@ -2583,7 +2714,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       Daftar Foto Dokumentasi ({totalPhotos} Foto)
                     </span>
                     <span className="text-slate-400 text-[10px]">
-                      Klik thumbnail untuk beralih atau tambah foto baru
+                      Klik 2x pada gambar atau gunakan tombol +/- untuk Zoom
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pt-0.5">
@@ -2591,7 +2722,10 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       <button
                         key={pIdx}
                         type="button"
-                        onClick={() => setActivePhotoIndex(pIdx)}
+                        onClick={() => {
+                          handleResetZoom();
+                          setActivePhotoIndex(pIdx);
+                        }}
                         className={`relative w-20 h-14 rounded-xl overflow-hidden border-2 shrink-0 transition-all cursor-pointer group ${
                           safeIndex === pIdx
                             ? 'border-blue-600 ring-2 ring-blue-500/30 scale-[1.02]'
@@ -2736,23 +2870,38 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       autoPlay
                       playsInline
                       muted
-                      className="w-full h-full object-cover"
+                      style={{
+                        transform: `scale(${liveCameraZoom})`,
+                        transformOrigin: 'center center'
+                      }}
+                      className="w-full h-full object-cover transition-transform duration-150"
                     />
-                    {/* Framing Overlay */}
+                    {/* Framing Overlay + Zoom Selector */}
                     <div className="absolute inset-4 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-2.5">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] font-bold text-white bg-slate-950/75 px-2.5 py-0.5 rounded-full border border-white/15">
-                          Mode Multi-Foto Aktif (Bisa &gt; 1 Foto)
+                          Mode Multi-Foto HD
                         </span>
-                        {cameraSessionCount > 0 && (
-                          <span className="text-[10px] font-black text-emerald-300 bg-emerald-950/85 px-2.5 py-0.5 rounded-full border border-emerald-400/40">
-                            +{cameraSessionCount} Terambil
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1 pointer-events-auto bg-slate-950/80 border border-white/15 rounded-full px-1.5 py-0.5">
+                          {[1, 1.5, 2, 3].map(zVal => (
+                            <button
+                              key={zVal}
+                              type="button"
+                              onClick={() => setLiveCameraZoom(zVal)}
+                              className={`px-1.5 py-0.5 rounded-full text-[9px] font-black transition cursor-pointer ${
+                                liveCameraZoom === zVal
+                                  ? 'bg-emerald-500 text-slate-950'
+                                  : 'text-white/80 hover:text-white'
+                              }`}
+                            >
+                              {zVal}x
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <div className="text-center">
                         <span className="text-[10px] font-bold text-white/90 bg-black/60 px-2.5 py-1 rounded-full">
-                          Jepret foto ke-{currentTargetPhotos.length + 1} &bull; Kamera tetap terbuka setelah jepret
+                          Jepret foto ke-{currentTargetPhotos.length + 1} &bull; Resolusi Penuh (Tajam)
                         </span>
                       </div>
                     </div>
