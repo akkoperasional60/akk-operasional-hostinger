@@ -34,7 +34,10 @@ import {
   AlertTriangle,
   ZoomIn,
   ZoomOut,
-  RotateCcw
+  RotateCcw,
+  RotateCw,
+  Crop,
+  Check
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -137,6 +140,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     panY: 0
   });
   const [liveCameraZoom, setLiveCameraZoom] = useState<number>(1);
+  const [isCropMode, setIsCropMode] = useState<boolean>(false);
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number }>({
+    x: 10,
+    y: 10,
+    w: 80,
+    h: 80
+  });
+  const [isApplyingCrop, setIsApplyingCrop] = useState<boolean>(false);
+  const cropContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const cropDragRef = React.useRef<{
+    active: boolean;
+    mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'create';
+    startClientX: number;
+    startClientY: number;
+    startRect: { x: number; y: number; w: number; h: number };
+  }>({
+    active: false,
+    mode: 'move',
+    startClientX: 0,
+    startClientY: 0,
+    startRect: { x: 10, y: 10, w: 80, h: 80 }
+  });
 
   // Custom Delete Confirmation Popup & Feedback Popup
   const [itemToDelete, setItemToDelete] = useState<DatabaseBarangRecord | null>(null);
@@ -316,6 +341,215 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setItems(databaseBarangService.getAll());
     setPreviewDocItem(saved);
     setActivePhotoIndex(0);
+  };
+
+  const startCropPointerDrag = (
+    e: React.PointerEvent,
+    mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'create'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const container = cropContainerRef.current;
+    if (!container) return;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+
+    if (mode === 'create') {
+      const bounds = container.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) return;
+      const relX = Math.max(0, Math.min(92, ((e.clientX - bounds.left) / bounds.width) * 100));
+      const relY = Math.max(0, Math.min(92, ((e.clientY - bounds.top) / bounds.height) * 100));
+      const initialRect = { x: relX, y: relY, w: 8, h: 8 };
+      setCropRect(initialRect);
+      cropDragRef.current = {
+        active: true,
+        mode: 'se',
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startRect: initialRect
+      };
+      return;
+    }
+
+    cropDragRef.current = {
+      active: true,
+      mode,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startRect: { ...cropRect }
+    };
+  };
+
+  const moveCropPointerDrag = (e: React.PointerEvent) => {
+    if (!cropDragRef.current.active) return;
+    const container = cropContainerRef.current;
+    if (!container) return;
+    const bounds = container.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+
+    const dxPct = ((e.clientX - cropDragRef.current.startClientX) / bounds.width) * 100;
+    const dyPct = ((e.clientY - cropDragRef.current.startClientY) / bounds.height) * 100;
+    const s = cropDragRef.current.startRect;
+    const mode = cropDragRef.current.mode;
+    const MIN_SIZE = 8;
+
+    let nx = s.x;
+    let ny = s.y;
+    let nw = s.w;
+    let nh = s.h;
+
+    if (mode === 'move') {
+      nx = Math.max(0, Math.min(100 - s.w, s.x + dxPct));
+      ny = Math.max(0, Math.min(100 - s.h, s.y + dyPct));
+    } else {
+      if (mode.includes('e')) {
+        nw = Math.max(MIN_SIZE, Math.min(100 - s.x, s.w + dxPct));
+      }
+      if (mode.includes('s')) {
+        nh = Math.max(MIN_SIZE, Math.min(100 - s.y, s.h + dyPct));
+      }
+      if (mode.includes('w')) {
+        const maxShiftX = s.w - MIN_SIZE;
+        const clampedDx = Math.max(-s.x, Math.min(maxShiftX, dxPct));
+        nx = s.x + clampedDx;
+        nw = s.w - clampedDx;
+      }
+      if (mode.includes('n')) {
+        const maxShiftY = s.h - MIN_SIZE;
+        const clampedDy = Math.max(-s.y, Math.min(maxShiftY, dyPct));
+        ny = s.y + clampedDy;
+        nh = s.h - clampedDy;
+      }
+    }
+
+    setCropRect({
+      x: Number(nx.toFixed(2)),
+      y: Number(ny.toFixed(2)),
+      w: Number(nw.toFixed(2)),
+      h: Number(nh.toFixed(2))
+    });
+  };
+
+  const endCropPointerDrag = () => {
+    cropDragRef.current.active = false;
+  };
+
+  const handleApplyCropInPreview = async (
+    item: DatabaseBarangRecord,
+    photoIdx: number,
+    saveAsNewPhoto: boolean
+  ) => {
+    const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    const targetUrl = existingUrls[photoIdx];
+    if (!targetUrl) return;
+
+    setIsApplyingCrop(true);
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = err => reject(err);
+        img.src = targetUrl;
+      });
+
+      const natW = img.naturalWidth || img.width || 800;
+      const natH = img.naturalHeight || img.height || 800;
+      const sx = Math.max(0, Math.round((cropRect.x / 100) * natW));
+      const sy = Math.max(0, Math.round((cropRect.y / 100) * natH));
+      const sw = Math.max(24, Math.min(natW - sx, Math.round((cropRect.w / 100) * natW)));
+      const sh = Math.max(24, Math.min(natH - sy, Math.round((cropRect.h / 100) * natH)));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context tidak tersedia');
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const updatedUrls = [...existingUrls];
+      let nextPhotoIdx = photoIdx;
+      if (saveAsNewPhoto) {
+        updatedUrls.push(croppedDataUrl);
+        nextPhotoIdx = updatedUrls.length - 1;
+      } else {
+        updatedUrls[photoIdx] = croppedDataUrl;
+      }
+
+      const saved = databaseBarangService.upsertItem({
+        ...item,
+        dokumentasiUrls: updatedUrls,
+        dokumentasiUrl: updatedUrls[0] || ''
+      });
+      setItems(databaseBarangService.getAll());
+      setPreviewDocItem(saved);
+      setActivePhotoIndex(nextPhotoIdx);
+      setIsCropMode(false);
+      setPreviewZoom(1);
+      setPreviewPan({ x: 0, y: 0 });
+    } catch (err) {
+      console.error('Gagal memotong (crop) foto:', err);
+    } finally {
+      setIsApplyingCrop(false);
+    }
+  };
+
+  const handleRotatePhotoInPreview = async (item: DatabaseBarangRecord, photoIdx: number) => {
+    const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+      ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+      : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    const targetUrl = existingUrls[photoIdx];
+    if (!targetUrl) return;
+
+    setIsApplyingCrop(true);
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = err => reject(err);
+        img.src = targetUrl;
+      });
+
+      const natW = img.naturalWidth || img.width || 800;
+      const natH = img.naturalHeight || img.height || 800;
+      const canvas = document.createElement('canvas');
+      canvas.width = natH;
+      canvas.height = natW;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context tidak tersedia');
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -natW / 2, -natH / 2, natW, natH);
+
+      const rotatedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const updatedUrls = [...existingUrls];
+      updatedUrls[photoIdx] = rotatedDataUrl;
+
+      const saved = databaseBarangService.upsertItem({
+        ...item,
+        dokumentasiUrls: updatedUrls,
+        dokumentasiUrl: updatedUrls[0] || ''
+      });
+      setItems(databaseBarangService.getAll());
+      setPreviewDocItem(saved);
+      setPreviewZoom(1);
+      setPreviewPan({ x: 0, y: 0 });
+    } catch (err) {
+      console.error('Gagal memutar foto:', err);
+    } finally {
+      setIsApplyingCrop(false);
+    }
   };
 
   const handleRowCameraUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2474,6 +2708,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             onClick={() => {
               setPreviewDocItem(null);
               setActivePhotoIndex(0);
+              setIsCropMode(false);
               handleResetZoom();
             }}
           >
@@ -2529,6 +2764,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     onClick={() => {
                       setPreviewDocItem(null);
                       setActivePhotoIndex(0);
+                      setIsCropMode(false);
                       handleResetZoom();
                     }}
                     className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
@@ -2538,13 +2774,20 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 </div>
               </div>
 
-              {/* Main Photo Stage with Interactive Zoom & Pan */}
-              <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto">
+              {/* Main Photo Stage with Interactive Zoom, Pan & Crop */}
+              <div className="p-4 sm:p-5 space-y-3 overflow-y-auto">
                 <div
                   className={`relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center aspect-16/10 shadow-inner group select-none ${
-                    previewZoom > 1 ? (isDraggingPan ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'
+                    isCropMode
+                      ? 'cursor-crosshair'
+                      : previewZoom > 1
+                      ? isDraggingPan
+                        ? 'cursor-grabbing'
+                        : 'cursor-grab'
+                      : 'cursor-zoom-in'
                   }`}
                   onWheel={e => {
+                    if (isCropMode) return;
                     e.preventDefault();
                     if (e.deltaY < 0) {
                       handleZoomIn();
@@ -2553,7 +2796,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     }
                   }}
                   onMouseDown={e => {
-                    if (previewZoom <= 1) return;
+                    if (isCropMode || previewZoom <= 1) return;
                     setIsDraggingPan(true);
                     panDragStartRef.current = {
                       x: e.clientX,
@@ -2563,7 +2806,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     };
                   }}
                   onMouseMove={e => {
-                    if (!isDraggingPan || previewZoom <= 1) return;
+                    if (isCropMode || !isDraggingPan || previewZoom <= 1) return;
                     const dx = e.clientX - panDragStartRef.current.x;
                     const dy = e.clientY - panDragStartRef.current.y;
                     setPreviewPan({
@@ -2574,6 +2817,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                   onMouseUp={() => setIsDraggingPan(false)}
                   onMouseLeave={() => setIsDraggingPan(false)}
                   onDoubleClick={() => {
+                    if (isCropMode) return;
                     if (previewZoom > 1) {
                       handleResetZoom();
                     } else {
@@ -2581,88 +2825,216 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     }
                   }}
                 >
-                  <img
-                    src={currentPhotoUrl}
-                    alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
-                    draggable={false}
-                    style={{
-                      transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom})`,
-                      transformOrigin: 'center center'
-                    }}
-                    className={`w-full h-full object-contain ${isDraggingPan ? '' : 'transition-transform duration-150'}`}
-                  />
+                  {isCropMode ? (
+                    <div
+                      ref={cropContainerRef}
+                      onPointerDown={e => startCropPointerDrag(e, 'create')}
+                      onPointerMove={moveCropPointerDrag}
+                      onPointerUp={endCropPointerDrag}
+                      onPointerCancel={endCropPointerDrag}
+                      className="relative inline-block max-w-full max-h-full select-none touch-none"
+                    >
+                      <img
+                        src={currentPhotoUrl}
+                        alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
+                        draggable={false}
+                        className="max-h-[42vh] sm:max-h-[46vh] max-w-full w-auto h-auto block select-none pointer-events-none"
+                      />
+
+                      {/* Darkened Mask Outside Crop Box */}
+                      <div
+                        style={{
+                          left: `${cropRect.x}%`,
+                          top: `${cropRect.y}%`,
+                          width: `${cropRect.w}%`,
+                          height: `${cropRect.h}%`,
+                          boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.68)'
+                        }}
+                        onPointerDown={e => startCropPointerDrag(e, 'move')}
+                        className="absolute border-2 border-amber-400 cursor-move z-20"
+                      >
+                        {/* Rule-of-Thirds Grid Lines */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                          <div className="border-r border-b border-white/35" />
+                          <div className="border-r border-b border-white/35" />
+                          <div className="border-b border-white/35" />
+                          <div className="border-r border-b border-white/35" />
+                          <div className="border-r border-b border-white/35" />
+                          <div className="border-b border-white/35" />
+                          <div className="border-r border-white/35" />
+                          <div className="border-r border-white/35" />
+                          <div />
+                        </div>
+
+                        {/* Dimension Badge inside Crop Box */}
+                        <div className="absolute -top-6 left-0 px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[9px] font-black whitespace-nowrap shadow-md pointer-events-none">
+                          Area Crop: {Math.round(cropRect.w)}% &times; {Math.round(cropRect.h)}% (Geser titik sudut)
+                        </div>
+
+                        {/* 4 Corner Resize Handles */}
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'nw')}
+                          className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-950 cursor-nwse-resize shadow-md"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'ne')}
+                          className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-950 cursor-nesw-resize shadow-md"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'sw')}
+                          className="absolute -bottom-2 -left-2 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-950 cursor-nesw-resize shadow-md"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'se')}
+                          className="absolute -bottom-2 -right-2 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-950 cursor-nwse-resize shadow-md"
+                        />
+
+                        {/* 4 Edge Resize Handles */}
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'n')}
+                          className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-6 h-3 rounded-full bg-amber-400 border border-slate-950 cursor-ns-resize shadow-sm"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 's')}
+                          className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-6 h-3 rounded-full bg-amber-400 border border-slate-950 cursor-ns-resize shadow-sm"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'w')}
+                          className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-6 rounded-full bg-amber-400 border border-slate-950 cursor-ew-resize shadow-sm"
+                        />
+                        <div
+                          onPointerDown={e => startCropPointerDrag(e, 'e')}
+                          className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-6 rounded-full bg-amber-400 border border-slate-950 cursor-ew-resize shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <img
+                      src={currentPhotoUrl}
+                      alt={previewDocItem.deskripsiBarang || previewDocItem.keteranganBarang}
+                      draggable={false}
+                      style={{
+                        transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom})`,
+                        transformOrigin: 'center center'
+                      }}
+                      className={`w-full h-full object-contain ${isDraggingPan ? '' : 'transition-transform duration-150'}`}
+                    />
+                  )}
 
                   {/* Top Floating Overlay Actions inside Photo Stage */}
                   {totalPhotos > 0 && (
-                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none z-10">
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none z-30 flex-wrap">
                       <span className="px-2.5 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-white/15 text-white text-[11px] font-bold">
-                        {totalPhotos > 1 ? `Galeri Multi-Foto (${safeIndex + 1}/${totalPhotos})` : '1 Foto Tersimpan'}
+                        {isCropMode
+                          ? '✂️ Mode Crop Foto Aktif'
+                          : totalPhotos > 1
+                          ? `Galeri Multi-Foto (${safeIndex + 1}/${totalPhotos})`
+                          : '1 Foto Tersimpan'}
                       </span>
-                      <div className="flex items-center gap-1.5 pointer-events-auto">
+                      <div className="flex items-center gap-1.5 pointer-events-auto flex-wrap justify-end">
                         {/* Interactive Zoom Control Bar */}
-                        <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md border border-white/20 text-white shadow-md">
-                          <button
-                            type="button"
-                            onClick={handleZoomOut}
-                            disabled={previewZoom <= 1}
-                            className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
-                            title="Perkecil (Zoom Out)"
-                          >
-                            <ZoomOut className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleResetZoom}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black text-sky-300 hover:bg-white/10 transition cursor-pointer"
-                            title="Klik untuk Reset Zoom (100%)"
-                          >
-                            {Math.round(previewZoom * 100)}%
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleZoomIn}
-                            disabled={previewZoom >= 4}
-                            className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
-                            title="Perbesar (Zoom In)"
-                          >
-                            <ZoomIn className="w-3.5 h-3.5" />
-                          </button>
-                          {previewZoom > 1 && (
+                        {!isCropMode && (
+                          <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md border border-white/20 text-white shadow-md">
+                            <button
+                              type="button"
+                              onClick={handleZoomOut}
+                              disabled={previewZoom <= 1}
+                              className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
+                              title="Perkecil (Zoom Out)"
+                            >
+                              <ZoomOut className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={handleResetZoom}
-                              className="p-1 rounded-lg hover:bg-white/15 text-amber-300 transition cursor-pointer"
-                              title="Reset Posisi & Zoom"
+                              className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black text-sky-300 hover:bg-white/10 transition cursor-pointer"
+                              title="Klik untuk Reset Zoom (100%)"
                             >
-                              <RotateCcw className="w-3 h-3" />
+                              {Math.round(previewZoom * 100)}%
                             </button>
-                          )}
-                        </div>
+                            <button
+                              type="button"
+                              onClick={handleZoomIn}
+                              disabled={previewZoom >= 4}
+                              className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-35 transition cursor-pointer"
+                              title="Perbesar (Zoom In)"
+                            >
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </button>
+                            {previewZoom > 1 && (
+                              <button
+                                type="button"
+                                onClick={handleResetZoom}
+                                className="p-1 rounded-lg hover:bg-white/15 text-amber-300 transition cursor-pointer"
+                                title="Reset Posisi & Zoom"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
 
-                        {safeIndex > 0 && (
+                        {/* Tombol Crop Interaktif */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleResetZoom();
+                            if (!isCropMode) {
+                              setCropRect({ x: 8, y: 8, w: 84, h: 84 });
+                              setIsCropMode(true);
+                            } else {
+                              setIsCropMode(false);
+                            }
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-md backdrop-blur-md transition cursor-pointer ${
+                            isCropMode
+                              ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300'
+                              : 'bg-amber-500/95 hover:bg-amber-400 text-slate-950'
+                          }`}
+                          title="Potong (Crop) bagian kardus/label pada foto ini"
+                        >
+                          <Crop className="w-3.5 h-3.5" />
+                          <span>{isCropMode ? 'Tutup Crop' : 'Crop'}</span>
+                        </button>
+
+                        {/* Tombol Putar 90 Derajat */}
+                        <button
+                          type="button"
+                          disabled={isApplyingCrop}
+                          onClick={() => handleRotatePhotoInPreview(previewDocItem, safeIndex)}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/20 text-white text-[11px] font-bold flex items-center gap-1 shadow-md backdrop-blur-md transition cursor-pointer disabled:opacity-50"
+                          title="Putar foto 90° searah jarum jam (untuk foto kardus terbalik/miring)"
+                        >
+                          <RotateCw className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Putar</span>
+                        </button>
+
+                        {safeIndex > 0 && !isCropMode && (
                           <button
                             type="button"
                             onClick={() => handleSetPrimaryPhotoInPreview(previewDocItem, safeIndex)}
-                            className="px-2.5 py-1 rounded-lg bg-indigo-600/90 hover:bg-indigo-500 text-white text-[10px] font-bold shadow-md backdrop-blur-xs transition cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-[10px] font-bold shadow-md backdrop-blur-xs transition cursor-pointer"
                             title="Jadikan sebagai Foto Utama"
                           >
                             ★ Set Utama
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
-                          className="p-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer"
-                          title="Hapus foto ini"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isCropMode && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
+                            className="p-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer"
+                            title="Hapus foto ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {/* Left / Right Navigation Arrows for Multiple Photos */}
-                  {totalPhotos > 1 && (
+                  {totalPhotos > 1 && !isCropMode && (
                     <>
                       <button
                         type="button"
@@ -2707,6 +3079,78 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                   )}
                 </div>
 
+                {/* Panel Kontrol Crop Cepat & Simpan Hasil Crop (Muncul saat tombol Crop ditekan) */}
+                {isCropMode && (
+                  <div className="p-3 rounded-2xl bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/35 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                        <Crop className="w-3.5 h-3.5" />
+                        <span>Pilih Area Kardus / Label (atau geser titik kuning pada gambar):</span>
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setCropRect({ x: 4, y: 2, w: 92, h: 34 })}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                        >
+                          Kardus Atas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCropRect({ x: 4, y: 31, w: 92, h: 38 })}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                        >
+                          Kardus Tengah
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCropRect({ x: 4, y: 60, w: 92, h: 38 })}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                        >
+                          Kardus Bawah
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCropRect({ x: 12, y: 12, w: 76, h: 76 })}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                        >
+                          Fokus Tengah
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t border-amber-500/20">
+                      <button
+                        type="button"
+                        onClick={() => setIsCropMode(false)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isApplyingCrop}
+                        onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, true)}
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer disabled:opacity-50"
+                        title="Simpan potongan sebagai foto tambahan tanpa menghapus foto asli"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Simpan Jadi Foto Baru</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isApplyingCrop}
+                        onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, false)}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
+                        title="Terapkan hasil crop pada foto ini"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{isApplyingCrop ? 'Menyimpan...' : 'Terapkan Crop'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Modern Filmstrip Thumbnail Bar (Selalu tampil agar bisa lihat semua foto & tambah foto baru) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[11px]">
@@ -2714,7 +3158,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       Daftar Foto Dokumentasi ({totalPhotos} Foto)
                     </span>
                     <span className="text-slate-400 text-[10px]">
-                      Klik 2x pada gambar atau gunakan tombol +/- untuk Zoom
+                      Klik tombol Crop untuk memotong bagian kardus, atau gunakan +/- untuk Zoom
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pt-0.5">
@@ -2724,6 +3168,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                         type="button"
                         onClick={() => {
                           handleResetZoom();
+                          setIsCropMode(false);
                           setActivePhotoIndex(pIdx);
                         }}
                         className={`relative w-20 h-14 rounded-xl overflow-hidden border-2 shrink-0 transition-all cursor-pointer group ${
