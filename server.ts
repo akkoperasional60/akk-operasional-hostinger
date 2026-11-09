@@ -3096,10 +3096,96 @@ Kembalikan HANYA JSON valid:
   app.post('/wms-scanner/api/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
   app.post('/api/wms-scanner/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
 
-  // 🔄 Cross-Device Persistence for Sales RFID Invoices (PC / Web / HP Android)
+  // 🔄 Cross-Device Two-Way Persistence for Sales RFID Invoices (PC / Web / HP Android)
   let inMemorySalesRfidInvoices: any[] = [];
 
+  const mergeTwoWaySalesInvoices = (existingList: any[], incomingList: any[], replaceAll = false): any[] => {
+    if (replaceAll || existingList.length === 0) return incomingList;
+    if (incomingList.length === 0) return existingList;
+
+    const existingById = new Map<string, any>();
+    existingList.forEach(inv => {
+      const key = String(inv?.id || inv?.noFaktur || '').trim();
+      if (key) existingById.set(key, inv);
+    });
+
+    const mergedMap = new Map<string, any>();
+    // Gabungkan seluruh invoice dari Incoming (PC/HP) dengan Existing di Server secara dua arah
+    for (const inc of incomingList) {
+      const key = String(inc?.id || inc?.noFaktur || '').trim();
+      if (!key) continue;
+      const ex = existingById.get(key);
+      if (!ex) {
+        mergedMap.set(key, inc);
+        continue;
+      }
+
+      const exItems: any[] = Array.isArray(ex.items) ? ex.items : [];
+      const incItems: any[] = Array.isArray(inc.items) ? inc.items : [];
+      const exItemByCode = new Map<string, any>();
+      exItems.forEach(it => {
+        const c = String(it?.id || it?.skuCode || '').trim().toUpperCase();
+        if (c) exItemByCode.set(c, it);
+      });
+
+      const mergedItems = incItems.map(incIt => {
+        const c = String(incIt?.id || incIt?.skuCode || '').trim().toUpperCase();
+        const exIt = c ? exItemByCode.get(c) : undefined;
+        if (!exIt) return incIt;
+
+        const incLoaded = Number(incIt.qtyLoaded ?? incIt.scannedQty ?? 0);
+        const exLoaded = Number(exIt.qtyLoaded ?? exIt.scannedQty ?? 0);
+        const bestLoaded = Math.max(incLoaded, exLoaded);
+        const incScans = Array.isArray(incIt.scans) ? incIt.scans : [];
+        const exScans = Array.isArray(exIt.scans) ? exIt.scans : [];
+        const scanById = new Map<string, any>();
+        for (const s of [...exScans, ...incScans]) {
+          if (s && s.id) scanById.set(String(s.id), s);
+        }
+        const mergedScans = Array.from(scanById.values());
+
+        return {
+          ...exIt,
+          ...incIt,
+          qtyLoaded: bestLoaded,
+          scans: mergedScans,
+          dokumentasiUrl: incIt.dokumentasiUrl || exIt.dokumentasiUrl
+        };
+      });
+
+      // Pertahankan item dari existing yang belum ada di incoming
+      const incCodes = new Set(incItems.map(it => String(it?.id || it?.skuCode || '').trim().toUpperCase()));
+      exItems.forEach(exIt => {
+        const c = String(exIt?.id || exIt?.skuCode || '').trim().toUpperCase();
+        if (c && !incCodes.has(c)) {
+          mergedItems.push(exIt);
+        }
+      });
+
+      mergedMap.set(key, {
+        ...ex,
+        ...inc,
+        isLoadingFinished: Boolean(inc.isLoadingFinished || ex.isLoadingFinished),
+        finishedAt: inc.finishedAt || ex.finishedAt,
+        items: mergedItems
+      });
+    }
+
+    // Jika incomingList memiliki jumlah invoice lebih sedikit dan tidak meminta hapus eksplisit, pertahankan invoice dari device lain
+    if (!replaceAll) {
+      existingList.forEach(ex => {
+        const key = String(ex?.id || ex?.noFaktur || '').trim();
+        if (key && !mergedMap.has(key)) {
+          mergedMap.set(key, ex);
+        }
+      });
+    }
+
+    return Array.from(mergedMap.values());
+  };
+
   app.get('/api/sales-rfid-invoices', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       if (isDatabaseConfigured()) {
         try {
@@ -3109,8 +3195,8 @@ Kembalikan HANYA JSON valid:
           if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
             const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
             if (Array.isArray(parsed) && parsed.length > 0) {
-              inMemorySalesRfidInvoices = parsed;
-              return res.json({ success: true, data: parsed });
+              inMemorySalesRfidInvoices = mergeTwoWaySalesInvoices(inMemorySalesRfidInvoices, parsed);
+              return res.json({ success: true, data: inMemorySalesRfidInvoices });
             }
           }
         } catch {
@@ -3126,20 +3212,36 @@ Kembalikan HANYA JSON valid:
   app.post('/api/sales-rfid-invoices', express.json({ limit: '35mb' }), async (req, res) => {
     try {
       const invoices = req.body?.invoices;
+      const replaceAll = Boolean(req.body?.replaceAll);
       if (Array.isArray(invoices)) {
-        inMemorySalesRfidInvoices = invoices;
+        let baseExisting = inMemorySalesRfidInvoices;
+        if (isDatabaseConfigured() && baseExisting.length === 0) {
+          try {
+            const rows = await mysqlQuery<any[]>(
+              `SELECT state_json FROM app_state WHERE state_key = 'sales_rfid_invoices' LIMIT 1`
+            );
+            if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+              const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+              if (Array.isArray(parsed)) baseExisting = parsed;
+            }
+          } catch {}
+        }
+
+        const mergedInvoices = mergeTwoWaySalesInvoices(baseExisting, invoices, replaceAll);
+        inMemorySalesRfidInvoices = mergedInvoices;
+
         if (isDatabaseConfigured()) {
           try {
             await mysqlQuery(
               `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('sales_rfid_invoices', ?, NOW())
                ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-              [JSON.stringify(invoices)]
+              [JSON.stringify(mergedInvoices)]
             );
           } catch {
             // MySQL write error, memory is preserved
           }
         }
-        return res.json({ success: true, count: invoices.length });
+        return res.json({ success: true, count: mergedInvoices.length, data: mergedInvoices });
       }
       return res.status(400).json({ success: false, message: 'Invalid payload, expected invoices array.' });
     } catch (err: any) {
@@ -3474,19 +3576,27 @@ Kembalikan HANYA JSON valid:
   app.get('/api/database-barang/photos-sync', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      let allItems = memoryDatabaseBarang;
+      let totalCount = memoryDatabaseBarang.length;
+      let dbPhotoItems: any[] = [];
+
       if (isDatabaseConfigured()) {
         try {
+          const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS cnt FROM wms_database_barang`);
+          if (Array.isArray(countRows) && countRows.length > 0) {
+            totalCount = Math.max(totalCount, Number(countRows[0]?.cnt) || 0);
+          }
+          // Query cepat khusus baris yang memiliki foto dokumentasi agar polling 3 detik sangat ringan dan tidak membebani MySQL
           const rows = await mysqlQuery<any[]>(
             `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
                     panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
                     payload_json, updated_at
              FROM wms_database_barang
+             WHERE (dokumentasi_url IS NOT NULL AND dokumentasi_url != '' AND dokumentasi_url NOT LIKE 'data:image/svg+xml%')
+                OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json != '' AND dokumentasi_urls_json != '[]')
              ORDER BY order_index ASC, no_barang ASC`
           );
           if (Array.isArray(rows) && rows.length > 0) {
-            allItems = deduplicateAndMergeDatabaseBarangRows(rows.map((r, i) => mapRowToDatabaseBarang(r, i)));
-            memoryDatabaseBarang = allItems;
+            dbPhotoItems = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
           }
         } catch {
           // Gunakan memoryDatabaseBarang jika MySQL sedang sibuk
@@ -3498,18 +3608,17 @@ Kembalikan HANYA JSON valid:
           });
           if (bridgeRes.ok) {
             const bridgeData: any = await bridgeRes.json();
+            if (typeof bridgeData?.totalCount === 'number') {
+              totalCount = Math.max(totalCount, bridgeData.totalCount);
+            }
             if (Array.isArray(bridgeData?.photoItems) && bridgeData.photoItems.length > 0) {
-              const merged = [...memoryDatabaseBarang, ...bridgeData.photoItems];
-              allItems = deduplicateAndMergeDatabaseBarangRows(merged);
-              memoryDatabaseBarang = allItems;
+              dbPhotoItems = bridgeData.photoItems;
             }
           }
         } catch {}
-        allItems = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang);
-        memoryDatabaseBarang = allItems;
       }
 
-      const photoItems = allItems.filter(
+      const memPhotoItems = memoryDatabaseBarang.filter(
         it =>
           (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
           (typeof it.dokumentasiUrl === 'string' &&
@@ -3517,7 +3626,8 @@ Kembalikan HANYA JSON valid:
             !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
       );
 
-      photoItems.forEach(it => {
+      const combinedPhotoItems = deduplicateAndMergeDatabaseBarangRows([...dbPhotoItems, ...memPhotoItems]);
+      combinedPhotoItems.forEach(it => {
         if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
           preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
         }
@@ -3525,9 +3635,9 @@ Kembalikan HANYA JSON valid:
 
       return res.json({
         success: true,
-        totalCount: allItems.length,
-        photoCount: photoItems.length,
-        photoItems,
+        totalCount,
+        photoCount: combinedPhotoItems.length,
+        photoItems: combinedPhotoItems,
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
@@ -3573,8 +3683,36 @@ Kembalikan HANYA JSON valid:
         const mergedUrls = Array.from(new Set([...incomingUrls, ...existingUrls, ...prevSaved]));
         preservedServerPhotosByCode.set(code, mergedUrls);
 
+        let canonicalId = String(existingMem?.id || rawItem?.id || `dbb-${code}`);
+        if (isDatabaseConfigured()) {
+          try {
+            const dbRows = await mysqlQuery<any[]>(
+              `SELECT id, order_index, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC LIMIT 1`,
+              [code]
+            );
+            if (Array.isArray(dbRows) && dbRows.length > 0) {
+              canonicalId = String(dbRows[0].id);
+              if (dbRows[0].dokumentasi_urls_json) {
+                try {
+                  const parsedDbUrls = typeof dbRows[0].dokumentasi_urls_json === 'string'
+                    ? JSON.parse(dbRows[0].dokumentasi_urls_json)
+                    : dbRows[0].dokumentasi_urls_json;
+                  if (Array.isArray(parsedDbUrls)) {
+                    for (const u of parsedDbUrls) {
+                      if (typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !mergedUrls.includes(u)) {
+                        mergedUrls.push(u);
+                      }
+                    }
+                    preservedServerPhotosByCode.set(code, mergedUrls);
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+        }
+
         const rec = {
-          id: String(existingMem?.id || rawItem?.id || `dbb-${code}`),
+          id: canonicalId,
           orderIndex: typeof existingMem?.orderIndex === 'number' ? existingMem.orderIndex : (typeof rawItem?.orderIndex === 'number' ? rawItem.orderIndex : memoryDatabaseBarang.length),
           noBarang: code,
           deskripsiBarang: String(existingMem?.deskripsiBarang || rawItem?.deskripsiBarang || rawItem?.keteranganBarang || 'Barang Kemasan AKK'),
@@ -3612,11 +3750,51 @@ Kembalikan HANYA JSON valid:
         if (isDatabaseConfigured()) {
           try {
             await mysqlQuery(
-              `UPDATE wms_database_barang
-               SET dokumentasi_url = ?, dokumentasi_urls_json = ?, updated_at = ?
-               WHERE UPPER(no_barang) = ?`,
-              [rec.dokumentasiUrl || null, JSON.stringify(rec.dokumentasiUrls), rec.updatedAt, code]
+              `INSERT INTO wms_database_barang (
+                id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
+                dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                dokumentasi_url = VALUES(dokumentasi_url),
+                dokumentasi_urls_json = VALUES(dokumentasi_urls_json),
+                updated_at = VALUES(updated_at)`,
+              [
+                rec.id,
+                rec.orderIndex,
+                rec.noBarang,
+                rec.deskripsiBarang,
+                rec.unit1,
+                rec.unit2,
+                rec.unit3,
+                String(rec.rasio2 ?? '0'),
+                String(rec.rasio3 ?? '0'),
+                rec.panjangCm,
+                rec.lebarCm,
+                rec.tinggiCm,
+                rec.volM3,
+                rec.beratKg,
+                rec.dokumentasiUrl || null,
+                JSON.stringify(rec.dokumentasiUrls),
+                JSON.stringify({
+                  kategoriBarang: rec.kategoriBarang,
+                  stokTersedia: rec.stokTersedia,
+                  cabang: rec.cabang,
+                  compressedSizeKb: rec.compressedSizeKb,
+                  originalSizeKb: rec.originalSizeKb,
+                  compressionSavingsPct: rec.compressionSavingsPct
+                }),
+                rec.updatedAt
+              ]
             );
+          } catch {}
+        } else {
+          try {
+            await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ photoItems: [rec] })
+            });
           } catch {}
         }
       }

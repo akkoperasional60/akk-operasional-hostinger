@@ -17,6 +17,10 @@ const win = {
   addEventListener: () => {},
   removeEventListener: () => {},
   dispatchEvent: () => true,
+  setTimeout: (...args) => setTimeout(...args),
+  clearTimeout: (id) => clearTimeout(id),
+  setInterval: (...args) => setInterval(...args),
+  clearInterval: (id) => clearInterval(id),
   requestAnimationFrame: (cb) => setTimeout(cb, 16),
   cancelAnimationFrame: (id) => clearTimeout(id),
   document: {

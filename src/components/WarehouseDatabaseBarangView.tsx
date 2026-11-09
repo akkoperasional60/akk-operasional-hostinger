@@ -631,12 +631,17 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     if (onSyncWithMasterSku && result.items.length > 0) {
       onSyncWithMasterSku(result.items);
     }
+    const photoCountNow = result.items.filter(
+      it =>
+        (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml'))) ||
+        (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
+    ).length;
     setFeedbackModal({
-      title: result.count > 0 ? 'Sinkronisasi Server PC & HP Berhasil' : 'Server Belum Memiliki Data Barang',
+      title: result.count > 0 ? 'Sinkronisasi 2 Arah (PC ↔ HP) Berhasil' : 'Server Belum Memiliki Data Barang',
       message:
         result.count > 0
-          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang telah tersinkronisasi penuh antara Server MySQL, tampilan PC, dan tampilan HP.`
-          : 'Saat ini belum ada data di Server MySQL. Buka halaman Database Barang di komputer (PC) tempat Anda meng-import Excel agar otomatis terunggah ke server, atau Import Excel langsung.'
+          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh dua arah antara Server MySQL, tampilan PC, dan tampilan HP.`
+          : 'Saat ini belum ada data di Server MySQL. Buka halaman Database Barang di perangkat tempat Anda menginput data agar otomatis terunggah ke server.'
     });
   };
 
@@ -1446,6 +1451,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleManualServerSync}
+            disabled={syncStatus.isSyncing}
+            className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+            title="Sinkronkan dua arah secara paksa antara IndexedDB HP, PC, dan Server MySQL"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+            <span>{syncStatus.isSyncing ? `Sinkron (${syncStatus.progressPct}%)...` : 'Sinkron 2 Arah (PC ↔ HP)'}</span>
+          </button>
           <button
             type="button"
             onClick={handleExportDatabaseBarang}

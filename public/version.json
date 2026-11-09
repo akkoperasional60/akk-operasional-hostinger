@@ -1,9 +1,9 @@
 {
-  "versionCode": 10024,
-  "versionName": "1.0.24",
-  "updatedAt": "2026-11-09T14:25:00.000000",
+  "versionCode": 10025,
+  "versionName": "1.0.25",
+  "updatedAt": "2026-11-09T16:05:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V36: Fitur Crop Interaktif (preset Kardus Atas/Tengah/Bawah & Simpan Jadi Foto Baru) serta Putar Foto 90 derajat pada Database Barang, plus sinkronisasi batch IndexedDB (POST /api/database-barang/photos-sync) agar 69+ foto dari HP langsung tampil di PC."
+  "releaseNotes": "Update V37: Sinkronisasi 2 Arah (PC <-> HP) Real-Time penuh untuk Database Barang (proteksi anti-hilang foto IndexedDB, micro-batch upload anti-413 Nginx, tombol Sinkron 2 Arah) serta penggabungan dua arah faktur & log scan muat Sales RFID (/api/sales-rfid-invoices) dan Skenario E2E #10."
 }

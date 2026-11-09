@@ -428,29 +428,138 @@ function useSharedSalesRfidInvoices() {
     return getInitialInvoices(defaultFleet, defaultAdmin);
   });
 
-  // Cross-device synchronization via server /api/sales-rfid-invoices + localStorage
+  const mergeClientAndRemoteInvoices = (
+    localList: SalesOrderInvoice[],
+    remoteList: SalesOrderInvoice[]
+  ): { merged: SalesOrderInvoice[]; localChanged: boolean; remoteNeedsPush: boolean } => {
+    if (remoteList.length === 0 && localList.length === 0) {
+      return { merged: [], localChanged: false, remoteNeedsPush: false };
+    }
+    if (remoteList.length === 0 && localList.length > 0) {
+      return { merged: localList, localChanged: false, remoteNeedsPush: true };
+    }
+    if (localList.length === 0 && remoteList.length > 0) {
+      return { merged: remoteList, localChanged: true, remoteNeedsPush: false };
+    }
+
+    const localById = new Map<string, SalesOrderInvoice>();
+    localList.forEach(inv => localById.set(inv.id, inv));
+
+    const remoteById = new Map<string, SalesOrderInvoice>();
+    remoteList.forEach(inv => remoteById.set(inv.id, inv));
+
+    let localChanged = false;
+    let remoteNeedsPush = false;
+    const seenIds = new Set<string>();
+    const merged: SalesOrderInvoice[] = [];
+
+    for (const locInv of localList) {
+      seenIds.add(locInv.id);
+      const remInv = remoteById.get(locInv.id);
+      if (!remInv) {
+        merged.push(locInv);
+        remoteNeedsPush = true;
+        continue;
+      }
+
+      const remItemsByCode = new Map<string, SalesOrderItem>();
+      (remInv.items || []).forEach(it => remItemsByCode.set(it.skuCode.trim().toUpperCase(), it));
+
+      const seenItemCodes = new Set<string>();
+      const mergedItems: SalesOrderItem[] = (locInv.items || []).map(locIt => {
+        const code = locIt.skuCode.trim().toUpperCase();
+        seenItemCodes.add(code);
+        const remIt = remItemsByCode.get(code);
+        if (!remIt) {
+          remoteNeedsPush = true;
+          return locIt;
+        }
+        const locLoaded = Number(locIt.qtyLoaded || 0);
+        const remLoaded = Number(remIt.qtyLoaded || 0);
+        const bestLoaded = Math.max(locLoaded, remLoaded);
+
+        const locScans = Array.isArray(locIt.scans) ? locIt.scans : [];
+        const remScans = Array.isArray(remIt.scans) ? remIt.scans : [];
+        const scanById = new Map<string, ItemPhotoScanLog>();
+        for (const s of [...remScans, ...locScans]) {
+          if (s && s.id) scanById.set(s.id, s);
+        }
+        const combinedScans = Array.from(scanById.values());
+
+        if (bestLoaded > locLoaded || combinedScans.length > locScans.length) {
+          localChanged = true;
+        }
+        if (bestLoaded > remLoaded || combinedScans.length > remScans.length) {
+          remoteNeedsPush = true;
+        }
+
+        return {
+          ...remIt,
+          ...locIt,
+          qtyLoaded: bestLoaded,
+          scans: combinedScans,
+          dokumentasiUrl: locIt.dokumentasiUrl || remIt.dokumentasiUrl
+        };
+      });
+
+      for (const remIt of remInv.items || []) {
+        const code = remIt.skuCode.trim().toUpperCase();
+        if (!seenItemCodes.has(code)) {
+          mergedItems.push(remIt);
+          localChanged = true;
+        }
+      }
+
+      merged.push({
+        ...remInv,
+        ...locInv,
+        isLoadingFinished: Boolean(locInv.isLoadingFinished || remInv.isLoadingFinished),
+        finishedAt: locInv.finishedAt || remInv.finishedAt,
+        items: mergedItems
+      });
+    }
+
+    for (const remInv of remoteList) {
+      if (!seenIds.has(remInv.id)) {
+        merged.push(remInv);
+        localChanged = true;
+      }
+    }
+
+    return { merged, localChanged, remoteNeedsPush };
+  };
+
+  // Cross-device two-way synchronization via server /api/sales-rfid-invoices + localStorage (PC <-> HP)
   useEffect(() => {
     let active = true;
     const fetchRemote = async () => {
       try {
-        const res = await fetch('/api/sales-rfid-invoices');
+        const res = await fetch('/api/sales-rfid-invoices', {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store'
+        });
         if (res.ok) {
           const json = await res.json();
           if (active && json.success && Array.isArray(json.data)) {
-            if (json.data.length > 0) {
-              const cleaned = sanitizeSavedInvoices(json.data);
-              setInvoices(cleaned);
-              try {
-                localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(cleaned));
-              } catch {}
-            } else if (invoices.length > 0) {
-              // Remote server has no invoices yet, seed it so mobile devices can access immediately
-              fetch('/api/sales-rfid-invoices', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ invoices })
-              }).catch(() => {});
-            }
+            const remoteCleaned = sanitizeSavedInvoices(json.data);
+            setInvoices(prev => {
+              const { merged, localChanged, remoteNeedsPush } = mergeClientAndRemoteInvoices(prev, remoteCleaned);
+              if (localChanged) {
+                try {
+                  localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(merged));
+                } catch {}
+              }
+              if (remoteNeedsPush && merged.length > 0) {
+                fetch('/api/sales-rfid-invoices', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ invoices: merged })
+                }).catch(() => {});
+              }
+              return localChanged ? merged : prev;
+            });
           }
         }
       } catch {}
@@ -478,7 +587,7 @@ function useSharedSalesRfidInvoices() {
     window.addEventListener('storage', syncFromStorage);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    const interval = window.setInterval(fetchRemote, 4000);
+    const interval = window.setInterval(fetchRemote, 3000);
 
     return () => {
       active = false;
@@ -488,20 +597,24 @@ function useSharedSalesRfidInvoices() {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [invoices.length]);
+  }, []);
 
-  const saveInvoices = (updater: SalesOrderInvoice[] | ((prev: SalesOrderInvoice[]) => SalesOrderInvoice[])) => {
+  const saveInvoices = (
+    updater: SalesOrderInvoice[] | ((prev: SalesOrderInvoice[]) => SalesOrderInvoice[]),
+    replaceAll = false
+  ) => {
     setInvoices(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       try {
         localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(next));
         window.dispatchEvent(new CustomEvent('akk-sales-rfid-updated'));
       } catch {}
-      // Sync to server in background
+      // Sync to server in background (two-way PC <-> HP)
       fetch('/api/sales-rfid-invoices', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoices: next })
+        body: JSON.stringify({ invoices: next, replaceAll })
       }).catch(() => {});
       return next;
     });
