@@ -1198,6 +1198,52 @@ export const databaseBarangService = {
     const list = this.getAll().filter(i => i.id !== id);
     this.saveAll(list, false);
     void this.deleteItemFromServer(id);
+  },
+
+  resolveBySkuOrClassName(rawLabelOrSku: string): DatabaseBarangRecord | undefined {
+    const clean = (rawLabelOrSku || '').trim().toUpperCase();
+    if (!clean) return undefined;
+    const list = this.getAll();
+    const direct = list.find(item => item.noBarang.trim().toUpperCase() === clean);
+    if (direct) return direct;
+    // Handle format "[7GPJA181] CUP PLST..." or "7GPJA181 - CUP..."
+    const bracketMatch = clean.match(/\[([A-Z0-9\-_]+)\]/);
+    if (bracketMatch?.[1]) {
+      const byBracket = list.find(item => item.noBarang.trim().toUpperCase() === bracketMatch[1]);
+      if (byBracket) return byBracket;
+    }
+    return this.findMatch(clean, clean);
+  },
+
+  async exportYoloDatasetFromServer(): Promise<{
+    success: boolean;
+    count: number;
+    classes: string[];
+    class_map: Record<string, string>;
+    data_yaml: string;
+    items: Array<{
+      class_id: number;
+      sku_code: string;
+      no_barang: string;
+      item_name: string;
+      deskripsi_barang: string;
+      unit: string;
+      photo_url: string;
+      photo_urls: string[];
+    }>;
+  } | null> {
+    try {
+      const res = await fetch('/api/yolo/export-dataset', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 };
+
 

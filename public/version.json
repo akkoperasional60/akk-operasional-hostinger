@@ -1,9 +1,9 @@
 {
-  "versionCode": 10019,
-  "versionName": "1.0.19",
-  "updatedAt": "2026-11-07T12:57:00.000000",
+  "versionCode": 10020,
+  "versionName": "1.0.20",
+  "updatedAt": "2026-11-09T09:18:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V31: Integrasi akses faktur dengan Hak Akses User Management (hasFullSalesAccess), penyederhanaan HUD atas kamera YOLO tanpa kotak tengah yang menghalangi pandangan kamera, serta dukungan penuh lingkungan E2E Test Runner CLI (setup_test_env.js)."
+  "releaseNotes": "Update V32: Arsitektur Hybrid YOLO26 End-to-End ONNX (Jalur A onnxruntime-web & Jalur B onnxruntime-node + sharp), Sistem Form Kirim & Validasi Finance, Aplikasi Mobile Penagihan Pelanggan (Kolektor), Analisa Prosentase TO/VO/RO Marketing, Simulasi 2D Box Armada (Tampak Samping & Atas), serta Integrasi Opname Gudang ke Adm Pembelian."
 }

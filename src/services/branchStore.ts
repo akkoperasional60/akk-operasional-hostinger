@@ -1,5 +1,5 @@
 import { UserPermissions, UserRole } from '../types';
-import { getDefaultPermissionsForRole, MODERN_SUBMENU_KEYS_BY_MODULE } from '../utils/rbac';
+import { getDefaultPermissionsForRole, MODERN_SUBMENU_KEYS_BY_MODULE, LEGACY_SUBMENU_KEY_MAP } from '../utils/rbac';
 
 export interface BranchRecord {
   id: string;
@@ -447,6 +447,17 @@ class BranchStoreService {
             const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
             modernKeys.forEach(subId => {
               let val = cloned.modules[modId].subMenus?.[subId];
+              if (val === undefined && cloned.modules[modId].subMenus) {
+                const legacyKeys = LEGACY_SUBMENU_KEY_MAP[subId];
+                if (legacyKeys) {
+                  for (const lk of legacyKeys) {
+                    if (cloned.modules[modId].subMenus[lk] !== undefined) {
+                      val = cloned.modules[modId].subMenus[lk];
+                      break;
+                    }
+                  }
+                }
+              }
               if (val === undefined) {
                 val =
                   existingMod?.subMenus?.[subId] ??

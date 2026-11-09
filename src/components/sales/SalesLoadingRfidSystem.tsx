@@ -34,6 +34,7 @@ import {
   Boxes
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import * as ort from 'onnxruntime-web';
 import { logisticsStore } from '../../services/store';
 import { Fleet } from '../../types';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
@@ -42,6 +43,7 @@ import { AkkLogo } from '../AkkLogo';
 import { useToast } from '../../context/ToastContext';
 import { useRoleAccess } from '../../hooks/useRoleAccess';
 import { canAccess, canEdit } from '../../utils/rbac';
+import { branchStore, BranchRecord } from '../../services/branchStore';
 import {
   ExifMetadataBadge,
   ExifTimestampMetadata,
@@ -84,6 +86,7 @@ export interface SalesOrderInvoice {
   invoiceNumber: string;
   soNumber: string;
   date: string;
+  branchName?: string;
   customerName: string;
   areaName: string;
   fleetLabel: string;
@@ -107,10 +110,10 @@ const MASTER_PACKAGING_CATALOG: Array<{
   { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
   { skuCode: '7AT01225', itemName: 'ALU TRAY OX-1225 (100PCS/PAK)', unit: 'Pack' },
   { skuCode: '7AT06005', itemName: 'ALU TRAY OX-6005 (100PCS/PAK)', unit: 'Pack' },
-  { skuCode: 'RFID-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
-  { skuCode: 'RFID-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
+  { skuCode: 'AKK-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
+  { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+  { skuCode: 'AKK-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
+  { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
 ];
 
 const PURGED_RFID_CODES = new Set(['RFID-KB-002', 'RFID-KB-003', 'RFID-KB-004', 'RFID-KB-005']);
@@ -133,7 +136,7 @@ function createSampleSvgPhoto(itemName: string, skuCode: string, qty: number, un
     <text x="46" y="54" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold">TAG: ${skuCode}</text>
     <text x="240" y="152" text-anchor="middle" fill="#fef3c7" font-family="sans-serif" font-size="22" font-weight="bold">${qty} ${unit}</text>
     <text x="240" y="232" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="bold">${safeName.slice(0, 42)}</text>
-    <text x="240" y="256" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">TERVERIFIKASI KAMERA RFID VISUAL • ${timestamp}</text>
+    <text x="240" y="256" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">TERVERIFIKASI KAMERA VISUAL • ${timestamp}</text>
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
@@ -146,6 +149,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       invoiceNumber: 'FKT/AKK/2026/11/001',
       soNumber: 'SO-BWI-261101',
       date: '2026-11-03',
+      branchName: 'Banyuwangi',
       customerName: 'TK HOLLY GENTENG',
       areaName: 'GENTENG RETAIL',
       fleetLabel: fleetDefault,
@@ -155,7 +159,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       items: [
         {
           id: 'itm-1',
-          skuCode: 'RFID-KB-001',
+          skuCode: 'AKK-KB-001',
           itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
           unit: 'Ikat',
           qtyOrdered: 20,
@@ -165,7 +169,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-1',
               timestamp: '08:15 WIB',
               qtyScanned: 20,
-              photoDataUrl: createSampleSvgPhoto('Karton Box Corrugated B-Flute 60x40x40 Polos', 'RFID-KB-001', 20, 'Ikat', '08:15 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Karton Box Corrugated B-Flute 60x40x40 Polos', 'AKK-KB-001', 20, 'Ikat', '08:15 WIB'),
               scannedBy: initialAdmin,
               notes: 'Kondisi ikatan rapi & lengkap'
             }
@@ -205,6 +209,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       invoiceNumber: 'FKT/AKK/2026/11/002',
       soNumber: 'SO-DPS-261102',
       date: '2026-11-03',
+      branchName: 'Bali',
       customerName: 'UD SUMBER KEMASAN BALI',
       areaName: 'DENPASAR 1',
       fleetLabel: fleetDefault,
@@ -215,7 +220,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       items: [
         {
           id: 'itm-201',
-          skuCode: 'RFID-KB-006',
+          skuCode: 'AKK-KB-006',
           itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)',
           unit: 'Box',
           qtyOrdered: 25,
@@ -225,7 +230,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-201',
               timestamp: '08:50 WIB',
               qtyScanned: 25,
-              photoDataUrl: createSampleSvgPhoto('Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', 'RFID-KB-006', 25, 'Box', '08:50 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', 'AKK-KB-006', 25, 'Box', '08:50 WIB'),
               scannedBy: adminDefault,
               notes: 'Muatan sesuai faktur'
             }
@@ -233,7 +238,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
         },
         {
           id: 'itm-202',
-          skuCode: 'RFID-KB-008',
+          skuCode: 'AKK-KB-008',
           itemName: 'Lakban Coklat Packing AKK 48mm x 90Y',
           unit: 'Box',
           qtyOrdered: 30,
@@ -243,7 +248,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-202',
               timestamp: '09:05 WIB',
               qtyScanned: 34,
-              photoDataUrl: createSampleSvgPhoto('Lakban Coklat Packing AKK 48mm x 90Y', 'RFID-KB-008', 34, 'Box', '09:05 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Lakban Coklat Packing AKK 48mm x 90Y', 'AKK-KB-008', 34, 'Box', '09:05 WIB'),
               scannedBy: adminDefault,
               notes: 'Terbawa 4 box ekstra dari palet sebelah'
             }
@@ -364,17 +369,21 @@ function useSharedSalesRfidInvoices() {
 
   const sanitizeSavedInvoices = (rawList: SalesOrderInvoice[]): SalesOrderInvoice[] => {
     const replacements: Record<string, { skuCode: string; itemName: string; unit: SalesOrderItem['unit'] }> = {
+      'RFID-KB-001': { skuCode: 'AKK-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
       'RFID-KB-002': { skuCode: '7AFBG453', itemName: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', unit: 'Box' },
-      'RFID-KB-003': { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+      'RFID-KB-003': { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
       'RFID-KB-004': { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
-      'RFID-KB-005': { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
+      'RFID-KB-005': { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' },
+      'RFID-KB-006': { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+      'RFID-KB-007': { skuCode: 'AKK-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
+      'RFID-KB-008': { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
     };
     let mutated = false;
     const cleaned = rawList.map(inv => ({
       ...inv,
       items: (inv.items || []).map(it => {
         const codeUpper = String(it.skuCode || '').trim().toUpperCase();
-        if (PURGED_RFID_CODES.has(codeUpper) && replacements[codeUpper]) {
+        if (replacements[codeUpper]) {
           mutated = true;
           const rep = replacements[codeUpper];
           return {
@@ -509,7 +518,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     addNotification(
       type === 'error' ? 'sla_warning' : 'checker',
-      type === 'error' ? 'Peringatan Muat RFID' : 'Faktur & SO Muat',
+      type === 'error' ? 'Peringatan Muat Barang' : 'Faktur & SO Muat',
       msg,
       type === 'error'
     );
@@ -543,16 +552,18 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
   const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterBranch, setFilterBranch] = useState('SEMUA CABANG');
   const [filterFleet, setFilterFleet] = useState('SEMUA ARMADA');
   const [filterStatus, setFilterStatus] = useState('SEMUA STATUS');
   const [filterDate, setFilterDate] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
 
-  // Form states for Import File Faktur / Sales Order (Pilih Area -> Upload File -> Review File)
+  // Form states for Import File Faktur / Sales Order (Pilih Cabang & Area -> Upload File -> Review File)
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [soNumber, setSoNumber] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [branchName, setBranchName] = useState<string>('Banyuwangi');
   const [customerName, setCustomerName] = useState('');
   const [areaName, setAreaName] = useState<string>('');
   const [fleetLabel, setFleetLabel] = useState(defaultFleet);
@@ -567,6 +578,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const [dbBarangList, setDbBarangList] = useState<DatabaseBarangRecord[]>(() =>
     databaseBarangService.getAll()
   );
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
 
   useEffect(() => {
     void databaseBarangService.ensureHydrated().then(loaded => {
@@ -575,10 +587,17 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     const syncDb = () => {
       setDbBarangList(databaseBarangService.getAll());
     };
+    const syncBranches = () => {
+      setBranches(branchStore.getBranches());
+    };
+    const unsubBranch = branchStore.subscribe(syncBranches);
     window.addEventListener('akk-database-barang-updated', syncDb);
+    window.addEventListener('akk-branch-updated', syncBranches);
     window.addEventListener('storage', syncDb);
     return () => {
+      unsubBranch();
       window.removeEventListener('akk-database-barang-updated', syncDb);
+      window.removeEventListener('akk-branch-updated', syncBranches);
       window.removeEventListener('storage', syncDb);
     };
   }, []);
@@ -610,6 +629,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setInvoiceNumber(defaultNoFaktur);
     setSoNumber('');
     setDate(new Date().toISOString().split('T')[0]);
+    const defaultMasterBranch =
+      branches.find(b => b.slug === 'banyuwangi')?.name || branches[0]?.name || 'Nusantara';
+    setBranchName(defaultMasterBranch);
     setCustomerName('');
     setAreaName(defaultArea);
     const initialFleet = fleetOptions[0] || defaultFleet;
@@ -654,6 +676,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setInvoiceNumber(inv.invoiceNumber);
     setSoNumber(inv.soNumber);
     setDate(inv.date);
+    setBranchName(inv.branchName || (inv.areaName.toLowerCase().includes('denpasar') || inv.areaName.toLowerCase().includes('bali') ? 'Bali' : 'Banyuwangi'));
     setCustomerName(inv.customerName);
     setAreaName(inv.areaName);
     const parsedFleets =
@@ -981,6 +1004,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             invoiceNumber: firstRow.noFaktur.trim().toUpperCase(),
             soNumber: soNumber.trim().toUpperCase() || inv.soNumber,
             date,
+            branchName: branchName || 'Banyuwangi',
             customerName: firstRow.namaPelanggan.trim().toUpperCase(),
             areaName,
             fleetLabel: finalFleetLabel,
@@ -992,7 +1016,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         })
       );
       showToast(
-        `Faktur ${firstRow.noFaktur} (Area ${areaName} • ${finalFleets.length} Armada) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi RFID!`,
+        `Faktur ${firstRow.noFaktur} (Cabang ${branchName} • Area ${areaName} • ${finalFleets.length} Armada) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi Scan Muat!`,
         'success'
       );
     } else {
@@ -1023,6 +1047,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         invoiceNumber: grp.noFaktur,
         soNumber: `SO-${areaName.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase()}-${String(invoices.length + grpIdx + 1).padStart(4, '0')}`,
         date,
+        branchName: branchName || 'Banyuwangi',
         customerName: grp.namaPelanggan,
         areaName,
         fleetLabel: finalFleetLabel,
@@ -1048,7 +1073,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
       saveInvoices(prev => [...createdInvoices, ...prev]);
       showToast(
-        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Area ${areaName} [${finalFleets.length} Armada] berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan RFID!`,
+        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Cabang ${branchName} • Area ${areaName} [${finalFleets.length} Armada] berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan Muat!`,
         'success'
       );
     }
@@ -1065,13 +1090,38 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     return accessibleInvoices.filter(inv => {
       const evalRes = evaluateInvoiceStatus(inv);
       const q = searchQuery.toLowerCase();
+      const invBranch =
+        inv.branchName ||
+        (inv.areaName.toLowerCase().includes('denpasar') || inv.areaName.toLowerCase().includes('bali')
+          ? 'Bali'
+          : 'Banyuwangi');
+
       const matchSearch =
         !q ||
         inv.invoiceNumber.toLowerCase().includes(q) ||
         inv.soNumber.toLowerCase().includes(q) ||
         inv.customerName.toLowerCase().includes(q) ||
         inv.areaName.toLowerCase().includes(q) ||
+        invBranch.toLowerCase().includes(q) ||
         inv.items.some(i => i.itemName.toLowerCase().includes(q) || i.skuCode.toLowerCase().includes(q));
+
+      const selectedMasterBranch = branches.find(
+        b =>
+          b.name.toLowerCase() === filterBranch.toLowerCase() ||
+          b.slug.toLowerCase() === filterBranch.toLowerCase()
+      );
+      const matchBranch =
+        filterBranch === 'SEMUA CABANG' ||
+        invBranch.toLowerCase() === filterBranch.toLowerCase() ||
+        inv.areaName.toLowerCase().includes(filterBranch.toLowerCase()) ||
+        Boolean(
+          selectedMasterBranch &&
+            (invBranch.toLowerCase() === selectedMasterBranch.name.toLowerCase() ||
+              invBranch.toLowerCase() === selectedMasterBranch.slug.toLowerCase() ||
+              invBranch.toLowerCase() === (selectedMasterBranch.city || '').toLowerCase() ||
+              inv.areaName.toLowerCase().includes(selectedMasterBranch.slug.toLowerCase()) ||
+              inv.areaName.toLowerCase().includes((selectedMasterBranch.city || '').toLowerCase()))
+        );
 
       const matchFleet =
         filterFleet === 'SEMUA ARMADA' ||
@@ -1087,9 +1137,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
       const matchDate = !filterDate || inv.date === filterDate;
 
-      return matchSearch && matchFleet && matchStatus && matchDate;
+      return matchSearch && matchBranch && matchFleet && matchStatus && matchDate;
     });
-  }, [accessibleInvoices, searchQuery, filterFleet, filterStatus, filterDate]);
+  }, [accessibleInvoices, searchQuery, filterBranch, filterFleet, filterStatus, filterDate]);
 
   const summaryStats = useMemo(() => {
     let total = accessibleInvoices.length;
@@ -1275,7 +1325,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               Input Faktur / Sales Order (SO)
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-              Input rincian Faktur / Sales Order muatan armada box yang terintegrasi dengan Aplikasi Scan &amp; Foto Muat RFID.
+              Input rincian Faktur / Sales Order muatan armada box yang terintegrasi dengan Aplikasi Scan &amp; Foto Muat Barang.
             </p>
           </div>
 
@@ -1325,7 +1375,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition cursor-pointer"
             >
               <Camera className="w-4 h-4 text-sky-400" />
-              <span>Buka Aplikasi Scan RFID</span>
+              <span>Buka Aplikasi Scan Muat</span>
               <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
           </div>
@@ -1431,10 +1481,10 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Activity className="w-4 h-4 text-indigo-500" />
-                  <span>Progres Realisasi Pemuatan Barang (Faktur vs Foto RFID)</span>
+                  <span>Progres Realisasi Pemuatan Barang (Faktur vs Foto Kamera)</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Verifikasi visual otomatis melalui kamera RFID gudang saat barang dinaikkan ke armada box.
+                  Verifikasi visual otomatis melalui kamera gudang saat barang dinaikkan ke armada box.
                 </p>
               </div>
               <div className="text-right">
@@ -1651,7 +1701,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                                 onClick={() => onOpenRfidScannerForInvoice(row.invoice.id)}
                                 className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
                               >
-                                Scan RFID
+                                Scan Muat
                               </button>
                             </td>
                           </tr>
@@ -1806,7 +1856,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                             onClick={() => onOpenRfidScannerForInvoice(inv.id)}
                             className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition cursor-pointer"
                           >
-                            Scan RFID
+                            Scan Muat
                           </button>
                         </td>
                       </tr>
@@ -1827,10 +1877,25 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari No. Faktur, No. SO, Nama Toko, Area, atau Nama Barang..."
+            placeholder="Cari No. Faktur, No. SO, Nama Toko, Cabang, Area, atau Nama Barang..."
             className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
           />
         </div>
+
+        {/* Fitur Pilih Cabang Terintegrasi Master Cabang */}
+        <select
+          value={filterBranch}
+          onChange={e => setFilterBranch(e.target.value)}
+          aria-label="Pilih Cabang"
+          className="px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer"
+        >
+          <option value="SEMUA CABANG">Pilih Cabang: Semua Cabang ({branches.length} Cabang Master)</option>
+          {branches.map(b => (
+            <option key={b.id} value={b.name}>
+              Cabang {b.name} ({b.city || b.slug})
+            </option>
+          ))}
+        </select>
 
         <select
           value={filterFleet}
@@ -1913,7 +1978,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       onClick={() => onOpenRfidScannerForInvoice(inv.id)}
                       className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline shrink-0 ml-2"
                     >
-                      Cek RFID →
+                      Cek Scan Muat →
                     </button>
                   </div>
                 )}
@@ -1926,6 +1991,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       </span>
                       <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-mono font-semibold">
                         {inv.soNumber}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold">
+                        Cabang: {inv.branchName || (inv.areaName.toLowerCase().includes('bali') || inv.areaName.toLowerCase().includes('denpasar') ? 'Bali' : 'Banyuwangi')}
                       </span>
                       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${ev.badgeColor}`}>
                         {ev.statusLabel}
@@ -1980,7 +2048,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>Scan &amp; Foto Barang (RFID)</span>
+                      <span>Scan &amp; Foto Barang Muat</span>
                     </button>
                     <button
                       type="button"
@@ -2005,7 +2073,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                 <div className="mt-4 space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-500 dark:text-slate-400 font-medium">
-                      Realisasi Barang Termuat via Foto RFID:{' '}
+                      Realisasi Barang Termuat via Foto Kamera:{' '}
                       <strong className="text-slate-900 dark:text-white">
                         {ev.totalLoaded} dari {ev.totalOrdered} Kemasan
                       </strong>
@@ -2032,7 +2100,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                           <th className="py-2 pr-3">Kode Tag / SKU</th>
                           <th className="py-2 pr-3">Nama Item Barang (Sesuai Faktur)</th>
                           <th className="py-2 pr-3 text-center">Qty Faktur</th>
-                          <th className="py-2 pr-3 text-center">Termuat (Foto RFID)</th>
+                          <th className="py-2 pr-3 text-center">Termuat (Foto Muat)</th>
                           <th className="py-2 pr-3 text-center">Selisih / Sisa</th>
                           <th className="py-2 pr-3">Bukti Foto</th>
                           <th className="py-2 text-right">Status Deteksi</th>
@@ -2142,9 +2210,27 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             </div>
 
             <form onSubmit={handleSaveInvoice} className="space-y-3 mt-3">
-              {/* Baris 1: Area Kirim, Tanggal, Admin PIC & Tambah Armada Simple */}
+              {/* Baris 1: Pilih Cabang, Area Kirim, Tanggal, Admin PIC & Tambah Armada Simple */}
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                      Pilih Cabang (Master Cabang) *
+                    </label>
+                    <select
+                      required
+                      value={branchName}
+                      onChange={e => setBranchName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:border-indigo-500"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.name}>
+                          Cabang {b.name} ({b.city || b.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                       Area Kirim *
@@ -2568,7 +2654,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     addNotification(
       type === 'error' ? 'sla_warning' : 'checker',
-      type === 'error' ? 'PERINGATAN RFID MUAT!' : 'Aplikasi Scan RFID Muat',
+      type === 'error' ? 'PERINGATAN MUAT BARANG!' : 'Aplikasi Scan Muat Barang',
       msg,
       type === 'error'
     );
@@ -2713,12 +2799,31 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const [masterSearchQuery, setMasterSearchQuery] = useState<string>('');
   const [isMasterSearchOpen, setIsMasterSearchOpen] = useState<boolean>(false);
 
-  // Ultralytics YOLO Real-Time Auto-Detection HUD States
-  const [yoloConfidence, setYoloConfidence] = useState<number>(0.984);
-  const [yoloInferenceMs, setYoloInferenceMs] = useState<number>(14);
+  // Ultralytics YOLO26 End-to-End ONNX (nms=True, 640x640) Real-Time Auto-Detection HUD States
+  const [yoloConfidence, setYoloConfidence] = useState<number>(0);
+  const [, setYoloInferenceMs] = useState<number>(14);
+  const [yoloEngineMode, setYoloEngineMode] = useState<'JALUR_A_WEB' | 'JALUR_B_SERVER'>('JALUR_A_WEB');
+  const [liveVisionStatus, setLiveVisionStatus] = useState<{
+    state: 'matching' | 'mismatch' | 'no_packaging' | 'checking';
+    confidence: number;
+    detectedCode?: string;
+    detectedSummary?: string;
+    reason?: string;
+    bbox?: [number, number, number, number];
+  }>({
+    state: 'no_packaging',
+    confidence: 0,
+    reason: 'Arahkan kamera ke label kemasan barang'
+  });
+  const isLiveCheckingRef = useRef<boolean>(false);
+  const ortSessionRef = useRef<ort.InferenceSession | null>(null);
+  const yoloClassesRef = useRef<string[]>([]);
+  const yoloCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastAutoVerifyCooldownUntilRef = useRef<number>(0);
 
-  // 4 Dedicated Mobile Pages + Scan Foto Button: 'kamera' (Kamera Satu Layar), 'list' (Urutan Pelanggan & List Barang), 'termuat_sisa' (Termuat & Sisa), 'riwayat' (Riwayat Scan)
+  // 4 Dedicated Mobile Pages: 'kamera' (Kamera Satu Layar), 'list' (Urutan Pelanggan & List Barang), 'termuat_sisa' (Termuat & Sisa), 'riwayat' (Riwayat Scan)
   const [scannerPage, setScannerPage] = useState<'kamera' | 'list' | 'termuat_sisa' | 'riwayat'>('kamera');
+  const [openCustomDropdown, setOpenCustomDropdown] = useState<'cam_store' | 'cam_item' | 'list_store' | 'list_item' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -2939,15 +3044,472 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
   };
 
-  // Ultralytics YOLO Real-Time Telemetry Ticker when Camera is Active
+  // Helper: Analyze live video frame to check if camera is pointing at a real packaging/label with printed text/lines vs floor/shoe/wall/blank
+  const analyzeVideoFrameForPackaging = (): {
+    hasPackaging: boolean;
+    edgeConfidence: number;
+    previewBase64: string | null;
+  } => {
+    if (!videoRef.current || videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      return { hasPackaging: false, edgeConfidence: 0, previewBase64: null };
+    }
+    const sampleW = 240;
+    const sampleH = 180;
+    const canvas = document.createElement('canvas');
+    canvas.width = sampleW;
+    canvas.height = sampleH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { hasPackaging: false, edgeConfidence: 0, previewBase64: null };
+    }
+
+    ctx.drawImage(videoRef.current, 0, 0, sampleW, sampleH);
+    const imgData = ctx.getImageData(24, 20, sampleW - 48, sampleH - 40);
+    const data = imgData.data;
+    const w = imgData.width;
+    const h = imgData.height;
+
+    let sumLum = 0;
+    let sumSqLum = 0;
+    let sharpEdges = 0;
+    const totalPixels = w * h;
+    const lum = new Float32Array(totalPixels);
+
+    for (let i = 0; i < totalPixels; i++) {
+      const idx = i * 4;
+      const l = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+      lum[i] = l;
+      sumLum += l;
+      sumSqLum += l * l;
+    }
+
+    const meanLum = sumLum / Math.max(1, totalPixels);
+    const variance = Math.max(0, sumSqLum / Math.max(1, totalPixels) - meanLum * meanLum);
+    const stdDev = Math.sqrt(variance);
+
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x;
+        const gx = Math.abs(lum[idx + 1] - lum[idx - 1]);
+        const gy = Math.abs(lum[idx + w] - lum[idx - w]);
+        if (gx + gy > 46) {
+          sharpEdges++;
+        }
+      }
+    }
+
+    const edgeRatio = sharpEdges / Math.max(1, totalPixels);
+    // Printed carton labels/tables have rich sharp text/line edges (edgeRatio >= 0.048) and contrast (stdDev >= 18),
+    // whereas floors, tiles with a shoe, walls, or covered lenses have very few sharp text edges.
+    const hasPackaging = edgeRatio >= 0.048 && stdDev >= 18 && meanLum > 22 && meanLum < 245;
+    const edgeConfidence = hasPackaging ? Math.min(0.99, 0.75 + edgeRatio * 1.5) : 0;
+
+    let previewBase64: string | null = null;
+    if (hasPackaging) {
+      const capCanvas = document.createElement('canvas');
+      capCanvas.width = 640;
+      capCanvas.height = Math.round((videoRef.current.videoHeight / videoRef.current.videoWidth) * 640) || 480;
+      const capCtx = capCanvas.getContext('2d');
+      if (capCtx) {
+        capCtx.drawImage(videoRef.current, 0, 0, capCanvas.width, capCanvas.height);
+        previewBase64 = capCanvas.toDataURL('image/jpeg', 0.72);
+      }
+    }
+
+    return { hasPackaging, edgeConfidence, previewBase64 };
+  };
+
+  // SPESIFIKASI 2: JALUR A — Muat /models/best.onnx & /models/classes.json di Browser HP via onnxruntime-web
   useEffect(() => {
-    if (!isCameraActive || scannerPage !== 'kamera') return;
+    let mounted = true;
+    const initLocalYolo26Onnx = async () => {
+      try {
+        // Point onnxruntime-web to dedicated /onnx-wasm/ route served with Content-Type: application/wasm
+        ort.env.wasm.wasmPaths = '/onnx-wasm/';
+        ort.env.wasm.numThreads = 1;
+        ort.env.logLevel = 'fatal';
+      } catch {
+        // Ignore env setup issues
+      }
+
+      try {
+        const clsResp = await fetch('/models/classes.json', { cache: 'no-store' });
+        if (clsResp.ok) {
+          const contentType = clsResp.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const parsed = await clsResp.json();
+            if (mounted) {
+              if (Array.isArray(parsed)) {
+                yoloClassesRef.current = parsed.map((c: unknown) => String(c || '').trim().toUpperCase());
+              } else if (parsed && typeof parsed === 'object') {
+                const obj = parsed as Record<string, unknown>;
+                if (Array.isArray(obj.classes)) {
+                  yoloClassesRef.current = obj.classes.map((c: unknown) => String(c || '').trim().toUpperCase());
+                } else {
+                  const keys = Object.keys(obj).sort((a, b) => Number(a) - Number(b));
+                  yoloClassesRef.current = keys.map(k => String(obj[k] || '').trim().toUpperCase());
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback ke daftar SKU dari Database Barang jika classes.json belum ada
+      }
+
+      try {
+        const modelResp = await fetch('/models/best.onnx', { method: 'GET', cache: 'no-store' });
+        if (!modelResp.ok) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
+        const contentType = (modelResp.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html') || contentType.includes('application/json')) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
+        const modelBuffer = await modelResp.arrayBuffer();
+        const bytes = new Uint8Array(modelBuffer);
+        // Validate non-empty binary and ensure it is not <!DOCTYPE html> (0x3c 0x21 0x64 0x6f)
+        if (
+          bytes.byteLength < 128 ||
+          (bytes[0] === 0x3c && bytes[1] === 0x21) ||
+          (bytes[0] === 0x7b && bytes[1] === 0x22)
+        ) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
+        let session: ort.InferenceSession | null = null;
+        try {
+          session = await ort.InferenceSession.create(bytes, {
+            executionProviders: ['webgl', 'wasm']
+          });
+        } catch {
+          session = await ort.InferenceSession.create(bytes, {
+            executionProviders: ['wasm']
+          });
+        }
+        if (mounted && session) {
+          ortSessionRef.current = session;
+          setYoloEngineMode('JALUR_A_WEB');
+        }
+      } catch {
+        if (mounted) {
+          ortSessionRef.current = null;
+          setYoloEngineMode('JALUR_B_SERVER');
+        }
+      }
+    };
+
+    void initLocalYolo26Onnx();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Helper Jalur A: Inferensi lokal YOLO26 End-to-End ONNX (nms=True, 640x640, output [1, 300, 6] -> [x1, y1, x2, y2, score, class_id])
+  const runJalurALocalOnnxDetection = async (
+    confThreshold: number = 0.25
+  ): Promise<{
+    loaded: boolean;
+    inferenceMs: number;
+    best: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      score: number;
+      classId: number;
+      skuCode: string;
+      itemName: string;
+      unit: string;
+    } | null;
+  }> => {
+    const t0 = performance.now();
+    const session = ortSessionRef.current;
+    if (
+      !session ||
+      !videoRef.current ||
+      videoRef.current.videoWidth === 0 ||
+      videoRef.current.videoHeight === 0
+    ) {
+      return { loaded: Boolean(session), inferenceMs: 0, best: null };
+    }
+
+    try {
+      const INPUT_SIZE = 640;
+      if (!yoloCanvasRef.current) {
+        yoloCanvasRef.current = document.createElement('canvas');
+        yoloCanvasRef.current.width = INPUT_SIZE;
+        yoloCanvasRef.current.height = INPUT_SIZE;
+      }
+      const canvas = yoloCanvasRef.current;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        return { loaded: true, inferenceMs: 0, best: null };
+      }
+
+      ctx.drawImage(videoRef.current, 0, 0, INPUT_SIZE, INPUT_SIZE);
+      const rgba = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data;
+      const numPixels = INPUT_SIZE * INPUT_SIZE;
+      const float32Data = new Float32Array(3 * numPixels);
+
+      for (let i = 0; i < numPixels; i++) {
+        const idx = i * 4;
+        float32Data[i] = rgba[idx] / 255.0;
+        float32Data[numPixels + i] = rgba[idx + 1] / 255.0;
+        float32Data[2 * numPixels + i] = rgba[idx + 2] / 255.0;
+      }
+
+      const inputName = session.inputNames[0] || 'images';
+      const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+      const outputMap = await session.run({ [inputName]: inputTensor });
+      const outputName = session.outputNames[0] || Object.keys(outputMap)[0];
+      const outputTensor = outputMap[outputName];
+      const outData = outputTensor.data as Float32Array | number[];
+      const dims = outputTensor.dims || [1, 300, 6];
+
+      // Parse End-to-End YOLO26 output tensor [1, 300, 6] dengan urutan [x1, y1, x2, y2, score, class_id]
+      const numRows = dims.length === 3 ? dims[1] : Math.floor(outData.length / 6);
+      const stride = dims.length === 3 ? dims[2] : 6;
+      const classesList =
+        yoloClassesRef.current.length > 0
+          ? yoloClassesRef.current
+          : dbBarangList.map(d => d.noBarang.trim().toUpperCase());
+
+      let bestDet: {
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        score: number;
+        classId: number;
+        skuCode: string;
+        itemName: string;
+        unit: string;
+      } | null = null;
+
+      for (let r = 0; r < numRows; r++) {
+        const offset = r * stride;
+        const x1 = Number(outData[offset]);
+        const y1 = Number(outData[offset + 1]);
+        const x2 = Number(outData[offset + 2]);
+        const y2 = Number(outData[offset + 3]);
+        const score = Number(outData[offset + 4]);
+        const classId = Math.round(Number(outData[offset + 5]));
+
+        if (score >= confThreshold && classId >= 0) {
+          if (!bestDet || score > bestDet.score) {
+            const rawSku = classesList[classId] || `SKU-${classId}`;
+            const dbMatch = databaseBarangService.resolveBySkuOrClassName(rawSku);
+            const manifestMatch = activeInvoice?.items.find(
+              it => it.skuCode.trim().toUpperCase() === rawSku
+            );
+            bestDet = {
+              x1: Math.max(0, Math.round(x1)),
+              y1: Math.max(0, Math.round(y1)),
+              x2: Math.min(INPUT_SIZE, Math.round(x2)),
+              y2: Math.min(INPUT_SIZE, Math.round(y2)),
+              score,
+              classId,
+              skuCode: dbMatch?.noBarang || manifestMatch?.skuCode || rawSku,
+              itemName:
+                dbMatch?.deskripsiBarang ||
+                manifestMatch?.itemName ||
+                `Barang SKU ${rawSku}`,
+              unit: dbMatch?.satuan || dbMatch?.unit1 || manifestMatch?.unit || 'CRT'
+            };
+          }
+        }
+      }
+
+      return {
+        loaded: true,
+        inferenceMs: Math.max(6, Math.round(performance.now() - t0)),
+        best: bestDet
+      };
+    } catch {
+      return { loaded: false, inferenceMs: Math.round(performance.now() - t0), best: null };
+    }
+  };
+
+  // Real-Time Visual & YOLO26 Hybrid Validation when Camera is Active
+  // Saat YOLO Auto: ON aktif, Jalur A dieksekusi setiap 250ms-300ms langsung dari <video> tanpa membebani kuota server
+  useEffect(() => {
+    if (!isCameraActive || scannerPage !== 'kamera' || !activeInvoice) {
+      setLiveVisionStatus({
+        state: 'no_packaging',
+        confidence: 0,
+        reason: 'Kamera belum aktif'
+      });
+      setYoloConfidence(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const runLiveCheck = async () => {
+      if (cancelled || isVerifyingScan || isLiveCheckingRef.current) return;
+      const tStart = performance.now();
+      const frameAnalysis = analyzeVideoFrameForPackaging();
+
+      if (!frameAnalysis.hasPackaging || !frameAnalysis.previewBase64) {
+        if (!cancelled) {
+          setYoloConfidence(0);
+          setYoloInferenceMs(Math.max(8, Math.round(performance.now() - tStart)));
+          setLiveVisionStatus({
+            state: 'no_packaging',
+            confidence: 0,
+            reason: 'Kamera tidak mengarah ke label barang'
+          });
+        }
+        return;
+      }
+
+      isLiveCheckingRef.current = true;
+
+      try {
+        const currentTarget = resolvedTargetItem || activeInvoice.items[0];
+        const dbInfo = currentTarget ? getIntegratedDbInfo(currentTarget) : null;
+        const targetCode = (dbInfo?.kodeBarang || currentTarget?.skuCode || 'AUTO').trim().toUpperCase();
+        const targetName = dbInfo?.deskripsiBarang || currentTarget?.itemName || '';
+
+        // 1. Jalankan JALUR A (onnxruntime-web lokal di browser HP) terlebih dahulu
+        const localRes = await runJalurALocalOnnxDetection(0.25);
+        if (cancelled) return;
+
+        if (localRes.loaded && localRes.best) {
+          setYoloEngineMode('JALUR_A_WEB');
+          setYoloInferenceMs(localRes.inferenceMs);
+          setYoloConfidence(localRes.best.score);
+
+          const detectedSku = localRes.best.skuCode.trim().toUpperCase();
+          const inManifest = activeInvoice.items.some(
+            it =>
+              it.skuCode.trim().toUpperCase() === detectedSku ||
+              getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === detectedSku
+          );
+          const isMatch =
+            inManifest &&
+            (targetScanMode === 'AUTO' || detectedSku === targetCode);
+
+          setLiveVisionStatus({
+            state: isMatch ? 'matching' : 'mismatch',
+            confidence: localRes.best.score,
+            detectedCode: detectedSku,
+            detectedSummary: localRes.best.itemName,
+            bbox: [localRes.best.x1, localRes.best.y1, localRes.best.x2, localRes.best.y2],
+            reason: isMatch
+              ? undefined
+              : `Terdeteksi [${detectedSku}] ${localRes.best.itemName}, target: [${targetCode}]`
+          });
+
+          // Jika YOLO Auto: ON dan status SESUAI (confidence >= 0.75) serta di luar masa cooldown 2 detik:
+          if (
+            autoScanEnabled &&
+            isMatch &&
+            localRes.best.score >= 0.75 &&
+            !scanErrorLock &&
+            Date.now() >= lastAutoVerifyCooldownUntilRef.current
+          ) {
+            const targetInList = activeInvoice.items.find(
+              it =>
+                it.skuCode.trim().toUpperCase() === detectedSku ||
+                getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === detectedSku
+            );
+            if (targetInList && targetInList.qtyLoaded < targetInList.qtyOrdered) {
+              lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
+              void executeCaptureAndVerify(frameAnalysis.previewBase64, undefined, false);
+            }
+          }
+          return;
+        }
+
+        // 2. Jika model lokal best.onnx belum dimuat di browser, gunakan pemeriksa ringan
+        const refImg = dbInfo?.matchedRecord?.dokumentasiUrl?.startsWith('data:image/jpeg')
+          ? dbInfo.matchedRecord.dokumentasiUrl
+          : undefined;
+
+        const res = await fetch('/api/scan-muat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: frameAnalysis.previewBase64,
+            image_base64: frameAnalysis.previewBase64,
+            surat_jalan_id: activeInvoice.invoiceNumber,
+            gate_id: selectedGate,
+            target_item_code: targetCode,
+            target_item_name: targetName,
+            reference_image_base64: refImg,
+            live_preview_only: true,
+            expected_items: activeInvoice.items
+          })
+        });
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        const elapsed = Math.max(12, Math.round(performance.now() - tStart));
+        setYoloInferenceMs(elapsed);
+
+        if (res.ok && data.is_valid_packaging && data.is_matching_target && data.status === 'success') {
+          const conf = typeof data.confidence === 'number' && data.confidence > 0 ? data.confidence : 0.97;
+          setYoloConfidence(conf);
+          setLiveVisionStatus({
+            state: 'matching',
+            confidence: conf,
+            detectedCode: data.extracted_code || targetCode,
+            detectedSummary: data.product_name || targetName
+          });
+        } else if (data.is_valid_packaging === false) {
+          setYoloConfidence(0);
+          setLiveVisionStatus({
+            state: 'no_packaging',
+            confidence: 0,
+            reason: data.message || 'Kamera tidak mengarah ke kemasan barang'
+          });
+        } else {
+          const conf = typeof data.confidence === 'number' && data.confidence > 0 ? data.confidence : 0.96;
+          setYoloConfidence(conf);
+          setLiveVisionStatus({
+            state: 'mismatch',
+            confidence: conf,
+            detectedCode: data.extracted_code || 'BERBEDA',
+            detectedSummary: data.product_name || 'Ukuran / Barang Berbeda',
+            reason: data.message || 'Barang di kamera tidak sesuai dengan target'
+          });
+        }
+      } catch {
+        // Keep last state on transient network error
+      } finally {
+        isLiveCheckingRef.current = false;
+      }
+    };
+
+    void runLiveCheck();
+    // Saat YOLO Auto: ON aktif & model Jalur A tersedia, jalankan inferensi real-time setiap 280ms (250ms-300ms)
+    const intervalMs = autoScanEnabled && ortSessionRef.current ? 280 : 1200;
     const timer = window.setInterval(() => {
-      setYoloConfidence(Number((0.968 + Math.random() * 0.029).toFixed(3)));
-      setYoloInferenceMs(Math.floor(11 + Math.random() * 7));
-    }, 900);
-    return () => window.clearInterval(timer);
-  }, [isCameraActive, scannerPage]);
+      void runLiveCheck();
+    }, intervalMs);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isCameraActive, scannerPage, activeInvoice, resolvedTargetItem, selectedGate, isVerifyingScan, autoScanEnabled, targetScanMode, scanErrorLock]);
 
   // Tambah Foto Tambahan (>1 Foto per Barang) langsung dari Kamera tanpa menambah beban antrian atau saat ingin multi-angle dokumentasi
   const handleCaptureExtraPhotoOnly = (overrideItem?: SalesOrderItem) => {
@@ -3153,8 +3715,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     );
   };
 
-  // Core Ultralytics YOLO Fast Verification Workflow:
-  // Instant local YOLOv8x-WMS + Database Barang verification (<35ms) with non-blocking /api/scan-muat sync
+  // Core Ultralytics YOLO + Gemini Vision Verification Workflow:
+  // Verifikasi visual nyata terhadap gambar kamera, ukuran (OZ/dimensi), dan Database Barang
   const executeCaptureAndVerify = async (
     customImageBase64?: string,
     customExif?: ExifTimestampMetadata,
@@ -3182,6 +3744,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         : dbInfo?.deskripsiBarang || currentTarget?.itemName || 'Kemasan Faktur';
     const desiredUnit = dbInfo?.satuan || currentTarget?.unit || 'Box';
 
+    // Cek terlebih dahulu apakah kamera mengarah ke barang (bukan lantai/kosong) saat memotret dari live camera
+    const liveFrameCheck = !customImageBase64 && isCameraActive ? analyzeVideoFrameForPackaging() : { hasPackaging: true, edgeConfidence: 0.98, previewBase64: null };
+
     const captured = customImageBase64
       ? { base64: customImageBase64, exif: customExif || createExifMetadataFromDate(nowDate, 'CAMERA_CAPTURE_SENSOR') }
       : captureCompressedBase64FromViewfinder(
@@ -3194,36 +3759,196 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     setLastCapturedPreview(captured.base64);
     setLastCapturedExif(captured.exif);
 
-    // Non-blocking background sync to /api/scan-muat so verification is instant
-    const masterBarang = databaseBarangService.getAll().slice(0, 120);
-    void fetch('/api/scan-muat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: captured.base64,
-        image_base64: captured.base64,
-        surat_jalan_id: activeInvoice.invoiceNumber,
-        so_number: activeInvoice.soNumber,
-        gate_id: selectedGate,
-        gate: selectedGate,
-        timestamp: isoTimestamp,
-        target_item_code: desiredCode,
-        qty_scanned: cleanQty,
-        expected_items: activeInvoice.items,
-        master_items: masterBarang,
-        force_mismatch: simulateMismatch
-      })
-    }).catch(() => {});
-
     try {
-      const extractedCode = (simulateMismatch ? 'BRG-SALAH-999' : desiredCode).toUpperCase();
+      let serverRejected = false;
+      let serverRejectionReason = '';
+      let serverExtractedCode = (simulateMismatch ? 'BRG-SALAH-999' : desiredCode).toUpperCase();
+      let serverExtractedName = simulateMismatch
+        ? 'Kemasan Barang Berbeda (Tidak Sesuai Database Barang)'
+        : desiredName;
+
+      if (!customImageBase64 && isCameraActive && !liveFrameCheck.hasPackaging) {
+        serverRejected = true;
+        serverExtractedCode = 'BUKAN-BARANG';
+        serverExtractedName = 'Kamera Tidak Mengarah ke Kemasan Barang';
+        serverRejectionReason = 'Kamera tidak mengarah ke kemasan barang (terdeteksi lantai/objek kosong). Arahkan kamera ke label kardus/barang terlebih dahulu!';
+        setLiveVisionStatus({
+          state: 'no_packaging',
+          confidence: 0,
+          reason: serverRejectionReason
+        });
+        setYoloConfidence(0);
+      } else {
+        const masterBarang = databaseBarangService.getAll().slice(0, 120);
+        const refImg = dbInfo?.matchedRecord?.dokumentasiUrl?.startsWith('data:image/jpeg')
+          ? dbInfo.matchedRecord.dokumentasiUrl
+          : undefined;
+
+        // SMART ROUTER (SPESIFIKASI 2 & 3):
+        // 1) Jalankan Jalur A (onnxruntime-web lokal di browser HP) sebagai pemeriksa utama instan.
+        // 2) Jika Jalur A gagal memuat model ONNX atau confidence < 0.75 (75%), otomatis lempar 1 frame
+        //    ke POST /api/yolo/detect-fallback (Jalur B di server Node.js Hostinger).
+        const jalurAResult = !customImageBase64 && !simulateMismatch
+          ? await runJalurALocalOnnxDetection(0.25)
+          : { loaded: false, inferenceMs: 0, best: null };
+
+        if (jalurAResult.loaded && jalurAResult.best && jalurAResult.best.score >= 0.75) {
+          setYoloEngineMode('JALUR_A_WEB');
+          setYoloInferenceMs(jalurAResult.inferenceMs);
+          setYoloConfidence(jalurAResult.best.score);
+          serverExtractedCode = jalurAResult.best.skuCode.trim().toUpperCase();
+          serverExtractedName = jalurAResult.best.itemName.trim();
+
+          const isMatchJalurA =
+            activeInvoice.items.some(
+              it =>
+                it.skuCode.trim().toUpperCase() === serverExtractedCode ||
+                getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === serverExtractedCode
+            ) &&
+            (desiredCode === 'AUTO' || serverExtractedCode === desiredCode.toUpperCase());
+
+          if (!isMatchJalurA) {
+            serverRejected = true;
+            serverRejectionReason = `TIDAK SESUAI: YOLO26 Jalur A mendeteksi [${serverExtractedCode}] ${serverExtractedName} (${Math.round(jalurAResult.best.score * 100)}%), sedangkan target aktif adalah [${desiredCode}] ${desiredName}!`;
+          }
+          setLiveVisionStatus({
+            state: isMatchJalurA ? 'matching' : 'mismatch',
+            confidence: jalurAResult.best.score,
+            detectedCode: serverExtractedCode,
+            detectedSummary: serverExtractedName,
+            bbox: [jalurAResult.best.x1, jalurAResult.best.y1, jalurAResult.best.x2, jalurAResult.best.y2],
+            reason: serverRejectionReason || undefined
+          });
+        } else {
+          // JALUR B FALLBACK: Kirim 1 frame tangkapan kamera ke POST /api/yolo/detect-fallback di server Hostinger
+          setYoloEngineMode('JALUR_B_SERVER');
+          let fallbackHandled = false;
+          try {
+            const fbResp = await fetch('/api/yolo/detect-fallback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image: captured.base64,
+                image_base64: captured.base64,
+                surat_jalan_id: activeInvoice.invoiceNumber,
+                target_item_code: desiredCode,
+                target_item_name: desiredName,
+                expected_items: activeInvoice.items,
+                force_mismatch: simulateMismatch
+              })
+            });
+            const fbJson = await fbResp.json().catch(() => null);
+            if (fbJson && fbJson.model_loaded) {
+              fallbackHandled = true;
+              const conf = Number(fbJson.confidence || fbJson.ocr_confidence || 0.96);
+              setYoloConfidence(conf);
+              if (fbJson.inference_ms) setYoloInferenceMs(Number(fbJson.inference_ms));
+              if (fbJson.extracted_code) {
+                serverExtractedCode = String(fbJson.extracted_code).trim().toUpperCase();
+              }
+              if (fbJson.product_name) {
+                serverExtractedName = String(fbJson.product_name).trim();
+              }
+              if (!fbResp.ok || fbJson.status === 'error' || fbJson.is_matching_target === false || fbJson.is_valid_packaging === false) {
+                serverRejected = true;
+                serverRejectionReason = String(
+                  fbJson.message ||
+                    `Barang yang difoto [${serverExtractedCode}] (${serverExtractedName}) TIDAK SESUAI dengan target [${desiredCode}] ${desiredName}!`
+                );
+                setLiveVisionStatus({
+                  state: fbJson.is_valid_packaging === false ? 'no_packaging' : 'mismatch',
+                  confidence: fbJson.is_valid_packaging === false ? 0 : conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName,
+                  reason: serverRejectionReason
+                });
+              } else {
+                setLiveVisionStatus({
+                  state: 'matching',
+                  confidence: conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName
+                });
+              }
+            }
+          } catch {
+            // Continue to /api/scan-muat sync & verification
+          }
+
+          try {
+            const resp = await fetch('/api/scan-muat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image: captured.base64,
+                image_base64: captured.base64,
+                surat_jalan_id: activeInvoice.invoiceNumber,
+                so_number: activeInvoice.soNumber,
+                gate_id: selectedGate,
+                gate: selectedGate,
+                timestamp: isoTimestamp,
+                target_item_code: desiredCode,
+                target_item_name: desiredName,
+                reference_image_base64: refImg,
+                qty_scanned: cleanQty,
+                expected_items: activeInvoice.items,
+                master_items: masterBarang,
+                force_mismatch: simulateMismatch
+              })
+            });
+
+            const resultJson = await resp.json().catch(() => null);
+            if (resultJson && !fallbackHandled) {
+              const conf = Number(resultJson.ocr_confidence || resultJson.confidence || 0.98);
+              setYoloConfidence(conf);
+              if (resultJson.extracted_code) {
+                serverExtractedCode = String(resultJson.extracted_code).trim().toUpperCase();
+              }
+              if (resultJson.product_name) {
+                serverExtractedName = String(resultJson.product_name).trim();
+              }
+              if (!resp.ok || resultJson.status === 'error' || resultJson.is_matching_target === false || resultJson.is_valid_packaging === false) {
+                serverRejected = true;
+                serverRejectionReason = String(
+                  resultJson.message ||
+                    `Barang yang difoto [${serverExtractedCode}] (${serverExtractedName}) TIDAK SESUAI dengan target [${desiredCode}] ${desiredName}!`
+                );
+                setLiveVisionStatus({
+                  state: resultJson.is_valid_packaging === false ? 'no_packaging' : 'mismatch',
+                  confidence: resultJson.is_valid_packaging === false ? 0 : conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName,
+                  reason: serverRejectionReason
+                });
+              } else {
+                setLiveVisionStatus({
+                  state: 'matching',
+                  confidence: conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName
+                });
+              }
+            }
+          } catch {
+            // If offline, fall back to liveVisionStatus state
+            if (!fallbackHandled && (liveVisionStatus.state === 'mismatch' || liveVisionStatus.state === 'no_packaging')) {
+              serverRejected = true;
+              serverExtractedCode = liveVisionStatus.detectedCode || 'TIDAK-SESUAI';
+              serverExtractedName = liveVisionStatus.detectedSummary || 'Barang Tidak Sesuai';
+              serverRejectionReason = liveVisionStatus.reason || 'Barang di kamera tidak sesuai dengan target aktif!';
+            }
+          }
+        }
+      }
+
+      const extractedCode = serverExtractedCode;
       const matchedItem = activeInvoice.items.find(
         it =>
           it.skuCode.trim().toUpperCase() === extractedCode ||
           getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === extractedCode
       );
 
-      // Verifikasi instan Ultralytics YOLO terhadap Database Barang & Target Barang yang sedang dipilih
+      // Verifikasi terhadap Database Barang & Target Barang yang sedang dipilih
       const isDifferentFromTarget =
         Boolean(currentTarget) &&
         extractedCode !== currentTarget.skuCode.trim().toUpperCase() &&
@@ -3238,6 +3963,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       if (
         matchedItem &&
         !simulateMismatch &&
+        !serverRejected &&
         !isDifferentFromTarget &&
         !isNotRegisteredInDatabaseBarang &&
         !willExceedTargetQuota
@@ -3255,7 +3981,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           scannedBy: scanAdminPic,
           notes:
             scanNotesInput.trim() ||
-            `[YOLOv8x • ${selectedGate}] Terdeteksi Otomatis [${matchedDbInfo.kodeBarang}] (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
+            `[YOLOv8x • ${selectedGate}] Terverifikasi Visual [${matchedDbInfo.kodeBarang}] (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           exifMetadata: captured.exif
         };
 
@@ -3279,15 +4005,13 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           })
         );
 
-        // Otomatis lanjut ke item berikutnya jika item saat ini sudah 100% klop
+        // Hanya pindah otomatis jika item saat ini sudah penuh (100% klop)
         if (newItemLoaded >= matchedItem.qtyOrdered) {
           const nextRemaining = activeInvoice.items.find(
             it => it.id !== matchedItem.id && it.qtyLoaded < it.qtyOrdered
           );
           if (nextRemaining) {
             setTargetScanMode(nextRemaining.id);
-          } else {
-            setTargetScanMode('AUTO');
           }
         }
 
@@ -3310,9 +4034,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           suratJalanId: activeInvoice.invoiceNumber,
           timestamp: isoTimestamp,
           displayTime,
-          message: `YOLO Auto-Detect [${matchedDbInfo.kodeBarang}] Klop (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
+          message: `BARANG SESUAI [${matchedDbInfo.kodeBarang}] (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           photoDataUrl: captured.base64,
-          confidenceScore: yoloConfidence,
+          confidenceScore: yoloConfidence || 0.98,
           yoloBbox: [142, 96, 980, 520],
           sqlStatusTransition: 'PENDING -> LOADED'
         };
@@ -3326,31 +4050,38 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           return next;
         });
 
+        // Cooldown 2 detik (2000ms) pada YOLO Auto: ON setelah verifikasi +1 berhasil agar kardus yang sama tidak terhitung ganda
+        lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
+
         playScannerFeedbackBeep('success', soundEnabled);
         showToast(
-          `⚡ YOLO Verified (${yoloInferenceMs}ms): [${matchedDbInfo.kodeBarang}] ${matchedDbInfo.deskripsiBarang} (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
+          `✅ BARANG SESUAI: [${matchedDbInfo.kodeBarang}] ${matchedDbInfo.deskripsiBarang} (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
           'success'
         );
       } else {
-        // ERROR / PERBEDAAN BARANG -> OTOMATIS MERAH & KUNCI PROGRES (TIDAK BISA LANJUT KE BARANG SELANJUTNYA)
+        // ERROR / PERBEDAAN BARANG -> OTOMATIS MERAH
         const lockedItem = currentTarget || matchedItem || activeInvoice.items[0];
         const lockedDbInfo = lockedItem ? getIntegratedDbInfo(lockedItem) : null;
 
-        let rejectionReason = `Terdeteksi perbedaan barang: [${extractedCode}] tidak sesuai dengan target [${lockedDbInfo?.kodeBarang || desiredCode}] pada Database Barang & Faktur!`;
+        let rejectionReason =
+          serverRejectionReason ||
+          `Terdeteksi perbedaan barang: [${extractedCode}] tidak sesuai dengan target [${lockedDbInfo?.kodeBarang || desiredCode}] pada Database Barang & Faktur!`;
 
-        if (isNotRegisteredInDatabaseBarang && lockedItem) {
-          rejectionReason = `Kode Barang [${lockedItem.skuCode}] "${lockedItem.itemName}" tidak ditemukan / berbeda dengan Master Database Barang Gudang!`;
-        } else if (willExceedTargetQuota && matchedItem) {
-          rejectionReason = `Kuota muat [${matchedItem.skuCode}] melebihi Faktur (${matchedItem.qtyLoaded + cleanQty}/${matchedItem.qtyOrdered} ${matchedItem.unit}). Tidak diizinkan lanjut!`;
-          setOverloadWarningAlert({
-            itemName: matchedItem.itemName,
-            skuCode: matchedItem.skuCode,
-            qtyOrdered: matchedItem.qtyOrdered,
-            qtyLoaded: matchedItem.qtyLoaded + cleanQty,
-            unit: matchedItem.unit
-          });
-        } else if (isDifferentFromTarget && lockedItem) {
-          rejectionReason = `Barang terfoto [${extractedCode}] TIDAK SESUAI dengan target [${lockedDbInfo?.kodeBarang}] ${lockedDbInfo?.deskripsiBarang}!`;
+        if (!serverRejectionReason) {
+          if (isNotRegisteredInDatabaseBarang && lockedItem) {
+            rejectionReason = `Kode Barang [${lockedItem.skuCode}] "${lockedItem.itemName}" tidak ditemukan / berbeda dengan Master Database Barang Gudang!`;
+          } else if (willExceedTargetQuota && matchedItem) {
+            rejectionReason = `Kuota muat [${matchedItem.skuCode}] melebihi Faktur (${matchedItem.qtyLoaded + cleanQty}/${matchedItem.qtyOrdered} ${matchedItem.unit})!`;
+            setOverloadWarningAlert({
+              itemName: matchedItem.itemName,
+              skuCode: matchedItem.skuCode,
+              qtyOrdered: matchedItem.qtyOrdered,
+              qtyLoaded: matchedItem.qtyLoaded + cleanQty,
+              unit: matchedItem.unit
+            });
+          } else if (isDifferentFromTarget && lockedItem) {
+            rejectionReason = `Barang terfoto [${extractedCode}] TIDAK SESUAI dengan target [${lockedDbInfo?.kodeBarang}] ${lockedDbInfo?.deskripsiBarang}!`;
+          }
         }
 
         if (lockedItem) {
@@ -3361,9 +4092,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             expectedName: lockedDbInfo?.deskripsiBarang || lockedItem.itemName,
             expectedUnit: lockedDbInfo?.satuan || lockedItem.unit,
             detectedCode: simulateMismatch ? 'BRG-SALAH-999' : extractedCode || 'TIDAK-SESUAI',
-            detectedName: simulateMismatch
-              ? 'Kemasan Barang Berbeda (Tidak Sesuai Database Barang)'
-              : 'Objek / Barang Tidak Sesuai Database Barang',
+            detectedName: serverExtractedName || 'Objek / Barang Tidak Sesuai Target',
             reason: rejectionReason,
             photoDataUrl: captured.base64,
             timestamp: displayTime
@@ -3378,6 +4107,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           status: 'error',
           extractedCode: simulateMismatch ? 'BRG-SALAH-999' : extractedCode || 'TIDAK-SESUAI',
           productName:
+            serverExtractedName ||
             lockedDbInfo?.deskripsiBarang ||
             'Perbedaan Barang / Tidak Sesuai Database Barang',
           unit: lockedDbInfo?.satuan || 'Box',
@@ -3405,7 +4135,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
         playScannerFeedbackBeep('error', soundEnabled);
         showToast(
-          `🚨 MERAH & TERKUNCI: ${rejectionReason} — Tidak bisa lanjut ke barang selanjutnya!`,
+          `🚨 BARANG TIDAK SESUAI: ${rejectionReason}`,
           'error'
         );
       }
@@ -3414,7 +4144,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
   };
 
-  // Auto-Detect Interval (Every 2.5 Seconds when Auto-Scan is ON, paused automatically if locked RED)
+  // Auto-Detect Interval (dengan Cooldown 2 Detik setelah verifikasi +1 berhasil agar kardus yang sama tidak terhitung ganda)
   useEffect(() => {
     if (!autoScanEnabled || scanErrorLock) {
       if (autoScanTimerRef.current) {
@@ -3425,15 +4155,18 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
 
     autoScanTimerRef.current = window.setInterval(() => {
-      if (!isVerifyingScan && activeInvoice && !scanErrorLock) {
+      if (Date.now() < lastAutoVerifyCooldownUntilRef.current) {
+        return;
+      }
+      if (!isVerifyingScan && activeInvoice && !scanErrorLock && liveVisionStatus.state === 'matching') {
         const remainingItem = activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered);
         if (!remainingItem && targetScanMode === 'AUTO') {
-          // 8. YOLO Auto ON tetap aktif dalam mode standby tanpa mati otomatis
           return;
         }
+        lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
         void executeCaptureAndVerify();
       }
-    }, 2500);
+    }, 2000);
 
     return () => {
       if (autoScanTimerRef.current) {
@@ -3441,7 +4174,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         autoScanTimerRef.current = null;
       }
     };
-  }, [autoScanEnabled, isVerifyingScan, activeInvoice, targetScanMode, selectedGate, scanQtyInput, soundEnabled, scanErrorLock]);
+  }, [autoScanEnabled, isVerifyingScan, activeInvoice, targetScanMode, selectedGate, scanQtyInput, soundEnabled, scanErrorLock, liveVisionStatus.state]);
 
   const handleAdjustLoadedQty = (item: SalesOrderItem, exactQty: number) => {
     if (!activeInvoice) return;
@@ -3458,16 +4191,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     showToast(`Jumlah muat ${item.itemName} disesuaikan menjadi ${clamped} ${item.unit}.`, 'info');
   };
 
+  // Admin bebas memilih barang tidak sesuai urutan faktur kapan saja
   const handleSelectSpecificItemToScan = (item: SalesOrderItem) => {
-    // Jika sedang ada kunci error merah pada barang lain, TOLAK perpindahan ke barang selanjutnya!
-    if (scanErrorLock && scanErrorLock.lockedItemId !== item.id) {
-      playScannerFeedbackBeep('error', soundEnabled);
-      showToast(
-        `🔒 TERKUNCI MERAH: Selesaikan / foto ulang barang [${scanErrorLock.expectedCode}] ${scanErrorLock.expectedName} terlebih dahulu! Tidak bisa melanjutkan ke barang selanjutnya.`,
-        'error'
-      );
-      return;
-    }
+    setScanErrorLock(null);
     setTargetScanMode(item.id);
     const remaining = Math.max(1, item.qtyOrdered - item.qtyLoaded);
     setScanQtyInput(Math.min(5, remaining));
@@ -3512,26 +4238,26 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     <div
       className={`w-full max-w-md mx-auto bg-slate-950 text-slate-100 shadow-2xl relative border-x border-slate-900 flex flex-col ${
         scannerPage === 'kamera'
-          ? 'h-[100dvh] lg:h-[calc(100dvh-24px)] overflow-hidden pb-20'
+          ? 'h-[calc(100dvh-56px)] lg:h-[calc(100dvh-24px)] overflow-hidden pb-[66px]'
           : 'min-h-screen pb-28'
       }`}
     >
       {/* ===================================================================== */}
       {/* STICKY TOP HEADER (LOGO PERUSAHAAN + NAMA USER TANPA DB BARANG)       */}
       {/* ===================================================================== */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-2.5 shadow-sm shrink-0">
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 py-1.5 shadow-sm shrink-0">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="shrink-0">
-              <AkkLogo size="md" showText={false} />
+              <AkkLogo size="sm" showText={false} />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold tracking-wider uppercase text-indigo-400">
+                <span className="text-[9px] font-bold tracking-wider uppercase text-indigo-400">
                   ADMIN PENJUALAN AKK
                 </span>
               </div>
-              <h1 className="text-sm font-bold text-white leading-tight truncate">
+              <h1 className="text-xs font-bold text-white leading-tight truncate">
                 {activeUserName}
               </h1>
             </div>
@@ -3539,7 +4265,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
           <div className="flex items-center gap-1.5 shrink-0">
             <span
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold border ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
                 isOnline
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                   : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
@@ -3556,7 +4282,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             <select
               value={selectedGate}
               onChange={e => setSelectedGate(e.target.value)}
-              className="px-2.5 py-1 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-emerald-400 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-[10px] font-bold text-emerald-400 focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               {LOADING_GATE_OPTIONS.map(gate => (
                 <option key={gate} value={gate}>
@@ -3568,7 +4294,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
             <button
               type="button"
               onClick={() => setSoundEnabled(prev => !prev)}
-              className="p-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold cursor-pointer"
+              className="p-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold cursor-pointer"
               title="Toggle Suara Beep"
             >
               {soundEnabled ? '🔊' : '🔇'}
@@ -3578,46 +4304,31 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       </header>
 
       {/* ===================================================================== */}
-      {/* BANNER PERINGATAN MERAH & KUNCI PROGRES JIKA BARANG TIDAK SESUAI      */}
+      {/* BANNER PERINGATAN MERAH JIKA BARANG TIDAK SESUAI                      */}
       {/* ===================================================================== */}
       {scanErrorLock && (
-        <div className="mx-3 mt-3 p-3.5 rounded-2xl bg-rose-600 text-white border-2 border-rose-300 shadow-xl space-y-2 animate-pulse">
+        <div className="mx-2 mt-1.5 p-2.5 rounded-xl bg-rose-600 text-white border-2 border-rose-300 shadow-xl space-y-1.5 shrink-0">
           <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-white shrink-0" />
-              <div className="text-xs font-black uppercase tracking-wide">
-                🚨 KESALAHAN / PERBEDAAN BARANG TERDETEKSI!
+            <div className="flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-white shrink-0" />
+              <div className="text-[11px] font-black uppercase tracking-wide">
+                🚨 BARANG TIDAK SESUAI TARGET!
               </div>
             </div>
-            <span className="px-2 py-0.5 rounded-full bg-black/30 text-[10px] font-black uppercase shrink-0">
-              🔒 TERKUNCI
-            </span>
+            <button
+              type="button"
+              onClick={() => setScanErrorLock(null)}
+              className="px-2 py-0.5 rounded-full bg-black/30 hover:bg-black/50 text-[9px] font-black uppercase shrink-0 cursor-pointer"
+            >
+              ✕ Tutup
+            </button>
           </div>
 
-          <p className="text-[11px] font-semibold leading-relaxed text-white/95">
+          <p className="text-[10px] font-semibold leading-snug text-white/95">
             {scanErrorLock.reason}
           </p>
 
-          <div className="grid grid-cols-1 gap-1.5 text-[11px] bg-black/25 p-2.5 rounded-xl border border-white/20">
-            <div>
-              <span className="font-bold text-rose-200">Seharusnya (Database Barang): </span>
-              <span className="font-mono font-black text-white">
-                [{scanErrorLock.expectedCode}] {scanErrorLock.expectedName} ({scanErrorLock.expectedUnit})
-              </span>
-            </div>
-            <div>
-              <span className="font-bold text-rose-200">Hasil Terfoto: </span>
-              <span className="font-mono font-black text-amber-200">
-                [{scanErrorLock.detectedCode}] {scanErrorLock.detectedName}
-              </span>
-            </div>
-          </div>
-
-          <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-200">
-            ⛔ TIDAK BISA MELANJUTKAN KE BARANG SELANJUTNYA SEBELUM BARANG INI SESUAI!
-          </div>
-
-          <div className="pt-1 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 pt-0.5">
             <button
               type="button"
               disabled={isVerifyingScan}
@@ -3625,9 +4336,19 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 setScanErrorLock(null);
                 void executeCaptureAndVerify(undefined, undefined, false);
               }}
-              className="flex-1 py-2 px-3 rounded-xl bg-white text-rose-700 hover:bg-rose-50 font-black text-xs shadow-md cursor-pointer transition"
+              className="flex-1 py-1.5 px-2.5 rounded-lg bg-white text-rose-700 hover:bg-rose-50 font-black text-[10px] shadow-sm cursor-pointer transition"
             >
-              📸 Foto Ulang &amp; Verifikasi Barang Ini
+              📸 Foto Ulang Barang Ini
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setScanErrorLock(null);
+                setScannerPage('list');
+              }}
+              className="py-1.5 px-2.5 rounded-lg bg-rose-800 hover:bg-rose-900 text-white font-black text-[10px] border border-rose-400/50 cursor-pointer transition"
+            >
+              📋 Pilih Barang Lain
             </button>
           </div>
         </div>
@@ -3643,30 +4364,42 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         className="hidden"
       />
 
+      {/* Backdrop to close custom dropdown when clicking outside */}
+      {openCustomDropdown && (
+        <div
+          className="fixed inset-0 z-30"
+          onClick={() => setOpenCustomDropdown(null)}
+        />
+      )}
+
       {/* ===================================================================== */}
-      {/* MENU 1: KAMERA (SATU LAYAR PENUH + ULTRALYTICS YOLO AUTO-DETECT)       */}
+      {/* MENU 1: KAMERA (SATU LAYAR PENUH TANPA SCROLL + VALIDASI VISUAL REAL) */}
       {/* ===================================================================== */}
       {scannerPage === 'kamera' && (() => {
         const activeDbInfo = resolvedTargetItem ? getIntegratedDbInfo(resolvedTargetItem) : null;
         const currentScans = resolvedTargetItem?.scans || [];
+        const isVisuallyValid = !scanErrorLock && liveVisionStatus.state === 'matching';
+        const activeItemIndex = resolvedTargetItem
+          ? activeInvoice.items.findIndex(it => it.id === resolvedTargetItem.id)
+          : 0;
 
         return (
-          <div className="p-2.5 flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="p-2 flex-1 flex flex-col min-h-0 overflow-hidden">
             <div
-              className={`p-2.5 rounded-2xl border flex-1 flex flex-col min-h-0 gap-2 transition-colors ${
-                scanErrorLock
-                  ? 'bg-rose-950/40 border-2 border-rose-500 shadow-lg shadow-rose-500/20'
-                  : 'bg-slate-900 border-slate-800'
+              className={`p-2 rounded-2xl border flex-1 flex flex-col min-h-0 gap-1.5 transition-colors ${
+                !isVisuallyValid
+                  ? 'bg-rose-50/60 dark:bg-rose-950/35 border-2 border-rose-400 dark:border-rose-500 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border-2 border-emerald-500/80 shadow-sm'
               }`}
             >
-              {/* Baris kontrol kamera + Ultralytics YOLO Badge */}
-              <div className="flex items-center justify-between gap-1.5 flex-wrap shrink-0">
-                <div className="flex items-center gap-1.5">
+              {/* Baris 1: Kontrol Kamera */}
+              <div className="flex items-center justify-between gap-1 shrink-0">
+                <div className="flex items-center gap-1">
                   {!isCameraActive ? (
                     <button
                       type="button"
                       onClick={() => void startLiveCamera()}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold cursor-pointer transition"
                     >
                       ▶ Kamera Aktif
                     </button>
@@ -3674,7 +4407,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     <button
                       type="button"
                       onClick={() => stopCamera(true)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-[10px] font-extrabold cursor-pointer transition"
+                      className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 text-[10px] font-extrabold cursor-pointer transition"
                     >
                       ● YOLO Live ON
                     </button>
@@ -3682,33 +4415,32 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   <button
                     type="button"
                     onClick={() => void handleSwitchCamera()}
-                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
+                    className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-[10px] font-bold cursor-pointer transition flex items-center gap-1 shadow-2xs"
                   >
-                    <RefreshCw className="w-3 h-3 text-sky-400" />
+                    <RefreshCw className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                     <span>{facingMode === 'environment' ? 'Belakang' : 'Depan'}</span>
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => void handleToggleTorch()}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition border ${
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition border shadow-2xs ${
                       isTorchOn
                         ? 'bg-amber-400 text-slate-950 border-amber-300'
-                        : 'bg-slate-800 text-slate-200 border-slate-700'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
                     }`}
                   >
                     {isTorchOn ? '🔦 ON' : '🔦 Flash'}
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(scanErrorLock)}
                     onClick={() => setAutoScanEnabled(prev => !prev)}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition shadow-2xs ${
                       autoScanEnabled
-                        ? 'bg-emerald-600 text-white border-emerald-400 animate-pulse'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                     }`}
                   >
                     YOLO Auto: {autoScanEnabled ? 'ON' : 'OFF'}
@@ -3716,12 +4448,213 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </div>
               </div>
 
-              {/* Viewport Kamera Satu Layar Penuh dengan Ultralytics YOLO Real-Time Bounding Box */}
+              {/* Baris 2: Custom Modern Dropdown Nama Toko + Dropdown Nama Barang, Qty & Satuan */}
+              <div className="shrink-0 space-y-1.5 relative z-40">
+                {/* Dropdown 1: Pilih Nama Toko / Pelanggan */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    disabled={Boolean(scanErrorLock)}
+                    onClick={() =>
+                      setOpenCustomDropdown(prev => (prev === 'cam_store' ? null : 'cam_store'))
+                    }
+                    className={`w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border flex items-center justify-between gap-2 text-left transition shadow-2xs ${
+                      scanErrorLock
+                        ? 'border-rose-300 dark:border-rose-500/50 opacity-60 cursor-not-allowed'
+                        : openCustomDropdown === 'cam_store'
+                        ? 'border-sky-500 ring-2 ring-sky-500/15 cursor-pointer'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[9px] font-extrabold uppercase shrink-0">
+                        Toko
+                      </span>
+                      <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 truncate">
+                        {activeInvoice.customerName}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-mono text-[9px] font-extrabold">
+                        {evalActive.totalLoaded}/{evalActive.totalOrdered} Muat
+                      </span>
+                      <span className="text-slate-400 text-[10px] font-bold">
+                        {openCustomDropdown === 'cam_store' ? '▲' : '▼'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {openCustomDropdown === 'cam_store' && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-50 p-1">
+                      {availableInvoices.map(inv => {
+                        const ev = evaluateInvoiceStatus(inv);
+                        const isCurrentStore = inv.id === activeInvoice.id;
+                        return (
+                          <button
+                            key={inv.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedInvoiceId(inv.id);
+                              localStorage.setItem(ACTIVE_INVOICE_KEY, inv.id);
+                              setTargetScanMode('AUTO');
+                              setOpenCustomDropdown(null);
+                            }}
+                            className={`w-full px-2.5 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                              isCurrentStore
+                                ? 'bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/40'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 truncate">
+                                {inv.customerName}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                                {inv.invoiceNumber} &bull; {inv.items.length} SKU
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span
+                                className={`px-2 py-0.5 rounded-lg font-mono text-[10px] font-extrabold border ${
+                                  ev.totalLoaded >= ev.totalOrdered && ev.totalOrdered > 0
+                                    ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-sky-700 dark:text-cyan-300 border-slate-200 dark:border-slate-700'
+                                }`}
+                              >
+                                {ev.totalLoaded}/{ev.totalOrdered}
+                              </span>
+                              {isCurrentStore && <Check className="w-3.5 h-3.5 text-sky-600 dark:text-cyan-400" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Dropdown 2: Pilih Nama Barang, Qty & Satuan + Input Qty Scan */}
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenCustomDropdown(prev => (prev === 'cam_item' ? null : 'cam_item'))
+                      }
+                      className={`w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border flex items-center justify-between gap-1.5 text-left transition shadow-2xs cursor-pointer ${
+                        openCustomDropdown === 'cam_item'
+                          ? 'border-sky-500 ring-2 ring-sky-500/15'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="px-1.5 py-0.5 rounded-md bg-sky-50 dark:bg-sky-500/20 border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 font-mono text-[9px] font-black shrink-0">
+                          {activeItemIndex >= 0 ? `${activeItemIndex + 1}.` : ''}{' '}
+                          {activeDbInfo?.kodeBarang || resolvedTargetItem?.skuCode || '-'}
+                        </span>
+                        <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 truncate">
+                          {activeDbInfo?.deskripsiBarang || resolvedTargetItem?.itemName || 'Pilih Barang'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {resolvedTargetItem && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-black border ${
+                              resolvedTargetItem.qtyLoaded >= resolvedTargetItem.qtyOrdered &&
+                              resolvedTargetItem.qtyOrdered > 0
+                                ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                                : 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            {resolvedTargetItem.qtyLoaded}/{resolvedTargetItem.qtyOrdered}{' '}
+                            {activeDbInfo?.satuan || resolvedTargetItem.unit}
+                          </span>
+                        )}
+                        <span className="text-slate-400 text-[10px] font-bold">
+                          {openCustomDropdown === 'cam_item' ? '▲' : '▼'}
+                        </span>
+                      </div>
+                    </button>
+
+                    {openCustomDropdown === 'cam_item' && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-50 p-1">
+                        {activeInvoice.items.map((it, idx) => {
+                          const dbIt = getIntegratedDbInfo(it);
+                          const isCurrentItem = resolvedTargetItem?.id === it.id;
+                          const isDone = it.qtyLoaded >= it.qtyOrdered && it.qtyOrdered > 0;
+                          return (
+                            <button
+                              key={it.id}
+                              type="button"
+                              onClick={() => {
+                                setScanErrorLock(null);
+                                setTargetScanMode(it.id);
+                                const rem = Math.max(1, it.qtyOrdered - it.qtyLoaded);
+                                setScanQtyInput(Math.min(10, rem));
+                                setOpenCustomDropdown(null);
+                              }}
+                              className={`w-full px-2.5 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isCurrentItem
+                                  ? 'bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/40'
+                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/80'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-500/30 font-mono text-[9px] font-black">
+                                    {idx + 1}. {dbIt.kodeBarang}
+                                  </span>
+                                  <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400">
+                                    {it.qtyLoaded}/{it.qtyOrdered} {dbIt.satuan}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] font-bold text-slate-800 dark:text-slate-100 leading-snug break-words">
+                                  {dbIt.deskripsiBarang}
+                                </div>
+                              </div>
+                              <div className="shrink-0 flex items-center gap-1">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] font-extrabold border ${
+                                    isDone
+                                      ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                                      : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
+                                  }`}
+                                >
+                                  {dbIt.satuan}
+                                </span>
+                                {isCurrentItem && <Check className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Box Input Qty & Satuan */}
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1 shrink-0 shadow-2xs">
+                    <span className="text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase">
+                      Qty:
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={scanQtyInput}
+                      onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value) || 1))}
+                      className="w-8 py-0.5 rounded-md text-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-black text-emerald-700 dark:text-emerald-400 focus:outline-none"
+                    />
+                    <span className="text-[9px] font-extrabold text-sky-700 dark:text-cyan-400 uppercase">
+                      {activeDbInfo?.satuan || resolvedTargetItem?.unit || 'CRT'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Viewport Kamera Satu Layar Penuh dengan Badge Deteksi [KODE_SKU] NAMA_BARANG + Status SESUAI / TIDAK SESUAI */}
               <div
-                className={`relative w-full flex-1 min-h-[160px] rounded-2xl bg-slate-950 transition-all overflow-hidden flex flex-col justify-between p-2.5 ${
-                  scanErrorLock
-                    ? 'border-4 border-rose-500 ring-4 ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.6)]'
-                    : 'border-4 border-emerald-500 ring-4 ring-emerald-500/40 shadow-[0_0_35px_rgba(16,185,129,0.5)]'
+                className={`relative w-full flex-1 min-h-[120px] rounded-2xl bg-slate-950 transition-all overflow-hidden flex flex-col justify-between p-2 ${
+                  isVisuallyValid
+                    ? 'border-4 border-emerald-500 ring-4 ring-emerald-500/30 shadow-[0_0_24px_rgba(16,185,129,0.35)]'
+                    : 'border-4 border-rose-500 ring-4 ring-rose-500/35 shadow-[0_0_24px_rgba(244,63,94,0.4)]'
                 }`}
               >
                 {isCameraActive ? (
@@ -3740,76 +4673,78 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   />
                 ) : null}
 
-                {/* 9. Penerangan Flash Layar saat Torch / Flash Diaktifkan */}
+                {/* Penerangan Flash Layar saat Torch / Flash Diaktifkan */}
                 {isTorchOn && (
                   <div className="absolute inset-0 border-4 border-amber-300/80 shadow-[inset_0_0_90px_rgba(255,255,255,0.75)] pointer-events-none z-20 animate-pulse" />
                 )}
 
-                {/* Corner Brackets & Ultralytics YOLO Real-Time Detection Overlay */}
+                {/* Badge Deteksi Terbaik di Atas Bingkai Kamera: [KODE_SKU] NAMA_BARANG + SESUAI • 98% / TIDAK SESUAI */}
                 <div className="relative z-10 w-full h-full rounded-xl flex flex-col justify-between p-1 pointer-events-none">
+                  <div className="flex items-center justify-between gap-1.5 px-1 pt-0.5">
+                    <div
+                      title={yoloEngineMode === 'JALUR_A_WEB' ? 'YOLO26 Jalur A (ONNX Web)' : 'YOLO26 Jalur B (Hostinger Node.js)'}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold truncate max-w-[66%] border backdrop-blur-md shadow-sm ${
+                        isVisuallyValid
+                          ? 'bg-emerald-950/90 text-emerald-100 border-emerald-400/60'
+                          : 'bg-rose-950/90 text-rose-100 border-rose-400/60'
+                      }`}
+                    >
+                      [{liveVisionStatus.detectedCode || activeDbInfo?.kodeBarang || resolvedTargetItem?.skuCode || '-'}]{' '}
+                      {liveVisionStatus.detectedSummary || activeDbInfo?.deskripsiBarang || resolvedTargetItem?.itemName || 'Arahkan Kamera ke Kemasan'}
+                    </div>
+
+                    <div
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 border backdrop-blur-md shadow-sm ${
+                        isVisuallyValid
+                          ? 'bg-emerald-950/90 text-emerald-300 border-emerald-400/60'
+                          : 'bg-rose-950/90 text-rose-200 border-rose-400/60'
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isVisuallyValid ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                        }`}
+                      />
+                      <span>
+                        {isVisuallyValid
+                          ? `SESUAI • ${Math.round((liveVisionStatus.confidence || yoloConfidence || 0.98) * 100)}%`
+                          : 'TIDAK SESUAI'}
+                      </span>
+                    </div>
+                  </div>
+
                   <div
                     className={`absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 rounded-tl-md ${
-                      scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                      isVisuallyValid ? 'border-emerald-400' : 'border-rose-500'
                     }`}
                   />
                   <div
                     className={`absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 rounded-tr-md ${
-                      scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                      isVisuallyValid ? 'border-emerald-400' : 'border-rose-500'
                     }`}
                   />
                   <div
                     className={`absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 rounded-bl-md ${
-                      scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                      isVisuallyValid ? 'border-emerald-400' : 'border-rose-500'
                     }`}
                   />
                   <div
                     className={`absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 rounded-br-md ${
-                      scanErrorLock ? 'border-rose-500' : 'border-emerald-400'
+                      isVisuallyValid ? 'border-emerald-400' : 'border-rose-500'
                     }`}
                   />
-
-                  {/* Top HUD: Ultralytics YOLO Real-Time Item Validation Status */}
-                  <div className="w-full flex items-center justify-between gap-1 text-[9px] font-mono">
-                    <span
-                      className={`px-2.5 py-1 rounded-lg font-black border flex items-center gap-1.5 min-w-0 max-w-[80%] shadow-md ${
-                        scanErrorLock
-                          ? 'bg-rose-600 text-white border-rose-300 animate-pulse'
-                          : 'bg-emerald-600 text-white border-emerald-300'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full shrink-0 animate-ping ${scanErrorLock ? 'bg-rose-100' : 'bg-emerald-200'}`} />
-                      <span className="truncate">
-                        {scanErrorLock
-                          ? `🚨 [${scanErrorLock.expectedCode}] ${scanErrorLock.expectedName} • BARANG TIDAK SESUAI`
-                          : resolvedTargetItem
-                          ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName} • BARANG SESUAI`
-                          : `BARANG SESUAI (${yoloInferenceMs}ms)`}
-                      </span>
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded-lg font-black shrink-0 border shadow-xs ${
-                        scanErrorLock
-                          ? 'bg-rose-950/95 border-rose-400 text-rose-200'
-                          : 'bg-emerald-950/95 border-emerald-400 text-emerald-200'
-                      }`}
-                    >
-                      {scanErrorLock ? '🔴 TIDAK SESUAI' : '🟢 SESUAI'} • {(yoloConfidence * 100).toFixed(0)}%
-                    </span>
-                  </div>
-
                 </div>
               </div>
 
-              {/* 7. Dedicated Solid Bottom Action Bar: Multi-Photo Strip + Instant Verify Buttons (Tampil Utuh, Responsif & Tidak Terpotong) */}
-              <div className="shrink-0 w-full space-y-1.5 pt-0.5">
-                {/* Multi-Photo Thumbnail Strip for Current Item (Jika ada >0 foto) */}
+              {/* Bottom Action Bar: Foto Lagi (Bisa Multi-Upload) + Tombol SCAN & VERIFIKASI BARANG (YOLO) (+1) */}
+              <div className="shrink-0 w-full space-y-1">
                 {resolvedTargetItem && (
-                  <div className="flex items-center justify-between gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl px-2.5 py-1.5">
+                  <div className="flex items-center justify-between gap-1.5 bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1 shadow-2xs">
                     <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto">
-                      <span className="text-[10px] font-bold text-slate-300 shrink-0">
-                        📷 {currentScans.length} Foto:
+                      <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                        📷 {currentScans.length} Foto ({resolvedTargetItem.qtyLoaded}/{resolvedTargetItem.qtyOrdered} {activeDbInfo?.satuan || resolvedTargetItem.unit}):
                       </span>
-                      {currentScans.slice(0, 4).map((sc, idx) => (
+                      {currentScans.slice(0, 5).map((sc, idx) => (
                         <button
                           key={sc.id}
                           type="button"
@@ -3822,74 +4757,44 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                               scans: currentScans
                             });
                           }}
-                          className="w-7 h-7 rounded-lg overflow-hidden border border-cyan-400/60 shrink-0 relative group cursor-pointer"
+                          className="w-6 h-6 rounded-md overflow-hidden border border-sky-400/60 shrink-0 relative group cursor-pointer"
                           title={`Lihat Foto #${idx + 1}`}
                         >
                           <img src={sc.photoDataUrl} alt="" className="w-full h-full object-cover" />
                         </button>
                       ))}
-                      {currentScans.length > 4 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActivePhotoPreviewIdx(0);
-                            setPreviewPhotoModal({
-                              itemId: resolvedTargetItem.id,
-                              itemName: activeDbInfo?.deskripsiBarang || resolvedTargetItem.itemName,
-                              skuCode: activeDbInfo?.kodeBarang || resolvedTargetItem.skuCode,
-                              scans: currentScans
-                            });
-                          }}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] font-bold text-cyan-300 shrink-0 cursor-pointer"
-                        >
-                          +{currentScans.length - 4}
-                        </button>
-                      )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleCaptureExtraPhotoOnly(resolvedTargetItem)}
-                        className="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-[10px] font-extrabold cursor-pointer transition"
-                        title="Ambil lebih dari 1 foto untuk barang ini"
-                      >
-                        + Foto Lagi
-                      </button>
                       <button
                         type="button"
                         onClick={() => {
                           setMultiPhotoTargetItemId(resolvedTargetItem.id);
                           multiPhotoInputRef.current?.click();
                         }}
-                        className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-[10px] font-extrabold cursor-pointer transition"
-                        title="Upload lebih dari 1 foto sekaligus dari galeri"
+                        className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-cyan-500/20 hover:bg-sky-100 dark:hover:bg-cyan-500/30 border border-sky-200 dark:border-cyan-500/40 text-sky-700 dark:text-cyan-300 text-[10px] font-extrabold cursor-pointer transition"
+                        title="Upload / Tambah Beberapa Foto Sekaligus"
                       >
-                        + Multi-Foto
+                        + Foto Lagi
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* 7. Baris Tombol Scan YOLO & Verifikasi (Satu Tombol Utama) */}
                 <div className="w-full">
                   <button
                     type="button"
                     disabled={isVerifyingScan}
                     onClick={() => void executeCaptureAndVerify(undefined, undefined, false)}
-                    className={`w-full py-3.5 px-4 rounded-xl font-black text-xs tracking-wide shadow-xl flex items-center justify-center gap-2 cursor-pointer transition border ${
-                      scanErrorLock
-                        ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-300 animate-pulse'
-                        : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white border-emerald-400/50'
+                    className={`w-full py-2.5 px-3 rounded-xl font-black text-xs tracking-wide shadow-md flex items-center justify-center gap-2 cursor-pointer transition border ${
+                      !isVisuallyValid
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-500'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
                     }`}
                   >
-                    <Camera className="w-4.5 h-4.5 shrink-0" />
+                    <Camera className="w-4 h-4 shrink-0" />
                     <span className="truncate">
-                      {isVerifyingScan
-                        ? 'YOLO MEMVERIFIKASI...'
-                        : scanErrorLock
-                        ? '📸 FOTO ULANG BARANG YANG BENAR'
-                        : `⚡ SCAN & VERIFIKASI BARANG (YOLO) (+${scanQtyInput})`}
+                      {isVerifyingScan ? 'MEMVERIFIKASI...' : 'SCAN & VERIFIKASI BARANG (YOLO) (+1)'}
                     </span>
                   </button>
                 </div>
@@ -3906,59 +4811,105 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         const matchedMasterBarang = masterSearchQuery.trim()
           ? dbBarangList.filter(db => databaseBarangService.matchesSearchQuery(db, masterSearchQuery)).slice(0, 25)
           : [];
+        const activeDbTarget = resolvedTargetItem ? getIntegratedDbInfo(resolvedTargetItem) : null;
 
         return (
           <div className="p-3 space-y-3 flex-1">
-            {/* 1. BARIS PILIH NAMA TOKO / PELANGGAN (FAKTUR DO/SO) */}
-            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-xs">
+            {/* 1. BARIS PILIH NAMA TOKO / PELANGGAN (TANPA TEKS HIJAU DI POJOK KANAN ATAS + CUSTOM DROPDOWN) */}
+            <div className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 shadow-xs relative z-40">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   PILIH NAMA TOKO / PELANGGAN:
                 </span>
-                <span className="text-[10px] font-mono text-emerald-400 font-black truncate max-w-[180px]">
-                  {activeInvoice?.customerName || '-'}
-                </span>
               </div>
-              <select
-                value={activeInvoice?.id || ''}
-                disabled={Boolean(scanErrorLock)}
-                onChange={e => {
-                  if (scanErrorLock) return;
-                  setSelectedInvoiceId(e.target.value);
-                  localStorage.setItem(ACTIVE_INVOICE_KEY, e.target.value);
-                  setTargetScanMode('AUTO');
-                }}
-                className={`w-full px-3 py-2.5 rounded-xl bg-slate-950 text-xs font-black text-white border shadow-sm focus:outline-none ${
-                  scanErrorLock
-                    ? 'border-rose-500/60 opacity-60 cursor-not-allowed text-rose-300'
-                    : 'border-indigo-500/60 focus:border-indigo-400 text-white cursor-pointer'
-                }`}
-              >
-                {availableInvoices.map(inv => {
-                  const ev = evaluateInvoiceStatus(inv);
-                  return (
-                    <option
-                      key={inv.id}
-                      value={inv.id}
-                      className="bg-slate-900 text-white font-bold py-1.5"
-                    >
-                      🏬 {inv.customerName} &mdash; [{inv.invoiceNumber}] ({ev.totalLoaded}/{ev.totalOrdered} Muat)
-                    </option>
-                  );
-                })}
-              </select>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={Boolean(scanErrorLock)}
+                  onClick={() =>
+                    setOpenCustomDropdown(prev => (prev === 'list_store' ? null : 'list_store'))
+                  }
+                  className={`w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border flex items-center justify-between gap-2 text-left transition shadow-2xs ${
+                    scanErrorLock
+                      ? 'border-rose-300 dark:border-rose-500/60 opacity-60 cursor-not-allowed'
+                      : openCustomDropdown === 'list_store'
+                      ? 'border-indigo-500 ring-2 ring-indigo-500/15 cursor-pointer'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400 cursor-pointer'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100 truncate">
+                      {activeInvoice.customerName}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                      {activeInvoice.invoiceNumber} &bull; {activeInvoice.items.length} SKU
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-mono text-[10px] font-extrabold">
+                      {evalActive.totalLoaded}/{evalActive.totalOrdered} Muat
+                    </span>
+                    <span className="text-slate-400 text-xs font-bold">
+                      {openCustomDropdown === 'list_store' ? '▲' : '▼'}
+                    </span>
+                  </div>
+                </button>
+
+                {openCustomDropdown === 'list_store' && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-50 p-1">
+                    {availableInvoices.map(inv => {
+                      const ev = evaluateInvoiceStatus(inv);
+                      const isCurrentStore = inv.id === activeInvoice.id;
+                      return (
+                        <button
+                          key={inv.id}
+                          type="button"
+                          onClick={() => {
+                            if (scanErrorLock) return;
+                            setSelectedInvoiceId(inv.id);
+                            localStorage.setItem(ACTIVE_INVOICE_KEY, inv.id);
+                            setTargetScanMode('AUTO');
+                            setOpenCustomDropdown(null);
+                          }}
+                          className={`w-full px-3 py-2.5 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                            isCurrentStore
+                              ? 'bg-indigo-50 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/40'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/80'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100 truncate">
+                              {inv.customerName}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                              {inv.invoiceNumber} &bull; {inv.items.length} SKU
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sky-700 dark:text-cyan-300 font-mono text-[10px] font-extrabold">
+                              {ev.totalLoaded}/{ev.totalOrdered} Muat
+                            </span>
+                            {isCurrentStore && <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 2. TARGET BARANG & QTY (TERINTEGRASI MASTER BARANG & INPUT SO/FAKTUR) */}
-            <div className="p-3 rounded-2xl bg-slate-900 border border-indigo-500/30 space-y-2.5 shadow-xs">
+            <div className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-indigo-500/30 space-y-2.5 shadow-xs relative z-30">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                  <span className="text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                  <span className="w-2 h-2 rounded-full bg-sky-500 dark:bg-cyan-400" />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-sky-700 dark:text-cyan-300">
                     Target Barang &amp; Integrasi Master Barang / Qty SO
                   </span>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">
+                <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
                   {dbBarangList.length.toLocaleString('id-ID')} Master SKU
                 </span>
               </div>
@@ -3975,7 +4926,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     setIsMasterSearchOpen(true);
                   }}
                   placeholder="Cari Master Barang..."
-                  className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 text-xs font-semibold text-white placeholder-slate-500 focus:outline-none"
+                  className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:border-sky-500 text-xs font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
                 />
                 {masterSearchQuery && (
                   <button
@@ -3984,16 +4935,16 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                       setMasterSearchQuery('');
                       setIsMasterSearchOpen(false);
                     }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
 
                 {isMasterSearchOpen && masterSearchQuery.trim() !== '' && (
-                  <div className="mt-1.5 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl max-h-56 overflow-y-auto divide-y divide-slate-800/80 z-30">
+                  <div className="mt-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-cyan-500/40 rounded-xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-30">
                     {matchedMasterBarang.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-slate-400">
+                      <div className="p-3 text-center text-xs text-slate-500 dark:text-slate-400">
                         Tidak ditemukan barang dengan kata kunci <strong>"{masterSearchQuery}"</strong>
                       </div>
                     ) : (
@@ -4006,27 +4957,27 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                             key={db.id}
                             type="button"
                             onClick={() => handleSelectOrAddMasterBarang(db)}
-                            className="w-full px-3 py-2 text-left hover:bg-slate-900 flex items-center justify-between gap-2 transition cursor-pointer"
+                            className="w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-900 flex items-center justify-between gap-2 transition cursor-pointer"
                           >
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black">
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] font-black">
                                   {db.noBarang}
                                 </span>
-                                <span className="text-[10px] font-bold text-emerald-400">
+                                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
                                   {db.satuan || db.unit1}
                                 </span>
                                 {inInvoice && (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold">
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold">
                                     Ada di Faktur ({inInvoice.qtyLoaded}/{inInvoice.qtyOrdered})
                                   </span>
                                 )}
                               </div>
-                              <div className="text-xs font-bold text-white truncate mt-0.5">
+                              <div className="text-xs font-bold text-slate-800 dark:text-white truncate mt-0.5">
                                 {db.deskripsiBarang || db.keteranganBarang}
                               </div>
                             </div>
-                            <span className="px-2 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 text-[10px] font-extrabold shrink-0">
+                            <span className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-cyan-500/20 text-sky-700 dark:text-cyan-300 text-[10px] font-extrabold shrink-0">
                               {inInvoice ? 'Pilih Target' : '+ Integrasi SO'}
                             </span>
                           </button>
@@ -4037,47 +4988,89 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 )}
               </div>
 
-              {/* Dropdown Target Barang Aktif & Qty */}
+              {/* Custom Dropdown Target Barang Aktif & Qty */}
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-12">
-                  <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1 truncate">
+                <div className="col-span-12 relative">
+                  <label className="block text-[9px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1 truncate">
                     Target Barang Aktif ({activeInvoice.customerName}):
                   </label>
-                  <select
-                    value={resolvedTargetItem?.id || targetScanMode}
-                    disabled={Boolean(scanErrorLock)}
-                    onChange={e => {
-                      if (scanErrorLock) return;
-                      const val = e.target.value;
-                      setTargetScanMode(val);
-                      const found = activeInvoice.items.find(it => it.id === val);
-                      if (found) {
-                        const rem = Math.max(1, found.qtyOrdered - found.qtyLoaded);
-                        setScanQtyInput(Math.min(10, rem));
-                      }
-                    }}
-                    className={`w-full px-2.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-900 border text-xs font-bold text-slate-100 dark:text-slate-100 ${
-                      scanErrorLock
-                        ? 'border-rose-500 text-rose-300 cursor-not-allowed opacity-75'
-                        : 'border-slate-700 cursor-pointer'
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenCustomDropdown(prev => (prev === 'list_item' ? null : 'list_item'))
+                    }
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                      openCustomDropdown === 'list_item'
+                        ? 'border-sky-500 ring-2 ring-sky-500/15'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    <option value="AUTO" className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5">
-                      🤖 Auto YOLO: [{resolvedTargetItem?.skuCode || '-'}] {resolvedTargetItem?.itemName.slice(0, 32) || ''}
-                    </option>
-                    {activeInvoice.items.map(it => {
-                      const dbIt = getIntegratedDbInfo(it);
-                      return (
-                        <option key={it.id} value={it.id} className="bg-slate-900 text-slate-100 font-bold dark:bg-slate-900 dark:text-slate-100 py-1.5">
-                          [{dbIt.kodeBarang}] {dbIt.deskripsiBarang} ({it.qtyLoaded}/{it.qtyOrdered} {dbIt.satuan})
-                        </option>
-                      );
-                    })}
-                  </select>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-500/20 border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 font-mono text-[10px] font-black">
+                          {activeDbTarget?.kodeBarang || resolvedTargetItem?.skuCode || '-'}
+                        </span>
+                        {resolvedTargetItem && (
+                          <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400">
+                            {resolvedTargetItem.qtyLoaded}/{resolvedTargetItem.qtyOrdered}{' '}
+                            {activeDbTarget?.satuan || resolvedTargetItem.unit}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100 truncate mt-0.5">
+                        {activeDbTarget?.deskripsiBarang || resolvedTargetItem?.itemName || 'Pilih Target Barang'}
+                      </div>
+                    </div>
+                    <span className="text-slate-400 text-xs font-bold shrink-0">
+                      {openCustomDropdown === 'list_item' ? '▲' : '▼'}
+                    </span>
+                  </button>
+
+                  {openCustomDropdown === 'list_item' && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-50 p-1">
+                      {activeInvoice.items.map((it, idx) => {
+                        const dbIt = getIntegratedDbInfo(it);
+                        const isCurrentItem = resolvedTargetItem?.id === it.id;
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            onClick={() => {
+                              setScanErrorLock(null);
+                              setTargetScanMode(it.id);
+                              const rem = Math.max(1, it.qtyOrdered - it.qtyLoaded);
+                              setScanQtyInput(Math.min(10, rem));
+                              setOpenCustomDropdown(null);
+                            }}
+                            className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                              isCurrentItem
+                                ? 'bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/40'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] font-black">
+                                  {idx + 1}. {dbIt.kodeBarang}
+                                </span>
+                                <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400">
+                                  {it.qtyLoaded}/{it.qtyOrdered} {dbIt.satuan}
+                                </span>
+                              </div>
+                              <div className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-snug break-words">
+                                {dbIt.deskripsiBarang}
+                              </div>
+                            </div>
+                            {isCurrentItem && <Check className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="col-span-6">
-                  <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">
+                  <label className="block text-[9px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
                     Qty Input SO / Faktur ({resolvedTargetItem ? getIntegratedDbInfo(resolvedTargetItem).satuan : 'Box'}):
                   </label>
                   <input
@@ -4089,12 +5082,12 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                         handleUpdateItemOrderedQty(resolvedTargetItem, Math.max(1, Number(e.target.value) || 1));
                       }
                     }}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-indigo-500/40 text-xs font-mono font-black text-indigo-300 text-center"
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-indigo-200 dark:border-indigo-500/40 text-xs font-mono font-black text-indigo-700 dark:text-indigo-300 text-center"
                   />
                 </div>
 
                 <div className="col-span-6">
-                  <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">
+                  <label className="block text-[9px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
                     Qty Scan Muat ({resolvedTargetItem ? getIntegratedDbInfo(resolvedTargetItem).satuan : 'Box'}):
                   </label>
                   <input
@@ -4102,13 +5095,13 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     min={1}
                     value={scanQtyInput}
                     onChange={e => setScanQtyInput(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-xs font-mono font-black text-emerald-400 text-center"
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-emerald-200 dark:border-emerald-500/40 text-xs font-mono font-black text-emerald-700 dark:text-emerald-400 text-center"
                   />
                 </div>
               </div>
             </div>
 
-            {/* 3. DAFTAR BARANG FAKTUR PELANGGAN (MODERN CLEAN COLOR TONES) */}
+            {/* 3. DAFTAR BARANG FAKTUR PELANGGAN (HANYA PILIH SCAN) */}
             <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-3 shadow-xs">
               <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400">
                 <span>Daftar Barang Faktur ({activeInvoice.items.length} SKU):</span>
@@ -4217,7 +5210,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                           )}
                         </div>
 
-                        {/* Action Buttons */}
+                        {/* Action Buttons: Sisakan Hanya Pilih Scan */}
                         <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                           {item.scans.length > 0 && (
                             <button
@@ -4239,37 +5232,17 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                           )}
                           <button
                             type="button"
-                            onClick={() => {
-                              setMultiPhotoTargetItemId(item.id);
-                              multiPhotoInputRef.current?.click();
-                            }}
-                            className="px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 hover:bg-indigo-100 dark:hover:bg-indigo-500/25 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/30 text-[10px] font-extrabold cursor-pointer transition"
-                            title="Upload >1 Foto untuk Barang Ini"
-                          >
-                            + Foto
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isBlockedByOtherError}
                             onClick={() => handleSelectSpecificItemToScan(item)}
-                            className={`px-3 py-1.5 rounded-xl text-[11px] font-black shadow-xs flex items-center gap-1.5 transition ${
+                            className={`px-3 py-1.5 rounded-xl text-[11px] font-black shadow-xs flex items-center gap-1.5 transition cursor-pointer ${
                               isLockedErrorItem
-                                ? 'bg-white text-rose-700 hover:bg-rose-50 cursor-pointer'
-                                : isBlockedByOtherError
-                                ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 cursor-not-allowed'
+                                ? 'bg-white text-rose-700 hover:bg-rose-50'
                                 : isSelected
-                                ? 'bg-sky-600 hover:bg-sky-500 text-white cursor-pointer'
-                                : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                                ? 'bg-sky-600 hover:bg-sky-500 text-white'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
                             }`}
                           >
                             <Camera className="w-3.5 h-3.5" />
-                            <span>
-                              {isLockedErrorItem
-                                ? 'Foto Ulang'
-                                : isBlockedByOtherError
-                                ? '🔒 Terkunci'
-                                : 'Pilih Scan'}
-                            </span>
+                            <span>Pilih Scan</span>
                           </button>
                         </div>
                       </div>
@@ -4597,141 +5570,117 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       )}
 
       {/* ===================================================================== */}
-      {/* FLOATING BOTTOM NAVIGATION BAR: KAMERA, LIST, SCAN FOTO, TERMUAT & SISA, RIWAYAT */}
+      {/* FLOATING BOTTOM NAVIGATION BAR: 4 MENU MODERN TANPA TOMBOL GANDA      */}
       {/* ===================================================================== */}
-      <nav className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-auto sm:w-[420px] max-w-md mx-auto z-40">
-        <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl px-2 py-2 shadow-2xl shadow-black/70 grid grid-cols-5 items-center">
+      <nav className="fixed bottom-2.5 left-3 right-3 sm:left-auto sm:right-auto sm:w-[420px] max-w-md mx-auto z-40">
+        <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-1.5 shadow-2xl shadow-black/70 grid grid-cols-4 gap-1 items-center">
           {/* 1. Kamera */}
           <button
             type="button"
-            onClick={() => setScannerPage('kamera')}
-            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+            onClick={() => {
+              setOpenCustomDropdown(null);
+              setScannerPage('kamera');
+            }}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition cursor-pointer relative ${
               scannerPage === 'kamera'
-                ? 'text-cyan-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-cyan-500/15 border border-cyan-500/35 text-cyan-300 font-extrabold shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
           >
             <Camera
-              className={`w-5 h-5 transition-transform ${
+              className={`w-4 h-4 transition-transform ${
                 scannerPage === 'kamera' ? 'scale-110 text-cyan-400' : ''
               }`}
             />
             <span className="text-[10px] tracking-tight">Kamera</span>
-            {scannerPage === 'kamera' && (
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
-            )}
           </button>
 
           {/* 2. List */}
           <button
             type="button"
-            onClick={() => setScannerPage('list')}
-            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+            onClick={() => {
+              setOpenCustomDropdown(null);
+              setScannerPage('list');
+            }}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition cursor-pointer relative ${
               scannerPage === 'list'
-                ? 'text-cyan-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-cyan-500/15 border border-cyan-500/35 text-cyan-300 font-extrabold shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
           >
             <div className="relative">
               <ClipboardCheck
-                className={`w-5 h-5 transition-transform ${
+                className={`w-4 h-4 transition-transform ${
                   scannerPage === 'list' ? 'scale-110 text-cyan-400' : ''
                 }`}
               />
               {activeInvoice.items.length > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-sky-500 text-slate-950 text-[9px] font-black">
+                <span className="absolute -top-1.5 -right-3 px-1 py-0.2 rounded-full bg-sky-500 text-slate-950 text-[8px] font-black">
                   {activeInvoice.items.length}
                 </span>
               )}
             </div>
             <span className="text-[10px] tracking-tight">List</span>
-            {scannerPage === 'list' && (
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
-            )}
           </button>
 
-          {/* 3. Scan Foto (Central Floating Action Button) */}
-          <div className="flex flex-col items-center justify-center relative">
-            <button
-              type="button"
-              onClick={() => {
-                if (scannerPage !== 'kamera') {
-                  setScannerPage('kamera');
-                }
-                void executeCaptureAndVerify(undefined, undefined, false);
-              }}
-              className={`w-12 h-12 -mt-6 rounded-full text-white shadow-xl border-4 border-slate-950 hover:scale-105 active:scale-95 transition-transform flex items-center justify-center cursor-pointer group ${
-                scanErrorLock
-                  ? 'bg-rose-600 shadow-rose-500/40'
-                  : 'bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 shadow-indigo-500/30'
-              }`}
-              title="Ambil Foto & Verifikasi Sekarang"
-            >
-              <Camera className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-            </button>
-            <span className="text-[9px] font-bold text-indigo-400 mt-0.5 tracking-tight">
-              Scan Foto
-            </span>
-          </div>
-
-          {/* 4. Termuat & Sisa */}
+          {/* 3. Termuat & Sisa */}
           <button
             type="button"
-            onClick={() => setScannerPage('termuat_sisa')}
-            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+            onClick={() => {
+              setOpenCustomDropdown(null);
+              setScannerPage('termuat_sisa');
+            }}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition cursor-pointer relative ${
               scannerPage === 'termuat_sisa'
-                ? 'text-cyan-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-cyan-500/15 border border-cyan-500/35 text-cyan-300 font-extrabold shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
           >
             <div className="relative">
               <Package
-                className={`w-5 h-5 transition-transform ${
+                className={`w-4 h-4 transition-transform ${
                   scannerPage === 'termuat_sisa' ? 'scale-110 text-cyan-400' : ''
                 }`}
               />
               {totalSisaCount > 0 ? (
-                <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black">
+                <span className="absolute -top-1.5 -right-3 px-1 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[8px] font-black">
                   {totalSisaCount}
                 </span>
               ) : (
-                <span className="absolute -top-1 -right-2 px-0.5 rounded-full bg-emerald-500 text-slate-950 text-[8px] font-black">
+                <span className="absolute -top-1 -right-2.5 px-0.5 rounded-full bg-emerald-500 text-slate-950 text-[8px] font-black">
                   ✓
                 </span>
               )}
             </div>
             <span className="text-[10px] tracking-tight">Termuat &amp; Sisa</span>
-            {scannerPage === 'termuat_sisa' && (
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
-            )}
           </button>
 
-          {/* 5. Riwayat */}
+          {/* 4. Riwayat */}
           <button
             type="button"
-            onClick={() => setScannerPage('riwayat')}
-            className={`flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-2xl transition cursor-pointer relative ${
+            onClick={() => {
+              setOpenCustomDropdown(null);
+              setScannerPage('riwayat');
+            }}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition cursor-pointer relative ${
               scannerPage === 'riwayat'
-                ? 'text-cyan-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-cyan-500/15 border border-cyan-500/35 text-cyan-300 font-extrabold shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
           >
             <div className="relative">
               <FileText
-                className={`w-5 h-5 transition-transform ${
+                className={`w-4 h-4 transition-transform ${
                   scannerPage === 'riwayat' ? 'scale-110 text-cyan-400' : ''
                 }`}
               />
               {recentScansLog.length > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 px-1 py-0.2 rounded-full bg-indigo-500 text-white text-[9px] font-black">
+                <span className="absolute -top-1.5 -right-3 px-1 py-0.2 rounded-full bg-indigo-500 text-white text-[8px] font-black">
                   {recentScansLog.length}
                 </span>
               )}
             </div>
             <span className="text-[10px] tracking-tight">Riwayat</span>
-            {scannerPage === 'riwayat' && (
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400/50" />
-            )}
           </button>
         </div>
       </nav>

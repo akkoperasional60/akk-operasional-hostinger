@@ -95,6 +95,7 @@ import { DriverCheckinModal } from './DriverCheckinModal';
 import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareModal';
 import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../utils/areaNormalizer';
+import { formKirimStore, FormKirimRecord } from '../services/formKirimStore';
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -314,12 +315,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   const [deliveries, setDeliveries] = useState<Schedule[]>([]);
+  const [formKirimList, setFormKirimList] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSupabaseLive, setIsSupabaseLive] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'scheduled' | 'delivered'>('active');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [bottomNav, setBottomNav] = useState<DriverPortalTab>('deliveries');
+
+  useEffect(() => {
+    return formKirimStore.subscribe(() => {
+      setFormKirimList(formKirimStore.getAll());
+    });
+  }, []);
   const [standbyReplaceForm, setStandbyReplaceForm] = useState<{
     isOpen: boolean;
     standbyCrewName: string;
@@ -4819,6 +4827,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </>
                   )}
                 </div>
+              )}
+
+              {/* Integrasi Form Kirim pada Portal Driver saat ini di-OFF-kan terlebih dahulu */}
+              {false && formKirimList.filter(fk => fk.financeStatus === 'approved_finance').length > 0 && (
+                <div className="hidden" />
               )}
 
             {/* Deliveries List */}

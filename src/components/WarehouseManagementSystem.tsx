@@ -38,8 +38,95 @@ export type WmsSubTab =
   | 'scanner'
   | 'slotting'
   | 'opname'
+  | 'kartu_stok'
   | 'cubication'
   | 'fleet_cubication';
+
+export interface WarehouseOpnameAuditItem {
+  id: string;
+  kodeBarang: string;
+  namaBarang: string;
+  kategori: string;
+  namaGudang: string;
+  cabang: string;
+  satuan: string;
+  stokSistem: number;
+  stokFisik: number;
+  reorderQty: number;
+  tanggalAudit: string;
+  auditor: string;
+  purchasingStatus: 'Sesuai Sistem' | 'Perlu Kirim ke Pembelian' | 'Terkirim ke Adm Pembelian' | 'Diproses PO Pembelian';
+  catatan: string;
+}
+
+export const LS_KEY_OPNAME_PURCHASING_SYNC = 'akk_wms_opname_purchasing_sync_v1';
+
+export const INITIAL_OPNAME_AUDIT_ITEMS: WarehouseOpnameAuditItem[] = [
+  {
+    id: 'OPN-2611-001',
+    kodeBarang: '7GPJA001',
+    namaBarang: 'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)',
+    kategori: 'Paper Cup & Food Pack',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    satuan: 'CRT',
+    stokSistem: 120,
+    stokFisik: 95,
+    reorderQty: 50,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Terkirim ke Adm Pembelian',
+    catatan: 'Selisih -25 CRT hasil audit fisik rak A1, diajukan restock ke Adm Pembelian'
+  },
+  {
+    id: 'OPN-2611-002',
+    kodeBarang: '7AFBG453',
+    namaBarang: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
+    kategori: 'Box Kemasan Makanan',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    satuan: 'CRT',
+    stokSistem: 80,
+    stokFisik: 62,
+    reorderQty: 40,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Perlu Kirim ke Pembelian',
+    catatan: 'Stok fisik menipis di bawah buffer minimum'
+  },
+  {
+    id: 'OPN-2611-003',
+    kodeBarang: '7AT00935',
+    namaBarang: 'ALU TRAY OX-935 (100PCS/PAK)',
+    kategori: 'Box Kemasan Makanan',
+    namaGudang: 'Sidoarjo',
+    cabang: 'Sidoarjo',
+    satuan: 'PAK',
+    stokSistem: 210,
+    stokFisik: 210,
+    reorderQty: 0,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Sesuai Sistem',
+    catatan: 'Klop 100% antara fisik gudang dan kartu stok'
+  },
+  {
+    id: 'OPN-2611-004',
+    kodeBarang: '7KRBJ406',
+    namaBarang: 'KR BAJA (HJ) 40X68 KN @40 (60PAK/ZAK)',
+    kategori: 'Plastik & Stretch Film',
+    namaGudang: 'Denpasar',
+    cabang: 'Bali',
+    satuan: 'ZAK',
+    stokSistem: 65,
+    stokFisik: 48,
+    reorderQty: 35,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Diproses PO Pembelian',
+    catatan: 'Sudah diteruskan ke Adm Pembelian untuk PO supplier'
+  }
+];
 
 export interface MasterSkuRecord {
   id: string;
@@ -502,6 +589,41 @@ export const WarehouseManagementSystem: React.FC<{
     }
     return ['Sidoarjo', 'Gudang Utama Banyuwangi', 'Farly', 'Gajah Mada', 'Denpasar'];
   });
+
+  // Opname Gudang Terintegrasi Adm Pembelian State
+  const [opnameAuditList, setOpnameAuditList] = useState<WarehouseOpnameAuditItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY_OPNAME_PURCHASING_SYNC);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_OPNAME_AUDIT_ITEMS;
+  });
+
+  const [opnameSearch, setOpnameSearch] = useState('');
+  const [opnameBranchFilter, setOpnameBranchFilter] = useState('ALL');
+  const [opnameStatusFilter, setOpnameStatusFilter] = useState('ALL');
+  const [isAddOpnameModalOpen, setIsAddOpnameModalOpen] = useState(false);
+  const [newOpnameForm, setNewOpnameForm] = useState({
+    kodeBarang: '7GPJA011',
+    namaBarang: 'CUP PLST JAGUAR BR 14 OZ NAT @50 (40SLP/CRT)',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    satuan: 'CRT',
+    stokSistem: 100,
+    stokFisik: 85,
+    reorderQty: 30,
+    catatan: ''
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY_OPNAME_PURCHASING_SYNC, JSON.stringify(opnameAuditList));
+      window.dispatchEvent(new CustomEvent('akk-opname-purchasing-sync'));
+    } catch {}
+  }, [opnameAuditList]);
 
   useEffect(() => {
     try {
@@ -1549,20 +1671,549 @@ export const WarehouseManagementSystem: React.FC<{
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: KARTU STOK & ANALISA OTOMATIS                                    */}
+      {/* TAB: OPNAME GUDANG (AUDIT FISIK VS SISTEM TERINTEGRASI ADM PEMBELIAN) */}
       {/* ===================================================================== */}
       {activeTab === 'opname' && (
         <div className="space-y-4">
+          {/* Header Opname Gudang */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-lg bg-purple-50 dark:bg-purple-500/15 border border-purple-200 dark:border-purple-500/30 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider">
+                  Gudang WMS &bull; Integrasi Adm Pembelian
+                </span>
+                <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                  Tersinkron Otomatis ke Adm Pembelian
+                </span>
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                Opname Gudang (Audit Stok Fisik vs Sistem) &amp; Pengajuan Restock Pembelian
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Pencatatan hasil hitung fisik barang di rak gudang dan pengiriman otomatis daftar selisih/kekurangan stok ke modul <strong>Stok Opname &amp; Kartu Stok (Adm Pembelian)</strong>.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleTabChange('kartu_stok')}
+                className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/70 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Buka Stok Opname di Adm Pembelian</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = opnameAuditList.map(item =>
+                    item.stokFisik < item.stokSistem && item.purchasingStatus === 'Perlu Kirim ke Pembelian'
+                      ? {
+                          ...item,
+                          purchasingStatus: 'Terkirim ke Adm Pembelian' as const,
+                          reorderQty: Math.max(item.reorderQty, item.stokSistem - item.stokFisik)
+                        }
+                      : item
+                  );
+                  setOpnameAuditList(updated);
+                  setPopupModal({
+                    title: 'Selisih Opname Dikirim ke Adm Pembelian',
+                    message: 'Seluruh item dengan selisih kurang stok telah dikirim ke halaman Stok Opname & Kartu Stok pada menu Adm Pembelian.'
+                  });
+                }}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Kirim Selisih ke Adm Pembelian</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddOpnameModalOpen(true)}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Input Hasil Opname Fisik</span>
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Cards Opname Gudang */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+              <div className="text-[10px] font-black uppercase text-slate-500">Total SKU Diaudit Fisik</div>
+              <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
+                {opnameAuditList.length} SKU
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Audit berkala seluruh gudang cabang</div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+              <div className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Klop / Sesuai Sistem</div>
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
+                {opnameAuditList.filter(i => i.stokFisik === i.stokSistem).length} SKU
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Tidak ada selisih fisik vs sistem</div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+              <div className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Selisih / Kurang Stok</div>
+              <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
+                {opnameAuditList.filter(i => i.stokFisik !== i.stokSistem).length} SKU
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Butuh rekonsiliasi &amp; PO restock</div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+              <div className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400">Terintegrasi Adm Pembelian</div>
+              <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1 font-mono">
+                {opnameAuditList.filter(i => i.purchasingStatus === 'Terkirim ke Adm Pembelian' || i.purchasingStatus === 'Diproses PO Pembelian').length} Pengajuan
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Diteruskan ke PO &amp; Stok Opname Pembelian</div>
+            </div>
+          </div>
+
+          {/* Filter Opname Gudang */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={opnameSearch}
+                onChange={e => setOpnameSearch(e.target.value)}
+                placeholder="Cari Kode Barang, Nama Barang, atau Gudang..."
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={opnameBranchFilter}
+                onChange={e => setOpnameBranchFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <option value="ALL">Semua Cabang</option>
+                <option value="Banyuwangi">Cabang Banyuwangi</option>
+                <option value="Sidoarjo">Cabang Sidoarjo</option>
+                <option value="Jember">Cabang Jember</option>
+                <option value="Bali">Cabang Bali</option>
+              </select>
+              <select
+                value={opnameStatusFilter}
+                onChange={e => setOpnameStatusFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <option value="ALL">Semua Status Integrasi</option>
+                <option value="Sesuai Sistem">Sesuai Sistem</option>
+                <option value="Perlu Kirim ke Pembelian">Perlu Kirim ke Pembelian</option>
+                <option value="Terkirim ke Adm Pembelian">Terkirim ke Adm Pembelian</option>
+                <option value="Diproses PO Pembelian">Diproses PO Pembelian</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Tabel Audit Fisik Gudang */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Daftar Audit Fisik Opname Gudang &amp; Status Sinkronisasi Adm Pembelian
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Ubah angka pada kolom <strong>Stok Fisik</strong> sesuai hasil hitung rak, lalu klik <strong>Kirim ke Pembelian</strong> untuk pengajuan PO.
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Kode &amp; Nama Barang</th>
+                    <th className="py-3 px-4">Cabang / Gudang</th>
+                    <th className="py-3 px-4 text-right">Stok Sistem</th>
+                    <th className="py-3 px-4 text-center">Stok Fisik (Input)</th>
+                    <th className="py-3 px-4 text-center">Selisih</th>
+                    <th className="py-3 px-4 text-center">Usulan Restock PO</th>
+                    <th className="py-3 px-4">Status Integrasi Pembelian</th>
+                    <th className="py-3 px-4 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                  {opnameAuditList
+                    .filter(item => {
+                      const q = opnameSearch.trim().toLowerCase();
+                      const matchQ =
+                        !q ||
+                        item.kodeBarang.toLowerCase().includes(q) ||
+                        item.namaBarang.toLowerCase().includes(q) ||
+                        item.namaGudang.toLowerCase().includes(q);
+                      const matchBranch = opnameBranchFilter === 'ALL' || item.cabang === opnameBranchFilter;
+                      const matchStatus = opnameStatusFilter === 'ALL' || item.purchasingStatus === opnameStatusFilter;
+                      return matchQ && matchBranch && matchStatus;
+                    })
+                    .map(item => {
+                      const selisih = item.stokFisik - item.stokSistem;
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4">
+                            <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{item.kodeBarang}</div>
+                            <div className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</div>
+                            <div className="text-[10px] text-slate-500">{item.catatan}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-bold text-[10px]">
+                              {item.cabang}
+                            </span>
+                            <div className="text-[11px] text-slate-500 mt-0.5">{item.namaGudang}</div>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">
+                            {item.stokSistem.toLocaleString('id-ID')} {item.satuan}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <input
+                              type="number"
+                              min={0}
+                              value={item.stokFisik}
+                              onChange={e => {
+                                const val = Math.max(0, Number(e.target.value) || 0);
+                                setOpnameAuditList(prev =>
+                                  prev.map(row => {
+                                    if (row.id !== item.id) return row;
+                                    const diff = val - row.stokSistem;
+                                    return {
+                                      ...row,
+                                      stokFisik: val,
+                                      reorderQty: diff < 0 ? Math.abs(diff) : 0,
+                                      purchasingStatus:
+                                        diff === 0
+                                          ? 'Sesuai Sistem'
+                                          : row.purchasingStatus === 'Diproses PO Pembelian'
+                                          ? 'Diproses PO Pembelian'
+                                          : 'Perlu Kirim ke Pembelian'
+                                    };
+                                  })
+                                );
+                              }}
+                              className="w-24 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-center font-mono font-bold text-slate-900 dark:text-white"
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-black">
+                            <span
+                              className={`px-2 py-0.5 rounded-lg text-[11px] ${
+                                selisih === 0
+                                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                  : selisih < 0
+                                  ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                                  : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                              }`}
+                            >
+                              {selisih > 0 ? `+${selisih}` : selisih} {item.satuan}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {item.reorderQty > 0 ? `${item.reorderQty} ${item.satuan}` : '-'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                                item.purchasingStatus === 'Sesuai Sistem'
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                  : item.purchasingStatus === 'Terkirim ke Adm Pembelian'
+                                  ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border-indigo-500/30'
+                                  : item.purchasingStatus === 'Diproses PO Pembelian'
+                                  ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border-cyan-500/30'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30'
+                              }`}
+                            >
+                              {item.purchasingStatus}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {item.stokFisik !== item.stokSistem && item.purchasingStatus !== 'Diproses PO Pembelian' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpnameAuditList(prev =>
+                                    prev.map(r =>
+                                      r.id === item.id
+                                        ? {
+                                            ...r,
+                                            purchasingStatus: 'Terkirim ke Adm Pembelian',
+                                            reorderQty: Math.max(r.reorderQty, Math.abs(r.stokSistem - r.stokFisik))
+                                          }
+                                        : r
+                                    )
+                                  );
+                                  setPopupModal({
+                                    title: 'Terkirim ke Adm Pembelian',
+                                    message: `Item ${item.kodeBarang} (${item.namaBarang}) berhasil dikirim ke Stok Opname & Kartu Stok Adm Pembelian.`
+                                  });
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] cursor-pointer transition"
+                              >
+                                Kirim ke Pembelian
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 font-semibold">Terverifikasi</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Modal Tambah Audit Opname Fisik */}
+          {isAddOpnameModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Input Audit Fisik Opname Gudang
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddOpnameModalOpen(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <form
+                  onSubmit={e => {
+                    e.preventDefault();
+                    const diff = newOpnameForm.stokFisik - newOpnameForm.stokSistem;
+                    const created: WarehouseOpnameAuditItem = {
+                      id: `OPN-${Date.now()}`,
+                      kodeBarang: newOpnameForm.kodeBarang.trim().toUpperCase(),
+                      namaBarang: newOpnameForm.namaBarang.trim(),
+                      kategori: inferKategoriBarang(newOpnameForm.kodeBarang, newOpnameForm.namaBarang),
+                      namaGudang: newOpnameForm.namaGudang,
+                      cabang: newOpnameForm.cabang,
+                      satuan: newOpnameForm.satuan,
+                      stokSistem: Number(newOpnameForm.stokSistem) || 0,
+                      stokFisik: Number(newOpnameForm.stokFisik) || 0,
+                      reorderQty: diff < 0 ? Math.abs(diff) : Number(newOpnameForm.reorderQty) || 0,
+                      tanggalAudit: new Date().toISOString().slice(0, 10),
+                      auditor: 'Tim Opname Gudang',
+                      purchasingStatus: diff === 0 ? 'Sesuai Sistem' : 'Terkirim ke Adm Pembelian',
+                      catatan: newOpnameForm.catatan.trim() || 'Hasil audit fisik opname gudang'
+                    };
+                    setOpnameAuditList(prev => [created, ...prev]);
+                    setIsAddOpnameModalOpen(false);
+                    setPopupModal({
+                      title: 'Audit Opname Disimpan & Disinkronkan',
+                      message: `Audit ${created.kodeBarang} disimpan dan otomatis terintegrasi dengan Adm Pembelian.`
+                    });
+                  }}
+                  className="space-y-3 text-xs"
+                >
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Kode Barang</label>
+                      <input
+                        type="text"
+                        required
+                        value={newOpnameForm.kodeBarang}
+                        onChange={e => setNewOpnameForm({ ...newOpnameForm, kodeBarang: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Cabang</label>
+                      <select
+                        value={newOpnameForm.cabang}
+                        onChange={e => setNewOpnameForm({ ...newOpnameForm, cabang: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                      >
+                        <option value="Banyuwangi">Banyuwangi</option>
+                        <option value="Sidoarjo">Sidoarjo</option>
+                        <option value="Jember">Jember</option>
+                        <option value="Bali">Bali</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Barang</label>
+                    <input
+                      type="text"
+                      required
+                      value={newOpnameForm.namaBarang}
+                      onChange={e => setNewOpnameForm({ ...newOpnameForm, namaBarang: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Stok Sistem</label>
+                      <input
+                        type="number"
+                        value={newOpnameForm.stokSistem}
+                        onChange={e => setNewOpnameForm({ ...newOpnameForm, stokSistem: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Stok Fisik</label>
+                      <input
+                        type="number"
+                        value={newOpnameForm.stokFisik}
+                        onChange={e => setNewOpnameForm({ ...newOpnameForm, stokFisik: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Satuan</label>
+                      <input
+                        type="text"
+                        value={newOpnameForm.satuan}
+                        onChange={e => setNewOpnameForm({ ...newOpnameForm, satuan: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Catatan Audit / Lokasi Rak</label>
+                    <input
+                      type="text"
+                      value={newOpnameForm.catatan}
+                      onChange={e => setNewOpnameForm({ ...newOpnameForm, catatan: e.target.value })}
+                      placeholder="Contoh: Selisih hasil cek fisik Rak B2..."
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddOpnameModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                    >
+                      Simpan &amp; Kirim ke Adm Pembelian
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: STOK OPNAME & KARTU STOK DIGITAL (BERPINDAH KE ADM PEMBELIAN)    */}
+      {/* ===================================================================== */}
+      {activeTab === 'kartu_stok' && (
+        <div className="space-y-4">
+          {/* Integrasi Hasil Opname dari Gudang Banner & Table */}
+          <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl p-5 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                    Adm Pembelian &bull; Integrasi Opname Gudang
+                  </span>
+                </div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-1">
+                  Rekapitulasi Selisih Opname Fisik Gudang (Pengajuan PO Restock)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Data hasil opname fisik dari tim Gudang yang memerlukan tindak lanjut Purchase Order (PO) atau penyesuaian kartu stok oleh Adm Pembelian.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleTabChange('opname')}
+                className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <Warehouse className="w-3.5 h-3.5" />
+                <span>Lihat Audit Opname Gudang</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="py-2.5 px-3">Kode &amp; Nama Barang</th>
+                    <th className="py-2.5 px-3">Gudang / Cabang</th>
+                    <th className="py-2.5 px-3 text-right">Stok Sistem</th>
+                    <th className="py-2.5 px-3 text-right">Stok Fisik</th>
+                    <th className="py-2.5 px-3 text-center">Selisih</th>
+                    <th className="py-2.5 px-3 text-center">Kebutuhan PO</th>
+                    <th className="py-2.5 px-3">Status Pembelian</th>
+                    <th className="py-2.5 px-3 text-right">Tindak Lanjut PO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {opnameAuditList.filter(i => i.stokFisik !== i.stokSistem || i.purchasingStatus !== 'Sesuai Sistem').map(item => {
+                    const diff = item.stokFisik - item.stokSistem;
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3">
+                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mr-1.5">{item.kodeBarang}</span>
+                          <span className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 font-semibold">
+                          {item.namaGudang} ({item.cabang})
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono">{item.stokSistem} {item.satuan}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold">{item.stokFisik} {item.satuan}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-rose-600 dark:text-rose-400">
+                          {diff > 0 ? `+${diff}` : diff} {item.satuan}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-black text-indigo-600 dark:text-indigo-400">
+                          {item.reorderQty} {item.satuan}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            item.purchasingStatus === 'Diproses PO Pembelian'
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }`}>
+                            {item.purchasingStatus}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {item.purchasingStatus !== 'Diproses PO Pembelian' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpnameAuditList(prev =>
+                                  prev.map(r => (r.id === item.id ? { ...r, purchasingStatus: 'Diproses PO Pembelian' } : r))
+                                );
+                                setPopupModal({
+                                  title: 'PO Restock Diproses Adm Pembelian',
+                                  message: `Pengajuan restock ${item.kodeBarang} sebanyak ${item.reorderQty} ${item.satuan} telah disetujui dan masuk antrean Purchase Order (PO).`
+                                });
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                            >
+                              Proses PO Restock
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">✓ Sudah Diproses PO</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {/* Header Kartu Stok */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
-                  Analisa Otomatis Kartu Stok
+                  Adm Pembelian &bull; Analisa Otomatis Kartu Stok
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Kartu Stok Digital &amp; Analisa Selisih Hari Pengisian Stok
+                Stok Opname &amp; Kartu Stok Digital (Analisa Selisih Hari Pengisian Stok)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Unggah file Excel mentahan Kartu Stok untuk diolah otomatis oleh sistem menjadi laporan analisa tanggal kuantitas minimum/kosong, tanggal stok masuk, selisih hari, dan kuantitas terakhir per gudang.

@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { branchStore, BranchRecord } from '../services/branchStore';
 
 // ============================================================
 // TYPES
@@ -71,9 +72,99 @@ export interface OfflineSalesReport {
   catatan: string;
 }
 
-interface MarketingDashboardProps {
-  activeTab: 'marketing_online' | 'marketing_offline';
+export interface ToVoRoRecord {
+  id: string;
+  periode: string;
+  cabang: string;
+  salesName: string;
+  wilayah: string;
+  totalTokoAktif: number;
+  targetVisit: number;
+  realisasiVisitVo: number;
+  takeOrderTo: number;
+  repeatOrderRo: number;
+  nilaiOmsetIdr: number;
+  catatan: string;
 }
+
+interface MarketingDashboardProps {
+  activeTab: 'marketing_online' | 'marketing_offline' | 'marketing_to_vo_ro';
+}
+
+const INITIAL_TO_VO_RO_DATA: ToVoRoRecord[] = [
+  {
+    id: 'TVR-001',
+    periode: '2026-11',
+    cabang: 'Banyuwangi',
+    salesName: 'Rendra Saputra',
+    wilayah: 'Banyuwangi Kota & Rogojampi',
+    totalTokoAktif: 60,
+    targetVisit: 120,
+    realisasiVisitVo: 108,
+    takeOrderTo: 86,
+    repeatOrderRo: 51,
+    nilaiOmsetIdr: 148500000,
+    catatan: 'Repeat order karton box dan cup plastik tinggi di area retail'
+  },
+  {
+    id: 'TVR-002',
+    periode: '2026-11',
+    cabang: 'Banyuwangi',
+    salesName: 'Dina Mariana',
+    wilayah: 'Genteng, Srono & Muncar',
+    totalTokoAktif: 55,
+    targetVisit: 110,
+    realisasiVisitVo: 98,
+    takeOrderTo: 79,
+    repeatOrderRo: 46,
+    nilaiOmsetIdr: 132400000,
+    catatan: 'Penetrasi kemasan food grade & lunch box meningkat'
+  },
+  {
+    id: 'TVR-003',
+    periode: '2026-11',
+    cabang: 'Jember',
+    salesName: 'Bagus Setiawan',
+    wilayah: 'Jember Kota, Ambulu & Tanggul',
+    totalTokoAktif: 48,
+    targetVisit: 100,
+    realisasiVisitVo: 88,
+    takeOrderTo: 68,
+    repeatOrderRo: 39,
+    nilaiOmsetIdr: 115800000,
+    catatan: 'Kunjungan toko grosir plastik & lakban rutin mingguan'
+  },
+  {
+    id: 'TVR-004',
+    periode: '2026-11',
+    cabang: 'Sidoarjo',
+    salesName: 'Hendra Wijaya',
+    wilayah: 'Sidoarjo, Waru & Krian',
+    totalTokoAktif: 65,
+    targetVisit: 130,
+    realisasiVisitVo: 119,
+    takeOrderTo: 95,
+    repeatOrderRo: 56,
+    nilaiOmsetIdr: 184200000,
+    catatan: 'Repeat order industri karton box B-Flute & CB-Flute stabil'
+  },
+  {
+    id: 'TVR-005',
+    periode: '2026-11',
+    cabang: 'Bali',
+    salesName: 'I Made Suartana',
+    wilayah: 'Denpasar, Badung & Gianyar',
+    totalTokoAktif: 52,
+    targetVisit: 104,
+    realisasiVisitVo: 94,
+    takeOrderTo: 76,
+    repeatOrderRo: 44,
+    nilaiOmsetIdr: 162900000,
+    catatan: 'Demand paper cup & kemasan horeca Bali sangat kuat'
+  }
+];
+
+const LS_KEY_TO_VO_RO = 'akk_marketing_to_vo_ro_v1';
 
 // ============================================================
 // INITIAL DATA
@@ -338,6 +429,52 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
       localStorage.setItem(LS_KEY_ONLINE_LEADS, JSON.stringify(onlineLeads));
     } catch {}
   }, [onlineLeads]);
+
+  // --- Persistent TO, VO & RO State ---
+  const [toVoRoList, setToVoRoList] = useState<ToVoRoRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY_TO_VO_RO);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_TO_VO_RO_DATA;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY_TO_VO_RO, JSON.stringify(toVoRoList));
+    } catch {}
+  }, [toVoRoList]);
+
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
+  useEffect(() => {
+    const syncBranches = () => setBranches(branchStore.getBranches());
+    const unsub = branchStore.subscribe(syncBranches);
+    window.addEventListener('akk-branch-updated', syncBranches);
+    return () => {
+      unsub();
+      window.removeEventListener('akk-branch-updated', syncBranches);
+    };
+  }, []);
+
+  const [tvrSearch, setTvrSearch] = useState('');
+  const [tvrBranchFilter, setTvrBranchFilter] = useState('ALL');
+  const [showAddTvrModal, setShowAddTvrModal] = useState(false);
+  const [tvrForm, setTvrForm] = useState({
+    periode: '2026-11',
+    cabang: branchStore.getBranches()[0]?.name || 'Nusantara',
+    salesName: '',
+    wilayah: '',
+    totalTokoAktif: 50,
+    targetVisit: 100,
+    realisasiVisitVo: 85,
+    takeOrderTo: 70,
+    repeatOrderRo: 42,
+    nilaiOmsetIdr: 95000000,
+    catatan: ''
+  });
 
   useEffect(() => {
     try {
@@ -721,6 +858,448 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
   const visitOrderRate = totalVisitsCount > 0 ? ((orderVisitsCount / totalVisitsCount) * 100).toFixed(1) : '0';
   const totalOfflineSalesOmset = salesReports.reduce((sum, s) => sum + s.totalPenjualan, 0);
   const totalFilteredSalesOmset = filteredSales.reduce((sum, s) => sum + s.totalPenjualan, 0);
+
+  // ============================================================
+  // RENDER: PROSENTASE TO, VO & RO (TAKE ORDER, VISIT ORDER, REPEAT ORDER)
+  // ============================================================
+  if (activeTab === 'marketing_to_vo_ro') {
+    const filteredTvr = toVoRoList.filter(item => {
+      const q = tvrSearch.trim().toLowerCase();
+      const matchQ =
+        !q ||
+        item.salesName.toLowerCase().includes(q) ||
+        item.wilayah.toLowerCase().includes(q) ||
+        item.cabang.toLowerCase().includes(q);
+      const selectedMasterBranch = branches.find(
+        b => b.name.toLowerCase() === tvrBranchFilter.toLowerCase() || b.slug.toLowerCase() === tvrBranchFilter.toLowerCase()
+      );
+      const matchBranch =
+        tvrBranchFilter === 'ALL' ||
+        item.cabang.toLowerCase() === tvrBranchFilter.toLowerCase() ||
+        Boolean(
+          selectedMasterBranch &&
+            (item.cabang.toLowerCase() === selectedMasterBranch.name.toLowerCase() ||
+              item.cabang.toLowerCase() === selectedMasterBranch.slug.toLowerCase() ||
+              item.cabang.toLowerCase() === (selectedMasterBranch.city || '').toLowerCase() ||
+              item.wilayah.toLowerCase().includes(selectedMasterBranch.slug.toLowerCase()))
+        );
+      return matchQ && matchBranch;
+    });
+
+    const totalTargetVisit = filteredTvr.reduce((s, r) => s + r.targetVisit, 0);
+    const totalRealisasiVo = filteredTvr.reduce((s, r) => s + r.realisasiVisitVo, 0);
+    const totalTakeOrderTo = filteredTvr.reduce((s, r) => s + r.takeOrderTo, 0);
+    const totalRepeatOrderRo = filteredTvr.reduce((s, r) => s + r.repeatOrderRo, 0);
+    const totalTokoAktifSum = filteredTvr.reduce((s, r) => s + r.totalTokoAktif, 0);
+    const totalOmsetTvr = filteredTvr.reduce((s, r) => s + r.nilaiOmsetIdr, 0);
+
+    const avgVoPct = totalTargetVisit > 0 ? ((totalRealisasiVo / totalTargetVisit) * 100).toFixed(1) : '0.0';
+    const avgToPct = totalRealisasiVo > 0 ? ((totalTakeOrderTo / totalRealisasiVo) * 100).toFixed(1) : '0.0';
+    const avgRoPct = totalTokoAktifSum > 0 ? ((totalRepeatOrderRo / totalTokoAktifSum) * 100).toFixed(1) : '0.0';
+
+    const handleExportTvrExcel = () => {
+      const rows = filteredTvr.map((r, i) => {
+        const voPct = r.targetVisit > 0 ? Math.round((r.realisasiVisitVo / r.targetVisit) * 1000) / 10 : 0;
+        const toPct = r.realisasiVisitVo > 0 ? Math.round((r.takeOrderTo / r.realisasiVisitVo) * 1000) / 10 : 0;
+        const roPct = r.totalTokoAktif > 0 ? Math.round((r.repeatOrderRo / r.totalTokoAktif) * 1000) / 10 : 0;
+        return {
+          No: i + 1,
+          Periode: r.periode,
+          Cabang: r.cabang,
+          'Nama Sales / Marketing': r.salesName,
+          'Wilayah / Area': r.wilayah,
+          'Toko Aktif': r.totalTokoAktif,
+          'Target Kunjungan': r.targetVisit,
+          'Realisasi Visit (VO)': r.realisasiVisitVo,
+          'Take Order (TO)': r.takeOrderTo,
+          'Repeat Order (RO)': r.repeatOrderRo,
+          '% VO': `${voPct}%`,
+          '% TO': `${toPct}%`,
+          '% RO': `${roPct}%`,
+          'Realisasi Omset (Rp)': r.nilaiOmsetIdr,
+          Catatan: r.catatan
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Prosentase_TO_VO_RO');
+      XLSX.writeFile(wb, `Rekap_Prosentase_TO_VO_RO_Marketing_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+
+    return (
+      <div className="space-y-5" id="marketing_to_vo_ro_hub">
+        {/* Header */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                Marketing Analytics &bull; Indikator TO, VO &amp; RO
+              </span>
+            </div>
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+              Analisa Prosentase TO (Take Order), VO (Visit Order) &amp; RO (Repeat Order)
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Monitoring efektivitas kunjungan sales lapangan (VO), tingkat konversi order masuk (TO), dan loyalitas pembelian berulang toko mitra (RO) di setiap cabang.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportTvrExcel}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Ekspor Excel TO/VO/RO</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddTvrModal(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Data TO / VO / RO</span>
+            </button>
+          </div>
+        </div>
+
+        {/* KPI Cards TO / VO / RO */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase VO (Visit Order)</span>
+              <MapPin className="w-4 h-4 text-sky-500" />
+            </div>
+            <div className="text-2xl font-black text-sky-600 dark:text-sky-400 font-mono">{avgVoPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Realisasi {totalRealisasiVo} dari {totalTargetVisit} target kunjungan
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase TO (Take Order)</span>
+              <ShoppingBag className="w-4 h-4 text-indigo-500" />
+            </div>
+            <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 font-mono">{avgToPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {totalTakeOrderTo} toko melakukan order dari {totalRealisasiVo} visit
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase RO (Repeat Order)</span>
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">{avgRoPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {totalRepeatOrderRo} toko repeat order dari {totalTokoAktifSum} toko aktif
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Total Realisasi Omset</span>
+              <DollarSign className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+              Rp {totalOmsetTvr.toLocaleString('id-ID')}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Akumulasi transaksi TO, VO &amp; RO seluruh tim
+            </p>
+          </div>
+        </div>
+
+        {/* Filter & Search Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={tvrSearch}
+              onChange={e => setTvrSearch(e.target.value)}
+              placeholder="Cari Nama Sales, Wilayah, atau Cabang..."
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500">Pilih Cabang (Master Cabang):</span>
+            <select
+              value={tvrBranchFilter}
+              onChange={e => setTvrBranchFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+            >
+              <option value="ALL">Semua Cabang ({branches.length} Cabang)</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.name}>
+                  Cabang {b.name} ({b.city || b.slug})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Table TO, VO & RO */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                Tabel Performa Prosentase TO, VO &amp; RO per Sales &amp; Wilayah
+              </h3>
+              <p className="text-xs text-slate-500">
+                VO = Kunjungan Terlaksana vs Target &bull; TO = Order Masuk vs Kunjungan &bull; RO = Toko Repeat Order vs Total Toko Aktif
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">Sales &amp; Wilayah</th>
+                  <th className="py-3 px-4">Cabang</th>
+                  <th className="py-3 px-4 text-center">Toko Aktif</th>
+                  <th className="py-3 px-4 text-center">Target Visit</th>
+                  <th className="py-3 px-4 text-center">Visit (VO)</th>
+                  <th className="py-3 px-4 text-center">Take Order (TO)</th>
+                  <th className="py-3 px-4 text-center">Repeat Order (RO)</th>
+                  <th className="py-3 px-4 text-center">% VO</th>
+                  <th className="py-3 px-4 text-center">% TO</th>
+                  <th className="py-3 px-4 text-center">% RO</th>
+                  <th className="py-3 px-4 text-right">Omset (Rp)</th>
+                  <th className="py-3 px-4 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                {filteredTvr.map(row => {
+                  const voPct = row.targetVisit > 0 ? Math.round((row.realisasiVisitVo / row.targetVisit) * 1000) / 10 : 0;
+                  const toPct = row.realisasiVisitVo > 0 ? Math.round((row.takeOrderTo / row.realisasiVisitVo) * 1000) / 10 : 0;
+                  const roPct = row.totalTokoAktif > 0 ? Math.round((row.repeatOrderRo / row.totalTokoAktif) * 1000) / 10 : 0;
+                  return (
+                    <tr key={row.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900 dark:text-white">{row.salesName}</div>
+                        <div className="text-[11px] text-slate-500">{row.wilayah}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-[10px]">
+                          {row.cabang}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold">{row.totalTokoAktif}</td>
+                      <td className="py-3 px-4 text-center font-mono">{row.targetVisit}</td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-sky-600 dark:text-sky-400">
+                        {row.realisasiVisitVo}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        {row.takeOrderTo}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {row.repeatOrderRo}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-300 font-mono font-black text-[11px]">
+                          {voPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-mono font-black text-[11px]">
+                          {toPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-mono font-black text-[11px]">
+                          {roPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                        Rp {row.nilaiOmsetIdr.toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setToVoRoList(prev => prev.filter(item => item.id !== row.id))}
+                          className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                          title="Hapus Data"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Modal Tambah Data TO / VO / RO */}
+        {showAddTvrModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Input Data Prosentase TO, VO &amp; RO
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAddTvrModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (!tvrForm.salesName.trim()) return;
+                  const newItem: ToVoRoRecord = {
+                    id: `TVR-${Date.now()}`,
+                    periode: tvrForm.periode,
+                    cabang: tvrForm.cabang,
+                    salesName: tvrForm.salesName.trim(),
+                    wilayah: tvrForm.wilayah.trim() || tvrForm.cabang,
+                    totalTokoAktif: Math.max(1, Number(tvrForm.totalTokoAktif) || 1),
+                    targetVisit: Math.max(1, Number(tvrForm.targetVisit) || 1),
+                    realisasiVisitVo: Math.max(0, Number(tvrForm.realisasiVisitVo) || 0),
+                    takeOrderTo: Math.max(0, Number(tvrForm.takeOrderTo) || 0),
+                    repeatOrderRo: Math.max(0, Number(tvrForm.repeatOrderRo) || 0),
+                    nilaiOmsetIdr: Math.max(0, Number(tvrForm.nilaiOmsetIdr) || 0),
+                    catatan: tvrForm.catatan.trim()
+                  };
+                  setToVoRoList(prev => [newItem, ...prev]);
+                  setShowAddTvrModal(false);
+                }}
+                className="space-y-3 text-xs"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Cabang (Master Cabang)</label>
+                    <select
+                      value={tvrForm.cabang}
+                      onChange={e => setTvrForm({ ...tvrForm, cabang: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.name}>
+                          Cabang {b.name} ({b.city || b.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Sales</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: Rendra Saputra"
+                      value={tvrForm.salesName}
+                      onChange={e => setTvrForm({ ...tvrForm, salesName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Wilayah / Rute Kunjungan</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Genteng, Srono & Muncar"
+                    value={tvrForm.wilayah}
+                    onChange={e => setTvrForm({ ...tvrForm, wilayah: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Toko Aktif</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={tvrForm.totalTokoAktif}
+                      onChange={e => setTvrForm({ ...tvrForm, totalTokoAktif: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Target Visit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={tvrForm.targetVisit}
+                      onChange={e => setTvrForm({ ...tvrForm, targetVisit: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Visit (VO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.realisasiVisitVo}
+                      onChange={e => setTvrForm({ ...tvrForm, realisasiVisitVo: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Take Order (TO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.takeOrderTo}
+                      onChange={e => setTvrForm({ ...tvrForm, takeOrderTo: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Repeat Order (RO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.repeatOrderRo}
+                      onChange={e => setTvrForm({ ...tvrForm, repeatOrderRo: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nilai Omset (Rp)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.nilaiOmsetIdr}
+                      onChange={e => setTvrForm({ ...tvrForm, nilaiOmsetIdr: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTvrModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Data TO/VO/RO
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // ============================================================
   // RENDER: MARKETING OFFLINE (LAPORAN KUNJUNGAN & LAPORAN PENJUALAN)

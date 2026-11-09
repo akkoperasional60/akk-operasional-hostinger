@@ -45,7 +45,8 @@ import {
   ClipboardCheck,
   Map as MapIcon,
   Clock,
-  QrCode
+  QrCode,
+  DollarSign
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -73,6 +74,7 @@ export type NavTab =
   | 'sales_schedules'
   | 'sales_loading_duration'
   | 'sales_invoice_so'
+  | 'sales_form_kirim'
   | 'sales_rfid_scanner'
   | 'sales_skill_matrix'
   | 'sales_jobdesk'
@@ -85,6 +87,7 @@ export type NavTab =
   | 'purchasing_dashboard'
   | 'purchasing_stock_overview'
   | 'purchasing_stock_forecast'
+  | 'purchasing_stok_opname'
   | 'hr_dashboard'
   | 'ga_security'
   | 'ga_hk'
@@ -92,6 +95,8 @@ export type NavTab =
   | 'training_videos'
   | 'training_karyawan'
   | 'finance_dashboard'
+  | 'finance_validasi_form_kirim'
+  | 'finance_billing_app'
   | 'warehouse_dashboard'
   | 'warehouse_inventory'
   | 'warehouse_inbound'
@@ -103,6 +108,7 @@ export type NavTab =
   | 'warehouse_fleet_cubication'
   | 'marketing_online'
   | 'marketing_offline'
+  | 'marketing_to_vo_ro'
   | 'activity_log'
   | 'users'
   | 'branches'
@@ -511,9 +517,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'warehouse_opname',
-              label: 'Stok Opname & Kartu Stok',
+              label: 'Opname Gudang (Integrasi Pembelian)',
               icon: <ClipboardCheck className="w-4 h-4 text-purple-500" />,
-              description: 'Audit periodik fisik vs sistem'
+              description: 'Audit fisik vs sistem & kirim restock ke Adm Pembelian'
             }
           ]
         }
@@ -556,7 +562,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Pengeluaran Barang & RFID Muat',
+          groupTitle: 'Pengeluaran & Scan Barang Muat',
           items: [
             {
               tab: 'sales_invoice_so',
@@ -568,6 +574,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 </span>
               ),
               description: 'Input faktur & daftar item barang muatan armada box'
+            },
+            {
+              tab: 'sales_form_kirim',
+              label: 'Form Kirim',
+              icon: <Truck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                  Finance & Driver
+                </span>
+              ),
+              description: 'Pengajuan Form Kirim terintegrasi Validasi Finance & Portal Driver'
             },
             {
               tab: 'sales_rfid_scanner',
@@ -633,13 +650,24 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'purchasing'),
       groups: [
         {
-          groupTitle: 'Admin Pembelian (PO)',
+          groupTitle: 'Admin Pembelian (PO) & Stok Opname',
           items: [
             {
               tab: 'purchasing_dashboard',
               label: 'Dashboard Pembelian',
               icon: <ShoppingBag className="w-4 h-4 text-purple-500" />,
               description: 'Permintaan barang dan PO supplier'
+            },
+            {
+              tab: 'purchasing_stok_opname',
+              label: 'Stok Opname & Kartu Stok',
+              icon: <ClipboardCheck className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  Integrasi Gudang
+                </span>
+              ),
+              description: 'Kartu stok digital & integrasi hasil opname gudang'
             },
             {
               tab: 'purchasing_stock_overview',
@@ -680,6 +708,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               description: 'Pipeline prospek pabrik dan industri'
             },
             {
+              tab: 'marketing_to_vo_ro',
+              label: 'Prosentase TO, VO & RO',
+              icon: <Percent className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  TO/VO/RO
+                </span>
+              ),
+              description: 'Analisa prosentase Take Order (TO), Visit Order (VO) & Repeat Order (RO)'
+            },
+            {
               tab: 'customer_map',
               label: 'Jaringan Toko & Wilayah Mitra',
               icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
@@ -694,17 +733,38 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       label: 'Finance & Tax',
       shortLabel: 'Finance',
       icon: <FileText className="w-5 h-5" />,
-      defaultTab: 'finance_dashboard',
       checkAccess: (user) => canAccess(user, 'finance_tax'),
       groups: [
         {
-          groupTitle: 'Keuangan & Perpajakan',
+          groupTitle: 'Keuangan & Penagihan Pelanggan',
           items: [
             {
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
               icon: <FileText className="w-4 h-4 text-emerald-500" />,
               description: 'Faktur penjualan, pajak & konfirmasi piutang'
+            },
+            {
+              tab: 'finance_validasi_form_kirim',
+              label: 'Validasi Form Kirim',
+              icon: <ShieldCheck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                  Integrasi
+                </span>
+              ),
+              description: 'Validasi Form Kirim Admin Penjualan sebelum masuk Portal Driver'
+            },
+            {
+              tab: 'finance_billing_app',
+              label: 'Aplikasi Penagihan Pelanggan',
+              icon: <DollarSign className="w-4 h-4 text-amber-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                  Kolektor
+                </span>
+              ),
+              description: 'Aplikasi HP penagihan ke pelanggan, foto bukti, kendala & lunas'
             }
           ]
         }
@@ -716,83 +776,34 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       shortLabel: 'HR',
       icon: <Users className="w-5 h-5" />,
       checkAccess: (user) =>
+        canAccess(user, 'hr') ||
         canAccess(user, 'hr', 'hr_dashboard') ||
-        canAccess(user, 'hr', 'hr_data_karyawan') ||
-        canAccess(user, 'hr', 'hr_gaji_kpi'),
+        canAccess(user, 'hr', 'ga_security') ||
+        canAccess(user, 'hr', 'ga_hk') ||
+        canAccess(user, 'hr', 'ga_aset') ||
+        canAccess(user, 'hr', 'training_videos') ||
+        canAccess(user, 'hr', 'training_karyawan'),
       groups: [
         {
-          groupTitle: 'Personalia & Presensi',
+          groupTitle: 'Sub-Menu Utama Departemen HR',
           items: [
             {
               tab: 'hr_dashboard',
-              label: 'Dashboard SDM & Presensi',
+              label: 'HR',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
               description: 'Data karyawan, presensi kru & rekap kehadiran'
-            }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'ga',
-      label: 'GA',
-      shortLabel: 'GA',
-      icon: <ShieldAlert className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'hr', 'ga_security') ||
-        canAccess(user, 'hr', 'ga_hk') ||
-        canAccess(user, 'hr', 'ga_aset'),
-      groups: [
-        {
-          groupTitle: 'General Affair (GA)',
-          items: [
+            },
             {
               tab: 'ga_security',
-              label: 'Security & Keamanan',
+              label: 'GA',
               icon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
-              description: 'Log buku tamu dan jadwal patroli gerbang'
+              description: 'Security pos gerbang, housekeeping 5R & manajemen aset pabrik'
             },
-            {
-              tab: 'ga_hk',
-              label: 'Housekeeping (Sanitasi)',
-              icon: <Brush className="w-4 h-4 text-cyan-500" />,
-              description: 'Ceklis kebersihan gudang dan kantor'
-            },
-            {
-              tab: 'ga_aset',
-              label: 'Manajemen Aset Pabrik',
-              icon: <Building2 className="w-4 h-4 text-amber-500" />,
-              description: 'Inventaris mesin, forklift, dan perlengkapan'
-            }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'training_dev',
-      label: 'Training Development',
-      shortLabel: 'Training',
-      icon: <Award className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'hr', 'training_videos') ||
-        canAccess(user, 'hr', 'training_karyawan') ||
-        canAccess(user, 'hr', 'td_video_training') ||
-        canAccess(user, 'hr', 'td_training_karyawan'),
-      groups: [
-        {
-          groupTitle: 'Pelatihan & SOP',
-          items: [
             {
               tab: 'training_videos',
-              label: 'Video Training SOP',
-              icon: <Video className="w-4 h-4 text-blue-500" />,
-              description: 'Video panduan muat dan keselamatan kerja'
-            },
-            {
-              tab: 'training_karyawan',
-              label: 'Modul Pelatihan Karyawan',
+              label: 'Training & Development',
               icon: <Award className="w-4 h-4 text-emerald-500" />,
-              description: 'Ujian pemahaman dan sertifikasi internal'
+              description: 'Video training SOP & pelatihan sertifikasi karyawan'
             }
           ]
         }
@@ -887,6 +898,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   const isCategoryActive = (cat: NavCategory): boolean => {
     if (cat.defaultTab === currentTab) return true;
     if (cat.id === 'logistik' && (currentTab === 'operational_dashboard' || currentTab === 'analytics_reports')) return true;
+    if (
+      cat.id === 'hr' &&
+      ['hr_dashboard', 'ga_security', 'ga_hk', 'ga_aset', 'training_videos', 'training_karyawan'].includes(currentTab)
+    ) {
+      return true;
+    }
     for (const group of cat.groups) {
       if (group.items.some(item => item.tab === currentTab)) return true;
     }
@@ -1140,18 +1157,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* Sidebar Bottom Footer (Aksi Cepat removed) */}
+          {/* Sidebar Bottom Footer */}
           {isMinimized ? (
             <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col items-center gap-2 shrink-0">
               <ThemeSwitcher variant="icon-only" />
-
-              <button
-                onClick={() => setIsApkModalOpen(true)}
-                className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
-                title="Unduh Berkas APK Driver Mobile"
-              >
-                <Smartphone className="w-4 h-4" />
-              </button>
 
               <button
                 onClick={() => logisticsStore.logoutUser()}
@@ -1167,25 +1176,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 <ThemeSwitcher />
                 <button
                   type="button"
-                  onClick={() => setIsApkModalOpen(true)}
-                  className="py-1.5 px-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                  title="Unduh Berkas APK Driver Mobile"
+                  onClick={() => logisticsStore.logoutUser()}
+                  className="py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:border-rose-300 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="Keluar Sesi"
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>APK Driver</span>
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Keluar Sesi</span>
                 </button>
               </div>
-
-              {/* Keluar atau Log Out */}
-              <button
-                type="button"
-                onClick={() => logisticsStore.logoutUser()}
-                className="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:border-rose-300 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-                title="Keluar Sesi"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Keluar Sesi</span>
-              </button>
             </div>
           )}
         </div>

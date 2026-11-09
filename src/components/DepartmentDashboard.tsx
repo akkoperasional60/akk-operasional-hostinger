@@ -6,7 +6,8 @@ import {
   CheckCircle2, UserCheck, ShieldAlert, Brush, Award, Video, Play,
   Check, Clock, Search, Plus, Calendar, ShieldCheck, FileText, ExternalLink,
   Truck, ArrowRight, X, Download, DollarSign, MapPin, CreditCard,
-  ChevronLeft, ChevronRight, Trash2
+  ChevronLeft, ChevronRight, Trash2, MessageSquare, Printer, Phone, Send,
+  Camera, Smartphone, Upload, AlertTriangle, History
 } from 'lucide-react';
 import { SecurityGateLog } from '../types';
 import { TeamCalendar } from './TeamCalendar';
@@ -14,6 +15,8 @@ import { attendanceService } from '../services/attendanceService';
 import { PresenceSummary } from './PresenceSummary';
 import { AbsenceManagementModal } from './AbsenceManagementModal';
 import { WarehouseManagementSystem } from './WarehouseManagementSystem';
+import { AkkLogo } from './AkkLogo';
+import { branchStore, BranchRecord } from '../services/branchStore';
 
 const MetricCard = ({ title, value, subtext, icon: Icon, color }: { title: string, value: string, subtext: string, icon: any, color: string }) => (
   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-xs">
@@ -241,83 +244,126 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
 
   return (
     <div className="space-y-6">
-      {/* Top HR & Submenu Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
-        <button
-          onClick={() => handleTabChange('hr_core')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'hr_core'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>1. HR & Presensi</span>
-        </button>
+      {/* Top 3 Sub-Menu Utama HR: 1. HR, 2. GA, 3. Training & Development */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
+          <button
+            type="button"
+            onClick={() => handleTabChange('hr_core')}
+            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
+              currentSubTab === 'hr_core'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>1. HR (Presensi &amp; SDM)</span>
+          </button>
 
-        <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+          <button
+            type="button"
+            onClick={() => handleTabChange(currentSubTab.startsWith('ga_') ? currentSubTab : 'ga_security')}
+            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
+              currentSubTab.startsWith('ga_')
+                ? 'bg-amber-600 text-slate-950 shadow-lg shadow-amber-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            <span>2. GA (General Affairs)</span>
+          </button>
 
-        <button
-          onClick={() => handleTabChange('ga_security')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'ga_security'
-              ? 'bg-amber-600 text-slate-950 shadow-lg shadow-amber-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4 text-amber-400" />
-          <span>2. GA: Security</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => handleTabChange(currentSubTab.startsWith('training_') ? currentSubTab : 'training_videos')}
+            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
+              currentSubTab.startsWith('training_')
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Award className="w-4 h-4" />
+            <span>3. Training &amp; Development</span>
+          </button>
+        </div>
 
-        <button
-          onClick={() => handleTabChange('ga_hk')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'ga_hk'
-              ? 'bg-amber-600 text-slate-950 shadow-lg shadow-amber-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Brush className="w-4 h-4 text-emerald-400" />
-          <span>GA: Housekeeping (HK)</span>
-        </button>
+        {/* Sub-navigasi internal untuk GA */}
+        {currentSubTab.startsWith('ga_') && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs">
+            <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 mr-1">
+              Sub-Bagian GA:
+            </span>
+            <button
+              type="button"
+              onClick={() => handleTabChange('ga_security')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                currentSubTab === 'ga_security'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Pos Security &amp; Gate Log</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange('ga_hk')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                currentSubTab === 'ga_hk'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Brush className="w-3.5 h-3.5" />
+              <span>Housekeeping (HK) 5R</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange('ga_aset')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                currentSubTab === 'ga_aset'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Manajemen Aset &amp; Fasilitas</span>
+            </button>
+          </div>
+        )}
 
-        <button
-          onClick={() => handleTabChange('ga_aset')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'ga_aset'
-              ? 'bg-amber-600 text-slate-950 shadow-lg shadow-amber-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Building2 className="w-4 h-4 text-cyan-400" />
-          <span>GA: Aset & Fasilitas</span>
-        </button>
-
-        <div className="h-4 w-px bg-slate-800 hidden sm:block" />
-
-        <button
-          onClick={() => handleTabChange('training_videos')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'training_videos'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Video className="w-4 h-4 text-indigo-400" />
-          <span>3. Training: Video SOP</span>
-        </button>
-
-        <button
-          onClick={() => handleTabChange('training_karyawan')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
-            currentSubTab === 'training_karyawan'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Award className="w-4 h-4 text-amber-400" />
-          <span>Training: Karyawan</span>
-        </button>
+        {/* Sub-navigasi internal untuk Training & Development */}
+        {currentSubTab.startsWith('training_') && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 mr-1">
+              Sub-Bagian Training:
+            </span>
+            <button
+              type="button"
+              onClick={() => handleTabChange('training_videos')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                currentSubTab === 'training_videos'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>Video Training SOP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange('training_karyawan')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                currentSubTab === 'training_karyawan'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>Pelatihan &amp; Sertifikasi Karyawan</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* SUBTAB 1: HR UTAMA (PRESENSI & DATA KARYAWAN) */}
@@ -946,6 +992,23 @@ const WarehouseDashboard = () => (
   <WarehouseManagementSystem />
 );
 
+interface CollectorProofLog {
+  id: string;
+  invoiceId: string;
+  noInvoice: string;
+  customerName: string;
+  region: string;
+  timestamp: string;
+  collectorName: string;
+  totalTagihanFaktur: number;
+  nominalDibayarkan: number;
+  sisaSetelahBayar: number;
+  statusLunas: boolean;
+  kendala: string;
+  notes: string;
+  photoDataUrl: string;
+}
+
 interface CustomerUnpaidInvoice {
   id: string;
   noInvoice: string;
@@ -960,6 +1023,12 @@ interface CustomerUnpaidInvoice {
   jumlahTerbayar: number;
   lastPaymentDate?: string;
   notes: string;
+  collectionPhotoUrl?: string;
+  kendalaTagihan?: string;
+  lastCollectedAmount?: number;
+  collectorName?: string;
+  collectionTimestamp?: string;
+  collectionLogs?: CollectorProofLog[];
 }
 
 const INITIAL_UNPAID_INVOICES: CustomerUnpaidInvoice[] = [
@@ -1086,7 +1155,77 @@ function getInvoiceStatus(inv: CustomerUnpaidInvoice): 'Lunas' | 'Jatuh Tempo (O
   return 'Belum Jatuh Tempo';
 }
 
-const FinanceDashboard: React.FC = () => {
+const KENDALA_PENAGIHAN_OPTIONS = [
+  'Tidak Ada Kendala (Pembayaran Lancar)',
+  'Toko Tutup Sementara',
+  'Pemilik / Bagian Keuangan Tidak di Tempat',
+  'Minta Tempo / Janji Bayar Ulang',
+  'Menunggu Giro / Cek Cair',
+  'Komplain Barang / Selisih Faktur',
+  'Kendala Lainnya'
+];
+
+function createSampleBillingPhotoDataUrl(
+  customerName: string,
+  noInvoice: string,
+  nominalDibayar: number,
+  totalTagihan: number,
+  collectorName: string,
+  kendala: string
+): string {
+  const nowStr = new Date().toLocaleString('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+  const isLunas = nominalDibayar >= totalTagihan && totalTagihan > 0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0f172a"/>
+        <stop offset="100%" stop-color="#1e293b"/>
+      </linearGradient>
+    </defs>
+    <rect width="640" height="420" rx="20" fill="url(#bg)"/>
+    <rect x="24" y="24" width="592" height="372" rx="14" fill="#090d16" fill-opacity="0.55" stroke="#334155" stroke-width="2"/>
+    <rect x="44" y="42" width="240" height="30" rx="8" fill="#10b981" fill-opacity="0.2" stroke="#10b981"/>
+    <text x="58" y="62" fill="#34d399" font-family="monospace" font-size="13" font-weight="bold">BUKTI PENAGIHAN LANGSUNG</text>
+    <text x="590" y="62" text-anchor="end" fill="#94a3b8" font-family="monospace" font-size="12">${nowStr} WIB</text>
+    <text x="44" y="106" fill="#f8fafc" font-family="sans-serif" font-size="22" font-weight="bold">${customerName.slice(0, 32)}</text>
+    <text x="44" y="132" fill="#38bdf8" font-family="monospace" font-size="15" font-weight="bold">No. Faktur: ${noInvoice}</text>
+    <line x1="44" y1="150" x2="596" y2="150" stroke="#334155" stroke-dasharray="4 4"/>
+    <text x="44" y="182" fill="#94a3b8" font-family="sans-serif" font-size="13">Total Nominal Tagihan:</text>
+    <text x="596" y="182" text-anchor="end" fill="#e2e8f0" font-family="monospace" font-size="16" font-weight="bold">Rp ${totalTagihan.toLocaleString('id-ID')}</text>
+    <text x="44" y="216" fill="#94a3b8" font-family="sans-serif" font-size="13">Nominal Dibayarkan Pelanggan:</text>
+    <text x="596" y="216" text-anchor="end" fill="#34d399" font-family="monospace" font-size="20" font-weight="bold">Rp ${nominalDibayar.toLocaleString('id-ID')}</text>
+    <text x="44" y="250" fill="#94a3b8" font-family="sans-serif" font-size="13">Status / Kendala:</text>
+    <text x="596" y="250" text-anchor="end" fill="#fbbf24" font-family="sans-serif" font-size="13" font-weight="bold">${kendala.slice(0, 38)}</text>
+    <rect x="44" y="280" width="552" height="54" rx="10" fill="${isLunas ? '#064e3b' : '#1e1b4b'}" stroke="${isLunas ? '#10b981' : '#6366f1'}"/>
+    <text x="320" y="313" text-anchor="middle" fill="#ffffff" font-family="monospace" font-size="16" font-weight="bold">${isLunas ? '✓ STATUS TAGIHAN: LUNAS 100%' : 'BUKTI KUNJUNGAN & PEMBAYARAN TERVERIFIKASI'}</text>
+    <text x="44" y="372" fill="#cbd5e1" font-family="monospace" font-size="12">Petugas Kolektor: ${collectorName}</text>
+    <text x="596" y="372" text-anchor="end" fill="#64748b" font-family="monospace" font-size="11">PT. Anugrah Kemasan Kreatif</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }> = ({ initialMode = 'monitoring' }) => {
+  const [financeMode, setFinanceMode] = useState<'monitoring' | 'billing_app'>(initialMode);
+  const currentUser = logisticsStore.getCurrentUser();
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
+
+  useEffect(() => {
+    const syncBranches = () => setBranches(branchStore.getBranches());
+    const unsub = branchStore.subscribe(syncBranches);
+    window.addEventListener('akk-branch-updated', syncBranches);
+    return () => {
+      unsub();
+      window.removeEventListener('akk-branch-updated', syncBranches);
+    };
+  }, []);
+
+  useEffect(() => {
+    setFinanceMode(initialMode);
+  }, [initialMode]);
+
   const [invoices, setInvoices] = useState<CustomerUnpaidInvoice[]>(() => {
     try {
       const saved = localStorage.getItem(LS_KEY_FINANCE_UNPAID);
@@ -1105,16 +1244,33 @@ const FinanceDashboard: React.FC = () => {
   }, [invoices]);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [branchFilter, setBranchFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('UNPAID_ONLY');
   const [agingFilter, setAgingFilter] = useState<string>('ALL');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Mobile Billing App State (Tampilan HP seperti Admin Penjualan & Portal Driver)
+  const [mobileNavTab, setMobileNavTab] = useState<'form_tagih' | 'daftar_toko' | 'riwayat_bukti'>('form_tagih');
+  const [selectedMobileInvoiceId, setSelectedMobileInvoiceId] = useState<string>(() => INITIAL_UNPAID_INVOICES[0]?.id || 'INV-001');
+  const [mobilePhotoDataUrl, setMobilePhotoDataUrl] = useState<string>('');
+  const [mobileKendala, setMobileKendala] = useState<string>(KENDALA_PENAGIHAN_OPTIONS[0]);
+  const [mobileNominalBayar, setMobileNominalBayar] = useState<number>(0);
+  const [mobileIsLunasChecked, setMobileIsLunasChecked] = useState<boolean>(false);
+  const [mobileCollectorNotes, setMobileCollectorNotes] = useState<string>('');
+  const [mobilePromiseDate, setMobilePromiseDate] = useState<string>('2026-11-12');
+  const mobilePhotoInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [paymentModalInvoice, setPaymentModalInvoice] = useState<CustomerUnpaidInvoice | null>(null);
   const [paymentNominal, setPaymentNominal] = useState<number>(0);
   const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [waBillingInvoice, setWaBillingInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [printSuratTagihanInvoice, setPrintSuratTagihanInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [collectorVisitInvoice, setCollectorVisitInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [collectorNoteInput, setCollectorNoteInput] = useState<string>('');
+  const [promiseDateInput, setPromiseDateInput] = useState<string>('2026-11-10');
   const [popupModal, setPopupModal] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
@@ -1143,9 +1299,13 @@ const FinanceDashboard: React.FC = () => {
     notes: ''
   });
 
-  // Filtered Invoices
+  // Filtered Invoices (Integrated with Master Cabang branchStore)
   const filteredInvoices = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const selectedMasterBranch = branches.find(
+      b => b.name.toLowerCase() === branchFilter.toLowerCase() || b.slug.toLowerCase() === branchFilter.toLowerCase()
+    );
+
     return invoices.filter(inv => {
       const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
       const st = getInvoiceStatus(inv);
@@ -1177,9 +1337,178 @@ const FinanceDashboard: React.FC = () => {
         matchAging = agingDays > 30 && sisa > 0;
       }
 
-      return matchSearch && matchStatus && matchAging;
+      let matchBranch = true;
+      if (branchFilter !== 'ALL') {
+        const regLower = inv.region.toLowerCase();
+        const bfLower = branchFilter.toLowerCase();
+        matchBranch =
+          regLower.includes(bfLower) ||
+          Boolean(
+            selectedMasterBranch &&
+              (regLower.includes(selectedMasterBranch.name.toLowerCase()) ||
+                regLower.includes(selectedMasterBranch.slug.toLowerCase()) ||
+                regLower.includes((selectedMasterBranch.city || '').toLowerCase()))
+          );
+      }
+
+      return matchSearch && matchStatus && matchAging && matchBranch;
     });
-  }, [invoices, searchQuery, statusFilter, agingFilter]);
+  }, [invoices, searchQuery, statusFilter, agingFilter, branchFilter, branches]);
+
+  // Invoices filtered by Master Cabang for Mobile App
+  const mobileBranchInvoices = useMemo(() => {
+    const selectedMasterBranch = branches.find(
+      b => b.name.toLowerCase() === branchFilter.toLowerCase() || b.slug.toLowerCase() === branchFilter.toLowerCase()
+    );
+    return invoices.filter(inv => {
+      if (branchFilter === 'ALL') return true;
+      const regLower = inv.region.toLowerCase();
+      const bfLower = branchFilter.toLowerCase();
+      return (
+        regLower.includes(bfLower) ||
+        Boolean(
+          selectedMasterBranch &&
+            (regLower.includes(selectedMasterBranch.name.toLowerCase()) ||
+              regLower.includes(selectedMasterBranch.slug.toLowerCase()) ||
+              regLower.includes((selectedMasterBranch.city || '').toLowerCase()))
+        )
+      );
+    });
+  }, [invoices, branchFilter, branches]);
+
+  const activeMobileInvoice = useMemo(() => {
+    return (
+      mobileBranchInvoices.find(i => i.id === selectedMobileInvoiceId) ||
+      mobileBranchInvoices[0] ||
+      invoices[0] ||
+      null
+    );
+  }, [mobileBranchInvoices, selectedMobileInvoiceId, invoices]);
+
+  // Sync mobile form defaults when switching active invoice
+  useEffect(() => {
+    if (!activeMobileInvoice) return;
+    const sisa = Math.max(0, activeMobileInvoice.totalTagihan - activeMobileInvoice.jumlahTerbayar);
+    setMobileNominalBayar(sisa);
+    setMobileIsLunasChecked(sisa === 0);
+    setMobilePhotoDataUrl(activeMobileInvoice.collectionPhotoUrl || '');
+    setMobileKendala(activeMobileInvoice.kendalaTagihan || KENDALA_PENAGIHAN_OPTIONS[0]);
+    setMobileCollectorNotes(activeMobileInvoice.notes || '');
+  }, [activeMobileInvoice?.id]);
+
+  const allCollectionLogs = useMemo(() => {
+    const list: CollectorProofLog[] = [];
+    invoices.forEach(inv => {
+      if (Array.isArray(inv.collectionLogs)) {
+        list.push(...inv.collectionLogs);
+      }
+    });
+    return list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }, [invoices]);
+
+  const handleMobilePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setMobilePhotoDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleToggleFiturLunas = (checked: boolean) => {
+    if (!activeMobileInvoice) return;
+    const sisa = Math.max(0, activeMobileInvoice.totalTagihan - activeMobileInvoice.jumlahTerbayar);
+    setMobileIsLunasChecked(checked);
+    if (checked) {
+      setMobileNominalBayar(sisa);
+      setMobileKendala('Tidak Ada Kendala (Pembayaran Lancar)');
+    }
+  };
+
+  const handleSaveMobileCollection = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeMobileInvoice) return;
+
+    const sisaSaatIni = Math.max(0, activeMobileInvoice.totalTagihan - activeMobileInvoice.jumlahTerbayar);
+    const bayarInput = mobileIsLunasChecked
+      ? sisaSaatIni
+      : Math.max(0, Math.min(sisaSaatIni, Number(mobileNominalBayar) || 0));
+    const totalTerbayarBaru = Math.min(
+      activeMobileInvoice.totalTagihan,
+      activeMobileInvoice.jumlahTerbayar + bayarInput
+    );
+    const sisaSetelahBayar = Math.max(0, activeMobileInvoice.totalTagihan - totalTerbayarBaru);
+    const isNowLunas = sisaSetelahBayar === 0;
+    const collectorName = currentUser?.fullName || 'Petugas Kolektor Finance';
+
+    const finalPhoto =
+      mobilePhotoDataUrl ||
+      createSampleBillingPhotoDataUrl(
+        activeMobileInvoice.customerName,
+        activeMobileInvoice.noInvoice,
+        bayarInput,
+        activeMobileInvoice.totalTagihan,
+        collectorName,
+        mobileKendala
+      );
+
+    const newLog: CollectorProofLog = {
+      id: `CLG-${Date.now()}`,
+      invoiceId: activeMobileInvoice.id,
+      noInvoice: activeMobileInvoice.noInvoice,
+      customerName: activeMobileInvoice.customerName,
+      region: activeMobileInvoice.region,
+      timestamp: new Date().toISOString(),
+      collectorName,
+      totalTagihanFaktur: activeMobileInvoice.totalTagihan,
+      nominalDibayarkan: bayarInput,
+      sisaSetelahBayar,
+      statusLunas: isNowLunas,
+      kendala: mobileKendala,
+      notes:
+        mobileCollectorNotes.trim() ||
+        (isNowLunas
+          ? `LUNAS 100% ditagih langsung oleh ${collectorName}`
+          : `Dibayar Rp ${bayarInput.toLocaleString('id-ID')} dari tagihan Rp ${activeMobileInvoice.totalTagihan.toLocaleString('id-ID')} (${mobileKendala})`),
+      photoDataUrl: finalPhoto
+    };
+
+    setInvoices(prev =>
+      prev.map(inv => {
+        if (inv.id !== activeMobileInvoice.id) return inv;
+        return {
+          ...inv,
+          jumlahTerbayar: totalTerbayarBaru,
+          lastPaymentDate: new Date().toISOString().slice(0, 10),
+          collectionPhotoUrl: finalPhoto,
+          kendalaTagihan: mobileKendala,
+          lastCollectedAmount: bayarInput,
+          collectorName,
+          collectionTimestamp: newLog.timestamp,
+          notes: `[${mobileKendala}] Dibayar Rp ${bayarInput.toLocaleString('id-ID')} / Total Rp ${inv.totalTagihan.toLocaleString('id-ID')}. ${
+            mobileCollectorNotes.trim() ? mobileCollectorNotes.trim() : isNowLunas ? 'Status: LUNAS.' : `Janji bayar sisa: ${mobilePromiseDate}`
+          }`,
+          collectionLogs: [newLog, ...(inv.collectionLogs || [])]
+        };
+      })
+    );
+
+    setMobilePhotoDataUrl(finalPhoto);
+    setPopupModal({
+      title: isNowLunas ? '✓ Tagihan Pelanggan LUNAS!' : 'Bukti Penagihan & Pembayaran Tersimpan',
+      message: `${activeMobileInvoice.customerName} (${activeMobileInvoice.noInvoice}) — Dibayarkan Rp ${bayarInput.toLocaleString(
+        'id-ID'
+      )} dari total tagihan Rp ${activeMobileInvoice.totalTagihan.toLocaleString('id-ID')}. ${
+        isNowLunas
+          ? 'Status faktur otomatis diperbarui menjadi LUNAS.'
+          : `Sisa tagihan: Rp ${sisaSetelahBayar.toLocaleString('id-ID')} (Kendala: ${mobileKendala}).`
+      }`
+    });
+  };
 
   const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -1316,43 +1645,700 @@ const FinanceDashboard: React.FC = () => {
     XLSX.writeFile(wb, `Tagihan_Pelanggan_Belum_Lunas_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  return (
-    <div className="space-y-5">
-      {/* Header Banner Finance & Tax */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 text-[10px] font-black uppercase tracking-wider">
-              Departemen Finance &amp; Tax &bull; Kontrol Piutang
-            </span>
-          </div>
-          <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-            Monitoring Tagihan Pelanggan yang Belum Terlunasi (Accounts Receivable)
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Rekapitulasi faktur tagihan toko/mitra yang belum lunas, pemantauan umur piutang jatuh tempo (overdue), dan pencatatan cicilan/pelunasan.
-          </p>
-        </div>
+  const formatWhatsappMessage = (inv: CustomerUnpaidInvoice) => {
+    const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+    const aging = computeInvoiceAgingDays(inv.dueDate);
+    return `Yth. Bapak/Ibu Pimpinan *${inv.customerName}* (${inv.region}),\n\nKami dari bagian Finance & Penagihan *PT. Anugrah Kemasan Kreatif (AKK)* menginformasikan rincian tagihan faktur berjalan sebagai berikut:\n\n• *No. Faktur*: ${inv.noInvoice}\n• *No. Surat Jalan*: ${inv.noSuratJalan}\n• *Tgl. Faktur*: ${inv.invoiceDate}\n• *Tgl. Jatuh Tempo*: ${inv.dueDate} (${aging > 0 ? `Lewat ${aging} Hari` : 'Belum Jatuh Tempo'})\n• *Rincian Pesanan*: ${inv.itemSummary}\n• *Total Tagihan*: Rp ${inv.totalTagihan.toLocaleString('id-ID')}\n• *Sudah Terbayar*: Rp ${inv.jumlahTerbayar.toLocaleString('id-ID')}\n• *Sisa Tagihan Belum Lunas*: *Rp ${sisa.toLocaleString('id-ID')}*\n\nMohon konfirmasi jadwal pembayaran/transfer melalui rekening resmi PT. Anugrah Kemasan Kreatif (BCA 8291-0092-11 a.n PT Anugrah Kemasan Kreatif). Terima kasih atas kerja sama yang baik.`;
+  };
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={handleExportUnpaidExcel}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Ekspor Excel Tagihan</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Tagihan Pelanggan</span>
-          </button>
+  const handleSaveCollectorVisit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!collectorVisitInvoice) return;
+    const noteText = `[Kolektor Tgl ${new Date().toISOString().slice(0, 10)} | Janji Bayar: ${promiseDateInput}] ${collectorNoteInput.trim() || 'Tanda terima faktur telah diserahkan ke pelanggan'}`;
+    setInvoices(prev =>
+      prev.map(item =>
+        item.id === collectorVisitInvoice.id
+          ? { ...item, notes: noteText }
+          : item
+      )
+    );
+    const cust = collectorVisitInvoice.customerName;
+    setCollectorVisitInvoice(null);
+    setCollectorNoteInput('');
+    setPopupModal({
+      title: 'Status Kunjungan Penagihan Tersimpan',
+      message: `Catatan penagihan kolektor & janji bayar (${promiseDateInput}) untuk "${cust}" berhasil diperbarui.`
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* ========================================================================== */}
+      {/* TAMPILAN APLIKASI HP PENAGIHAN PELANGGAN (SEPERTI ADMIN PENJUALAN & DRIVER) */}
+      {/* ========================================================================== */}
+      {financeMode === 'billing_app' ? (
+        <div className="py-1">
+          <div className="max-w-md mx-auto rounded-[2.25rem] border-[5px] border-slate-800 dark:border-slate-700 bg-white dark:bg-slate-950 shadow-2xl overflow-hidden flex flex-col min-h-[760px]">
+            {/* Top Phone Status & Collector Profile Header */}
+            <div className="bg-slate-900 text-white px-4 pt-3 pb-3.5 border-b border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center shrink-0">
+                    <AkkLogo size="sm" showText={false} />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                      APLIKASI PENAGIHAN AKK
+                    </div>
+                    <div className="text-xs font-black text-white leading-tight">
+                      {currentUser?.fullName || 'Kolektor Finance'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Online
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black cursor-pointer"
+                    title="Tambah Tagihan Baru"
+                  >
+                    + Tagihan
+                  </button>
+                </div>
+              </div>
+
+              {/* Pilih Cabang (Terintegrasi Master Cabang) & Pilih Toko di Header HP */}
+              <div className="grid grid-cols-1 gap-2 pt-1">
+                <div className="flex items-center gap-2 bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-[10px] font-bold uppercase text-slate-400 shrink-0">Cabang:</span>
+                  <select
+                    value={branchFilter}
+                    onChange={e => setBranchFilter(e.target.value)}
+                    className="w-full bg-transparent text-xs font-black text-amber-300 focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL" className="bg-slate-900 text-white">
+                      Semua Cabang ({branches.length} Cabang Master)
+                    </option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.name} className="bg-slate-900 text-white">
+                        Cabang {b.name} ({b.city || b.slug})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 bg-slate-950/90 border border-indigo-500/40 rounded-xl px-3 py-2">
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase shrink-0">
+                    TOKO
+                  </span>
+                  <select
+                    value={activeMobileInvoice?.id || ''}
+                    onChange={e => setSelectedMobileInvoiceId(e.target.value)}
+                    className="w-full bg-transparent text-xs font-black text-white focus:outline-none cursor-pointer truncate"
+                  >
+                    {mobileBranchInvoices.map(inv => {
+                      const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                      return (
+                        <option key={inv.id} value={inv.id} className="bg-slate-900 text-white">
+                          {inv.customerName} — {sisa > 0 ? `Sisa Rp ${sisa.toLocaleString('id-ID')}` : '✓ LUNAS'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Mobile App Body Content (Scrollable) */}
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 bg-slate-50 dark:bg-slate-950">
+              {mobileNavTab === 'form_tagih' && activeMobileInvoice && (() => {
+                const sisaSaatIni = Math.max(0, activeMobileInvoice.totalTagihan - activeMobileInvoice.jumlahTerbayar);
+                const agingDays = computeInvoiceAgingDays(activeMobileInvoice.dueDate);
+                const effectivePaidNow = mobileIsLunasChecked
+                  ? sisaSaatIni
+                  : Math.max(0, Math.min(sisaSaatIni, Number(mobileNominalBayar) || 0));
+                const sisaSetelahBayar = Math.max(0, sisaSaatIni - effectivePaidNow);
+                const isFakturAlreadyLunas = sisaSaatIni === 0;
+
+                return (
+                  <form onSubmit={handleSaveMobileCollection} className="space-y-3.5">
+                    {/* Kartu Detail Tagihan Pelanggan */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-[10px] font-mono font-black text-indigo-600 dark:text-indigo-400">
+                            {activeMobileInvoice.noInvoice} &bull; SJ: {activeMobileInvoice.noSuratJalan}
+                          </div>
+                          <h3 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
+                            {activeMobileInvoice.customerName}
+                          </h3>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                            <span>{activeMobileInvoice.region}</span>
+                            <span>&bull;</span>
+                            <span className="font-mono">{activeMobileInvoice.contactPhone}</span>
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 border ${
+                            isFakturAlreadyLunas
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                              : agingDays > 0
+                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                          }`}
+                        >
+                          {isFakturAlreadyLunas
+                            ? '✓ LUNAS'
+                            : agingDays > 0
+                            ? `Overdue ${agingDays} Hr`
+                            : `Jatuh Tempo ${activeMobileInvoice.dueDate}`}
+                        </span>
+                      </div>
+
+                      {/* Ringkasan Nominal Tagihan Faktur vs Terbayar vs Sisa */}
+                      <div className="grid grid-cols-3 gap-1.5 pt-1">
+                        <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <div className="text-[9px] font-bold uppercase text-slate-400">Nominal Tagihan</div>
+                          <div className="text-[11px] font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                            Rp {activeMobileInvoice.totalTagihan.toLocaleString('id-ID')}
+                          </div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                          <div className="text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">Sudah Dibayar</div>
+                          <div className="text-[11px] font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
+                            Rp {activeMobileInvoice.jumlahTerbayar.toLocaleString('id-ID')}
+                          </div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-rose-500/5 border border-rose-500/20">
+                          <div className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400">Sisa Tagihan</div>
+                          <div className="text-[11px] font-black font-mono text-rose-600 dark:text-rose-400 mt-0.5">
+                            Rp {sisaSaatIni.toLocaleString('id-ID')}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tombol Cepat WA & Cetak Surat Tagihan */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setWaBillingInvoice(activeMobileInvoice)}
+                          className="py-1.5 px-2.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Kirim WA Tagihan</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPrintSuratTagihanInvoice(activeMobileInvoice)}
+                          className="py-1.5 px-2.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>Surat Tagihan</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 1. UPLOAD FOTO BUKTI PENAGIHAN KE PELANGGAN LANGSUNG */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Camera className="w-4 h-4 text-indigo-500" />
+                          <span>1. Foto Bukti Penagihan ke Pelanggan</span>
+                        </label>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                          Wajib / Kamera HP
+                        </span>
+                      </div>
+
+                      <input
+                        ref={mobilePhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleMobilePhotoFileChange}
+                        className="hidden"
+                      />
+
+                      {mobilePhotoDataUrl ? (
+                        <div className="space-y-2">
+                          <div className="relative rounded-xl overflow-hidden border border-emerald-500/40 bg-slate-950 aspect-16/10">
+                            <img
+                              src={mobilePhotoDataUrl}
+                              alt="Bukti Penagihan Pelanggan"
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-emerald-600/90 text-white text-[10px] font-black">
+                              ✓ Bukti Foto Terlampir
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => mobilePhotoInputRef.current?.click()}
+                              className="flex-1 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Foto Ulang Kamera</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setMobilePhotoDataUrl('')}
+                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-bold cursor-pointer"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => mobilePhotoInputRef.current?.click()}
+                            className="py-4 px-3 rounded-xl border-2 border-dashed border-indigo-400/60 bg-indigo-50/40 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 flex flex-col items-center justify-center gap-1.5 text-indigo-600 dark:text-indigo-300 cursor-pointer transition"
+                          >
+                            <Camera className="w-5 h-5" />
+                            <span className="text-[11px] font-black">Ambil Foto / Upload</span>
+                            <span className="text-[9px] text-slate-500">Kamera HP / Galeri</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sampleUrl = createSampleBillingPhotoDataUrl(
+                                activeMobileInvoice.customerName,
+                                activeMobileInvoice.noInvoice,
+                                effectivePaidNow,
+                                activeMobileInvoice.totalTagihan,
+                                currentUser?.fullName || 'Kolektor Finance',
+                                mobileKendala
+                              );
+                              setMobilePhotoDataUrl(sampleUrl);
+                            }}
+                            className="py-4 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 flex flex-col items-center justify-center gap-1.5 text-slate-700 dark:text-slate-300 cursor-pointer transition"
+                          >
+                            <Upload className="w-5 h-5 text-emerald-500" />
+                            <span className="text-[11px] font-black">Buat Bukti Digital</span>
+                            <span className="text-[9px] text-slate-500">Stempel Waktu &amp; Faktur</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 2. INPUT KENDALA PENAGIHAN DI LAPANGAN */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-2.5">
+                      <label className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                        <span>2. Kendala Penagihan ke Pelanggan</span>
+                      </label>
+
+                      <select
+                        value={mobileKendala}
+                        onChange={e => setMobileKendala(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                      >
+                        {KENDALA_PENAGIHAN_OPTIONS.map(opt => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="grid grid-cols-1 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                            Catatan Kunjungan / Detail Kendala Pelanggan
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={mobileCollectorNotes}
+                            onChange={e => setMobileCollectorNotes(e.target.value)}
+                            placeholder="Contoh: Faktur diterima bagian keuangan, pembayaran via transfer BCA / tunai..."
+                            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        {mobileKendala !== 'Tidak Ada Kendala (Pembayaran Lancar)' && (
+                          <div className="flex items-center justify-between gap-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-1.5">
+                            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                              Tgl Janji Bayar Ulang:
+                            </span>
+                            <input
+                              type="date"
+                              value={mobilePromiseDate}
+                              onChange={e => setMobilePromiseDate(e.target.value)}
+                              className="bg-transparent text-xs font-black text-amber-800 dark:text-amber-200 outline-none"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 3 & 4. TOTAL NOMINAL YANG DIBAYARKAN DARI NOMINAL TAGIHAN + FITUR LUNAS */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <DollarSign className="w-4 h-4 text-emerald-500" />
+                          <span>3. Nominal Dibayarkan &amp; Fitur Lunas</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleFiturLunas(!mobileIsLunasChecked)}
+                          className={`px-3 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer transition border ${
+                            mobileIsLunasChecked || sisaSetelahBayar === 0
+                              ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>✓ FITUR LUNAS (100%)</span>
+                        </button>
+                      </div>
+
+                      {/* Input Nominal yang Dibayarkan Sekarang */}
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-slate-500 font-semibold">Total Nominal Dibayarkan Sekarang:</span>
+                          <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                            dari Sisa Rp {sisaSaatIni.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">
+                            Rp
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={sisaSaatIni}
+                            value={effectivePaidNow}
+                            onChange={e => {
+                              const val = Math.max(0, Math.min(sisaSaatIni, Number(e.target.value) || 0));
+                              setMobileNominalBayar(val);
+                              setMobileIsLunasChecked(val >= sisaSaatIni && sisaSaatIni > 0);
+                            }}
+                            className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-mono font-black text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        {/* Quick Nominal Preset Pills */}
+                        <div className="grid grid-cols-3 gap-1.5 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMobileNominalBayar(0);
+                              setMobileIsLunasChecked(false);
+                            }}
+                            className="py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold cursor-pointer"
+                          >
+                            Rp 0 (Janji Bayar)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const half = Math.round(sisaSaatIni / 2);
+                              setMobileNominalBayar(half);
+                              setMobileIsLunasChecked(false);
+                            }}
+                            className="py-1.5 rounded-lg bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold cursor-pointer"
+                          >
+                            Cicil 50%
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleFiturLunas(true)}
+                            className="py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-black cursor-pointer"
+                          >
+                            ✓ Lunas Penuh
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Ringkasan Kalkulasi Total Nominal yang Dibayarkan dari Nominal Tagihan */}
+                      <div
+                        className={`p-3 rounded-xl border space-y-1.5 text-xs ${
+                          sisaSetelahBayar === 0
+                            ? 'bg-emerald-500/10 border-emerald-500/30'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800'
+                        }`}
+                      >
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Total Nominal Tagihan Faktur:</span>
+                          <span className="font-mono font-bold text-slate-900 dark:text-white">
+                            Rp {activeMobileInvoice.totalTagihan.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Total Dibayarkan (Akumulasi):</span>
+                          <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                            Rp {(activeMobileInvoice.jumlahTerbayar + effectivePaidNow).toLocaleString('id-ID')} / Rp{' '}
+                            {activeMobileInvoice.totalTagihan.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between pt-1.5 border-t border-slate-200/80 dark:border-slate-800 items-center">
+                          <span className="font-bold text-slate-700 dark:text-slate-200">Sisa Tagihan Akhir:</span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`font-mono font-black text-sm ${
+                                sisaSetelahBayar === 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }`}
+                            >
+                              Rp {sisaSetelahBayar.toLocaleString('id-ID')}
+                            </span>
+                            {sisaSetelahBayar === 0 && (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-black">
+                                LUNAS
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer transition"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          {sisaSetelahBayar === 0
+                            ? 'SIMPAN BUKTI & NYATAKAN LUNAS'
+                            : 'SIMPAN BUKTI PENAGIHAN & PEMBAYARAN'}
+                        </span>
+                      </button>
+                    </div>
+                  </form>
+                );
+              })()}
+
+              {/* TAB 2 HP: DAFTAR TOKO TAGIHAN */}
+              {mobileNavTab === 'daftar_toko' && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-xs font-black uppercase text-slate-700 dark:text-slate-300">
+                      Daftar Pelanggan ({mobileBranchInvoices.length} Toko)
+                    </h4>
+                    <span className="text-[11px] text-slate-500">Klik toko untuk menagih</span>
+                  </div>
+                  {mobileBranchInvoices.map(inv => {
+                    const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                    const isLunas = sisa <= 0;
+                    return (
+                      <div
+                        key={inv.id}
+                        onClick={() => {
+                          setSelectedMobileInvoiceId(inv.id);
+                          setMobileNavTab('form_tagih');
+                        }}
+                        className={`p-3 rounded-2xl border transition cursor-pointer ${
+                          activeMobileInvoice?.id === inv.id
+                            ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-500'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                              {inv.noInvoice}
+                            </div>
+                            <div className="text-xs font-black text-slate-900 dark:text-white">
+                              {inv.customerName}
+                            </div>
+                            <div className="text-[10px] text-slate-500">{inv.region}</div>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                              isLunas
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                            }`}
+                          >
+                            {isLunas ? '✓ LUNAS' : `Sisa Rp ${sisa.toLocaleString('id-ID')}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                          <span>
+                            Terbayar: <strong>Rp {inv.jumlahTerbayar.toLocaleString('id-ID')}</strong> / Rp{' '}
+                            {inv.totalTagihan.toLocaleString('id-ID')}
+                          </span>
+                          {inv.kendalaTagihan && (
+                            <span className="text-amber-600 dark:text-amber-400 font-bold truncate max-w-[140px]">
+                              {inv.kendalaTagihan}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* TAB 3 HP: RIWAYAT BUKTI PENAGIHAN */}
+              {mobileNavTab === 'riwayat_bukti' && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-xs font-black uppercase text-slate-700 dark:text-slate-300">
+                      Riwayat Foto Bukti Penagihan ({allCollectionLogs.length})
+                    </h4>
+                  </div>
+                  {allCollectionLogs.length === 0 ? (
+                    <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-1.5">
+                      <Camera className="w-8 h-8 text-slate-400 mx-auto" />
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Belum Ada Riwayat Bukti Penagihan
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Silakan ambil foto bukti penagihan &amp; simpan pembayaran pada tab Tagih &amp; Bayar.
+                      </p>
+                    </div>
+                  ) : (
+                    allCollectionLogs.map(log => (
+                      <div
+                        key={log.id}
+                        className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-black text-slate-900 dark:text-white">
+                              {log.customerName}
+                            </div>
+                            <div className="text-[10px] font-mono text-indigo-500">
+                              {log.noInvoice} &bull; Oleh: {log.collectorName}
+                            </div>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                              log.statusLunas
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            {log.statusLunas ? '✓ LUNAS' : 'CICILAN / KUNJUNGAN'}
+                          </span>
+                        </div>
+                        {log.photoDataUrl && (
+                          <img
+                            src={log.photoDataUrl}
+                            alt={log.customerName}
+                            className="w-full h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-800"
+                          />
+                        )}
+                        <div className="text-[11px] space-y-0.5">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Dibayarkan dari Tagihan:</span>
+                            <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              Rp {log.nominalDibayarkan.toLocaleString('id-ID')} / Rp{' '}
+                              {log.totalTagihanFaktur.toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Kendala:</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">{log.kendala}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Navigation Bar HP (Seperti Aplikasi Admin Penjualan & Portal Driver) */}
+            <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-3 py-2 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileNavTab('form_tagih')}
+                className={`py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-black cursor-pointer transition ${
+                  mobileNavTab === 'form_tagih'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Camera className="w-4 h-4" />
+                <span>Tagih &amp; Lunas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileNavTab('daftar_toko')}
+                className={`py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-black cursor-pointer transition ${
+                  mobileNavTab === 'daftar_toko'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Daftar Toko ({mobileBranchInvoices.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileNavTab('riwayat_bukti')}
+                className={`py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-black cursor-pointer transition ${
+                  mobileNavTab === 'riwayat_bukti'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <History className="w-4 h-4" />
+                <span>Bukti ({allCollectionLogs.length})</span>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Header Simple Finance & Tax (Monitoring Desktop) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                Monitoring Tagihan &amp; Piutang Pelanggan
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Rekapitulasi faktur tagihan toko/mitra dan pencatatan pelunasan per cabang
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5">
+                <MapPin className="w-3.5 h-3.5 text-amber-500" />
+                <select
+                  value={branchFilter}
+                  onChange={e => {
+                    setBranchFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">Semua Cabang ({branches.length})</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.name}>
+                      Cabang {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportUnpaidExcel}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Ekspor Excel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Tagihan</span>
+              </button>
+            </div>
+          </div>
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1683,6 +2669,8 @@ const FinanceDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {/* ============================================================ */}
       {/* MODAL: CATAT PEMBAYARAN / CICILAN TAGIHAN                    */}
@@ -1987,6 +2975,233 @@ const FinanceDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* MODAL: KIRIM REMINDER TAGIHAN WHATSAPP */}
+      {waBillingInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-emerald-500" />
+                  <span>Kirim Tagihan Pelanggan via WhatsApp</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  {waBillingInvoice.customerName} &bull; {waBillingInvoice.contactPhone}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaBillingInvoice(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <label className="block font-bold text-slate-700 dark:text-slate-300">
+                Draft Pesan Penagihan Resmi PT. Anugrah Kemasan Kreatif:
+              </label>
+              <textarea
+                readOnly
+                rows={11}
+                value={formatWhatsappMessage(waBillingInvoice)}
+                className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[11px] leading-relaxed"
+              />
+              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(formatWhatsappMessage(waBillingInvoice));
+                    const cust = waBillingInvoice.customerName;
+                    setWaBillingInvoice(null);
+                    setPopupModal({
+                      title: 'Pesan Tagihan WhatsApp Disalin',
+                      message: `Format pesan penagihan untuk "${cust}" telah disalin dan siap dikirimkan ke nomor ${waBillingInvoice.contactPhone}.`
+                    });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Salin &amp; Tandai Dikirim ke WA</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SURAT PENAGIHAN / TANDA TERIMA FAKTUR */}
+      {printSuratTagihanInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Printer className="w-4 h-4 text-indigo-500" />
+                  <span>Surat Penagihan &amp; Tanda Terima Faktur</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  Dokumen Resmi Finance &amp; Tax PT. Anugrah Kemasan Kreatif
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrintSuratTagihanInvoice(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3 text-xs">
+              <div className="flex justify-between items-start border-b border-slate-200 dark:border-slate-800 pb-2">
+                <div>
+                  <div className="font-black text-slate-900 dark:text-white">PT. ANUGRAH KEMASAN KREATIF</div>
+                  <div className="text-[11px] text-slate-500">Divisi Finance, Accounting &amp; Penagihan Piutang</div>
+                </div>
+                <div className="text-right font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                  <div>No. Surat: SPG/{printSuratTagihanInvoice.id}/XI/2026</div>
+                  <div>Tanggal: {new Date().toISOString().slice(0, 10)}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Kepada Pelanggan:</span>
+                  <span className="font-black text-slate-900 dark:text-white">{printSuratTagihanInvoice.customerName}</span>
+                  <span className="block text-[11px] text-slate-500">{printSuratTagihanInvoice.region} ({printSuratTagihanInvoice.contactPhone})</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">No. Faktur &amp; SJ:</span>
+                  <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{printSuratTagihanInvoice.noInvoice}</span>
+                  <span className="block font-mono text-[11px] text-slate-500">SJ: {printSuratTagihanInvoice.noSuratJalan}</span>
+                </div>
+              </div>
+
+              <div className="border-t border-b border-slate-200 dark:border-slate-800 py-2.5 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Deskripsi Barang:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{printSuratTagihanInvoice.itemSummary}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tanggal Jatuh Tempo:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">{printSuratTagihanInvoice.dueDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Tagihan Faktur:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">Rp {printSuratTagihanInvoice.totalTagihan.toLocaleString('id-ID')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Sudah Terbayar:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Rp {printSuratTagihanInvoice.jumlahTerbayar.toLocaleString('id-ID')}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-800">
+                  <span className="font-black text-slate-800 dark:text-slate-200">Sisa Tagihan Ditagihkan:</span>
+                  <span className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
+                    Rp {Math.max(0, printSuratTagihanInvoice.totalTagihan - printSuratTagihanInvoice.jumlahTerbayar).toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPrintSuratTagihanInvoice(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const invNo = printSuratTagihanInvoice.noInvoice;
+                  setPrintSuratTagihanInvoice(null);
+                  window.print();
+                  setPopupModal({
+                    title: 'Surat Penagihan Siap Dicetak',
+                    message: `Surat Penagihan & Tanda Terima Faktur ${invNo} telah diproses untuk pencetakan.`
+                  });
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Cetak Surat Tagihan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CATAT JANJI BAYAR / KUNJUNGAN KOLEKTOR */}
+      {collectorVisitInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Catat Kunjungan Kolektor &amp; Janji Bayar
+                </h3>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  {collectorVisitInvoice.noInvoice} &bull; {collectorVisitInvoice.customerName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollectorVisitInvoice(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCollectorVisit} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Tanggal Janji Bayar / Giro Cair *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={promiseDateInput}
+                  onChange={e => setPromiseDateInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Hasil Kunjungan Kolektor / Konfirmasi Toko *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Contoh: Faktur asli sudah ditukar tanda terima, dijanjikan transfer hari Kamis..."
+                  value={collectorNoteInput}
+                  onChange={e => setCollectorNoteInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCollectorVisitInvoice(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black cursor-pointer"
+                >
+                  Simpan Status Tagihan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* POPUP NOTIFICATION */}
       {popupModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2034,7 +3249,8 @@ const PurchasingDashboard = () => (
 export const DepartmentDashboard: React.FC<{ 
   dashboardType?: 'hr' | 'finance' | 'warehouse' | 'purchasing';
   initialHrTab?: HrSubTab;
-}> = ({ dashboardType, initialHrTab }) => {
+  initialFinanceMode?: 'monitoring' | 'billing_app';
+}> = ({ dashboardType, initialHrTab, initialFinanceMode = 'monitoring' }) => {
   const user = logisticsStore.getCurrentUser();
   
   // Use dashboardType prop if provided, otherwise fallback to user's department role
@@ -2044,7 +3260,7 @@ export const DepartmentDashboard: React.FC<{
     switch (typeToRender) {
       case 'hr': return <HRDashboard activeHrTab={initialHrTab} />;
       case 'warehouse': return <WarehouseDashboard />;
-      case 'finance': return <FinanceDashboard />;
+      case 'finance': return <FinanceDashboard initialMode={initialFinanceMode} />;
       case 'purchasing': return <PurchasingDashboard />;
       default: return <div className="text-slate-400">Dashboard tidak tersedia untuk role ini.</div>;
     }
@@ -2054,7 +3270,7 @@ export const DepartmentDashboard: React.FC<{
     <div className="space-y-6">
       {typeToRender !== 'warehouse' && typeToRender !== 'finance' && (
         <h2 className="text-lg font-black text-slate-900 dark:text-white">
-          Dashboard {typeToRender === 'hr' ? 'Human Resources (HR, GA & Training)' : 'Purchasing'}
+          Dashboard {typeToRender === 'hr' ? 'Human Resources (1. HR, 2. GA & 3. Training & Development)' : 'Purchasing'}
         </h2>
       )}
       {renderDashboard()}

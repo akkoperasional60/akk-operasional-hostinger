@@ -1217,7 +1217,9 @@ interface FleetBoxPreset {
   panjangBoxCm: number;
   lebarBoxCm: number;
   tinggiBoxCm: number;
-  kubikasiBoxM3: number;
+  kubikasiBoxGrossM3: number;
+  innerMultiplierPct: number;
+  kubikasiBoxNettoM3: number;
   maxPayloadKg: number;
 }
 
@@ -1230,16 +1232,105 @@ const CARGO_COLORS = [
   'bg-rose-500'
 ];
 
+const CARGO_HEX_COLORS = [
+  { fill: '#10b981', stroke: '#047857', text: '#ecfdf5' },
+  { fill: '#6366f1', stroke: '#4338ca', text: '#eef2ff' },
+  { fill: '#f59e0b', stroke: '#b45309', text: '#fffbeb' },
+  { fill: '#06b6d4', stroke: '#0e7490', text: '#ecfeff' },
+  { fill: '#a855f7', stroke: '#7e22ce', text: '#faf5ff' },
+  { fill: '#f43f5e', stroke: '#be123c', text: '#fff1f2' }
+];
+
 export const WarehouseFleetCubicationSimulator: React.FC<{
   skuItems: MasterSkuRecord[];
 }> = ({ skuItems }) => {
-  const enrichedSkus = useMemo(() => skuItems.map(enrichSkuWithCubication), [skuItems]);
+  // 1. Integrasi Langsung dengan Database Barang pada Sub-Menu Gudang (Dimensi P x L x T, Vol m³, Berat Kg)
+  const [dbBarangRecords, setDbBarangRecords] = useState(() => databaseBarangService.getAll());
+  const [storeFleets, setStoreFleets] = useState(() => logisticsStore.getFleets());
+  const [sim2dViewMode, setSim2dViewMode] = useState<'both' | 'side' | 'top'>('both');
+  const [skuSearchFilter, setSkuSearchFilter] = useState<string>('');
 
-  // Build Fleet Box Options from real AKK fleets in logisticsStore + standard presets
+  useEffect(() => {
+    void databaseBarangService.ensureHydrated().then(items => {
+      setDbBarangRecords(items);
+    });
+    const syncDb = () => {
+      setDbBarangRecords(databaseBarangService.getAll());
+    };
+    const syncFleets = () => {
+      setStoreFleets(logisticsStore.getFleets());
+    };
+    const unsubStore = logisticsStore.subscribe(syncFleets);
+    window.addEventListener('akk-database-barang-updated', syncDb);
+    window.addEventListener('storage', syncDb);
+    return () => {
+      unsubStore();
+      window.removeEventListener('akk-database-barang-updated', syncDb);
+      window.removeEventListener('storage', syncDb);
+    };
+  }, []);
+
+  const enrichedSkus = useMemo<SkuCubicationRecord[]>(() => {
+    const map = new Map<string, SkuCubicationRecord>();
+
+    // Muat seluruh barang dari Database Barang Gudang (Sub-Menu Gudang)
+    dbBarangRecords.forEach(rec => {
+      const code = (rec.noBarang || '').trim().toUpperCase();
+      if (!code || isLegacySeededBarang(code)) return;
+      const baseSku: MasterSkuRecord = {
+        id: rec.id || `db-${code}`,
+        kategoriBarang: inferKategoriBarang(code, rec.keteranganBarang || ''),
+        noBarang: code,
+        namaBarang: rec.keteranganBarang || code,
+        stokTersedia: 1000,
+        satuan: rec.unit3 || rec.satuan || 'CRT',
+        panjangCm: rec.panjangCm && rec.panjangCm > 0 ? rec.panjangCm : undefined,
+        lebarCm: rec.lebarCm && rec.lebarCm > 0 ? rec.lebarCm : undefined,
+        tinggiCm: rec.tinggiCm && rec.tinggiCm > 0 ? rec.tinggiCm : undefined,
+        kubikasiM3: rec.volM3 && rec.volM3 > 0 ? rec.volM3 : undefined,
+        beratKg: rec.beratKg && rec.beratKg > 0 ? rec.beratKg : undefined
+      };
+      map.set(code, enrichSkuWithCubication(baseSku));
+    });
+
+    // Gabungkan juga dari prop skuItems jika ada tambahan/override
+    skuItems.forEach(s => {
+      const code = (s.noBarang || '').trim().toUpperCase();
+      if (!code || isLegacySeededBarang(code)) return;
+      const enriched = enrichSkuWithCubication(s);
+      const existing = map.get(code);
+      if (!existing) {
+        map.set(code, enriched);
+      } else {
+        map.set(code, {
+          ...existing,
+          ...enriched,
+          panjangCm: enriched.panjangCm || existing.panjangCm,
+          lebarCm: enriched.lebarCm || existing.lebarCm,
+          tinggiCm: enriched.tinggiCm || existing.tinggiCm,
+          kubikasiM3: enriched.kubikasiM3 || existing.kubikasiM3,
+          beratKg: enriched.beratKg || existing.beratKg
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [dbBarangRecords, skuItems]);
+
+  const filteredSelectableSkus = useMemo(() => {
+    const q = skuSearchFilter.trim().toLowerCase();
+    if (!q) return enrichedSkus;
+    return enrichedSkus.filter(
+      s =>
+        s.noBarang.toLowerCase().includes(q) ||
+        s.namaBarang.toLowerCase().includes(q) ||
+        s.kategoriBarang.toLowerCase().includes(q)
+    );
+  }, [enrichedSkus, skuSearchFilter]);
+
+  // 2. Integrasi Data Armada & Faktor Pengali Dimensi Dalam (boxInnerMultiplierPercent)
   const fleetPresets = useMemo<FleetBoxPreset[]>(() => {
-    const storeFleets = logisticsStore.getFleets();
     const mappedFromStore: FleetBoxPreset[] = storeFleets.map(f => {
-      // Determine interior box dimensions (cm) from boxInnerDimensions or boxDimensions if available
       let p = 420;
       let l = 190;
       let t = 185;
@@ -1251,7 +1342,6 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         const rawP = parseFloat(dimMatch[1].replace(',', '.'));
         const rawL = parseFloat(dimMatch[2].replace(',', '.'));
         const rawT = parseFloat(dimMatch[3].replace(',', '.'));
-        // If dimensions are in meters (< 20), convert to cm
         p = rawP < 20 ? Math.round(rawP * 100) : Math.round(rawP);
         l = rawL < 20 ? Math.round(rawL * 100) : Math.round(rawL);
         t = rawT < 20 ? Math.round(rawT * 100) : Math.round(rawT);
@@ -1280,17 +1370,39 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         }
       }
 
-      const rawM3 = f.boxInnerCapacityM3 || f.boxCapacityM3 || 0;
-      const calcM3 = rawM3 > 0 ? Number(rawM3.toFixed(2)) : Number(((p * l * t) / 1_000_000).toFixed(2));
+      const multiplierPct =
+        typeof f.boxInnerMultiplierPercent === 'number' && f.boxInnerMultiplierPercent > 0
+          ? f.boxInnerMultiplierPercent
+          : 90;
+      const calcGrossFromDim = Number(((p * l * t) / 1_000_000).toFixed(2));
+      const grossM3 =
+        typeof f.boxCapacityM3 === 'number' && f.boxCapacityM3 > 0
+          ? Number(f.boxCapacityM3.toFixed(2))
+          : calcGrossFromDim;
+      const nettoM3 =
+        typeof f.boxInnerCapacityM3 === 'number' && f.boxInnerCapacityM3 > 0
+          ? Number(f.boxInnerCapacityM3.toFixed(2))
+          : Number(((grossM3 * multiplierPct) / 100).toFixed(2));
+
+      // Jika armada punya kubikasi spesifik (misal 5.5 m³) tanpa string dimensi, sesuaikan P x L x T proporsional
+      if (!dimMatch && grossM3 > 0 && Math.abs(grossM3 - calcGrossFromDim) > 0.3) {
+        const scale = Math.cbrt((grossM3 * 1_000_000) / (p * l * t));
+        p = Math.round(p * scale);
+        l = Math.round(l * scale);
+        t = Math.round(t * scale);
+      }
+
       const fleetName = f.brand ? `${f.brand} ${f.vehicleType}` : f.vehicleType;
       return {
         id: f.id,
-        label: `[${f.initialCode || 'ARMADA'}] ${f.plateNumber} — ${fleetName} (${calcM3} m³)`,
+        label: `[${f.initialCode || 'ARMADA'}] ${f.plateNumber} — ${fleetName} (Luar: ${grossM3} m³ • Pengali ${multiplierPct}% = Netto ${nettoM3} m³)`,
         plateNumber: f.plateNumber,
         panjangBoxCm: p,
         lebarBoxCm: l,
         tinggiBoxCm: t,
-        kubikasiBoxM3: calcM3,
+        kubikasiBoxGrossM3: grossM3,
+        innerMultiplierPct: multiplierPct,
+        kubikasiBoxNettoM3: nettoM3,
         maxPayloadKg: maxKg
       };
     });
@@ -1298,53 +1410,73 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     const standardPresets: FleetBoxPreset[] = [
       {
         id: 'preset-cde-box',
-        label: '[STANDAR] Truk Engkel CDE Box (9,50 m³ / 2.800 Kg)',
+        label: '[STANDAR] Truk Engkel CDE Box (Luar: 9,50 m³ • Pengali 90% = Netto 8,55 m³)',
         plateNumber: 'CDE BOX',
         panjangBoxCm: 310,
         lebarBoxCm: 175,
         tinggiBoxCm: 175,
-        kubikasiBoxM3: 9.5,
+        kubikasiBoxGrossM3: 9.5,
+        innerMultiplierPct: 90,
+        kubikasiBoxNettoM3: 8.55,
         maxPayloadKg: 2800
       },
       {
         id: 'preset-cdd-box',
-        label: '[STANDAR] Truk Double CDD Box (15,50 m³ / 4.800 Kg)',
+        label: '[STANDAR] Truk Double CDD Box (Luar: 15,50 m³ • Pengali 90% = Netto 13,95 m³)',
         plateNumber: 'CDD BOX',
         panjangBoxCm: 425,
         lebarBoxCm: 195,
         tinggiBoxCm: 187,
-        kubikasiBoxM3: 15.5,
+        kubikasiBoxGrossM3: 15.5,
+        innerMultiplierPct: 90,
+        kubikasiBoxNettoM3: 13.95,
         maxPayloadKg: 4800
       },
       {
         id: 'preset-cdd-long',
-        label: '[STANDAR] Truk CDD Long Box (22,00 m³ / 6.500 Kg)',
+        label: '[STANDAR] Truk CDD Long Box (Luar: 22,00 m³ • Pengali 90% = Netto 19,80 m³)',
         plateNumber: 'CDD LONG',
         panjangBoxCm: 530,
         lebarBoxCm: 205,
         tinggiBoxCm: 202,
-        kubikasiBoxM3: 22.0,
+        kubikasiBoxGrossM3: 22.0,
+        innerMultiplierPct: 90,
+        kubikasiBoxNettoM3: 19.8,
         maxPayloadKg: 6500
       }
     ];
 
     return [...mappedFromStore, ...standardPresets];
-  }, []);
+  }, [storeFleets]);
 
   const [selectedFleetId, setSelectedFleetId] = useState<string>(() => fleetPresets[0]?.id || 'preset-cdd-box');
   const [boxPanjangCm, setBoxPanjangCm] = useState<number>(() => fleetPresets[0]?.panjangBoxCm || 420);
   const [boxLebarCm, setBoxLebarCm] = useState<number>(() => fleetPresets[0]?.lebarBoxCm || 190);
   const [boxTinggiCm, setBoxTinggiCm] = useState<number>(() => fleetPresets[0]?.tinggiBoxCm || 185);
-  const [boxKubikasiM3, setBoxKubikasiM3] = useState<number>(() => fleetPresets[0]?.kubikasiBoxM3 || 14.76);
+  const [boxKubikasiM3, setBoxKubikasiM3] = useState<number>(() => fleetPresets[0]?.kubikasiBoxGrossM3 || 14.76);
   const [maxPayloadKg, setMaxPayloadKg] = useState<number>(() => fleetPresets[0]?.maxPayloadKg || 4500);
-  const [stackingEfficiencyPct, setStackingEfficiencyPct] = useState<number>(90);
+  // Faktor Pengali Dimensi Dalam (%) dari Data Armada (default 90%)
+  const [innerMultiplierPct, setInnerMultiplierPct] = useState<number>(
+    () => fleetPresets[0]?.innerMultiplierPct ?? 90
+  );
 
   // Select item form state
   const [selectedSkuId, setSelectedSkuId] = useState<string>(() => enrichedSkus[0]?.id || '');
-  const [inputQty, setInputQty] = useState<number>(80);
+  const [inputQty, setInputQty] = useState<number>(25);
 
-  // Simulated Cargo Manifest (initialized with 3 realistic items)
-  const [cargoList, setCargoList] = useState<SimulatedCargoItem[]>(() => {
+  useEffect(() => {
+    if ((!selectedSkuId || !enrichedSkus.some(s => s.id === selectedSkuId)) && enrichedSkus.length > 0) {
+      setSelectedSkuId(enrichedSkus[0].id);
+    }
+  }, [enrichedSkus, selectedSkuId]);
+
+  // Simulated Cargo Manifest (initialized from enrichedSkus)
+  const [cargoList, setCargoList] = useState<SimulatedCargoItem[]>([]);
+  const hasSeededCargoRef = React.useRef(false);
+
+  useEffect(() => {
+    if (hasSeededCargoRef.current || enrichedSkus.length === 0) return;
+    hasSeededCargoRef.current = true;
     const initial: SimulatedCargoItem[] = [];
     const s0 = enrichedSkus[0];
     const s1 = enrichedSkus[1];
@@ -1361,7 +1493,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         tinggiCm: s0.tinggiCm,
         kubikasiUnitM3: s0.kubikasiM3,
         beratUnitKg: s0.beratKg,
-        qtyMuat: 50
+        qtyMuat: 24
       });
     }
     if (s1) {
@@ -1376,7 +1508,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         tinggiCm: s1.tinggiCm,
         kubikasiUnitM3: s1.kubikasiM3,
         beratUnitKg: s1.beratKg,
-        qtyMuat: 20
+        qtyMuat: 18
       });
     }
     if (s2) {
@@ -1391,11 +1523,11 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         tinggiCm: s2.tinggiCm,
         kubikasiUnitM3: s2.kubikasiM3,
         beratUnitKg: s2.beratKg,
-        qtyMuat: 250
+        qtyMuat: 16
       });
     }
-    return initial;
-  });
+    setCargoList(initial);
+  }, [enrichedSkus]);
 
   const handleSelectFleetPreset = (presetId: string) => {
     setSelectedFleetId(presetId);
@@ -1404,7 +1536,8 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
       setBoxPanjangCm(found.panjangBoxCm);
       setBoxLebarCm(found.lebarBoxCm);
       setBoxTinggiCm(found.tinggiBoxCm);
-      setBoxKubikasiM3(found.kubikasiBoxM3);
+      setBoxKubikasiM3(found.kubikasiBoxGrossM3);
+      setInnerMultiplierPct(found.innerMultiplierPct);
       setMaxPayloadKg(found.maxPayloadKg);
     }
   };
@@ -1423,11 +1556,16 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     const qty = Math.max(1, Number(inputQty) || 1);
 
     setCargoList(prev => {
-      const existingIdx = prev.findIndex(c => c.skuId === targetSku.id);
+      const existingIdx = prev.findIndex(c => c.skuId === targetSku.id || c.noBarang === targetSku.noBarang);
       if (existingIdx >= 0) {
         const clone = [...prev];
         clone[existingIdx] = {
           ...clone[existingIdx],
+          panjangCm: targetSku.panjangCm,
+          lebarCm: targetSku.lebarCm,
+          tinggiCm: targetSku.tinggiCm,
+          kubikasiUnitM3: targetSku.kubikasiM3,
+          beratUnitKg: targetSku.beratKg,
           qtyMuat: clone[existingIdx].qtyMuat + qty
         };
         return clone;
@@ -1461,11 +1599,20 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     setCargoList(prev => prev.filter(item => item.id !== id));
   };
 
-  // Calculations
+  // Calculations: Hasil Kubikasi Dalam (Netto) = Kubikasi Luar * (Faktor Pengali Dimensi Dalam / 100)
   const effectiveBoxCapacityM3 = useMemo(
-    () => Number(((boxKubikasiM3 * stackingEfficiencyPct) / 100).toFixed(2)),
-    [boxKubikasiM3, stackingEfficiencyPct]
+    () => Number(((boxKubikasiM3 * innerMultiplierPct) / 100).toFixed(2)),
+    [boxKubikasiM3, innerMultiplierPct]
   );
+
+  // Dimensi Dalam Efektif (cm) setelah dikalikan Faktor Pengali Dimensi Dalam (cbrt dari rasio volume dalam)
+  const linearInnerRatio = useMemo(
+    () => Math.cbrt(Math.max(0.1, Math.min(1, innerMultiplierPct / 100))),
+    [innerMultiplierPct]
+  );
+  const innerPanjangCm = useMemo(() => Math.max(40, Math.round(boxPanjangCm * linearInnerRatio)), [boxPanjangCm, linearInnerRatio]);
+  const innerLebarCm = useMemo(() => Math.max(40, Math.round(boxLebarCm * linearInnerRatio)), [boxLebarCm, linearInnerRatio]);
+  const innerTinggiCm = useMemo(() => Math.max(40, Math.round(boxTinggiCm * linearInnerRatio)), [boxTinggiCm, linearInnerRatio]);
 
   const totalCargoKubikasiM3 = useMemo(
     () => cargoList.reduce((acc, item) => acc + item.kubikasiUnitM3 * item.qtyMuat, 0),
@@ -1506,6 +1653,138 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
       : 0;
   const maxAdditionalUnitsFit = Math.max(0, Math.min(maxAdditionalUnitsByVolume, maxAdditionalUnitsByWeight));
 
+  // ============================================================================
+  // KALKULASI TATA LETAK 2D SIMULASI BOX ARMADA (TAMPAK SAMPING & TAMPAK ATAS)
+  // ============================================================================
+  const layout2D = useMemo(() => {
+    interface PlacedColSide {
+      id: string;
+      skuIdx: number;
+      noBarang: string;
+      namaBarang: string;
+      xCm: number;
+      wCm: number;
+      itemHeightCm: number;
+      tiersCount: number;
+      unitsInCol: number;
+      isOverflow: boolean;
+    }
+
+    interface PlacedBlockTop {
+      id: string;
+      skuIdx: number;
+      noBarang: string;
+      namaBarang: string;
+      xCm: number;
+      yCm: number;
+      wCm: number;
+      dCm: number;
+      stackCount: number;
+      isOverflow: boolean;
+    }
+
+    const sideCols: PlacedColSide[] = [];
+    const topBlocks: PlacedBlockTop[] = [];
+    const skuZones: Array<{
+      id: string;
+      skuIdx: number;
+      noBarang: string;
+      namaBarang: string;
+      startXCm: number;
+      usedLengthCm: number;
+      maxTiersZ: number;
+      maxRowsY: number;
+      colsNeeded: number;
+      qtyMuat: number;
+    }> = [];
+
+    let cursorXCm = 0;
+
+    cargoList.forEach((item, idx) => {
+      const pCm = Math.max(10, Number(item.panjangCm) || 45);
+      const lCm = Math.max(10, Number(item.lebarCm) || 35);
+      const tCm = Math.max(10, Number(item.tinggiCm) || 30);
+
+      // Berapa tumpuk ke atas (Tinggi Dalam / Tinggi Barang) dan berapa baris ke samping (Lebar Dalam / Lebar Barang)
+      const maxTiersZ = Math.max(1, Math.floor(innerTinggiCm / tCm));
+      const maxRowsY = Math.max(1, Math.floor(innerLebarCm / lCm));
+      const unitsPerCrossSection = Math.max(1, maxTiersZ * maxRowsY);
+      const colsNeeded = Math.ceil(item.qtyMuat / unitsPerCrossSection);
+      const startXCm = cursorXCm;
+
+      let remainingUnits = item.qtyMuat;
+
+      for (let c = 0; c < colsNeeded; c++) {
+        const colX = cursorXCm;
+        const unitsInThisSlice = Math.min(remainingUnits, unitsPerCrossSection);
+        const tiersInCol = Math.max(1, Math.min(maxTiersZ, Math.ceil(unitsInThisSlice / maxRowsY)));
+        const rowsInCol = Math.max(1, Math.min(maxRowsY, unitsInThisSlice));
+        const isOverflow = colX + pCm > innerPanjangCm;
+
+        // Batasi jumlah visual kolom maksimal 60 agar SVG tetap ringan
+        if (sideCols.length < 80) {
+          sideCols.push({
+            id: `${item.id}-col-${c}`,
+            skuIdx: idx,
+            noBarang: item.noBarang,
+            namaBarang: item.namaBarang,
+            xCm: colX,
+            wCm: pCm,
+            itemHeightCm: Math.min(innerTinggiCm, tCm),
+            tiersCount: tiersInCol,
+            unitsInCol: unitsInThisSlice,
+            isOverflow
+          });
+
+          for (let r = 0; r < rowsInCol; r++) {
+            topBlocks.push({
+              id: `${item.id}-top-${c}-${r}`,
+              skuIdx: idx,
+              noBarang: item.noBarang,
+              namaBarang: item.namaBarang,
+              xCm: colX,
+              yCm: r * Math.min(innerLebarCm, lCm),
+              wCm: pCm,
+              dCm: Math.min(innerLebarCm, lCm),
+              stackCount: Math.min(maxTiersZ, Math.ceil(unitsInThisSlice / rowsInCol)),
+              isOverflow
+            });
+          }
+        }
+
+        cursorXCm += pCm;
+        remainingUnits -= unitsInThisSlice;
+      }
+
+      skuZones.push({
+        id: item.id,
+        skuIdx: idx,
+        noBarang: item.noBarang,
+        namaBarang: item.namaBarang,
+        startXCm,
+        usedLengthCm: colsNeeded * pCm,
+        maxTiersZ,
+        maxRowsY,
+        colsNeeded,
+        qtyMuat: item.qtyMuat
+      });
+    });
+
+    const totalUsedLengthCm = cursorXCm;
+    const freeLengthCm = Math.max(0, innerPanjangCm - totalUsedLengthCm);
+    const lengthUsagePct = innerPanjangCm > 0 ? (totalUsedLengthCm / innerPanjangCm) * 100 : 0;
+
+    return {
+      sideCols,
+      topBlocks,
+      skuZones,
+      totalUsedLengthCm,
+      freeLengthCm,
+      lengthUsagePct,
+      isLengthOverflow: totalUsedLengthCm > innerPanjangCm
+    };
+  }, [cargoList, innerPanjangCm, innerLebarCm, innerTinggiCm]);
+
   const handleExportSimulationExcel = () => {
     const rows = cargoList.map((c, idx) => ({
       No: idx + 1,
@@ -1518,7 +1797,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
       Satuan: c.satuan,
       'Subtotal Kubikasi (m3)': Number((c.kubikasiUnitM3 * c.qtyMuat).toFixed(3)),
       'Subtotal Berat (Kg)': Number((c.beratUnitKg * c.qtyMuat).toFixed(2)),
-      '% dari Kapasitas Efektif Box': `${
+      '% dari Kubikasi Dalam Netto': `${
         effectiveBoxCapacityM3 > 0
           ? (((c.kubikasiUnitM3 * c.qtyMuat) / effectiveBoxCapacityM3) * 100).toFixed(1)
           : '0'
@@ -1527,7 +1806,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Simulasi_Kubikasi_Armada');
-    XLSX.writeFile(wb, `Simulasi_Kubikasi_Box_Armada_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `Simulasi_2D_Kubikasi_Box_Armada_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
@@ -1538,14 +1817,14 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
               <Truck className="w-3.5 h-3.5" />
-              <span>WMS &bull; Kalkulator &amp; Simulasi Muatan Armada</span>
+              <span>Simulasi 2D Box Armada &bull; Terintegrasi Database Barang Gudang &amp; Data Armada</span>
             </span>
           </div>
           <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-            Simulasi Kubikasi Box Armada vs. Kubikasi Item Barang
+            Simulasi 2D Susunan Box Armada vs. Dimensi Barang Gudang ({enrichedSkus.length} SKU Terhubung)
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Simulasikan kecukupan ruang box armada (m&sup3;) dan daya angkut beban (Kg) terhadap daftar item barang yang akan dimuat sebelum penerbitan jadwal kirim.
+            Visualisasi 2D (Tampak Samping &amp; Tampak Atas) tata letak kardus/kemasan dari <strong>Database Barang (Sub-Menu Gudang)</strong> terhadap ukuran dalam box armada setelah dikalikan <strong>Faktor Pengali Dimensi Dalam (%)</strong> dari <strong>Data Armada</strong>.
           </p>
         </div>
 
@@ -1569,21 +1848,21 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
         </div>
       </div>
 
-      {/* Main Grid: Left = Konfigurasi Box Armada, Right = Hasil Simulasi & Visualisasi */}
+      {/* Main Grid: Left = Konfigurasi Box Armada & Database Barang, Right = 2D Visualisasi & Manifest */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* LEFT COLUMN (5 COLS): SPESIFIKASI BOX ARMADA & FORM TAMBAH BARANG */}
+        {/* LEFT COLUMN (5 COLS): SPESIFIKASI BOX ARMADA & FORM TAMBAH BARANG GUDANG */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Card 1: Pilih Armada & Spesifikasi Box */}
+          {/* Card 1: Pilih Armada & Faktor Pengali Dimensi Dalam (Integrasi Data Armada) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Truck className="w-4 h-4 text-amber-500" />
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                  1. Pilih Armada &amp; Ukuran Box Truk
+                  1. Pilih Armada &amp; Faktor Pengali Dimensi Dalam
                 </h3>
               </div>
               <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">
-                Terintegrasi Data Armada
+                Sinkron Data Armada
               </span>
             </div>
 
@@ -1605,10 +1884,11 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </select>
               </div>
 
+              {/* Dimensi Luar Box (cm) */}
               <div className="grid grid-cols-3 gap-2.5">
                 <div>
                   <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Panjang Box (cm)
+                    Panjang Luar (cm)
                   </label>
                   <input
                     type="number"
@@ -1622,7 +1902,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </div>
                 <div>
                   <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Lebar Box (cm)
+                    Lebar Luar (cm)
                   </label>
                   <input
                     type="number"
@@ -1636,7 +1916,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </div>
                 <div>
                   <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Tinggi Box (cm)
+                    Tinggi Luar (cm)
                   </label>
                   <input
                     type="number"
@@ -1650,10 +1930,10 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Kubikasi Box (m&sup3;)
+                    Kubikasi Luar / Gross (m&sup3;)
                   </label>
                   <input
                     type="number"
@@ -1666,20 +1946,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </div>
                 <div>
                   <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Efisiensi Susun (%)
-                  </label>
-                  <input
-                    type="number"
-                    min={50}
-                    max={100}
-                    value={stackingEfficiencyPct}
-                    onChange={e => setStackingEfficiencyPct(Math.min(100, Math.max(50, Number(e.target.value))))}
-                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Batas Berat (Kg)
+                    Batas Beban Armada (Kg)
                   </label>
                   <input
                     type="number"
@@ -1691,41 +1958,95 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px]">
-                <span className="text-slate-500 font-semibold">
-                  Kapasitas Ruang Efektif ({stackingEfficiencyPct}% dari {boxKubikasiM3} m&sup3;):
-                </span>
-                <span className="font-mono font-black text-slate-900 dark:text-white">
-                  {effectiveBoxCapacityM3.toFixed(2)} m&sup3;
-                </span>
+              {/* Faktor Pengali Dimensi Dalam & Hasil Kubikasi Dalam (Netto) — Persis Seperti Data Armada */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800 items-center">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black text-sky-700 dark:text-sky-400">
+                      Faktor Pengali Dimensi Dalam
+                    </span>
+                    <span className="text-xs font-mono font-black text-amber-600 dark:text-amber-400">
+                      {innerMultiplierPct}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={50}
+                      max={100}
+                      value={innerMultiplierPct}
+                      onChange={e =>
+                        setInnerMultiplierPct(Math.min(100, Math.max(50, Number(e.target.value) || 90)))
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-amber-700 dark:text-amber-300 font-mono font-black text-sm"
+                    />
+                    <span className="font-bold text-slate-500">%</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    Dimensi box dikali {innerMultiplierPct}% karena tebal dinding luar &amp; dalam berbeda (Data Armada).
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-sky-900/15 dark:bg-sky-950/50 border border-sky-500/30 space-y-1">
+                  <div className="text-[11px] font-bold text-sky-700 dark:text-sky-300">
+                    Hasil Kubikasi Dalam (Netto):
+                  </div>
+                  <div className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                    {effectiveBoxCapacityM3.toFixed(2)}{' '}
+                    <span className="text-xs font-bold text-sky-600 dark:text-sky-400">m&sup3;</span>
+                  </div>
+                  <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <span>✓ Kapasitas bersih efektif muat</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-500">
+                    Dimensi Dalam: {innerPanjangCm}&times;{innerLebarCm}&times;{innerTinggiCm} cm
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Card 2: Tambah Item Barang ke Simulasi */}
+          {/* Card 2: Tambah Item Barang dari Database Barang (Sub-Menu Gudang) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Package className="w-4 h-4 text-emerald-500" />
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                  2. Tambah Item Barang ke Box Armada
+                  2. Pilih Barang dari Database Barang Gudang
                 </h3>
               </div>
+              <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                {enrichedSkus.length} SKU Gudang
+              </span>
             </div>
 
             <form onSubmit={handleAddCargoItem} className="space-y-3 text-xs">
               <div>
                 <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Pilih Barang dari Master SKU &amp; Kubikasi
+                  Cari Cepat Nomor / Nama Barang Gudang
+                </label>
+                <div className="relative mb-2">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={skuSearchFilter}
+                    onChange={e => setSkuSearchFilter(e.target.value)}
+                    placeholder="Ketik kode barang (mis. 7GPJA001) atau nama barang..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Pilih Barang dari Database Barang (Sub-Menu Gudang)
                 </label>
                 <select
                   value={selectedSkuId}
                   onChange={e => setSelectedSkuId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold cursor-pointer"
                 >
-                  {enrichedSkus.map(s => (
+                  {filteredSelectableSkus.map(s => (
                     <option key={s.id} value={s.id}>
-                      [{s.noBarang}] {s.namaBarang} ({s.kubikasiM3} m³ | {s.beratKg} Kg/{s.satuan})
+                      [{s.noBarang}] {s.namaBarang} ({s.panjangCm}×{s.lebarCm}×{s.tinggiCm} cm = {s.kubikasiM3} m³)
                     </option>
                   ))}
                 </select>
@@ -1734,7 +2055,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
               {activeSelectedSku && (
                 <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-1 text-[11px]">
                   <div className="flex justify-between">
-                    <span className="text-slate-600 dark:text-slate-400">Dimensi &amp; Kubikasi Satuan:</span>
+                    <span className="text-slate-600 dark:text-slate-400">Dimensi Database Barang Gudang:</span>
                     <span className="font-mono font-bold text-slate-900 dark:text-white">
                       {activeSelectedSku.panjangCm}&times;{activeSelectedSku.lebarCm}&times;{activeSelectedSku.tinggiCm} cm ={' '}
                       <strong className="text-emerald-600 dark:text-emerald-400">{activeSelectedSku.kubikasiM3} m&sup3;</strong>
@@ -1752,7 +2073,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
               <div className="flex items-end gap-3">
                 <div className="flex-1">
                   <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    Jumlah Muat ({activeSelectedSku?.satuan || 'Unit'})
+                    Jumlah Muat ({activeSelectedSku?.satuan || 'CRT'})
                   </label>
                   <input
                     type="number"
@@ -1768,14 +2089,14 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                   className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Tambah ke Simulasi</span>
+                  <span>Tambah ke Simulasi 2D</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
 
-        {/* RIGHT COLUMN (7 COLS): VISUALISASI KUBIKASI BOX & TABEL MANIFEST */}
+        {/* RIGHT COLUMN (7 COLS): 2D SIMULASI BOX ARMADA & TABEL MANIFEST */}
         <div className="lg:col-span-7 space-y-4">
           {/* 3 Summary Comparison Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
@@ -1788,7 +2109,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
               }`}
             >
               <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                Total Kubikasi Barang vs Box
+                Kubikasi Barang vs Kubikasi Dalam
               </div>
               <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
                 {totalCargoKubikasiM3.toFixed(2)}{' '}
@@ -1801,7 +2122,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
               >
                 {isOverVolume
                   ? `Melebihi Box +${Math.abs(remainingVolumeM3).toFixed(2)} m³ (${volumeUsagePct.toFixed(1)}%)`
-                  : `Sisa Ruang: ${remainingVolumeM3.toFixed(2)} m³ (${volumeUsagePct.toFixed(1)}% Terisi)`}
+                  : `Sisa Ruang Netto: ${remainingVolumeM3.toFixed(2)} m³ (${volumeUsagePct.toFixed(1)}% Terisi)`}
               </div>
             </div>
 
@@ -1837,7 +2158,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 Rekomendasi Kebutuhan Armada
               </div>
               <div className="flex items-center gap-2">
-                {isOverVolume || isOverWeight ? (
+                {isOverVolume || isOverWeight || layout2D.isLengthOverflow ? (
                   <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
                 ) : (
                   <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
@@ -1847,76 +2168,397 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                 </span>
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                {isOverVolume || isOverWeight
-                  ? 'Muatan melebihi kapasitas 1 box truk'
-                  : 'Muatan aman dalam 1 box armada'}
+                Panjang Terpakai: <strong>{layout2D.totalUsedLengthCm} cm</strong> / {innerPanjangCm} cm
               </div>
             </div>
           </div>
 
-          {/* Visual 3D-Styled Box Container Fill Indicator */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* ========================================================================== */}
+          {/* VISUALISASI 2D SIMULASI BOX ARMADA (TAMPAK SAMPING & TAMPAK ATAS)         */}
+          {/* ========================================================================== */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                  Visualisasi Keterisian Ruang Box Armada ({boxPanjangCm}&times;{boxLebarCm}&times;{boxTinggiCm} cm)
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                  <Box className="w-4 h-4 text-indigo-500" />
+                  <span>
+                    Visualisasi 2D Simulasi Box Armada (Dimensi Dalam Efektif {innerPanjangCm}&times;{innerLebarCm}&times;{innerTinggiCm} cm &bull; Pengali {innerMultiplierPct}%)
+                  </span>
                 </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Proporsi penggunaan kubikasi box oleh masing-masing item barang yang dimuat.
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Susunan 2D balok karton berdasarkan ukuran <strong>P &times; L &times; T (cm) Database Barang Gudang</strong> di dalam ruang bersih box armada.
                 </p>
               </div>
-              <span
-                className={`px-2.5 py-1 rounded-lg font-mono text-xs font-black ${
-                  isOverVolume
-                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
-                    : volumeUsagePct > 85
-                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                }`}
-              >
-                {volumeUsagePct.toFixed(1)}% Kubikasi Box
-              </span>
+
+              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setSim2dViewMode('both')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer transition ${
+                    sim2dViewMode === 'both'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  Samping + Atas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSim2dViewMode('side')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer transition ${
+                    sim2dViewMode === 'side'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  Tampak Samping 2D
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSim2dViewMode('top')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer transition ${
+                    sim2dViewMode === 'top'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  Tampak Atas 2D
+                </button>
+              </div>
             </div>
 
-            {/* Stacked Visual Truck Box Container */}
-            <div className="relative h-14 w-full rounded-2xl bg-slate-100 dark:bg-slate-950 border-2 border-slate-300 dark:border-slate-700 overflow-hidden flex items-stretch shadow-inner">
-              {cargoList.map((item, idx) => {
-                const subM3 = item.kubikasiUnitM3 * item.qtyMuat;
-                const pct = effectiveBoxCapacityM3 > 0 ? Math.min(100, (subM3 / effectiveBoxCapacityM3) * 100) : 0;
-                if (pct <= 0) return null;
-                const colorClass = CARGO_COLORS[idx % CARGO_COLORS.length];
-                return (
-                  <div
-                    key={item.id}
-                    style={{ width: `${pct}%` }}
-                    title={`${item.namaBarang}: ${subM3.toFixed(2)} m³ (${pct.toFixed(1)}%)`}
-                    className={`${colorClass} h-full border-r border-white/20 flex items-center justify-center text-[10px] font-mono font-black text-white overflow-hidden transition-all duration-300`}
-                  >
-                    {pct >= 9 ? `${pct.toFixed(0)}%` : ''}
-                  </div>
-                );
-              })}
-
-              {remainingVolumeM3 > 0 && (
-                <div className="flex-1 flex items-center justify-center text-[10px] font-mono font-bold text-slate-400">
-                  Kosong {remainingVolumeM3.toFixed(2)} m&sup3;
+            {/* 1. TAMPAK SAMPING 2D (PANJANG DALAM X TINGGI DALAM) */}
+            {(sim2dViewMode === 'both' || sim2dViewMode === 'side') && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-black text-slate-700 dark:text-slate-200 uppercase">
+                    A. Tampak Samping 2D (Panjang Dalam {innerPanjangCm} cm &times; Tinggi Dalam {innerTinggiCm} cm)
+                  </span>
+                  <span className="font-mono text-slate-500">
+                    Terisi Panjang: <strong className={layout2D.isLengthOverflow ? 'text-rose-500' : 'text-emerald-500'}>{layout2D.totalUsedLengthCm} cm</strong> / {innerPanjangCm} cm (Sisa {layout2D.freeLengthCm} cm)
+                  </span>
                 </div>
-              )}
-            </div>
 
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              {cargoList.map((item, idx) => {
-                const subM3 = item.kubikasiUnitM3 * item.qtyMuat;
-                const colorClass = CARGO_COLORS[idx % CARGO_COLORS.length];
-                return (
-                  <div key={item.id} className="flex items-center gap-1.5 text-[11px]">
-                    <span className={`w-2.5 h-2.5 rounded-xs ${colorClass}`} />
-                    <span className="font-bold text-slate-700 dark:text-slate-300">{item.noBarang}</span>
-                    <span className="font-mono text-slate-500">({subM3.toFixed(2)} m&sup3;)</span>
+                <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3 overflow-x-auto">
+                  <svg
+                    viewBox="0 0 760 250"
+                    className="w-full h-auto min-w-[560px]"
+                    role="img"
+                    aria-label="Simulasi 2D Tampak Samping Box Armada"
+                  >
+                    {/* Grid Background */}
+                    <defs>
+                      <pattern id="grid2dSide" width="25" height="25" patternUnits="userSpaceOnUse">
+                        <path d="M 25 0 L 0 0 0 25" fill="none" stroke="#1e293b" strokeWidth="1" />
+                      </pattern>
+                    </defs>
+                    <rect x="0" y="0" width="760" height="250" rx="12" fill="#090d16" />
+                    <rect x="110" y="22" width="560" height="170" fill="url(#grid2dSide)" />
+
+                    {/* Truck Cabin Silhouette on Left */}
+                    <path
+                      d="M 25 192 L 25 105 L 58 68 L 104 68 L 104 192 Z"
+                      fill="#1e293b"
+                      stroke="#475569"
+                      strokeWidth="2"
+                    />
+                    <polygon points="34,105 60,76 96,76 96,105" fill="#0ea5e9" fillOpacity="0.25" stroke="#38bdf8" strokeWidth="1.5" />
+                    <text x="64" y="145" textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="monospace" fontWeight="bold">
+                      KABIN
+                    </text>
+
+                    {/* Outer Box Wall (Ukuran Luar Gross: boxPanjangCm x boxTinggiCm) */}
+                    <rect
+                      x="108"
+                      y="18"
+                      width="568"
+                      height="176"
+                      rx="4"
+                      fill="#0f172a"
+                      fillOpacity="0.6"
+                      stroke="#64748b"
+                      strokeWidth="2"
+                      strokeDasharray="6 3"
+                    />
+                    <text x="114" y="13" fill="#94a3b8" fontSize="9" fontFamily="monospace">
+                      Dinding Luar ({boxPanjangCm}×{boxTinggiCm} cm = {boxKubikasiM3} m³) • Dinding Dalam Efektif ({innerMultiplierPct}% = {effectiveBoxCapacityM3.toFixed(2)} m³)
+                    </text>
+
+                    {/* Inner Effective Box Area (Setelah Faktor Pengali Dimensi Dalam) */}
+                    <rect
+                      x="116"
+                      y="26"
+                      width="552"
+                      height="160"
+                      rx="2"
+                      fill="#020617"
+                      stroke="#10b981"
+                      strokeWidth="2"
+                    />
+
+                    {/* Overflow Zone on the Right (Rear Door) */}
+                    <rect
+                      x="668"
+                      y="26"
+                      width="76"
+                      height="160"
+                      fill="#4c0519"
+                      fillOpacity="0.3"
+                      stroke="#f43f5e"
+                      strokeWidth="1"
+                      strokeDasharray="4 4"
+                    />
+                    <text x="706" y="42" textAnchor="middle" fill="#fb7185" fontSize="8" fontFamily="monospace" fontWeight="bold">
+                      OVERLOAD
+                    </text>
+
+                    {/* 2D Stacked Carton Boxes Inside Inner Box */}
+                    {layout2D.sideCols.map(col => {
+                      const scaleX = 552 / Math.max(1, innerPanjangCm);
+                      const scaleY = 160 / Math.max(1, innerTinggiCm);
+                      const pxX = 116 + col.xCm * scaleX;
+                      const pxW = Math.max(6, col.wCm * scaleX - 1.5);
+                      const boxPxH = Math.max(8, col.itemHeightCm * scaleY - 1.5);
+                      const palette = CARGO_HEX_COLORS[col.skuIdx % CARGO_HEX_COLORS.length];
+
+                      if (pxX > 740) return null;
+
+                      return (
+                        <g key={col.id}>
+                          {Array.from({ length: col.tiersCount }).map((_, tierIdx) => {
+                            const pyY = 26 + 160 - (tierIdx + 1) * (col.itemHeightCm * scaleY);
+                            return (
+                              <rect
+                                key={`${col.id}-t-${tierIdx}`}
+                                x={pxX}
+                                y={Math.max(26, pyY)}
+                                width={pxW}
+                                height={boxPxH}
+                                rx="2"
+                                fill={col.isOverflow ? '#e11d48' : palette.fill}
+                                fillOpacity={0.88}
+                                stroke={col.isOverflow ? '#fda4af' : palette.stroke}
+                                strokeWidth="1"
+                              >
+                                <title>
+                                  {`[${col.noBarang}] ${col.namaBarang} • Tumpukan ${tierIdx + 1}/${col.tiersCount} (${col.unitsInCol} unit di kolom ini)`}
+                                </title>
+                              </rect>
+                            );
+                          })}
+                        </g>
+                      );
+                    })}
+
+                    {/* Zone Labels per SKU at Top of Stack */}
+                    {layout2D.skuZones.map(zone => {
+                      const scaleX = 552 / Math.max(1, innerPanjangCm);
+                      const centerPx = 116 + (zone.startXCm + zone.usedLengthCm / 2) * scaleX;
+                      if (centerPx > 735 || zone.usedLengthCm * scaleX < 28) return null;
+                      return (
+                        <g key={`lbl-side-${zone.id}`}>
+                          <rect
+                            x={centerPx - 34}
+                            y={32}
+                            width="68"
+                            height="16"
+                            rx="4"
+                            fill="#0f172a"
+                            fillOpacity="0.85"
+                            stroke="#334155"
+                          />
+                          <text
+                            x={centerPx}
+                            y={43}
+                            textAnchor="middle"
+                            fill="#f8fafc"
+                            fontSize="8.5"
+                            fontFamily="monospace"
+                            fontWeight="bold"
+                          >
+                            {zone.noBarang} ({zone.qtyMuat})
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Chassis & Wheels */}
+                    <rect x="20" y="192" width="656" height="8" rx="3" fill="#334155" />
+                    <circle cx="66" cy="212" r="16" fill="#1e293b" stroke="#64748b" strokeWidth="4" />
+                    <circle cx="66" cy="212" r="6" fill="#94a3b8" />
+                    <circle cx="545" cy="212" r="16" fill="#1e293b" stroke="#64748b" strokeWidth="4" />
+                    <circle cx="545" cy="212" r="6" fill="#94a3b8" />
+                    <circle cx="588" cy="212" r="16" fill="#1e293b" stroke="#64748b" strokeWidth="4" />
+                    <circle cx="588" cy="212" r="6" fill="#94a3b8" />
+
+                    {/* Horizontal Centimeter Ruler */}
+                    <text x="116" y="242" fill="#34d399" fontSize="9.5" fontFamily="monospace" fontWeight="bold">
+                      0 cm (Depan Box)
+                    </text>
+                    <text x="392" y="242" textAnchor="middle" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
+                      {Math.round(innerPanjangCm / 2)} cm
+                    </text>
+                    <text x="668" y="242" textAnchor="end" fill="#34d399" fontSize="9.5" fontFamily="monospace" fontWeight="bold">
+                      {innerPanjangCm} cm (Pintu Belakang)
+                    </text>
+                  </svg>
+                </div>
+              </div>
+            )}
+
+            {/* 2. TAMPAK ATAS / DENAH LANTAI 2D (PANJANG DALAM X LEBAR DALAM) */}
+            {(sim2dViewMode === 'both' || sim2dViewMode === 'top') && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-black text-slate-700 dark:text-slate-200 uppercase">
+                    B. Tampak Atas / Denah Lantai 2D (Panjang Dalam {innerPanjangCm} cm &times; Lebar Dalam {innerLebarCm} cm)
+                  </span>
+                  <span className="font-mono text-slate-500">
+                    Baris Lebar &amp; Kolom Panjang Karton
+                  </span>
+                </div>
+
+                <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3 overflow-x-auto">
+                  <svg
+                    viewBox="0 0 760 185"
+                    className="w-full h-auto min-w-[560px]"
+                    role="img"
+                    aria-label="Simulasi 2D Tampak Atas Denah Lantai Box Armada"
+                  >
+                    <rect x="0" y="0" width="760" height="185" rx="12" fill="#090d16" />
+
+                    {/* Top-Down Cabin */}
+                    <rect x="28" y="26" width="76" height="128" rx="10" fill="#1e293b" stroke="#475569" strokeWidth="2" />
+                    <text x="66" y="94" textAnchor="middle" fill="#94a3b8" fontSize="9.5" fontFamily="monospace" fontWeight="bold">
+                      KABIN
+                    </text>
+
+                    {/* Outer Wall Top View */}
+                    <rect
+                      x="108"
+                      y="18"
+                      width="568"
+                      height="144"
+                      rx="4"
+                      fill="#0f172a"
+                      stroke="#64748b"
+                      strokeWidth="1.5"
+                      strokeDasharray="5 3"
+                    />
+
+                    {/* Inner Effective Floor Area (Setelah Faktor Pengali Dimensi Dalam) */}
+                    <rect
+                      x="116"
+                      y="26"
+                      width="552"
+                      height="128"
+                      rx="2"
+                      fill="#020617"
+                      stroke="#38bdf8"
+                      strokeWidth="2"
+                    />
+
+                    {/* Top-Down Placed Blocks */}
+                    {layout2D.topBlocks.map(blk => {
+                      const scaleX = 552 / Math.max(1, innerPanjangCm);
+                      const scaleY = 128 / Math.max(1, innerLebarCm);
+                      const pxX = 116 + blk.xCm * scaleX;
+                      const pxY = 26 + blk.yCm * scaleY;
+                      const pxW = Math.max(6, blk.wCm * scaleX - 1.5);
+                      const pxD = Math.max(8, blk.dCm * scaleY - 1.5);
+                      const palette = CARGO_HEX_COLORS[blk.skuIdx % CARGO_HEX_COLORS.length];
+
+                      if (pxX > 740) return null;
+
+                      return (
+                        <g key={blk.id}>
+                          <rect
+                            x={pxX}
+                            y={pxY}
+                            width={pxW}
+                            height={pxD}
+                            rx="2"
+                            fill={blk.isOverflow ? '#e11d48' : palette.fill}
+                            fillOpacity={0.85}
+                            stroke={blk.isOverflow ? '#fda4af' : palette.stroke}
+                            strokeWidth="1"
+                          >
+                            <title>
+                              {`[${blk.noBarang}] ${blk.namaBarang} • Tumpuk Vertikal: ${blk.stackCount} Lapis`}
+                            </title>
+                          </rect>
+                          {pxW >= 18 && pxD >= 14 && (
+                            <text
+                              x={pxX + pxW / 2}
+                              y={pxY + pxD / 2 + 3}
+                              textAnchor="middle"
+                              fill="#ffffff"
+                              fontSize="8"
+                              fontFamily="monospace"
+                              fontWeight="bold"
+                            >
+                              {blk.stackCount}x
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    <text x="116" y="174" fill="#38bdf8" fontSize="9.5" fontFamily="monospace" fontWeight="bold">
+                      Lebar Dalam: {innerLebarCm} cm (Luar: {boxLebarCm} cm)
+                    </text>
+                    <text x="668" y="174" textAnchor="end" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
+                      Angka &ldquo;Nx&rdquo; = Jumlah Tumpukan ke Atas per Titik Lantai
+                    </text>
+                  </svg>
+                </div>
+              </div>
+            )}
+
+            {/* Stacked Progress Bar & SKU Legend */}
+            <div className="pt-2 space-y-2">
+              <div className="relative h-8 w-full rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 overflow-hidden flex items-stretch">
+                {cargoList.map((item, idx) => {
+                  const subM3 = item.kubikasiUnitM3 * item.qtyMuat;
+                  const pct = effectiveBoxCapacityM3 > 0 ? Math.min(100, (subM3 / effectiveBoxCapacityM3) * 100) : 0;
+                  if (pct <= 0) return null;
+                  const colorClass = CARGO_COLORS[idx % CARGO_COLORS.length];
+                  return (
+                    <div
+                      key={item.id}
+                      style={{ width: `${pct}%` }}
+                      title={`${item.namaBarang}: ${subM3.toFixed(2)} m³ (${pct.toFixed(1)}%)`}
+                      className={`${colorClass} h-full border-r border-white/20 flex items-center justify-center text-[10px] font-mono font-black text-white overflow-hidden transition-all duration-300`}
+                    >
+                      {pct >= 9 ? `${pct.toFixed(0)}%` : ''}
+                    </div>
+                  );
+                })}
+
+                {remainingVolumeM3 > 0 && (
+                  <div className="flex-1 flex items-center justify-center text-[10px] font-mono font-bold text-slate-400">
+                    Sisa Netto {remainingVolumeM3.toFixed(2)} m&sup3;
                   </div>
-                );
-              })}
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {cargoList.map((item, idx) => {
+                  const subM3 = item.kubikasiUnitM3 * item.qtyMuat;
+                  const colorClass = CARGO_COLORS[idx % CARGO_COLORS.length];
+                  const zoneInfo = layout2D.skuZones.find(z => z.id === item.id);
+                  return (
+                    <div key={item.id} className="flex items-center gap-1.5 text-[11px]">
+                      <span className={`w-2.5 h-2.5 rounded-xs ${colorClass}`} />
+                      <span className="font-bold text-slate-700 dark:text-slate-300">{item.noBarang}</span>
+                      <span className="font-mono text-slate-500">
+                        ({item.panjangCm}&times;{item.lebarCm}&times;{item.tinggiCm} cm &bull; {subM3.toFixed(2)} m&sup3;
+                        {zoneInfo ? ` • Panjang ${zoneInfo.usedLengthCm} cm` : ''})
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -1928,7 +2570,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                   Rincian Simulasi Item Barang di Dalam Box Armada
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Ubah angka <strong>Qty Muat</strong> secara langsung untuk melihat perubahan kubikasi dan tonase secara real-time.
+                  Ubah angka <strong>Qty Muat</strong> secara langsung untuk memperbarui simulasi 2D, kubikasi dalam netto, dan tonase secara real-time.
                 </p>
               </div>
               <span className="text-xs font-bold text-slate-500">
@@ -1940,12 +2582,12 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="py-3 px-4">Item Barang</th>
+                    <th className="py-3 px-4">Item Barang (Database Gudang)</th>
                     <th className="py-3 px-4 text-center">Kubikasi &amp; Berat / Unit</th>
                     <th className="py-3 px-4 text-center">Qty Muat</th>
                     <th className="py-3 px-4 text-right">Subtotal Kubikasi</th>
                     <th className="py-3 px-4 text-right">Subtotal Berat</th>
-                    <th className="py-3 px-4 text-right">% Ruang Box</th>
+                    <th className="py-3 px-4 text-right">% Kubikasi Dalam</th>
                     <th className="py-3 px-4 text-right">Hapus</th>
                   </tr>
                 </thead>
@@ -2018,7 +2660,7 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
                   ) : (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
-                        Belum ada item barang dalam simulasi muatan. Pilih barang di panel kiri lalu klik <strong>Tambah ke Simulasi</strong>.
+                        Belum ada item barang dalam simulasi muatan. Pilih barang dari Database Barang Gudang di panel kiri lalu klik <strong>Tambah ke Simulasi 2D</strong>.
                       </td>
                     </tr>
                   )}
@@ -2031,3 +2673,4 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     </div>
   );
 };
+

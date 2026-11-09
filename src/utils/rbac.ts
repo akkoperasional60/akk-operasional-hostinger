@@ -155,6 +155,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         sales_schedules: isAll || isSales ? 'full_access' : 'none',
         sales_loading_duration: isAll || isSales ? 'full_access' : 'none',
         sales_invoice_so: isAll || isSales ? 'full_access' : 'none',
+        sales_form_kirim: isAll || isSales ? 'full_access' : 'none',
         sales_rfid_scanner: isAll || isSales ? 'full_access' : 'none',
         sales_skill_matrix: isAll || isSales ? 'full_access' : 'none',
         sales_jobdesk: isAll || isSales ? 'full_access' : 'none',
@@ -196,6 +197,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       subMenus: {
         marketing_online: isAll || isMktOnline ? 'full_access' : 'none',
         marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
+        marketing_to_vo_ro: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         // Legacy keys
         kampanye: isAll || isMktOnline ? 'full_access' : 'none',
@@ -207,6 +209,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       enabled: isAll || isPurchasing,
       subMenus: {
         purchasing_dashboard: isAll || isPurchasing ? 'full_access' : 'none',
+        purchasing_stok_opname: isAll || isPurchasing ? 'full_access' : 'none',
         purchasing_stock_overview: isAll || isPurchasing ? 'full_access' : 'none',
         purchasing_stock_forecast: isAll || isPurchasing ? 'full_access' : 'none',
         // Legacy keys
@@ -219,6 +222,8 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       enabled: isAll || isFinance,
       subMenus: {
         finance_dashboard: isAll || isFinance ? 'full_access' : 'none',
+        finance_validasi_form_kirim: isAll || isFinance ? 'full_access' : 'none',
+        finance_billing_app: isAll || isFinance ? 'full_access' : 'none',
         // Legacy keys
         kas_bank: isAll || isFinance ? 'full_access' : 'none',
         faktur_pajak: isAll || isFinance ? 'full_access' : 'none',
@@ -338,6 +343,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   sales_schedules: { moduleId: 'sales_admin', subMenuId: 'sales_schedules' },
   sales_loading_duration: { moduleId: 'sales_admin', subMenuId: 'sales_loading_duration' },
   sales_invoice_so: { moduleId: 'sales_admin', subMenuId: 'sales_invoice_so' },
+  sales_form_kirim: { moduleId: 'sales_admin', subMenuId: 'sales_form_kirim' },
   sales_rfid_scanner: { moduleId: 'sales_admin', subMenuId: 'sales_rfid_scanner' },
   sales_skill_matrix: { moduleId: 'sales_admin', subMenuId: 'sales_skill_matrix' },
   sales_jobdesk: { moduleId: 'sales_admin', subMenuId: 'sales_jobdesk' },
@@ -357,16 +363,20 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'warehouse_fleet_cubication' },
   marketing_online: { moduleId: 'marketing', subMenuId: 'marketing_online' },
   marketing_offline: { moduleId: 'marketing', subMenuId: 'marketing_offline' },
+  marketing_to_vo_ro: { moduleId: 'marketing', subMenuId: 'marketing_to_vo_ro' },
   purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'purchasing_dashboard' },
+  purchasing_stok_opname: { moduleId: 'purchasing', subMenuId: 'purchasing_stok_opname' },
   purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_overview' },
   purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_forecast' },
   finance_dashboard: { moduleId: 'finance_tax', subMenuId: 'finance_dashboard' },
+  finance_validasi_form_kirim: { moduleId: 'finance_tax', subMenuId: 'finance_validasi_form_kirim' },
+  finance_billing_app: { moduleId: 'finance_tax', subMenuId: 'finance_billing_app' },
   hr_dashboard: { moduleId: 'hr', subMenuId: 'hr_dashboard' },
   ga_security: { moduleId: 'hr', subMenuId: 'ga_security' },
-  ga_hk: { moduleId: 'hr', subMenuId: 'ga_hk' },
-  ga_aset: { moduleId: 'hr', subMenuId: 'ga_aset' },
+  ga_hk: { moduleId: 'hr', subMenuId: 'ga_security' },
+  ga_aset: { moduleId: 'hr', subMenuId: 'ga_security' },
   training_videos: { moduleId: 'hr', subMenuId: 'training_videos' },
-  training_karyawan: { moduleId: 'hr', subMenuId: 'training_karyawan' },
+  training_karyawan: { moduleId: 'hr', subMenuId: 'training_videos' },
   activity_log: { moduleId: 'sistem_pengguna', subMenuId: 'activity_log' },
   branches: { moduleId: 'sistem_pengguna', subMenuId: 'branches' },
   users: { moduleId: 'sistem_pengguna', subMenuId: 'users' },
@@ -384,6 +394,7 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   sales_schedules: ['jadwal_admin'],
   sales_loading_duration: ['durasi_muat'],
   sales_invoice_so: ['input_faktur_so'],
+  sales_form_kirim: ['sales_invoice_so', 'input_faktur_so', 'sales_dashboard', 'dashboard_penjualan'],
   sales_rfid_scanner: ['aplikasi_rfid_muat'],
   sales_skill_matrix: ['matriks_skil'],
   sales_jobdesk: ['pengaturan_sop'],
@@ -407,14 +418,21 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   tracking_eval: ['monitoring_sla'],
   marketing_online: ['kampanye'],
   marketing_offline: ['leads_pipeline'],
+  marketing_to_vo_ro: ['leads_pipeline', 'laporan_kunjungan', 'marketing_offline', 'marketing_online'],
   customer_map: ['laporan_kunjungan'],
   purchasing_dashboard: ['permintaan_pembelian'],
+  purchasing_stok_opname: ['permintaan_pembelian', 'po_vendor', 'purchasing_dashboard', 'warehouse_opname'],
   purchasing_stock_overview: ['po_vendor'],
   purchasing_stock_forecast: ['po_vendor'],
   finance_dashboard: ['kas_bank', 'faktur_pajak'],
+  finance_validasi_form_kirim: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
+  finance_billing_app: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   hr_dashboard: ['hr_data_karyawan'],
-  training_videos: ['td_video_training'],
-  training_karyawan: ['td_training_karyawan'],
+  ga_security: ['ga_hk', 'ga_aset'],
+  ga_hk: ['ga_security'],
+  ga_aset: ['ga_security'],
+  training_videos: ['td_video_training', 'training_karyawan', 'td_training_karyawan'],
+  training_karyawan: ['training_videos', 'td_training_karyawan'],
   dashboard: ['dashboard_eksekutif'],
   users: ['daftar_pengguna', 'persetujuan_akun'],
   branches: ['daftar_pengguna'],
@@ -423,49 +441,148 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   activity_log: ['log_aktivitas_sistem']
 };
 
-export const MODERN_SUBMENU_KEYS_BY_MODULE: Record<string, string[]> = {
-  logistics: [
-    'operational_dashboard',
-    'schedules',
-    'driver_portal',
-    'fleet_forms',
-    'driver_reports',
-    'tracking_eval',
-    'fleets',
-    'crew_history',
-    'spareparts',
-    'fuel_efficiency',
-    'warehouse_fleet_cubication'
-  ],
-  sales_admin: [
-    'sales_dashboard',
-    'sales_activities',
-    'sales_schedules',
-    'sales_loading_duration',
-    'sales_invoice_so',
-    'sales_rfid_scanner',
-    'sales_skill_matrix',
-    'sales_jobdesk',
-    'sales_kpi_individual',
-    'sales_kpi_fines',
-    'sales_kpi_nusantara',
-    'sales_kpi_omset'
-  ],
-  warehouse: [
-    'warehouse_scanner',
-    'warehouse_dashboard',
-    'warehouse_inventory',
-    'warehouse_slotting',
-    'warehouse_inbound',
-    'warehouse_outbound',
-    'warehouse_opname'
-  ],
-  marketing: ['marketing_online', 'marketing_offline', 'customer_map'],
-  purchasing: ['purchasing_dashboard', 'purchasing_stock_overview', 'purchasing_stock_forecast'],
-  finance_tax: ['finance_dashboard'],
-  hr: ['hr_dashboard', 'ga_security', 'ga_hk', 'ga_aset', 'training_videos', 'training_karyawan'],
-  sistem_pengguna: ['dashboard', 'users', 'branches', 'activity_log', 'e2e_testing', 'architecture']
-};
+export interface CanonicalModuleDef {
+  id: string;
+  name: string;
+  description: string;
+  borderClass: string;
+  iconBgClass: string;
+  subMenus: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Single Source of Truth antara Sidebar Navigasi & Hak Akses User Management.
+ * Setiap perubahan menu/sub-menu di sini otomatis tersinkron ke Sidebar, RBAC, dan User Management.
+ */
+export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
+  {
+    id: 'logistics',
+    name: 'Logistik & Pengiriman',
+    description: 'Dashboard logistik, jadwal pengiriman, armada, simulasi kubikasi armada, dan portal driver per cabang.',
+    borderClass: 'border-blue-500/30',
+    iconBgClass: 'bg-blue-500/15 text-blue-400',
+    subMenus: [
+      { id: 'operational_dashboard', name: 'Dashboard Logistik & Pengiriman' },
+      { id: 'schedules', name: 'Jadwal & Penugasan Armada' },
+      { id: 'driver_portal', name: 'Portal Driver Mobile' },
+      { id: 'fleet_forms', name: 'Formulir Pengadaan Armada' },
+      { id: 'driver_reports', name: 'Laporan Kiriman Kru' },
+      { id: 'tracking_eval', name: 'Evaluasi Jalur GPS (Excel)' },
+      { id: 'fleets', name: 'Data Armada Terpadu' },
+      { id: 'crew_history', name: 'Kru Pengiriman & Kernet' },
+      { id: 'spareparts', name: 'Suku Cadang & Bengkel' },
+      { id: 'fuel_efficiency', name: 'Efisiensi Bahan Bakar (BBM)' },
+      { id: 'warehouse_fleet_cubication', name: 'Simulasi Box Muatan Armada (2D)' }
+    ]
+  },
+  {
+    id: 'warehouse',
+    name: 'Gudang (WMS)',
+    description: 'Database barang, dashboard gudang, master SKU & stok bin, denah rak, inbound/outbound, dan opname gudang integrasi pembelian.',
+    borderClass: 'border-emerald-500/30',
+    iconBgClass: 'bg-emerald-500/15 text-emerald-400',
+    subMenus: [
+      { id: 'warehouse_scanner', name: 'Database Barang (m³ & Kg)' },
+      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang (WMS)' },
+      { id: 'warehouse_inventory', name: 'Master SKU & Stok Bin' },
+      { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
+      { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
+      { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
+      { id: 'warehouse_opname', name: 'Opname Gudang (Integrasi Pembelian)' }
+    ]
+  },
+  {
+    id: 'sales_admin',
+    name: 'Admin Penjualan',
+    description: 'Aktivitas harian admin, jadwal produksi, durasi muat, pengeluaran & scan barang muat, matriks skill, dan data KPI penjualan.',
+    borderClass: 'border-indigo-500/30',
+    iconBgClass: 'bg-indigo-500/15 text-indigo-400',
+    subMenus: [
+      { id: 'sales_dashboard', name: 'Dashboard Sales Hub' },
+      { id: 'sales_activities', name: 'Checklist Aktivitas Harian' },
+      { id: 'sales_schedules', name: 'Jadwal Admin & Produksi' },
+      { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
+      { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
+      { id: 'sales_form_kirim', name: 'Form Kirim (Integrasi Finance & Portal Driver)' },
+      { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat' },
+      { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
+      { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
+      { id: 'sales_kpi_individual', name: '1. KPI Individu Staf' },
+      { id: 'sales_kpi_fines', name: '2. Akumulasi Denda' },
+      { id: 'sales_kpi_nusantara', name: '3. Persentase Kiriman' },
+      { id: 'sales_kpi_omset', name: '4. Omset Admin Penjualan' }
+    ]
+  },
+  {
+    id: 'purchasing',
+    name: 'Adm Pembelian (Purchasing)',
+    description: 'Dashboard pembelian, stok opname & kartu stok digital (integrasi gudang), ringkasan stok bahan, dan prediksi kebutuhan reorder.',
+    borderClass: 'border-purple-500/30',
+    iconBgClass: 'bg-purple-500/15 text-purple-400',
+    subMenus: [
+      { id: 'purchasing_dashboard', name: 'Dashboard Pembelian' },
+      { id: 'purchasing_stok_opname', name: 'Stok Opname & Kartu Stok' },
+      { id: 'purchasing_stock_overview', name: 'Ringkasan Stok Bahan' },
+      { id: 'purchasing_stock_forecast', name: 'Prediksi Kebutuhan Stok' }
+    ]
+  },
+  {
+    id: 'marketing',
+    name: 'Marketing',
+    description: 'Marketing online, marketing offline/kunjungan, prosentase TO/VO/RO, serta jaringan toko & wilayah mitra per cabang.',
+    borderClass: 'border-amber-500/30',
+    iconBgClass: 'bg-amber-500/15 text-amber-400',
+    subMenus: [
+      { id: 'marketing_online', name: 'Marketing Online & Ads' },
+      { id: 'marketing_offline', name: 'Marketing Offline / Kunjungan' },
+      { id: 'marketing_to_vo_ro', name: 'Prosentase TO, VO & RO' },
+      { id: 'customer_map', name: 'Jaringan Toko & Wilayah Mitra' }
+    ]
+  },
+  {
+    id: 'finance_tax',
+    name: 'Finance & Tax',
+    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan Aplikasi Mobile Penagihan Pelanggan per cabang.',
+    borderClass: 'border-cyan-500/30',
+    iconBgClass: 'bg-cyan-500/15 text-cyan-400',
+    subMenus: [
+      { id: 'finance_dashboard', name: 'Finance & Tagihan Pelanggan' },
+      { id: 'finance_validasi_form_kirim', name: 'Validasi Form Kirim' },
+      { id: 'finance_billing_app', name: 'Aplikasi Penagihan Pelanggan (Mobile)' }
+    ]
+  },
+  {
+    id: 'hr',
+    name: 'HR (HR, GA & Training Development)',
+    description: '3 Sub-Menu Utama Departemen HR: 1. HR (Presensi & SDM), 2. GA (Security, Housekeeping, Aset), dan 3. Training & Development.',
+    borderClass: 'border-rose-500/30',
+    iconBgClass: 'bg-rose-500/15 text-rose-400',
+    subMenus: [
+      { id: 'hr_dashboard', name: '1. HR (Presensi & SDM)' },
+      { id: 'ga_security', name: '2. GA (Security, Housekeeping & Aset)' },
+      { id: 'training_videos', name: '3. Training & Development' }
+    ]
+  },
+  {
+    id: 'sistem_pengguna',
+    name: 'Master Data & Sistem',
+    description: 'Dashboard eksekutif, master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
+    borderClass: 'border-slate-600/40',
+    iconBgClass: 'bg-slate-700/40 text-slate-300',
+    subMenus: [
+      { id: 'dashboard', name: 'Dashboard Eksekutif' },
+      { id: 'users', name: 'Manajemen User & Approval' },
+      { id: 'branches', name: 'Master Cabang Operasional' },
+      { id: 'activity_log', name: 'Log Aktivitas Sistem' },
+      { id: 'e2e_testing', name: 'Pengujian E2E Otomatis' },
+      { id: 'architecture', name: 'Skema Database SQL' }
+    ]
+  }
+];
+
+export const MODERN_SUBMENU_KEYS_BY_MODULE: Record<string, string[]> = Object.fromEntries(
+  CANONICAL_SIDEBAR_MODULES.map(mod => [mod.id, mod.subMenus.map(sub => sub.id)])
+);
 
 const maxAccessLevel = (
   ...levels: Array<'full_access' | 'read_only' | 'none' | undefined>
@@ -792,57 +909,7 @@ export const getFirstAccessibleTabForUser = (user: UserProfile): string => {
   if (canAccess(user, roleDefault)) {
     return roleDefault;
   }
-  const priorityTabs = [
-    'operational_dashboard',
-    'schedules',
-    'driver_portal',
-    'fleet_forms',
-    'driver_reports',
-    'tracking_eval',
-    'fleets',
-    'crew_history',
-    'spareparts',
-    'fuel_efficiency',
-    'warehouse_fleet_cubication',
-    'sales_dashboard',
-    'sales_activities',
-    'sales_schedules',
-    'sales_loading_duration',
-    'sales_invoice_so',
-    'sales_rfid_scanner',
-    'sales_skill_matrix',
-    'sales_jobdesk',
-    'sales_kpi_individual',
-    'sales_kpi_fines',
-    'sales_kpi_nusantara',
-    'sales_kpi_omset',
-    'warehouse_scanner',
-    'warehouse_dashboard',
-    'warehouse_inventory',
-    'warehouse_slotting',
-    'warehouse_inbound',
-    'warehouse_outbound',
-    'warehouse_opname',
-    'marketing_online',
-    'marketing_offline',
-    'customer_map',
-    'purchasing_dashboard',
-    'purchasing_stock_overview',
-    'purchasing_stock_forecast',
-    'finance_dashboard',
-    'hr_dashboard',
-    'ga_security',
-    'ga_hk',
-    'ga_aset',
-    'training_videos',
-    'training_karyawan',
-    'dashboard',
-    'users',
-    'branches',
-    'activity_log',
-    'e2e_testing',
-    'architecture'
-  ];
+  const priorityTabs = CANONICAL_SIDEBAR_MODULES.flatMap(mod => mod.subMenus.map(sub => sub.id));
   for (const tab of priorityTabs) {
     if (canAccess(user, tab)) {
       return tab;

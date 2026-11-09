@@ -738,69 +738,57 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   return (
     <div className="space-y-6">
       {/* ========================================================================= */}
-      {/* 1. TOP HEADER & ACTION BAR                                               */}
+      {/* 1. TOP HEADER & ACTION BAR (SIMPLIFIED UI/UX)                             */}
       {/* ========================================================================= */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 shadow-lg relative overflow-hidden backdrop-blur-sm">
-        <div className="absolute -right-16 -top-16 w-56 h-56 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                <Fuel className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-black text-white tracking-tight">
-                    Efisiensi BBM & Manajemen Konsumsi Armada
-                  </h1>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    Eco-Fleet
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Pemantauan rasio kilometer per liter (KM/L), audit biaya operasional pengisian bahan bakar, dan analisis eco-driving kru pengiriman PT Anugrah Kemasan Kreatif.
-                </p>
-              </div>
+      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
+              <Fuel className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                Efisiensi BBM Armada
+              </h1>
+              <p className="text-xs text-slate-400">
+                Rasio KM/L &amp; konsumsi BBM operasional
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setIsAddModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Catat Pengisian BBM</span>
+              <span>Catat BBM</span>
             </button>
 
             <button
               onClick={() => setIsExportModalOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
-              title="Export Laporan Konsumsi BBM Format PDF / Excel (Ringkasan Mingguan per Driver & Armada)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer"
+              title="Export Laporan Konsumsi BBM (PDF / Excel)"
             >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>Export Laporan BBM</span>
-              <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-700/70 text-emerald-100 font-extrabold uppercase">
-                PDF/Excel
-              </span>
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Export Laporan</span>
             </button>
 
             <button
               onClick={() => setActiveTab('calculator')}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
             >
-              <Calculator className="w-4 h-4 text-amber-400" />
-              <span>Kalkulator Rute</span>
+              <Calculator className="w-3.5 h-3.5 text-amber-400" />
+              <span>Kalkulator</span>
             </button>
 
             <button
               onClick={handleExportCSV}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
               title="Ekspor Data Rekap ke CSV"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">Ekspor CSV</span>
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>CSV</span>
             </button>
           </div>
         </div>

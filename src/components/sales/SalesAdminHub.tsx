@@ -6,6 +6,7 @@ import { LoadingDurationTab } from './LoadingDurationTab';
 import { SkillMatrixTab } from './SkillMatrixTab';
 import { JobdeskConfigTab } from './JobdeskConfigTab';
 import { SalesInvoiceSoTab, SalesRfidScannerAppTab } from './SalesLoadingRfidSystem';
+import { SalesFormKirimTab } from './FormKirimSystem';
 
 export type SalesAdminSubTab =
   | 'dashboard'
@@ -13,6 +14,7 @@ export type SalesAdminSubTab =
   | 'schedules'
   | 'loading_duration'
   | 'invoice_so'
+  | 'form_kirim'
   | 'rfid_scanner'
   | 'skill_matrix'
   | 'jobdesk';
@@ -57,6 +59,9 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
             onSelectSubTab('rfid_scanner');
           }}
         />
+      )}
+      {effectiveTab === 'form_kirim' && (
+        <SalesFormKirimTab />
       )}
       {effectiveTab === 'skill_matrix' && (
         <SkillMatrixTab adminOptions={adminOptions} />

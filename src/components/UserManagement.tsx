@@ -8,140 +8,24 @@ import {
 } from 'lucide-react';
 import { UserProfile, UserRole, UserApprovalStatus, UserPermissions } from '../types';
 import { logisticsStore } from '../services/store';
-import { canAccess, getDefaultPermissionsForRole } from '../utils/rbac';
+import { canAccess, getDefaultPermissionsForRole, CANONICAL_SIDEBAR_MODULES, LEGACY_SUBMENU_KEY_MAP } from '../utils/rbac';
 import { branchStore, BranchRecord, UserBranchPermissionEntry } from '../services/branchStore';
 
-const MODULE_DEFINITIONS = [
-  {
-    id: 'logistics',
-    name: 'Logistik & Pengiriman',
-    description: 'Dashboard logistik, jadwal pengiriman, armada, simulasi kubikasi armada, dan portal driver per cabang.',
-    borderClass: 'border-blue-500/30',
-    iconBgClass: 'bg-blue-500/15 text-blue-400',
-    IconComp: Truck,
-    subMenus: [
-      { id: 'operational_dashboard', name: 'Dashboard Logistik & Pengiriman' },
-      { id: 'schedules', name: 'Jadwal & Penugasan Armada' },
-      { id: 'driver_portal', name: 'Portal Driver Mobile' },
-      { id: 'fleet_forms', name: 'Formulir Pengadaan Armada' },
-      { id: 'driver_reports', name: 'Laporan Kiriman Kru' },
-      { id: 'tracking_eval', name: 'Evaluasi Jalur GPS (Excel)' },
-      { id: 'fleets', name: 'Data Armada Terpadu' },
-      { id: 'crew_history', name: 'Kru Pengiriman & Kernet' },
-      { id: 'spareparts', name: 'Suku Cadang & Bengkel' },
-      { id: 'fuel_efficiency', name: 'Efisiensi Bahan Bakar (BBM)' },
-      { id: 'warehouse_fleet_cubication', name: 'Simulasi Box Muatan Armada' }
-    ]
-  },
-  {
-    id: 'sales_admin',
-    name: 'Admin Penjualan',
-    description: 'Aktivitas harian admin, jadwal produksi, durasi muat, matriks skill, dan data KPI penjualan mengikuti cabang.',
-    borderClass: 'border-indigo-500/30',
-    iconBgClass: 'bg-indigo-500/15 text-indigo-400',
-    IconComp: Briefcase,
-    subMenus: [
-      { id: 'sales_dashboard', name: 'Dashboard Sales Hub' },
-      { id: 'sales_activities', name: 'Checklist Aktivitas Harian' },
-      { id: 'sales_schedules', name: 'Jadwal Admin & Produksi' },
-      { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
-      { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
-      { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat' },
-      { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
-      { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
-      { id: 'sales_kpi_individual', name: '1. KPI Individu Staf' },
-      { id: 'sales_kpi_fines', name: '2. Akumulasi Denda' },
-      { id: 'sales_kpi_nusantara', name: '3. Persentase Kiriman' },
-      { id: 'sales_kpi_omset', name: '4. Omset Admin Penjualan' }
-    ]
-  },
-  {
-    id: 'warehouse',
-    name: 'Gudang (WMS)',
-    description: 'Database barang, dashboard gudang, master SKU & stok bin, denah rak, inbound/outbound, dan opname stok per cabang.',
-    borderClass: 'border-emerald-500/30',
-    iconBgClass: 'bg-emerald-500/15 text-emerald-400',
-    IconComp: Package,
-    subMenus: [
-      { id: 'warehouse_scanner', name: 'Database Barang (m³ & Kg)' },
-      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang (WMS)' },
-      { id: 'warehouse_inventory', name: 'Master SKU & Stok Bin' },
-      { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
-      { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
-      { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
-      { id: 'warehouse_opname', name: 'Stok Opname & Kartu Stok' }
-    ]
-  },
-  {
-    id: 'purchasing',
-    name: 'Admin Pembelian (Purchasing)',
-    description: 'Akses stok pembelian, ringkasan stok, dan analisa prediksi kebutuhan reorder mengikuti cabang.',
-    borderClass: 'border-purple-500/30',
-    iconBgClass: 'bg-purple-500/15 text-purple-400',
-    IconComp: ShoppingBag,
-    subMenus: [
-      { id: 'purchasing_dashboard', name: 'Dashboard Pembelian' },
-      { id: 'purchasing_stock_overview', name: 'Ringkasan Stok Bahan' },
-      { id: 'purchasing_stock_forecast', name: 'Prediksi Kebutuhan Stok' }
-    ]
-  },
-  {
-    id: 'marketing',
-    name: 'Marketing',
-    description: 'Marketing online, laporan kunjungan & laporan penjualan marketing offline, serta pemetaan jaringan toko per cabang.',
-    borderClass: 'border-amber-500/30',
-    iconBgClass: 'bg-amber-500/15 text-amber-400',
-    IconComp: Megaphone,
-    subMenus: [
-      { id: 'marketing_online', name: 'Marketing Online & Ads' },
-      { id: 'marketing_offline', name: 'Marketing Offline / Kunjungan' },
-      { id: 'customer_map', name: 'Jaringan Toko & Wilayah Mitra' }
-    ]
-  },
-  {
-    id: 'finance_tax',
-    name: 'Finance & Tax',
-    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan pencatatan faktur/pembayaran per cabang.',
-    borderClass: 'border-cyan-500/30',
-    iconBgClass: 'bg-cyan-500/15 text-cyan-400',
-    IconComp: DollarSign,
-    subMenus: [
-      { id: 'finance_dashboard', name: 'Finance & Tagihan Pelanggan' }
-    ]
-  },
-  {
-    id: 'hr',
-    name: 'Human Resources & GA',
-    description: 'Data karyawan & presensi, General Affair (Security, Housekeeping, Aset), serta Training & Development per cabang.',
-    borderClass: 'border-rose-500/30',
-    iconBgClass: 'bg-rose-500/15 text-rose-400',
-    IconComp: Users,
-    subMenus: [
-      { id: 'hr_dashboard', name: 'Dashboard SDM & Presensi' },
-      { id: 'ga_security', name: 'Security & Keamanan' },
-      { id: 'ga_hk', name: 'Housekeeping (Sanitasi)' },
-      { id: 'ga_aset', name: 'Manajemen Aset Pabrik' },
-      { id: 'training_videos', name: 'Video Training SOP' },
-      { id: 'training_karyawan', name: 'Modul Pelatihan Karyawan' }
-    ]
-  },
-  {
-    id: 'sistem_pengguna',
-    name: 'Sistem & Pengguna',
-    description: 'Dashboard eksekutif, master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
-    borderClass: 'border-slate-600/40',
-    iconBgClass: 'bg-slate-700/40 text-slate-300',
-    IconComp: Settings,
-    subMenus: [
-      { id: 'dashboard', name: 'Dashboard Eksekutif' },
-      { id: 'users', name: 'Manajemen User & Approval' },
-      { id: 'branches', name: 'Master Cabang Operasional' },
-      { id: 'activity_log', name: 'Log Aktivitas Sistem' },
-      { id: 'e2e_testing', name: 'Pengujian E2E Otomatis' },
-      { id: 'architecture', name: 'Skema Database SQL' }
-    ]
-  }
-];
+const MODULE_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  logistics: Truck,
+  sales_admin: Briefcase,
+  warehouse: Package,
+  purchasing: ShoppingBag,
+  marketing: Megaphone,
+  finance_tax: DollarSign,
+  hr: Users,
+  sistem_pengguna: Settings,
+};
+
+const MODULE_DEFINITIONS = CANONICAL_SIDEBAR_MODULES.map(mod => ({
+  ...mod,
+  IconComp: MODULE_ICON_MAP[mod.id] || Settings,
+}));
 
 const DEPARTMENT_FILTER_OPTIONS = [
   { id: 'all', label: 'Semua Role / Departemen', shortLabel: 'Semua', icon: '🌐' },
@@ -427,55 +311,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           } else {
             let savedVal = userMod?.subMenus?.[sub.id];
             if (savedVal === undefined && userMod?.subMenus) {
-              const LEGACY_MAP: Record<string, string[]> = {
-                sales_kpi_individual: ['data_kpi'],
-                sales_kpi_fines: ['data_kpi'],
-                sales_kpi_nusantara: ['data_kpi'],
-                sales_kpi_omset: ['data_kpi'],
-                sales_dashboard: ['dashboard_penjualan'],
-                sales_activities: ['aktivitas_harian'],
-                sales_schedules: ['jadwal_admin'],
-                sales_loading_duration: ['durasi_muat'],
-                sales_invoice_so: ['input_faktur_so'],
-                sales_rfid_scanner: ['aplikasi_rfid_muat'],
-                sales_skill_matrix: ['matriks_skil'],
-                sales_jobdesk: ['pengaturan_sop'],
-                warehouse_scanner: ['stok_barang'],
-                warehouse_dashboard: ['stok_barang'],
-                warehouse_inventory: ['stok_barang'],
-                warehouse_slotting: ['stok_barang'],
-                warehouse_inbound: ['permintaan_barang'],
-                warehouse_outbound: ['ceklis_muat'],
-                warehouse_opname: ['opname_stok'],
-                operational_dashboard: ['dashboard_logistik'],
-                schedules: ['rencana_rute'],
-                driver_portal: ['portal_driver'],
-                fleet_forms: ['armada_ceklis'],
-                fleets: ['armada_ceklis'],
-                spareparts: ['armada_ceklis'],
-                fuel_efficiency: ['armada_ceklis'],
-                warehouse_fleet_cubication: ['armada_ceklis'],
-                driver_reports: ['monitoring_sla'],
-                crew_history: ['monitoring_sla'],
-                tracking_eval: ['monitoring_sla'],
-                marketing_online: ['kampanye'],
-                marketing_offline: ['leads_pipeline'],
-                customer_map: ['laporan_kunjungan'],
-                purchasing_dashboard: ['permintaan_pembelian'],
-                purchasing_stock_overview: ['po_vendor'],
-                purchasing_stock_forecast: ['po_vendor'],
-                finance_dashboard: ['kas_bank', 'faktur_pajak'],
-                hr_dashboard: ['hr_data_karyawan'],
-                training_videos: ['td_video_training'],
-                training_karyawan: ['td_training_karyawan'],
-                dashboard: ['dashboard_eksekutif'],
-                users: ['daftar_pengguna'],
-                branches: ['daftar_pengguna'],
-                e2e_testing: ['daftar_pengguna'],
-                architecture: ['manajemen_hak_akses'],
-                activity_log: ['log_aktivitas_sistem']
-              };
-              const legacyKeys = LEGACY_MAP[sub.id];
+              const legacyKeys = LEGACY_SUBMENU_KEY_MAP[sub.id];
               if (legacyKeys) {
                 for (const lk of legacyKeys) {
                   if (userMod.subMenus[lk] !== undefined) {

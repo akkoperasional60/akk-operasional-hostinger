@@ -13,6 +13,7 @@ import { CustomerMapping } from './components/CustomerMapping';
 import { FleetFormCenter } from './components/FleetFormCenter';
 import { SupabaseSqlArchitecture } from './components/SupabaseSqlArchitecture';
 import { SalesAdminHub, SalesAdminSubTab } from './components/sales/SalesAdminHub';
+import { FinanceValidasiFormKirimTab } from './components/sales/FormKirimSystem';
 import { SalesKpi } from './components/sales/SalesKpi';
 import { PurchasingStockAnalysis } from './components/purchasing/PurchasingStockAnalysis';
 import { HelpDeskChat } from './components/HelpDeskChat';
@@ -253,6 +254,7 @@ export default function App() {
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
       case 'sales_schedules': return 'Sales Hub: Jadwal Produksi & Kirim';
       case 'sales_loading_duration': return 'Sales Hub: Durasi Muat Real-Time';
+      case 'sales_form_kirim': return 'Sales Hub: Form Kirim Barang';
       case 'sales_skill_matrix': return 'Sales Hub: Matriks Keterampilan Admin';
       case 'sales_jobdesk': return 'Sales Hub: Konfigurasi SOP & Jobdesk';
       case 'sales_kpi': return 'Sales Hub: Data Kinerja & KPI Penjualan';
@@ -267,6 +269,7 @@ export default function App() {
       case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
       case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
       case 'finance_dashboard': return 'Finance & Tax: Tagihan Pelanggan Belum Terlunasi';
+      case 'finance_validasi_form_kirim': return 'Finance & Tax: Validasi Form Kirim';
       case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
       case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
       case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
@@ -394,47 +397,16 @@ export default function App() {
       {/* Main Content Area with smooth offset transition for Sidebar */}
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[padding] ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
         {/* Desktop Top Header Bar Matching Modern SaaS Layout */}
-        <header className="hidden lg:flex sticky top-0 z-[1050] h-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
+        <header className="hidden lg:flex sticky top-0 z-[1050] h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight truncate">
-                Selamat datang kembali, {currentUser.fullName ? currentUser.fullName.split(' ')[0] : 'Admin'}!
-              </h1>
-              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5 truncate">
-                <span>Berikut ringkasan bisnis &amp; operasional hari ini</span>
-                <span>&middot;</span>
-                <span className="font-medium text-slate-700 dark:text-slate-300 truncate">
-                  {getTabTitle(activeNavTab)}
-                </span>
-              </div>
-            </div>
+            <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">
+              Selamat datang kembali, {currentUser.fullName ? currentUser.fullName.split(' ')[0] : 'Admin'}!
+            </h1>
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
             {/* Date Range Pill */}
             <LiveClockBadge />
-
-            {/* Quick Driver Mobile Mode Switcher */}
-            <button
-              onClick={() =>
-                selectTabImmediate(
-                  activeNavTab === 'driver_portal'
-                    ? isAdmin()
-                      ? 'dashboard'
-                      : 'operational_dashboard'
-                    : 'driver_portal'
-                )
-              }
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer border ${
-                currentTab === 'driver_portal'
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-              title="Buka Tampilan Khusus Mobile Supir (Driver Portal)"
-            >
-              <Smartphone className={`w-3.5 h-3.5 ${currentTab === 'driver_portal' ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
-              <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Driver Mobile'}</span>
-            </button>
 
             {/* Clean Icon-Only Theme Switcher */}
             <ThemeSwitcher variant="icon-only" />
@@ -637,6 +609,13 @@ export default function App() {
             />
           )}
 
+          {currentTab === 'sales_form_kirim' && (
+            <SalesAdminHub
+              activeSubTab="form_kirim"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
           {currentTab === 'sales_rfid_scanner' && (
             <SalesAdminHub
               activeSubTab="rfid_scanner"
@@ -679,7 +658,13 @@ export default function App() {
             />
           )}
           {currentTab === 'finance_dashboard' && (
-            <DepartmentDashboard dashboardType="finance" />
+            <DepartmentDashboard dashboardType="finance" initialFinanceMode="monitoring" />
+          )}
+          {currentTab === 'finance_validasi_form_kirim' && (
+            <FinanceValidasiFormKirimTab />
+          )}
+          {currentTab === 'finance_billing_app' && (
+            <DepartmentDashboard dashboardType="finance" initialFinanceMode="billing_app" />
           )}
           {(currentTab === 'warehouse_dashboard' ||
             currentTab === 'warehouse_inventory' ||
@@ -719,6 +704,7 @@ export default function App() {
                   scanner: 'warehouse_scanner',
                   slotting: 'warehouse_slotting',
                   opname: 'warehouse_opname',
+                  kartu_stok: 'purchasing_stok_opname',
                   cubication: 'warehouse_cubication',
                   fleet_cubication: 'warehouse_fleet_cubication'
                 };
@@ -729,6 +715,16 @@ export default function App() {
           {currentTab === 'purchasing_dashboard' && (
             <DepartmentDashboard dashboardType="purchasing" />
           )}
+          {currentTab === 'purchasing_stok_opname' && (
+            <WarehouseManagementSystem
+              initialTab="kartu_stok"
+              onNavigateTab={(tab: WmsSubTab) => {
+                if (tab === 'opname') {
+                  setCurrentTab('warehouse_opname');
+                }
+              }}
+            />
+          )}
           {currentTab === 'purchasing_stock_overview' && (
             <PurchasingStockAnalysis tab="overview" />
           )}
@@ -736,7 +732,7 @@ export default function App() {
             <PurchasingStockAnalysis tab="forecast" />
           )}
 
-          {(currentTab === 'marketing_online' || currentTab === 'marketing_offline') && (
+          {(currentTab === 'marketing_online' || currentTab === 'marketing_offline' || currentTab === 'marketing_to_vo_ro') && (
             <MarketingDashboard activeTab={currentTab} />
           )}
 
