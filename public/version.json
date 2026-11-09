@@ -1,9 +1,9 @@
 {
-  "versionCode": 10021,
-  "versionName": "1.0.21",
-  "updatedAt": "2026-11-09T10:48:00.000000",
+  "versionCode": 10022,
+  "versionName": "1.0.22",
+  "updatedAt": "2026-11-09T11:42:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V33: Bundling model ONNX Ultralytics YOLO (public/models/best.onnx) & Notebook Training Colab, pencocokan signature visual 16x16 terhadap Foto Dokumentasi Database Barang (Canvas & Sharp), pemetaan cerdas COCO base model ke SKU classes.json, serta sinkronisasi penuh foto dokumentasi lokal-server."
+  "releaseNotes": "Update V34: Stabilizer anti-getaran kamera YOLO (250ms real-time & verifikasi non-blocking instan), proteksi satuan kemasan luar (CRT/ZAK agar tidak tertimpa SLP), tampilan utuh nama & ukuran Master Barang tanpa terpotong di kamera/list, serta penghapusan floating HelpDeskChat."
 }

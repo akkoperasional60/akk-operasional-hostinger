@@ -4221,16 +4221,26 @@ Kembalikan HANYA JSON valid:
 
         // Jika classId valid dari model kustom DAN cocok dengan barang yang ada di Database Barang / Faktur
         if (directClassSku && (dbBySku.has(directClassSku) || expectedItems.some(e => String(e.skuCode || '').trim().toUpperCase() === directClassSku))) {
-          // Namun jika user sudah mendokumentasikan foto barang target di Database Barang dan cocok secara visual, utamakan hasil analisa dokumentasi Database Barang
-          if (bestDocMatchSku && bestDocMatchScore >= 0.55 && bestDocMatchSku === targetSkuRaw) {
-            return { skuCode: bestDocMatchSku, classIdx: Math.max(0, classesList.indexOf(bestDocMatchSku)) };
+          // Jika target aktif berasal dari keluarga kardus yang sama (misal 7GPJA001 10 OZ vs 7GPJA011 14 OZ pada kardus Jaguar yang identik)
+          // atau dokumentasi visual cocok, utamakan target aktif yang sedang dipindai
+          const isSameCartonFamily =
+            targetSkuRaw &&
+            targetSkuRaw !== 'AUTO' &&
+            directClassSku.length >= 5 &&
+            targetSkuRaw.length >= 5 &&
+            directClassSku.slice(0, 5) === targetSkuRaw.slice(0, 5);
+          if (
+            (bestDocMatchSku && bestDocMatchScore >= 0.42 && bestDocMatchSku === targetSkuRaw) ||
+            isSameCartonFamily
+          ) {
+            return { skuCode: targetSkuRaw, classIdx: Math.max(0, classesList.indexOf(targetSkuRaw)) };
           }
           return { skuCode: directClassSku, classIdx: rawClassId };
         }
 
         // Jika best.onnx adalah model base COCO (misal mendeteksi class 73 = book pada tabel kardus) atau classId di luar daftar classes.json:
         // Gunakan hasil analisa Dokumentasi Database Barang + classes.json + Target Barang Aktif!
-        if (bestDocMatchSku && bestDocMatchScore >= 0.48) {
+        if (bestDocMatchSku && bestDocMatchScore >= 0.42) {
           return { skuCode: bestDocMatchSku, classIdx: Math.max(0, classesList.indexOf(bestDocMatchSku)) };
         }
         if (targetSkuRaw && targetSkuRaw !== 'AUTO') {
@@ -4289,7 +4299,7 @@ Kembalikan HANYA JSON valid:
           // Parse End-to-End YOLO26 output tensor [1, 300, 6]: [x1, y1, x2, y2, score, class_id]
           const numRows = dims.length === 3 ? dims[1] : Math.floor(outData.length / 6);
           const stride = dims.length === 3 ? dims[2] : 6;
-          const confThreshold = Number(req.body?.conf_threshold ?? 0.25);
+          const confThreshold = Number(req.body?.conf_threshold ?? 0.2);
 
           for (let r = 0; r < numRows; r++) {
             const offset = r * stride;
@@ -4312,10 +4322,10 @@ Kembalikan HANYA JSON valid:
                 dbRec?.keteranganBarang ||
                 matchedExpected?.itemName ||
                 (skuFromClass === targetSkuRaw && targetNameRaw ? targetNameRaw : `Barang SKU ${skuFromClass}`);
-              const unit = dbRec?.unit1 || dbRec?.satuan || matchedExpected?.unit || 'CRT';
+              const unit = matchedExpected?.unit || dbRec?.unit2 || dbRec?.unit1 || dbRec?.satuan || 'CRT';
 
               const boostedScore =
-                bestDocMatchSku === skuFromClass && bestDocMatchScore > 0.5
+                bestDocMatchSku === skuFromClass && bestDocMatchScore > 0.42
                   ? Math.min(0.99, Math.max(score, Number((0.6 * score + 0.4 * bestDocMatchScore + 0.15).toFixed(4))))
                   : Number(score.toFixed(4));
 
@@ -4350,7 +4360,7 @@ Kembalikan HANYA JSON valid:
         const fallbackName = forceMismatch
           ? 'BARANG BERBEDA / TIDAK SESUAI TARGET'
           : dbRec?.deskripsiBarang || dbRec?.keteranganBarang || matchedExpected?.itemName || targetNameRaw || `Kemasan ${fallbackSku}`;
-        const fallbackUnit = dbRec?.unit1 || dbRec?.satuan || matchedExpected?.unit || 'CRT';
+        const fallbackUnit = matchedExpected?.unit || dbRec?.unit2 || dbRec?.unit1 || dbRec?.satuan || 'CRT';
         const computedConf =
           bestDocMatchScore > 0.5
             ? Math.min(0.99, Number((0.75 + bestDocMatchScore * 0.22).toFixed(4)))

@@ -16,7 +16,6 @@ import { SalesAdminHub, SalesAdminSubTab } from './components/sales/SalesAdminHu
 import { FinanceValidasiFormKirimTab } from './components/sales/FormKirimSystem';
 import { SalesKpi } from './components/sales/SalesKpi';
 import { PurchasingStockAnalysis } from './components/purchasing/PurchasingStockAnalysis';
-import { HelpDeskChat } from './components/HelpDeskChat';
 import { AuthModal } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
@@ -775,7 +774,6 @@ export default function App() {
         onClose={() => setIsAuthOpen(false)}
         defaultTab={authDefaultTab}
       />
-      <HelpDeskChat activeTab={currentTab} user={currentUser} />
     </div>
   );
 }
