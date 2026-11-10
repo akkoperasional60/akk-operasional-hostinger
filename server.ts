@@ -3573,6 +3573,36 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint ringan Real-Time Multi-Device Sync khusus untuk menyinkronkan foto dokumentasi & perubahan barang antar HP dan PC
+  // Ringkasan ringan dari MySQL, tanpa mentransfer foto/base64 ke browser.
+  // Dipakai untuk verifikasi pemulihan foto lama dari IndexedDB perangkat asal.
+  app.get('/api/database-barang/photos-summary', requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isDatabaseConfigured()) {
+      return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi.' });
+    }
+    try {
+      const rows = await mysqlQuery<any[]>(`
+        SELECT UPPER(TRIM(no_barang)) AS code,
+               CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '')
+                      OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
+                    THEN 1 ELSE 0 END AS has_photo
+        FROM wms_database_barang
+      `);
+      const codes = new Set<string>();
+      const photoCodes = new Set<string>();
+      for (const row of rows || []) {
+        const code = String(row.code || '').trim();
+        if (!code) continue;
+        codes.add(code);
+        if (Number(row.has_photo) === 1) photoCodes.add(code);
+      }
+      return res.json({ success: true, totalSkuCount: codes.size, photoSkuCount: photoCodes.size });
+    } catch (err: any) {
+      console.error('[Database Barang Photos] Gagal membaca ringkasan MySQL:', err);
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca MySQL' });
+    }
+  });
+
   app.get('/api/database-barang/photos-sync', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
@@ -3649,8 +3679,12 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role
-  app.post('/api/database-barang/photos-sync', async (req: any, res: any) => {
+  app.post('/api/database-barang/photos-sync', requireAuth, async (req: any, res: any) => {
     try {
+      if (!isDatabaseConfigured()) {
+        return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; foto tidak disimpan di server.' });
+      }
+      // Tabel disiapkan saat server startup. Hindari CREATE TABLE untuk setiap foto yang dikirim.
       const incomingPhotoItems = Array.isArray(req.body?.photoItems) ? req.body.photoItems : [];
       if (incomingPhotoItems.length === 0) {
         return res.json({ success: true, updatedCount: 0 });
@@ -3680,18 +3714,21 @@ Kembalikan HANYA JSON valid:
         const existingUrls = existingMem && Array.isArray(existingMem.dokumentasiUrls)
           ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
           : [];
-        const mergedUrls = Array.from(new Set([...incomingUrls, ...existingUrls, ...prevSaved]));
-        preservedServerPhotosByCode.set(code, mergedUrls);
+        const mergedUrls = Array.from(new Set([...existingUrls, ...prevSaved, ...incomingUrls]));
 
         let canonicalId = String(existingMem?.id || rawItem?.id || `dbb-${code}`);
         if (isDatabaseConfigured()) {
           try {
             const dbRows = await mysqlQuery<any[]>(
-              `SELECT id, order_index, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC LIMIT 1`,
+              `SELECT id, order_index, dokumentasi_url, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC LIMIT 1`,
               [code]
             );
             if (Array.isArray(dbRows) && dbRows.length > 0) {
               canonicalId = String(dbRows[0].id);
+              const legacySingleUrl = String(dbRows[0].dokumentasi_url || '').trim();
+              if (legacySingleUrl && !legacySingleUrl.startsWith('data:image/svg+xml') && !mergedUrls.includes(legacySingleUrl)) {
+                mergedUrls.push(legacySingleUrl);
+              }
               if (dbRows[0].dokumentasi_urls_json) {
                 try {
                   const parsedDbUrls = typeof dbRows[0].dokumentasi_urls_json === 'string'
@@ -3703,12 +3740,14 @@ Kembalikan HANYA JSON valid:
                         mergedUrls.push(u);
                       }
                     }
-                    preservedServerPhotosByCode.set(code, mergedUrls);
                   }
                 } catch {}
               }
             }
-          } catch {}
+          } catch (dbErr: any) {
+            // Jangan berasumsi SKU belum ada jika pembacaan MySQL sedang gagal.
+            throw new Error(`Gagal membaca foto barang ${code} dari MySQL: ${dbErr?.message || 'Database tidak tersedia'}`);
+          }
         }
 
         const rec = {
@@ -3738,14 +3777,6 @@ Kembalikan HANYA JSON valid:
           cabang: String(existingMem?.cabang || rawItem?.cabang || 'Banyuwangi'),
           updatedAt: new Date().toISOString().split('T')[0]
         };
-
-        if (existingIdx !== undefined) {
-          memoryDatabaseBarang[existingIdx] = rec;
-        } else {
-          byCode.set(code, memoryDatabaseBarang.length);
-          memoryDatabaseBarang.push(rec);
-        }
-        updatedCount++;
 
         if (isDatabaseConfigured()) {
           try {
@@ -3787,16 +3818,20 @@ Kembalikan HANYA JSON valid:
                 rec.updatedAt
               ]
             );
-          } catch {}
-        } else {
-          try {
-            await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ photoItems: [rec] })
-            });
-          } catch {}
+          } catch (dbErr: any) {
+            console.error('[Database Barang Photos] Gagal simpan MySQL:', dbErr);
+            throw new Error(`Gagal simpan foto barang ${code} ke MySQL: ${dbErr?.message || 'Kesalahan database'}`);
+          }
         }
+        // Jangan tandai sukses sebelum insert/update MySQL benar-benar selesai.
+        preservedServerPhotosByCode.set(code, mergedUrls);
+        if (existingIdx !== undefined) {
+          memoryDatabaseBarang[existingIdx] = rec;
+        } else {
+          byCode.set(code, memoryDatabaseBarang.length);
+          memoryDatabaseBarang.push(rec);
+        }
+        updatedCount++;
       }
 
       return res.json({
@@ -4021,8 +4056,9 @@ Kembalikan HANYA JSON valid:
             `;
             await mysqlQuery(sql, params);
           }
-        } catch {
-          console.log('[Database Barang Sync] MySQL host unavailable, operating in-memory storage mode');
+        } catch (dbErr: any) {
+          console.error('[Database Barang Sync] MySQL gagal:', dbErr);
+          return res.status(503).json({ success: false, error: `Gagal sinkronisasi ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
         }
       }
 
@@ -4042,6 +4078,9 @@ Kembalikan HANYA JSON valid:
 
   app.post('/api/database-barang/item', async (req: any, res: any) => {
     try {
+      if (!isDatabaseConfigured()) {
+        return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; data tidak dapat disimpan permanen.' });
+      }
       // Izinkan semua akun operasional (termasuk Admin Penjualan / Sales & Gudang) menambahkan foto dokumentasi barang ke server
       const item = req.body?.item || req.body;
       const replacePhotos = Boolean(req.body?.replacePhotos || item?.replacePhotos);
@@ -4188,8 +4227,9 @@ Kembalikan HANYA JSON valid:
               rec.updatedAt
             ]
           );
-        } catch {
-          console.log('[Database Barang Item] MySQL host unavailable, operating in-memory storage mode');
+        } catch (dbErr: any) {
+          console.error('[Database Barang Item] MySQL gagal:', dbErr);
+          return res.status(503).json({ success: false, error: `Gagal menyimpan barang/foto ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
         }
       } else {
         try {

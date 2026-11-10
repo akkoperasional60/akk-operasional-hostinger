@@ -585,9 +585,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       if (cameraTargetItem && cameraTargetItem.id === saved.id) {
         setCameraTargetItem(saved);
       }
+      const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
       setFeedbackModal({
-        title: `${newUrls.length} Foto Dokumentasi Berhasil Disimpan`,
-        message: `Total ${updatedUrls.length} foto dokumentasi untuk barang ${saved.noBarang} (${saved.deskripsiBarang}) telah tersimpan!`
+        title: persistedToMysql ? `${newUrls.length} Foto Berhasil Masuk MySQL` : 'Foto Baru Hanya Tersimpan di Browser',
+        message: persistedToMysql
+          ? `Total ${updatedUrls.length} foto untuk ${saved.noBarang} telah diterima MySQL.`
+          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk MySQL. Gunakan tombol Pulihkan Foto Lokal ke MySQL dari perangkat ini.`
       });
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
@@ -626,7 +629,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   }, []);
 
   const handleManualServerSync = async () => {
-    const result = await databaseBarangService.forceSyncNow();
+    let result: { count: number; items: DatabaseBarangRecord[] };
+    try {
+      result = await databaseBarangService.forceSyncNow();
+    } catch (err: any) {
+      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server MySQL.' });
+      return;
+    }
+    const syncError = databaseBarangService.getSyncStatus().error;
     setItems(result.items);
     if (onSyncWithMasterSku && result.items.length > 0) {
       onSyncWithMasterSku(result.items);
@@ -637,12 +647,40 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
     ).length;
     setFeedbackModal({
-      title: result.count > 0 ? 'Sinkronisasi 2 Arah (PC ↔ HP) Berhasil' : 'Server Belum Memiliki Data Barang',
+      title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi 2 Arah (PC ↔ HP) Berhasil' : 'Server Belum Memiliki Data Barang'),
       message:
-        result.count > 0
+        syncError ? `Server melaporkan masalah: ${syncError}. Data lokal belum dihapus. Gunakan tombol Pulihkan Foto Lokal ke MySQL dari perangkat asal.` : result.count > 0
           ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh dua arah antara Server MySQL, tampilan PC, dan tampilan HP.`
           : 'Saat ini belum ada data di Server MySQL. Buka halaman Database Barang di perangkat tempat Anda menginput data agar otomatis terunggah ke server.'
     });
+  };
+
+  const handleRecoverLocalPhotos = async () => {
+    try {
+      const result = await databaseBarangService.recoverLocalPhotosToMysql();
+      setItems(databaseBarangService.getAll());
+      if (result.localPhotoSkuCount === 0) {
+        setFeedbackModal({
+          title: 'Foto Lokal Tidak Ditemukan',
+          message: `Browser ini tidak menyimpan foto lama. MySQL saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Pulihkan Foto Lokal di sana.`
+        });
+        return;
+      }
+      setFeedbackModal({
+        title: result.failedSkuCount > 0 ? 'Sebagian Foto Belum Berhasil Dikirim' : 'Pemulihan Foto ke MySQL Selesai',
+        message: `Ditemukan ${result.localPhotoSkuCount} barang berfoto pada browser ini. ` +
+          `Upload berhasil ${result.succeededSkuCount}, gagal ${result.failedSkuCount}. ` +
+          `Barang berfoto di MySQL: ${result.beforePhotoSkuCount} menjadi ${result.afterPhotoSkuCount}. ` +
+          (result.failedSkuCount ? `Contoh SKU gagal: ${result.failedCodes.slice(0, 5).join(', ')}. ` : '') +
+          (result.afterPhotoSkuCount === result.beforePhotoSkuCount ? `Jika jumlah belum bertambah, coba perangkat/browser ASAL tempat foto lama disimpan. ` : '') +
+          `Foto asli di browser tidak dihapus. Periksa lagi di phpMyAdmin.`
+      });
+    } catch (err: any) {
+      setFeedbackModal({
+        title: 'Gagal Menghubungkan Foto ke MySQL',
+        message: `${err?.message || 'Server belum tersedia'}. Foto asli di browser tetap aman. Pastikan patch sudah dideploy ke aplikasi yang aktif.`
+      });
+    }
   };
 
   // Auto-calculate volM3 whenever panjang, lebar, tinggi change
@@ -853,7 +891,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     });
   };
 
-  const handleSaveItemForm = (e: React.FormEvent) => {
+  const handleSaveItemForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!noBarang.trim() || !deskripsiBarang.trim()) return;
 
@@ -883,10 +921,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const all = databaseBarangService.getAll();
     setItems(all);
     if (onSyncWithMasterSku) onSyncWithMasterSku(all);
+    const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
     setIsFormModalOpen(false);
     setFeedbackModal({
-      title: editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan',
-      message: `Data "${saved.deskripsiBarang}" (${saved.noBarang}) berhasil disimpan dengan ${dokumentasiUrls.length} foto dokumentasi.`
+      title: persistedToMysql ? (editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan') : 'Data Tersimpan Lokal, MySQL Gagal',
+      message: persistedToMysql
+        ? `Data "${saved.deskripsiBarang}" (${saved.noBarang}) telah masuk MySQL dengan ${dokumentasiUrls.length} foto dokumentasi.`
+        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di MySQL. Coba tombol Pulihkan Foto Lokal ke MySQL.`
     });
   };
 
@@ -1460,6 +1501,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
             <span>{syncStatus.isSyncing ? `Sinkron (${syncStatus.progressPct}%)...` : 'Sinkron 2 Arah (PC ↔ HP)'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleRecoverLocalPhotos}
+            disabled={syncStatus.isSyncing}
+            className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60"
+            title="Kirim ulang seluruh foto yang masih tersimpan di IndexedDB browser ini ke MySQL; tidak menghapus foto lokal"
+          >
+            Pulihkan Foto Lokal ke MySQL
           </button>
           <button
             type="button"

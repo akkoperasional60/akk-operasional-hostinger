@@ -736,6 +736,48 @@ function mergeLocalAndRemoteRecords(
   };
 }
 
+// Satu foto per request agar data lama dari IndexedDB tidak terkena HTTP 413.
+// Foto lokal tidak dikurangi/ditimpa saat dibuat versi lebih ringan untuk jaringan.
+async function photoForServer(original: string, maxEdge: number, quality: number): Promise<string> {
+  if (typeof window === 'undefined' || !original.startsWith('data:image/')) return original;
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Foto tidak bisa dibaca'));
+      img.src = original;
+    });
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return original;
+    const scale = Math.min(1, maxEdge / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return original;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const compressed = canvas.toDataURL('image/jpeg', quality);
+    return compressed.length < original.length ? compressed : original;
+  } catch {
+    return original;
+  }
+}
+
+// Serialisasi upload supaya sinkronisasi otomatis dan pemulihan manual tidak saling menimpa.
+let photoUploadChain: Promise<void> = Promise.resolve();
+const pendingItemUploads = new Map<string, Promise<boolean>>();
+
+export interface DatabaseBarangPhotoRecoveryResult {
+  localPhotoSkuCount: number;
+  attemptedSkuCount: number;
+  succeededSkuCount: number;
+  failedSkuCount: number;
+  beforePhotoSkuCount: number;
+  afterPhotoSkuCount: number;
+  failedCodes: string[];
+}
+
 export const databaseBarangService = {
   getSyncStatus(): DatabaseBarangSyncStatus {
     return { ...syncStatusState };
@@ -869,40 +911,163 @@ export const databaseBarangService = {
         headers: getAuthHeaders(),
         body: JSON.stringify({ item: { ...record, orderIndex }, replacePhotos })
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `HTTP ${res.status}: gagal simpan ke MySQL`);
+      }
       if (res.ok) {
         updateSyncStatus({
           lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
         });
       }
       return res.ok;
-    } catch (err) {
+    } catch (err: any) {
+      updateSyncStatus({ error: `Gagal simpan barang/foto ke MySQL: ${err?.message || err}` });
       console.warn('Gagal sinkron item ke server:', err);
       return false;
     }
+  },
+
+  async waitForItemUpload(code: string): Promise<boolean> {
+    const job = pendingItemUploads.get(String(code || '').trim().toUpperCase());
+    return job ? await job : false;
   },
 
   async pushPhotosBatchToServer(
     entries: Array<{ record: DatabaseBarangRecord; idx: number }>
   ): Promise<void> {
     if (typeof window === 'undefined' || entries.length === 0) return;
-    // Kirim secara micro-batch (2 item per request, ~300KB-600KB) agar 69+ foto resolusi tinggi dari HP tidak pernah ditolak 413 oleh Nginx Hostinger!
-    const MICRO_BATCH_SIZE = 2;
-    for (let i = 0; i < entries.length; i += MICRO_BATCH_SIZE) {
-      const batch = entries.slice(i, i + MICRO_BATCH_SIZE);
-      await Promise.allSettled([
-        ...batch.map(entry => this.pushItemToServer(entry.record, entry.idx, false)),
-        fetch('/api/database-barang/photos-sync', {
-          method: 'POST',
-          credentials: 'include',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            photoItems: batch.map(e => ({
-              ...e.record,
-              orderIndex: e.idx
-            }))
-          })
-        }).catch(() => null)
-      ]);
+    const upload = async (): Promise<void> => {
+      for (const entry of entries) {
+        const photos = extractCleanPhotos(entry.record);
+        for (const originalPhoto of photos) {
+          // Setiap POST hanya membawa SATU foto, bukan semua foto barang tersebut.
+          let photo = originalPhoto;
+          let lastError = 'Gagal upload foto';
+          let saved = false;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const res = await fetch('/api/database-barang/photos-sync', {
+                method: 'POST',
+                credentials: 'include',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                  photoItems: [{
+                    ...entry.record,
+                    orderIndex: entry.idx,
+                    dokumentasiUrl: photo,
+                    dokumentasiUrls: [photo]
+                  }]
+                })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (res.ok && data.success && Number(data.updatedCount) > 0) {
+                saved = true;
+                break;
+              }
+              lastError = data.error || `HTTP ${res.status}`;
+              if (res.status === 401 || res.status === 403) break;
+              if (res.status === 413 || /packet.*large|too.*large|payload.*large/i.test(lastError)) {
+                photo = await photoForServer(originalPhoto, attempt === 0 ? 1100 : 850, attempt === 0 ? 0.75 : 0.65);
+              }
+            } catch (err: any) {
+              lastError = err?.message || 'Jaringan gagal';
+            }
+            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+          }
+          if (!saved) {
+            const message = `Foto barang ${entry.record.noBarang} gagal masuk MySQL: ${lastError}`;
+            updateSyncStatus({ error: message });
+            console.error('[Database Barang Photos]', message);
+            throw new Error(message);
+          }
+        }
+      }
+    };
+    // Queue tetap hidup setelah kegagalan agar tombol pemulihan bisa dicoba kembali.
+    const job = photoUploadChain.then(upload, upload);
+    photoUploadChain = job.catch(() => {});
+    return job;
+  },
+
+  // Jalankan pada perangkat/browser ASAL tempat foto lama masih tersimpan di IndexedDB.
+  // Tidak menghapus data, tidak replace_all, dan memeriksa jumlah SKU berfoto di MySQL.
+  async recoverLocalPhotosToMysql(): Promise<DatabaseBarangPhotoRecoveryResult> {
+    if (typeof window === 'undefined') throw new Error('Hanya tersedia di browser.');
+    updateSyncStatus({ isSyncing: true, progressPct: 2, error: null });
+    try {
+      const localRecords = await loadRecordsFromIndexedDb();
+      const cacheRecords = this.getAll();
+      let localStorageRecords: DatabaseBarangRecord[] = [];
+      try {
+        const raw = JSON.parse(localStorage.getItem(LS_KEY_DATABASE_BARANG) || '[]');
+        if (Array.isArray(raw)) localStorageRecords = raw;
+      } catch {}
+      const byCode = new Map<string, { record: DatabaseBarangRecord; idx: number; photos: string[] }>();
+      // Gabungkan IDB + memori + localStorage cache. Jangan menulis kembali IDB sebelum data dipulihkan.
+      [...localRecords, ...localStorageRecords, ...cacheRecords].forEach((record, idx) => {
+        const code = String(record.noBarang || '').trim().toUpperCase();
+        if (!code || explicitlyClearedPhotoCodes.has(code)) return;
+        const preserved = preservedPhotosByCode.get(code) || [];
+        const photoSet = new Set([...(byCode.get(code)?.photos || []), ...extractCleanPhotos(record), ...preserved]);
+        if (!photoSet.size) return;
+        byCode.set(code, { record, idx, photos: [...photoSet] });
+      });
+      const localPhotoSkuCount = byCode.size;
+      const readSummary = async (): Promise<number> => {
+        const res = await fetch('/api/database-barang/photos-summary', {
+          credentials: 'include', headers: getAuthHeaders(), cache: 'no-store'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `MySQL belum bisa diverifikasi (HTTP ${res.status})`);
+        }
+        return Number(data.photoSkuCount) || 0;
+      };
+      const beforePhotoSkuCount = await readSummary();
+      let succeededSkuCount = 0;
+      let failedSkuCount = 0;
+      const failedCodes: string[] = [];
+      let processed = 0;
+      for (const [code, item] of byCode.entries()) {
+        try {
+          await this.pushPhotosBatchToServer([{
+            record: {
+              ...item.record,
+              dokumentasiUrl: item.photos[0],
+              dokumentasiUrls: item.photos
+            },
+            idx: item.idx
+          }]);
+          succeededSkuCount++;
+        } catch (err: any) {
+          failedSkuCount++;
+          failedCodes.push(code);
+          console.error('[Database Barang Recovery]', code, err?.message || err);
+        }
+        processed++;
+        updateSyncStatus({ progressPct: Math.min(95, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 95)) });
+      }
+      const afterPhotoSkuCount = await readSummary();
+      updateSyncStatus({
+        progressPct: 100,
+        lastSyncedAt: new Date().toLocaleTimeString('id-ID'),
+        error: failedSkuCount ? `${failedSkuCount} SKU foto gagal dikirim; data lokal tetap disimpan.` : null
+      });
+      return {
+        localPhotoSkuCount,
+        attemptedSkuCount: processed,
+        succeededSkuCount,
+        failedSkuCount,
+        beforePhotoSkuCount,
+        afterPhotoSkuCount,
+        failedCodes
+      };
+    } catch (err: any) {
+      updateSyncStatus({ error: err?.message || 'Gagal memulihkan foto lokal' });
+      throw err;
+    } finally {
+      updateSyncStatus({ isSyncing: false });
     }
   },
 
@@ -1128,7 +1293,8 @@ export const databaseBarangService = {
         error: null
       });
       return localChanged;
-    } catch {
+    } catch (err: any) {
+      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto otomatis' });
       return false;
     }
   },
@@ -1217,7 +1383,9 @@ export const databaseBarangService = {
 
           // Dorong segera semua item yang memiliki foto di device ini (misal 69 foto di HP) tapi belum ada di server!
           if (itemsWithLocalPhotosToPush.length > 0) {
-            void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush);
+            void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(err => {
+              updateSyncStatus({ error: err?.message || 'Gagal kirim foto ke MySQL' });
+            });
           } else if (shouldPushToServer && merged.length > 0) {
             void this.syncAllToServer(merged, 'replace_all');
           }
@@ -1643,7 +1811,11 @@ export const databaseBarangService = {
     }
 
     this.saveAll(list, false);
-    void this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace);
+    const job = this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace);
+    pendingItemUploads.set(cleanCode, job);
+    void job.finally(() => {
+      if (pendingItemUploads.get(cleanCode) === job) pendingItemUploads.delete(cleanCode);
+    });
     return record;
   },
 
