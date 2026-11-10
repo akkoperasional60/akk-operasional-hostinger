@@ -67,13 +67,26 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
   const allMasterFleets = useMemo(() => logisticsStore.getFleets(), [checklists]);
 
-  const loadChecklists = () => {
-    const list = driverChecklistService.getChecklists();
-    setChecklists(list);
+  const loadChecklists = async () => {
+    const localList = driverChecklistService.getChecklists();
+    setChecklists(localList);
+    const syncedList = await driverChecklistService.syncFromServer();
+    setChecklists(syncedList);
   };
 
   useEffect(() => {
-    loadChecklists();
+    void loadChecklists();
+    const handleUpdate = () => {
+      setChecklists(driverChecklistService.getChecklists());
+    };
+    window.addEventListener('driver-checklist-updated', handleUpdate);
+    const interval = setInterval(() => {
+      void driverChecklistService.syncFromServer().then(setChecklists);
+    }, 10000);
+    return () => {
+      window.removeEventListener('driver-checklist-updated', handleUpdate);
+      clearInterval(interval);
+    };
   }, []);
 
   // Unique fleets in checklists enriched with initialCode / Nama Armada

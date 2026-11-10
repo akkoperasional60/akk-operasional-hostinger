@@ -84,15 +84,36 @@ const LEGACY_NAME_ALIASES: Record<string, string> = {
 
 class DriverChecklistService {
   private memoryChecklists: DriverVehicleChecklist[] | null = null;
+  private isSyncing: boolean = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', (evt) => {
         if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3') {
           this.memoryChecklists = null;
+          window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
         }
       });
+      setTimeout(() => {
+        void this.syncFromServer();
+      }, 300);
     }
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        localStorage.getItem('akk_session_token') ||
+        localStorage.getItem('session_token') ||
+        sessionStorage.getItem('akk_session_token') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
   }
 
   public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
@@ -119,40 +140,16 @@ class DriverChecklistService {
     });
   }
 
-  private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
-    const today = getLocalDateStr();
-    const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
-      id: `chk-item-${idx + 1}`,
-      ...item,
-      status: 'ok' as const,
-      note: ''
-    }));
-
-    return [
-      {
-        id: `CHK-INIT-${Date.now()}-1`,
-        driverId: 'crew-01',
-        driverName: 'Ach Taufiq',
-        fleetId: 'fl-01',
-        plateNumber: 'P 8848 U',
-        vehicleType: 'Engkel Long Box',
-        date: today,
-        time: '06:45',
-        odometerKm: 124580,
-        fuelLevelPercent: 85,
-        inspectionType: 'pre_trip',
-        overallStatus: 'passed',
-        passedCount: items.length,
-        issueCount: 0,
-        items,
-        notes: 'Pemeriksaan rutin pagi hari di pool DC Banyuwangi. Seluruh sistem mesin dan pengereman prima.',
-        driverSignature: 'Ach Taufiq (Digital Signed)',
-        checkerName: 'Rahmat Hidayat (Kepala Pool DC)',
-        checkerSigned: true,
-        synced: true,
-        createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
-      }
-    ];
+  private normalizeChecklist(chk: DriverVehicleChecklist): DriverVehicleChecklist {
+    const syncedItems = this.syncItemsWithStandard(chk.items);
+    const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+    return {
+      ...chk,
+      items: syncedItems,
+      overallStatus,
+      passedCount,
+      issueCount
+    };
   }
 
   private loadAllChecklists(): DriverVehicleChecklist[] {
@@ -166,26 +163,104 @@ class DriverChecklistService {
         list = [];
       }
 
-      list = list.map(chk => {
-        const syncedItems = this.syncItemsWithStandard(chk.items);
-        const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
-        return {
-          ...chk,
-          items: syncedItems,
-          overallStatus,
-          passedCount,
-          issueCount
-        };
-      });
+      // Filter out legacy fake sample checklists (CHK-INIT-...)
+      list = list
+        .filter(chk => chk && chk.id && !String(chk.id).startsWith('CHK-INIT-'))
+        .map(chk => this.normalizeChecklist(chk));
 
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       this.memoryChecklists = list;
       return list;
     } catch {
-      const fallback = this.generateInitialSampleChecklists();
-      this.memoryChecklists = fallback;
-      return fallback;
+      this.memoryChecklists = [];
+      return [];
     }
+  }
+
+  public async syncFromServer(): Promise<DriverVehicleChecklist[]> {
+    if (typeof window === 'undefined' || this.isSyncing) {
+      return this.loadAllChecklists();
+    }
+    this.isSyncing = true;
+    try {
+      const res = await fetch('/api/fleet-checklists', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) {
+        return this.loadAllChecklists();
+      }
+      const data = await res.json();
+      const serverList: DriverVehicleChecklist[] = Array.isArray(data?.checklists) ? data.checklists : [];
+      const localList = this.loadAllChecklists();
+
+      const mergedMap = new Map<string, DriverVehicleChecklist>();
+      serverList.forEach(chk => {
+        if (chk && chk.id && !String(chk.id).startsWith('CHK-INIT-')) {
+          mergedMap.set(String(chk.id), this.normalizeChecklist({ ...chk, synced: true }));
+        }
+      });
+
+      const unsyncedLocal: DriverVehicleChecklist[] = [];
+      localList.forEach(chk => {
+        if (chk && chk.id && !String(chk.id).startsWith('CHK-INIT-')) {
+          if (!mergedMap.has(String(chk.id))) {
+            mergedMap.set(String(chk.id), this.normalizeChecklist(chk));
+            if (!chk.synced) {
+              unsyncedLocal.push(chk);
+            }
+          }
+        }
+      });
+
+      // Push any unsynced local checklists to server
+      for (const localChk of unsyncedLocal.slice(0, 10)) {
+        try {
+          await fetch('/api/fleet-checklists', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ checklist: { ...localChk, synced: true } })
+          });
+        } catch {}
+      }
+
+      const merged = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      this.persistLocal(merged);
+      window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+      return merged;
+    } catch {
+      return this.loadAllChecklists();
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  private persistLocal(list: DriverVehicleChecklist[]): void {
+    const trimmedAll = list.slice(0, 60).map((chk, idx) => {
+      if (idx < 8) return chk;
+      return {
+        ...chk,
+        photoEvidenceUrl: chk.photoEvidenceUrl?.startsWith('data:') ? undefined : chk.photoEvidenceUrl,
+        items: chk.items.map(it => ({
+          ...it,
+          photoUrl: it.photoUrl?.startsWith('data:') ? undefined : it.photoUrl
+        }))
+      };
+    });
+    this.memoryChecklists = trimmedAll;
+    const savedOk = safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll));
+    if (!savedOk) {
+      safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
+    }
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
+      }
+    } catch {}
   }
 
   public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
@@ -207,15 +282,11 @@ class DriverChecklistService {
 
   public saveChecklist(checklist: DriverVehicleChecklist): boolean {
     try {
-      const syncedItems = this.syncItemsWithStandard(checklist.items);
-      const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
-      const normalizedChecklist: DriverVehicleChecklist = {
+      const normalizedChecklist = this.normalizeChecklist({
         ...checklist,
-        items: syncedItems,
-        overallStatus,
-        passedCount,
-        issueCount
-      };
+        synced: true,
+        createdAt: checklist.createdAt || new Date().toISOString()
+      });
       const all = this.getChecklists();
       const existingIdx = all.findIndex(c => c.id === normalizedChecklist.id);
       if (existingIdx >= 0) {
@@ -223,29 +294,17 @@ class DriverChecklistService {
       } else {
         all.unshift(normalizedChecklist);
       }
-      const trimmedAll = all.slice(0, 40).map((chk, idx) => {
-        // Keep full photos for recent 8 checklists; strip heavy base64 on older historical entries to prevent QuotaExceededError
-        if (idx < 8) return chk;
-        return {
-          ...chk,
-          photoEvidenceUrl: chk.photoEvidenceUrl?.startsWith('data:') ? undefined : chk.photoEvidenceUrl,
-          items: chk.items.map(it => ({
-            ...it,
-            photoUrl: it.photoUrl?.startsWith('data:') ? undefined : it.photoUrl
-          }))
-        };
-      });
-      this.memoryChecklists = trimmedAll;
-      const savedOk = safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll));
-      if (!savedOk) {
-        // Fallback: keep only the latest 3 checklists if device storage is critically full
-        safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 3)));
+      this.persistLocal(all);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+        void fetch('/api/fleet-checklists', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({ checklist: normalizedChecklist })
+        }).catch(err => console.warn('[DriverChecklistService] Sync to server failed:', err));
       }
-      try {
-        if (typeof sessionStorage !== 'undefined') {
-          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
-        }
-      } catch {}
       return true;
     } catch (err) {
       console.error('Failed to save checklist:', err);
@@ -325,6 +384,14 @@ class DriverChecklistService {
       this.memoryChecklists = filtered;
       safeSetItem(STORAGE_KEY, JSON.stringify(filtered));
       safeSetItem('akk_driver_vehicle_checklists_v3', JSON.stringify(filtered));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+        void fetch(`/api/fleet-checklists/${encodeURIComponent(cleanId)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: this.getAuthHeaders()
+        }).catch(() => {});
+      }
       return true;
     } catch {
       return false;

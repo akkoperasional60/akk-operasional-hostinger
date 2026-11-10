@@ -594,6 +594,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         ? fleet.boxInnerCapacityM3
         : Number((boxM3 * (multiplier / 100)).toFixed(2));
 
+    const pickExplicitOrCanon = (primary?: string, existingVal?: string, canonVal?: string, defaultVal = '') => {
+      if (primary !== undefined) return primary;
+      if (existingVal !== undefined) return existingVal;
+      if (canonVal !== undefined) return canonVal;
+      return defaultVal;
+    };
+
     setEditingFleet({
       ...(canonical || ({} as Fleet)),
       ...(existingInStore || ({} as Fleet)),
@@ -602,16 +609,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       brand,
       engineCc: pickStr(fleet.engineCc, existingInStore?.engineCc, canonical?.engineCc) || '2477 CC',
       year: fleet.year || existingInStore?.year || canonical?.year || 2020,
-      lastMaintenance: pickStr(fleet.lastMaintenance, existingInStore?.lastMaintenance, canonical?.lastMaintenance) || '2026-12-23',
-      taxDueDate: pickStr(fleet.taxDueDate, existingInStore?.taxDueDate, canonical?.taxDueDate) || getDefaultTaxDate(),
-      stnkExpiryDate: pickStr(fleet.stnkExpiryDate, existingInStore?.stnkExpiryDate, canonical?.stnkExpiryDate) || getDefaultStnkDate(),
-      kirExpiryDate: pickStr(fleet.kirExpiryDate, existingInStore?.kirExpiryDate, canonical?.kirExpiryDate),
+      lastMaintenance: pickExplicitOrCanon(fleet.lastMaintenance, existingInStore?.lastMaintenance, canonical?.lastMaintenance, ''),
+      taxDueDate: pickExplicitOrCanon(fleet.taxDueDate, existingInStore?.taxDueDate, canonical?.taxDueDate, getDefaultTaxDate()),
+      stnkExpiryDate: pickExplicitOrCanon(fleet.stnkExpiryDate, existingInStore?.stnkExpiryDate, canonical?.stnkExpiryDate, getDefaultStnkDate()),
+      kirExpiryDate: pickExplicitOrCanon(fleet.kirExpiryDate, existingInStore?.kirExpiryDate, canonical?.kirExpiryDate, ''),
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
       boxInnerCapacityM3: innerM3,
-      kirDocUrl: pickStr(fleet.kirDocUrl, existingInStore?.kirDocUrl, canonical?.kirDocUrl),
-      kirDocFileName: pickStr(fleet.kirDocFileName, existingInStore?.kirDocFileName, canonical?.kirDocFileName)
+      kirDocUrl: pickExplicitOrCanon(fleet.kirDocUrl, existingInStore?.kirDocUrl, canonical?.kirDocUrl, ''),
+      kirDocFileName: pickExplicitOrCanon(fleet.kirDocFileName, existingInStore?.kirDocFileName, canonical?.kirDocFileName, '')
     });
     const currentCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
     setEditingAssignedCrewId(currentCrew ? currentCrew.id : (fleet.driverId || ''));
@@ -629,14 +636,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       ...(existingFleet || ({} as Fleet)),
       ...editingFleet,
       plateNumber: (editingFleet.plateNumber || existingFleet?.plateNumber || canonical?.plateNumber || '').trim().toUpperCase(),
-      initialCode: (editingFleet.initialCode || existingFleet?.initialCode || canonical?.initialCode || '').trim(),
+      initialCode: editingFleet.initialCode !== undefined ? editingFleet.initialCode.trim() : (existingFleet?.initialCode || canonical?.initialCode || ''),
       vehicleType: editingFleet.vehicleType || existingFleet?.vehicleType || canonical?.vehicleType || 'Pick Up Box',
-      brand: editingFleet.brand || existingFleet?.brand || canonical?.brand || 'Mitsubishi L300',
-      engineCc: editingFleet.engineCc || existingFleet?.engineCc || canonical?.engineCc || '2477 CC',
+      brand: editingFleet.brand !== undefined ? editingFleet.brand : (existingFleet?.brand || canonical?.brand || 'Mitsubishi L300'),
+      engineCc: editingFleet.engineCc !== undefined ? editingFleet.engineCc : (existingFleet?.engineCc || canonical?.engineCc || '2477 CC'),
       year: editingFleet.year || existingFleet?.year || canonical?.year || 2020,
-      lastMaintenance: editingFleet.lastMaintenance || existingFleet?.lastMaintenance || canonical?.lastMaintenance || '',
-      taxDueDate: editingFleet.taxDueDate || existingFleet?.taxDueDate || canonical?.taxDueDate || '',
-      stnkExpiryDate: editingFleet.stnkExpiryDate || existingFleet?.stnkExpiryDate || canonical?.stnkExpiryDate || ''
+      lastMaintenance: editingFleet.lastMaintenance !== undefined ? editingFleet.lastMaintenance : (existingFleet?.lastMaintenance ?? ''),
+      taxDueDate: editingFleet.taxDueDate !== undefined ? editingFleet.taxDueDate : (existingFleet?.taxDueDate ?? ''),
+      stnkExpiryDate: editingFleet.stnkExpiryDate !== undefined ? editingFleet.stnkExpiryDate : (existingFleet?.stnkExpiryDate ?? ''),
+      kirExpiryDate: editingFleet.kirExpiryDate !== undefined ? editingFleet.kirExpiryDate : (existingFleet?.kirExpiryDate ?? ''),
+      kirDocUrl: editingFleet.kirDocUrl !== undefined ? editingFleet.kirDocUrl : (existingFleet?.kirDocUrl ?? ''),
+      kirDocFileName: editingFleet.kirDocFileName !== undefined ? editingFleet.kirDocFileName : (existingFleet?.kirDocFileName ?? '')
     };
 
     const validation = validateFleet(mergedForSave, fleets, true, editingFleet.id);
@@ -657,13 +667,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
     setIsSavingFleet(true);
     try {
-      // 1. Update fleet record including driverId and inner box dimensions while keeping all previously saved fields
+      // 1. Update fleet record including driverId and inner box dimensions while keeping all explicitly edited/cleared fields
       const updatedFleetData: Fleet = {
         ...mergedForSave,
         boxCapacityM3: grossM3,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
-        driverId: editingAssignedCrewId || mergedForSave.driverId || undefined
+        driverId: editingAssignedCrewId ? editingAssignedCrewId : ''
       };
       logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
       branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
@@ -678,8 +688,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         }
       });
 
-      // 3. Persist to backend API asynchronously without rolling back local saved changes
-      await updateFleetInSupabase(editingFleet.id, updatedFleetData).catch(() => null);
+      // 3. Persist to Hostinger MySQL API
+      await updateFleetInSupabase(editingFleet.id, updatedFleetData);
 
       setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
       setCrews(logisticsStore.getCrews());
@@ -819,6 +829,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const nextStatus: FleetStatus =
       fleet.status === 'available' ? 'on-duty' : fleet.status === 'on-duty' ? 'maintenance' : 'available';
     logisticsStore.updateFleetStatus(fleet.id, nextStatus);
+    void updateFleetInSupabase(fleet.id, { ...fleet, status: nextStatus }).catch(() => null);
+    setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
   };
 
   // Integrasi 2 arah Status Operasional Kru dengan Manajemen User (Aktif / Nonaktif)
@@ -1469,10 +1481,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                     <span className="text-rose-400 font-semibold">
                                       Tidak bisa diatur kirim
                                     </span>
-                                  ) : liveInfo.areaName ? (
-                                    <span className="text-emerald-300/90">
-                                      Area: {liveInfo.areaName}
-                                    </span>
                                   ) : (
                                     <span>Siap jadwal esok</span>
                                   )}
@@ -1601,8 +1609,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
                             : liveInfo.effectiveStatus === 'maintenance'
                             ? 'Dalam perbaikan (Tidak bisa kirim)'
-                            : liveInfo.areaName
-                            ? `Area: ${liveInfo.areaName}`
                             : 'Siap jadwal esok'}
                         </span>
                       </div>

@@ -1780,6 +1780,12 @@ class LogisticsStore {
       return undefined;
     };
 
+    const pickExplicitStr = (primary: string | undefined | null, localVal?: string, canonVal?: string) => {
+      if (primary !== undefined && primary !== null) return String(primary).trim();
+      if (localVal !== undefined) return localVal;
+      return canonVal;
+    };
+
     const pickNum = (...vals: Array<number | undefined | null>) => {
       for (const v of vals) {
         if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
@@ -1799,25 +1805,27 @@ class LogisticsStore {
       ...f,
       id: pickStr(f.id, localRef?.id, canonical?.id) || f.id,
       plateNumber: pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber,
-      initialCode: pickStr(f.initialCode, localRef?.initialCode, canonical?.initialCode),
+      initialCode: pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode),
       vehicleType: (pickStr(f.vehicleType, localRef?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as Fleet['vehicleType'],
-      brand: pickStr(f.brand, localRef?.brand, canonical?.brand),
-      engineCc: pickStr(f.engineCc, localRef?.engineCc, canonical?.engineCc),
+      brand: pickExplicitStr(f.brand, localRef?.brand, canonical?.brand),
+      engineCc: pickExplicitStr(f.engineCc, localRef?.engineCc, canonical?.engineCc),
       year: pickNum(f.year, localRef?.year, canonical?.year) ?? 2020,
       boxCapacityM3,
-      boxDimensions: pickStr(f.boxDimensions, localRef?.boxDimensions, canonical?.boxDimensions),
+      boxDimensions: pickExplicitStr(f.boxDimensions, localRef?.boxDimensions, canonical?.boxDimensions),
       boxInnerMultiplierPercent,
       boxInnerCapacityM3,
-      lastMaintenance: pickStr(f.lastMaintenance, localRef?.lastMaintenance, canonical?.lastMaintenance),
-      taxDueDate: pickStr(f.taxDueDate, localRef?.taxDueDate, canonical?.taxDueDate),
-      stnkExpiryDate: pickStr(f.stnkExpiryDate, localRef?.stnkExpiryDate, canonical?.stnkExpiryDate),
-      kirExpiryDate: pickStr(f.kirExpiryDate, localRef?.kirExpiryDate, canonical?.kirExpiryDate),
-      kirDocUrl: pickStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
-      kirDocFileName: pickStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
-      kirDocUploadedAt: pickStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
-      driverId: pickStr(f.driverId, localRef?.driverId, canonical?.driverId),
+      lastMaintenance: pickExplicitStr(f.lastMaintenance, localRef?.lastMaintenance, canonical?.lastMaintenance),
+      taxDueDate: pickExplicitStr(f.taxDueDate, localRef?.taxDueDate, canonical?.taxDueDate),
+      stnkExpiryDate: pickExplicitStr(f.stnkExpiryDate, localRef?.stnkExpiryDate, canonical?.stnkExpiryDate),
+      kirExpiryDate: pickExplicitStr(f.kirExpiryDate, localRef?.kirExpiryDate, canonical?.kirExpiryDate),
+      kirDocUrl: pickExplicitStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
+      kirDocFileName: pickExplicitStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
+      kirDocUploadedAt: pickExplicitStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+      driverId: pickExplicitStr(f.driverId, localRef?.driverId, canonical?.driverId),
       tonnageCapacity: pickNum(f.tonnageCapacity, localRef?.tonnageCapacity, canonical?.tonnageCapacity) ?? 3.5,
-      odometerKm: pickNum(f.odometerKm, localRef?.odometerKm, canonical?.odometerKm) ?? 0
+      odometerKm: typeof f.odometerKm === 'number' && Number.isFinite(f.odometerKm) && f.odometerKm >= 0
+        ? f.odometerKm
+        : (pickNum(localRef?.odometerKm, canonical?.odometerKm) ?? 0)
     };
   }
 
@@ -2357,9 +2365,9 @@ class LogisticsStore {
     const targetSchedules = schedules || this.schedules || [];
     let addedCount = 0;
 
-    // Purge history items for schedules that no longer exist
+    // Purge history items for schedules that no longer exist (and purge legacy mock rows without scheduleId when real schedules exist)
     const activeScheduleIds = new Set(targetSchedules.map(s => s.id));
-    this.crewHistory = this.crewHistory.filter(h => !h.scheduleId || activeScheduleIds.has(h.scheduleId));
+    this.crewHistory = this.crewHistory.filter(h => Boolean(h.scheduleId && activeScheduleIds.has(h.scheduleId)));
 
     targetSchedules.forEach((sch) => {
       // Flexible crew lookup by ID or name
@@ -3148,11 +3156,21 @@ class LogisticsStore {
     this.lastHydrateAt = nowMs;
     this.hydratePromise = (async () => {
       try {
+        const savedToken =
+          (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+          '';
+        const authHeaders: Record<string, string> = {};
+        if (savedToken) {
+          authHeaders['Authorization'] = `Bearer ${savedToken}`;
+          authHeaders['x-akk-session-token'] = savedToken;
+        }
+
         const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-          fetch('/api/fleets', { credentials: 'same-origin' }),
-          fetch('/api/crews', { credentials: 'same-origin' }),
-          fetch('/api/stores', { credentials: 'same-origin' }),
-          fetch('/api/schedules/persisted', { credentials: 'same-origin' })
+          fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
         ]);
 
         const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
@@ -3162,15 +3180,42 @@ class LogisticsStore {
           scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
         ]);
 
-        if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-          const prevFleets = this.fleets || [];
-          this.fleets = sortFleetsByCanonicalOrder(
-            fleetPayload.data.map((f: Fleet) => {
-              const prev = prevFleets.find(pf => pf.id === f.id || pf.plateNumber === f.plateNumber);
-              return this.enrichFleetItem(f, prev);
-            })
+        if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
+          const deletedIdSet = new Set(
+            Array.isArray(fleetPayload?.deletedIds) ? fleetPayload.deletedIds.map((x: any) => String(x).trim()) : []
           );
-          this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+          const deletedPlateSet = new Set(
+            Array.isArray(fleetPayload?.deletedPlates)
+              ? fleetPayload.deletedPlates.map((x: any) => String(x).replace(/\s+/g, '').toUpperCase())
+              : []
+          );
+          const baseFleets = (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS).filter(bf => {
+            const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+            return !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
+          });
+
+          if (fleetPayload.data.length > 0) {
+            const mergedMap = new Map<string, Fleet>();
+            baseFleets.forEach(bf => {
+              mergedMap.set(bf.id, bf);
+            });
+            fleetPayload.data.forEach((remoteF: Fleet) => {
+              const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+              if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
+              const matchExisting = Array.from(mergedMap.values()).find(
+                ef =>
+                  ef.id === remoteF.id ||
+                  String(ef.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanRemotePlate
+              );
+              const targetKey = matchExisting ? matchExisting.id : remoteF.id;
+              mergedMap.set(targetKey, this.enrichFleetItem({ ...remoteF, id: targetKey }, matchExisting));
+            });
+            this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+          } else if (deletedIdSet.size > 0 || deletedPlateSet.size > 0) {
+            this.fleets = sortFleetsByCanonicalOrder(baseFleets);
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+          }
         }
         if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
           this.crews = crewPayload.data;
@@ -4399,14 +4444,12 @@ class LogisticsStore {
       statusLabel: 'Ready',
       dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/25',
       badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
-      areaName: resolvedArea,
+      areaName: null,
       driverName: resolvedDriver,
       helperName: resolvedHelper,
       canBeScheduled: true,
-      statusDescription: resolvedArea
-        ? `Siap jadwal esok • Area Hari Ini: ${resolvedArea}`
-        : 'Siap untuk digunakan jadwal esok harinya',
-      scheduleStatus: dateMatchedSch?.status || null
+      statusDescription: 'Siap jadwal esok',
+      scheduleStatus: null
     };
   }
 

@@ -52,8 +52,28 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   // Filter & Search States (Text Fields & Selectors)
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
   const [selectedFleetFilter, setSelectedFleetFilter] = useState<string>('all');
-  const [selectedMonth, setSelectedMonth] = useState<number>(0); // Default Januari (0)
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
+    const schedules = logisticsStore.getSchedules();
+    const validDates = schedules
+      .map(s => new Date(s.departureDate || s.returnDate || ''))
+      .filter(d => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+    if (validDates.length > 0) {
+      return validDates[0].getMonth();
+    }
+    return new Date().getMonth();
+  });
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const schedules = logisticsStore.getSchedules();
+    const validDates = schedules
+      .map(s => new Date(s.departureDate || s.returnDate || ''))
+      .filter(d => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+    if (validDates.length > 0) {
+      return validDates[0].getFullYear();
+    }
+    return new Date().getFullYear();
+  });
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [areaQuickFilter, setAreaQuickFilter] = useState<string>('');
@@ -238,9 +258,17 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     };
   }, [fleets]);
 
-  // Filtered raw history list
+  // Filtered raw history list (Hanya dari jadwal penugasan nyata agar akurat 100% sesuai Jadwal & Penugasan)
   const filteredHistory = useMemo(() => {
+    const activeSchedules = logisticsStore.getSchedules();
+    const activeScheduleIdSet = new Set(activeSchedules.map(s => s.id));
+
     return history.filter(item => {
+      if (activeScheduleIdSet.size > 0) {
+        if (!item.scheduleId || !activeScheduleIdSet.has(item.scheduleId)) {
+          return false;
+        }
+      }
       const itemDate = new Date(item.completionDate);
       const matchesCrew = selectedCrewId === 'all' || item.crewId === selectedCrewId;
       const matchesArea =
@@ -310,8 +338,15 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       }
     > = {};
 
+    const seenCrewTripKeys = new Set<string>();
+
     filteredHistory.forEach(item => {
       const key = item.crewId || item.crewName;
+      const dateSlice = (item.completionDate || '').slice(0, 10);
+      const dedupKey = `${key}__${item.scheduleId || `${dateSlice}_${item.area.toLowerCase().trim()}`}`;
+      if (seenCrewTripKeys.has(dedupKey)) return;
+      seenCrewTripKeys.add(dedupKey);
+
       const rawInit = item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
       const resolvedFl = resolveCanonicalFleet(rawInit, item.vehiclePlate);
 
@@ -366,7 +401,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     return filteredByToggle.sort((a, b) => b.totalTrips - a.totalTrips);
   }, [filteredHistory, threshold, onlyExceededFilter, resolveCanonicalFleet]);
 
-  // Integrated Real-time Fleet (Inisial Mobil) Area Stats from History Log + Katalog Armada
+  // Integrated Real-time Fleet (Inisial Mobil) Area Stats from Jadwal & Penugasan (1 Jadwal / Hari = 1 Trip Armada, tanpa terduplikasi baris Helper)
   const fleetAreaStatsList = useMemo(() => {
     const map: Record<
       string,
@@ -379,11 +414,34 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       }
     > = {};
 
+    // Deduplikasi trip armada berdasarkan scheduleId dan tanggal+armada (sehari 1 ritase per jadwal, tidak menggandakan baris Driver + Helper)
+    const seenFleetTripKeys = new Set<string>();
+
     filteredHistory.forEach(item => {
+      // Baris helper adalah pendamping pada truk yang sama dengan driver, jangan dihitung 2x sebagai trip mobil
+      if (item.id?.startsWith('cdh-sync-hlp-') || /^tugas helper/i.test(item.notes || '')) {
+        return;
+      }
+
       const rawInit =
         item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || 'DS3';
       const resolved = resolveCanonicalFleet(rawInit, item.vehiclePlate);
       const key = resolved.initialCode;
+
+      const dateSlice = (item.completionDate || '').slice(0, 10);
+      const uniqueTripKey = item.scheduleId
+        ? `${key}__sch__${item.scheduleId}`
+        : `${key}__date__${dateSlice}__${item.area.toLowerCase().trim()}`;
+
+      // Pastikan juga 1 mobil di tanggal & area yang sama tidak dihitung ganda
+      const dateAreaKey = `${key}__day__${dateSlice}__${item.area.toLowerCase().trim()}`;
+      if (seenFleetTripKeys.has(uniqueTripKey) || (dateSlice && seenFleetTripKeys.has(dateAreaKey))) {
+        return;
+      }
+      seenFleetTripKeys.add(uniqueTripKey);
+      if (dateSlice) {
+        seenFleetTripKeys.add(dateAreaKey);
+      }
 
       if (!map[key]) {
         map[key] = {

@@ -594,8 +594,10 @@ class TrackingLogAnalyticsService {
       const fFuelLogs = filteredFuelLogs.filter((fl: FuelLog) => fl.fleetId === fleet.id);
       const fCrewHist = filteredCrewHistory.filter(
         (h: CrewDeliveryHistory) =>
-          (h.vehiclePlate || h.plateNumber || '').toLowerCase() === fleet.plateNumber.toLowerCase() ||
-          (fleet.initialCode && (h.initialCode || '').toLowerCase() === fleet.initialCode.toLowerCase())
+          !h.id?.startsWith('cdh-sync-hlp-') &&
+          !/^tugas helper/i.test(h.notes || '') &&
+          ((h.vehiclePlate || h.plateNumber || '').toLowerCase() === fleet.plateNumber.toLowerCase() ||
+            (fleet.initialCode && (h.initialCode || '').toLowerCase() === fleet.initialCode.toLowerCase()))
       );
 
       const fleetStartKmTotal = fFuelLogs.reduce(
@@ -607,11 +609,11 @@ class TrackingLogAnalyticsService {
       fRoutes.forEach((r: RouteEvaluationSummary) => uniqueScheduleIds.add(r.scheduleId));
       fCrewHist.forEach((h: CrewDeliveryHistory) => {
         if (h.scheduleId) uniqueScheduleIds.add(h.scheduleId);
-        else uniqueScheduleIds.add(h.id);
+        else uniqueScheduleIds.add(`${(h.completionDate || '').slice(0, 10)}_${(h.area || '').toLowerCase()}`);
       });
 
-      const totalTrips = Math.max(fRoutes.length, uniqueScheduleIds.size);
-      const crewMenuFrequency = fCrewHist.length || fRoutes.length;
+      const totalTrips = fRoutes.length > 0 ? fRoutes.length : uniqueScheduleIds.size;
+      const crewMenuFrequency = uniqueScheduleIds.size || fRoutes.length;
       const onTimeTripsCount = fRoutes.filter((r: RouteEvaluationSummary) => r.isOnTime).length;
       const lateTripsCount = fRoutes.filter((r: RouteEvaluationSummary) => !r.isOnTime).length;
       const onTimeRatePercent =

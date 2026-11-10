@@ -2104,59 +2104,350 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
+  const toMysqlDateOnly = (val: any): string | null => {
+    if (val === null || val === undefined) return null;
+    const s = String(val).trim();
+    if (!s) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return null;
+  };
+
+  let inMemoryFleetsFallback: Record<string, any> = {};
+  let inMemoryDeletedFleets: { ids: string[]; plates: string[] } = { ids: [], plates: [] };
+  let inMemoryFleetChecklists: any[] = [];
+
+  const getDeletedFleetsState = async (): Promise<{ ids: string[]; plates: string[] }> => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = 'deleted_fleets_v1' LIMIT 1");
+      if (rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        return {
+          ids: Array.isArray(parsed?.ids) ? parsed.ids : [],
+          plates: Array.isArray(parsed?.plates) ? parsed.plates : []
+        };
+      }
+    } catch {}
+    return inMemoryDeletedFleets;
+  };
+
+  const saveDeletedFleetsState = async (state: { ids: string[]; plates: string[] }): Promise<void> => {
+    inMemoryDeletedFleets = state;
+    try {
+      await mysqlQuery(
+        "INSERT INTO app_state (state_key, state_json) VALUES ('deleted_fleets_v1', ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()",
+        [JSON.stringify(state)]
+      );
+    } catch {}
+  };
+
   // REST API for Fleets - Hostinger MySQL is the single source of truth
   app.get("/api/fleets", requireAuth, async (_req, res) => {
     try {
-      const mysqlFleets = await mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC");
-      const mapped = mysqlFleets.map(f => mergePayload(f.payload_json, {
-        id: f.id, plateNumber: f.plate_number, vehicleType: f.vehicle_type,
-        tonnageCapacity: Number(f.tonnage_capacity || 0), currentTonnage: Number(f.current_tonnage || 0),
-        status: f.status, gpsImei: f.gps_imei || '', fuelLevelPercent: Number(f.fuel_level_percent || 0),
-        odometerKm: Number(f.odometer_km || 0), year: Number(f.year || 0), lastMaintenance: f.last_maintenance || undefined
-      }));
-      return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
+      const [mysqlFleets, deletedState] = await Promise.all([
+        mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC"),
+        getDeletedFleetsState()
+      ]);
+      const deletedIdSet = new Set((deletedState.ids || []).map(x => String(x).trim()));
+      const deletedPlateSet = new Set((deletedState.plates || []).map(x => String(x).replace(/\s+/g, '').toUpperCase()));
+      const mapped = mysqlFleets
+        .map(f => {
+          const rawLastMaint = f.last_maintenance instanceof Date
+            ? f.last_maintenance.toISOString().slice(0, 10)
+            : (f.last_maintenance ? String(f.last_maintenance).slice(0, 10) : '');
+          return mergePayload(f.payload_json, {
+            id: f.id,
+            plateNumber: f.plate_number,
+            vehicleType: f.vehicle_type,
+            tonnageCapacity: Number(f.tonnage_capacity || 0),
+            currentTonnage: Number(f.current_tonnage || 0),
+            status: f.status,
+            gpsImei: f.gps_imei || '',
+            fuelLevelPercent: Number(f.fuel_level_percent ?? 100),
+            odometerKm: Number(f.odometer_km || 0),
+            year: Number(f.year || 0),
+            lastMaintenance: rawLastMaint
+          });
+        })
+        .filter(f => {
+          const cleanPlate = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+          return !deletedIdSet.has(String(f.id)) && !deletedPlateSet.has(cleanPlate);
+        });
+      return res.json({
+        success: true,
+        source: "hostinger_mysql",
+        count: mapped.length,
+        data: mapped,
+        deletedIds: deletedState.ids,
+        deletedPlates: deletedState.plates
+      });
     } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca armada dari Hostinger MySQL' });
+      const fallbackList = Object.values(inMemoryFleetsFallback);
+      return res.json({
+        success: true,
+        source: "memory_fallback",
+        count: fallbackList.length,
+        data: fallbackList,
+        deletedIds: inMemoryDeletedFleets.ids,
+        deletedPlates: inMemoryDeletedFleets.plates,
+        warning: err?.message
+      });
     }
   });
 
   app.post("/api/fleets", requireLogisticsWrite, express.json(), async (req, res) => {
     const f = req.body || {};
     if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
-    const id = f.id || `flt-${Date.now()}`;
+    const id = String(f.id || `flt-${Date.now()}`).trim();
+    const plateNumber = String(f.plateNumber).trim().toUpperCase();
+    const cleanPlate = plateNumber.replace(/\s+/g, '').toUpperCase();
+    const lastMaintDate = toMysqlDateOnly(f.lastMaintenance);
+    const fullPayload = {
+      ...f,
+      id,
+      plateNumber,
+      lastMaintenance: lastMaintDate || ''
+    };
+    inMemoryFleetsFallback[id] = fullPayload;
+
     try {
+      // Remove from deleted list if re-added
+      const deletedState = await getDeletedFleetsState();
+      if (deletedState.ids.includes(id) || deletedState.plates.includes(cleanPlate)) {
+        await saveDeletedFleetsState({
+          ids: deletedState.ids.filter(x => x !== id),
+          plates: deletedState.plates.filter(x => x !== cleanPlate)
+        });
+      }
+
       await mysqlQuery(
         `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year, last_maintenance, payload_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE vehicle_type=VALUES(vehicle_type), tonnage_capacity=VALUES(tonnage_capacity), current_tonnage=VALUES(current_tonnage), status=VALUES(status), gps_imei=VALUES(gps_imei), fuel_level_percent=VALUES(fuel_level_percent), odometer_km=VALUES(odometer_km), year=VALUES(year), last_maintenance=VALUES(last_maintenance), payload_json=VALUES(payload_json)`,
-        [id, String(f.plateNumber).trim().toUpperCase(), f.vehicleType || 'Engkel STD', f.tonnageCapacity ?? 0, f.currentTonnage ?? 0, f.status || 'available', f.gpsImei || null, f.fuelLevelPercent ?? 100, f.odometerKm ?? 0, f.year ?? new Date().getFullYear(), f.lastMaintenance || null, JSON.stringify({ ...f, id })]
+         ON DUPLICATE KEY UPDATE
+           plate_number=VALUES(plate_number),
+           vehicle_type=VALUES(vehicle_type),
+           tonnage_capacity=VALUES(tonnage_capacity),
+           current_tonnage=VALUES(current_tonnage),
+           status=VALUES(status),
+           gps_imei=VALUES(gps_imei),
+           fuel_level_percent=VALUES(fuel_level_percent),
+           odometer_km=VALUES(odometer_km),
+           year=VALUES(year),
+           last_maintenance=VALUES(last_maintenance),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          plateNumber,
+          f.vehicleType || 'Engkel STD',
+          Number(f.tonnageCapacity ?? 0) || 0,
+          Number(f.currentTonnage ?? 0) || 0,
+          f.status || 'available',
+          f.gpsImei || null,
+          Number(f.fuelLevelPercent ?? 100),
+          Number(f.odometerKm ?? 0) || 0,
+          Number(f.year ?? new Date().getFullYear()) || new Date().getFullYear(),
+          lastMaintDate,
+          JSON.stringify(fullPayload)
+        ]
       );
-      return res.json({ success: true, source: 'hostinger_mysql', data: { ...f, id } });
+      return res.json({ success: true, source: 'hostinger_mysql', data: fullPayload });
     } catch (err: any) {
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'memory_fallback', data: fullPayload, warning: err?.message });
+      }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan armada' });
     }
   });
 
   app.put("/api/fleets/:id", requireLogisticsWrite, express.json(), async (req, res) => {
-    const id = req.params.id;
+    const id = String(req.params.id || '').trim();
     const f = req.body || {};
     try {
+      let existingPayload: Record<string, any> = { ...(inMemoryFleetsFallback[id] || {}) };
+      try {
+        const existingRows = await mysqlQuery<any[]>(
+          "SELECT * FROM fleets WHERE id = ? OR UPPER(plate_number) = UPPER(?) LIMIT 1",
+          [id, String(f.plateNumber || '').trim()]
+        );
+        if (existingRows.length > 0) {
+          const row = existingRows[0];
+          const parsedJson = typeof row.payload_json === 'string'
+            ? JSON.parse(row.payload_json || '{}')
+            : (row.payload_json || {});
+          existingPayload = {
+            id: row.id,
+            plateNumber: row.plate_number,
+            vehicleType: row.vehicle_type,
+            tonnageCapacity: Number(row.tonnage_capacity || 0),
+            currentTonnage: Number(row.current_tonnage || 0),
+            status: row.status,
+            gpsImei: row.gps_imei || '',
+            fuelLevelPercent: Number(row.fuel_level_percent ?? 100),
+            odometerKm: Number(row.odometer_km || 0),
+            year: Number(row.year || new Date().getFullYear()),
+            lastMaintenance: row.last_maintenance instanceof Date
+              ? row.last_maintenance.toISOString().slice(0, 10)
+              : (row.last_maintenance ? String(row.last_maintenance).slice(0, 10) : ''),
+            ...parsedJson
+          };
+        }
+      } catch {}
+
+      const merged = {
+        ...existingPayload,
+        ...f,
+        id
+      };
+      const plateNumber = String(merged.plateNumber || existingPayload.plateNumber || id).trim().toUpperCase();
+      merged.plateNumber = plateNumber;
+
+      const hasExplicitLastMaint = Object.prototype.hasOwnProperty.call(f, 'lastMaintenance');
+      const lastMaintDate = hasExplicitLastMaint
+        ? toMysqlDateOnly(f.lastMaintenance)
+        : toMysqlDateOnly(merged.lastMaintenance);
+      merged.lastMaintenance = lastMaintDate || '';
+
+      inMemoryFleetsFallback[id] = merged;
+
       await mysqlQuery(
-        `UPDATE fleets SET plate_number=COALESCE(?, plate_number), vehicle_type=COALESCE(?, vehicle_type), tonnage_capacity=COALESCE(?, tonnage_capacity), current_tonnage=COALESCE(?, current_tonnage), status=COALESCE(?, status), gps_imei=COALESCE(?, gps_imei), fuel_level_percent=COALESCE(?, fuel_level_percent), odometer_km=COALESCE(?, odometer_km), year=COALESCE(?, year), last_maintenance=COALESCE(?, last_maintenance), payload_json=? WHERE id=?`,
-        [f.plateNumber ? String(f.plateNumber).trim().toUpperCase() : null, f.vehicleType ?? null, f.tonnageCapacity ?? null, f.currentTonnage ?? null, f.status ?? null, f.gpsImei ?? null, f.fuelLevelPercent ?? null, f.odometerKm ?? null, f.year ?? null, f.lastMaintenance ?? null, JSON.stringify({ ...f, id }), id]
+        `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year, last_maintenance, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           plate_number=VALUES(plate_number),
+           vehicle_type=VALUES(vehicle_type),
+           tonnage_capacity=VALUES(tonnage_capacity),
+           current_tonnage=VALUES(current_tonnage),
+           status=VALUES(status),
+           gps_imei=VALUES(gps_imei),
+           fuel_level_percent=VALUES(fuel_level_percent),
+           odometer_km=VALUES(odometer_km),
+           year=VALUES(year),
+           last_maintenance=VALUES(last_maintenance),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          plateNumber,
+          merged.vehicleType || 'Engkel STD',
+          Number(merged.tonnageCapacity ?? 0) || 0,
+          Number(merged.currentTonnage ?? 0) || 0,
+          merged.status || 'available',
+          merged.gpsImei || null,
+          Number(merged.fuelLevelPercent ?? 100),
+          Number(merged.odometerKm ?? 0) || 0,
+          Number(merged.year ?? new Date().getFullYear()) || new Date().getFullYear(),
+          lastMaintDate,
+          JSON.stringify(merged)
+        ]
       );
-      return res.json({ success: true, source: 'hostinger_mysql', data: { ...f, id } });
+      return res.json({ success: true, source: 'hostinger_mysql', data: merged });
     } catch (err: any) {
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'memory_fallback', data: inMemoryFleetsFallback[id] || { ...f, id }, warning: err?.message });
+      }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui armada' });
     }
   });
 
   app.delete("/api/fleets/:id", requireLogisticsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const queryPlate = String(req.query.plateNumber || '').trim();
+    delete inMemoryFleetsFallback[id];
     try {
-      const result: any = await mysqlQuery("DELETE FROM fleets WHERE id = ?", [req.params.id]);
-      return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
+      let plateToDelete = queryPlate;
+      if (!plateToDelete) {
+        const rows = await mysqlQuery<any[]>("SELECT plate_number FROM fleets WHERE id = ? LIMIT 1", [id]).catch(() => []);
+        if (rows.length > 0 && rows[0].plate_number) plateToDelete = String(rows[0].plate_number);
+      }
+      const cleanPlate = plateToDelete.replace(/\s+/g, '').toUpperCase();
+
+      const deletedState = await getDeletedFleetsState();
+      const nextIds = Array.from(new Set([...deletedState.ids, id].filter(Boolean)));
+      const nextPlates = Array.from(new Set([...deletedState.plates, cleanPlate].filter(Boolean)));
+      await saveDeletedFleetsState({ ids: nextIds, plates: nextPlates });
+
+      const result: any = await mysqlQuery(
+        "DELETE FROM fleets WHERE id = ? OR (? <> '' AND UPPER(REPLACE(plate_number, ' ', '')) = ?)",
+        [id, cleanPlate, cleanPlate]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 1) });
     } catch (err: any) {
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'memory_fallback', removed: 1, warning: err?.message });
+      }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus armada' });
+    }
+  });
+
+  // REST API for Driver Vehicle Checklists (Synced across Mobile Portal & Admin PC via Hostinger MySQL app_state)
+  const getPersistedChecklists = async (): Promise<any[]> => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = 'fleet_checklists_v1' LIMIT 1");
+      if (rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (Array.isArray(parsed)) {
+          inMemoryFleetChecklists = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+    return inMemoryFleetChecklists;
+  };
+
+  const savePersistedChecklists = async (list: any[]): Promise<void> => {
+    inMemoryFleetChecklists = list;
+    await mysqlQuery(
+      "INSERT INTO app_state (state_key, state_json) VALUES ('fleet_checklists_v1', ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()",
+      [JSON.stringify(list)]
+    );
+  };
+
+  app.get("/api/fleet-checklists", async (_req, res) => {
+    try {
+      const list = await getPersistedChecklists();
+      return res.json({ success: true, count: list.length, data: list, checklists: list });
+    } catch (err: any) {
+      return res.json({ success: true, count: inMemoryFleetChecklists.length, data: inMemoryFleetChecklists, checklists: inMemoryFleetChecklists, warning: err?.message });
+    }
+  });
+
+  app.post("/api/fleet-checklists", express.json({ limit: '15mb' }), async (req, res) => {
+    const incoming = req.body?.checklist || req.body;
+    if (!incoming || !incoming.id) {
+      return res.status(400).json({ success: false, error: 'Data checklist tidak valid' });
+    }
+    try {
+      const current = await getPersistedChecklists();
+      const syncedItem = { ...incoming, synced: true };
+      const idx = current.findIndex((c: any) => c && c.id === syncedItem.id);
+      if (idx >= 0) {
+        current[idx] = syncedItem;
+      } else {
+        current.unshift(syncedItem);
+      }
+      const trimmed = current.slice(0, 150);
+      await savePersistedChecklists(trimmed).catch(() => {
+        inMemoryFleetChecklists = trimmed;
+      });
+      return res.json({ success: true, count: trimmed.length, data: syncedItem });
+    } catch (err: any) {
+      return res.json({ success: true, data: incoming, warning: err?.message });
+    }
+  });
+
+  app.delete("/api/fleet-checklists/:id", async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    try {
+      const current = await getPersistedChecklists();
+      const filtered = current.filter((c: any) => c && c.id !== id);
+      await savePersistedChecklists(filtered).catch(() => {
+        inMemoryFleetChecklists = filtered;
+      });
+      return res.json({ success: true, count: filtered.length });
+    } catch (err: any) {
+      return res.json({ success: true, count: inMemoryFleetChecklists.length, warning: err?.message });
     }
   });
 
@@ -3522,9 +3813,11 @@ Kembalikan HANYA JSON valid:
 
   const preservedServerPhotosByCode = new Map<string, string[]>();
   const PRODUCTION_BRIDGE_ORIGIN = 'https://akkoperasional.com';
+  const isHostingerEnv = process.env.NODE_ENV === 'production' && !process.env.K_SERVICE;
 
   app.get('/api/database-barang', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    let mysqlLoaded = false;
     if (isDatabaseConfigured()) {
       try {
         const rows = await mysqlQuery<any[]>(
@@ -3534,6 +3827,7 @@ Kembalikan HANYA JSON valid:
            FROM wms_database_barang
            ORDER BY order_index ASC, no_barang ASC`
         );
+        mysqlLoaded = true;
         if (Array.isArray(rows) && rows.length > 0) {
           const mapped = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
           const deduped = deduplicateAndMergeDatabaseBarangRows(mapped);
@@ -3549,7 +3843,8 @@ Kembalikan HANYA JSON valid:
       } catch {
         console.log('[GET /api/database-barang] MySQL host unavailable, using in-memory database storage');
       }
-    } else if (memoryDatabaseBarang.length === 0) {
+    }
+    if (!mysqlLoaded && !isHostingerEnv && memoryDatabaseBarang.length === 0) {
       try {
         const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang`, {
           headers: { Accept: 'application/json' }
@@ -3577,30 +3872,52 @@ Kembalikan HANYA JSON valid:
   // Dipakai untuk verifikasi pemulihan foto lama dari IndexedDB perangkat asal.
   app.get('/api/database-barang/photos-summary', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!isDatabaseConfigured()) {
+    if (!isDatabaseConfigured() && isHostingerEnv) {
       return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi.' });
     }
-    try {
-      const rows = await mysqlQuery<any[]>(`
-        SELECT UPPER(TRIM(no_barang)) AS code,
-               CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '')
-                      OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
-                    THEN 1 ELSE 0 END AS has_photo
-        FROM wms_database_barang
-      `);
-      const codes = new Set<string>();
-      const photoCodes = new Set<string>();
-      for (const row of rows || []) {
-        const code = String(row.code || '').trim();
-        if (!code) continue;
-        codes.add(code);
-        if (Number(row.has_photo) === 1) photoCodes.add(code);
+    if (isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>(`
+          SELECT UPPER(TRIM(no_barang)) AS code,
+                 CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '')
+                        OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
+                      THEN 1 ELSE 0 END AS has_photo
+          FROM wms_database_barang
+        `);
+        const codes = new Set<string>();
+        const photoCodes = new Set<string>();
+        for (const row of rows || []) {
+          const code = String(row.code || '').trim();
+          if (!code) continue;
+          codes.add(code);
+          if (Number(row.has_photo) === 1) photoCodes.add(code);
+        }
+        return res.json({ success: true, totalSkuCount: codes.size, photoSkuCount: photoCodes.size });
+      } catch (err: any) {
+        if (isHostingerEnv) {
+          console.warn('[Database Barang Photos] Gagal membaca ringkasan MySQL:', err?.message || err);
+          return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca MySQL' });
+        }
       }
-      return res.json({ success: true, totalSkuCount: codes.size, photoSkuCount: photoCodes.size });
-    } catch (err: any) {
-      console.error('[Database Barang Photos] Gagal membaca ringkasan MySQL:', err);
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca MySQL' });
     }
+    const memCodes = new Set<string>();
+    const memPhotoCodes = new Set<string>();
+    for (const item of memoryDatabaseBarang) {
+      const code = String(item?.noBarang || '').trim().toUpperCase();
+      if (!code) continue;
+      memCodes.add(code);
+      const hasPhoto =
+        (Array.isArray(item?.dokumentasiUrls) && item.dokumentasiUrls.length > 0) ||
+        (typeof item?.dokumentasiUrl === 'string' && item.dokumentasiUrl.trim() !== '' && !item.dokumentasiUrl.startsWith('data:image/svg+xml'));
+      if (hasPhoto) memPhotoCodes.add(code);
+    }
+    for (const [code, urls] of preservedServerPhotosByCode.entries()) {
+      if (code && Array.isArray(urls) && urls.length > 0) {
+        memCodes.add(code);
+        memPhotoCodes.add(code);
+      }
+    }
+    return res.json({ success: true, totalSkuCount: memCodes.size, photoSkuCount: memPhotoCodes.size });
   });
 
   app.get('/api/database-barang/photos-sync', async (_req, res) => {
@@ -3608,10 +3925,12 @@ Kembalikan HANYA JSON valid:
     try {
       let totalCount = memoryDatabaseBarang.length;
       let dbPhotoItems: any[] = [];
+      let mysqlLoaded = false;
 
       if (isDatabaseConfigured()) {
         try {
           const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS cnt FROM wms_database_barang`);
+          mysqlLoaded = true;
           if (Array.isArray(countRows) && countRows.length > 0) {
             totalCount = Math.max(totalCount, Number(countRows[0]?.cnt) || 0);
           }
@@ -3629,9 +3948,11 @@ Kembalikan HANYA JSON valid:
             dbPhotoItems = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
           }
         } catch {
-          // Gunakan memoryDatabaseBarang jika MySQL sedang sibuk
+          // Gunakan memoryDatabaseBarang / bridge jika MySQL lokal tidak aktif di preview
         }
-      } else {
+      }
+
+      if (!mysqlLoaded && !isHostingerEnv) {
         try {
           const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
             headers: { Accept: 'application/json' }
@@ -3681,7 +4002,7 @@ Kembalikan HANYA JSON valid:
   // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role
   app.post('/api/database-barang/photos-sync', requireAuth, async (req: any, res: any) => {
     try {
-      if (!isDatabaseConfigured()) {
+      if (!isDatabaseConfigured() && isHostingerEnv) {
         return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; foto tidak disimpan di server.' });
       }
       // Tabel disiapkan saat server startup. Hindari CREATE TABLE untuk setiap foto yang dikirim.
@@ -3696,6 +4017,7 @@ Kembalikan HANYA JSON valid:
       });
 
       let updatedCount = 0;
+      let mysqlAvailable = isDatabaseConfigured();
       for (const rawItem of incomingPhotoItems) {
         const code = String(rawItem?.noBarang || '').trim().toUpperCase();
         if (!code) continue;
@@ -3717,7 +4039,7 @@ Kembalikan HANYA JSON valid:
         const mergedUrls = Array.from(new Set([...existingUrls, ...prevSaved, ...incomingUrls]));
 
         let canonicalId = String(existingMem?.id || rawItem?.id || `dbb-${code}`);
-        if (isDatabaseConfigured()) {
+        if (mysqlAvailable) {
           try {
             const dbRows = await mysqlQuery<any[]>(
               `SELECT id, order_index, dokumentasi_url, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC LIMIT 1`,
@@ -3745,8 +4067,10 @@ Kembalikan HANYA JSON valid:
               }
             }
           } catch (dbErr: any) {
-            // Jangan berasumsi SKU belum ada jika pembacaan MySQL sedang gagal.
-            throw new Error(`Gagal membaca foto barang ${code} dari MySQL: ${dbErr?.message || 'Database tidak tersedia'}`);
+            if (isHostingerEnv) {
+              throw new Error(`Gagal membaca foto barang ${code} dari MySQL: ${dbErr?.message || 'Database tidak tersedia'}`);
+            }
+            mysqlAvailable = false;
           }
         }
 
@@ -3778,7 +4102,7 @@ Kembalikan HANYA JSON valid:
           updatedAt: new Date().toISOString().split('T')[0]
         };
 
-        if (isDatabaseConfigured()) {
+        if (mysqlAvailable) {
           try {
             await mysqlQuery(
               `INSERT INTO wms_database_barang (
@@ -3819,8 +4143,11 @@ Kembalikan HANYA JSON valid:
               ]
             );
           } catch (dbErr: any) {
-            console.error('[Database Barang Photos] Gagal simpan MySQL:', dbErr);
-            throw new Error(`Gagal simpan foto barang ${code} ke MySQL: ${dbErr?.message || 'Kesalahan database'}`);
+            if (isHostingerEnv) {
+              console.warn('[Database Barang Photos] Gagal simpan MySQL:', dbErr?.message || dbErr);
+              throw new Error(`Gagal simpan foto barang ${code} ke MySQL: ${dbErr?.message || 'Kesalahan database'}`);
+            }
+            mysqlAvailable = false;
           }
         }
         // Jangan tandai sukses sebelum insert/update MySQL benar-benar selesai.
@@ -3832,6 +4159,16 @@ Kembalikan HANYA JSON valid:
           memoryDatabaseBarang.push(rec);
         }
         updatedCount++;
+      }
+
+      if (!mysqlAvailable && !isHostingerEnv && updatedCount > 0) {
+        try {
+          await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ photoItems: incomingPhotoItems })
+          });
+        } catch {}
       }
 
       return res.json({
@@ -4057,8 +4394,11 @@ Kembalikan HANYA JSON valid:
             await mysqlQuery(sql, params);
           }
         } catch (dbErr: any) {
-          console.error('[Database Barang Sync] MySQL gagal:', dbErr);
-          return res.status(503).json({ success: false, error: `Gagal sinkronisasi ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
+          if (isHostingerEnv) {
+            console.warn('[Database Barang Sync] MySQL gagal:', dbErr?.message || dbErr);
+            return res.status(503).json({ success: false, error: `Gagal sinkronisasi ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
+          }
+          console.log('[Database Barang Sync] MySQL lokal belum aktif di preview; data disimpan di memori server.');
         }
       }
 
@@ -4068,7 +4408,7 @@ Kembalikan HANYA JSON valid:
         totalCount: memoryDatabaseBarang.length
       });
     } catch (err: any) {
-      console.error('[POST /api/database-barang/sync] Error:', err);
+      console.warn('[POST /api/database-barang/sync] Error:', err?.message || err);
       return res.status(500).json({
         success: false,
         error: err?.message || 'Gagal menyimpan sinkronisasi Database Barang ke server'
@@ -4078,7 +4418,7 @@ Kembalikan HANYA JSON valid:
 
   app.post('/api/database-barang/item', async (req: any, res: any) => {
     try {
-      if (!isDatabaseConfigured()) {
+      if (!isDatabaseConfigured() && isHostingerEnv) {
         return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; data tidak dapat disimpan permanen.' });
       }
       // Izinkan semua akun operasional (termasuk Admin Penjualan / Sales & Gudang) menambahkan foto dokumentasi barang ke server
@@ -4173,6 +4513,7 @@ Kembalikan HANYA JSON valid:
         memoryDatabaseBarang.push(rec);
       }
 
+      let savedToMysql = false;
       if (isDatabaseConfigured()) {
         try {
           await mysqlQuery(
@@ -4227,11 +4568,15 @@ Kembalikan HANYA JSON valid:
               rec.updatedAt
             ]
           );
+          savedToMysql = true;
         } catch (dbErr: any) {
-          console.error('[Database Barang Item] MySQL gagal:', dbErr);
-          return res.status(503).json({ success: false, error: `Gagal menyimpan barang/foto ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
+          if (isHostingerEnv) {
+            console.warn('[Database Barang Item] MySQL gagal:', dbErr?.message || dbErr);
+            return res.status(503).json({ success: false, error: `Gagal menyimpan barang/foto ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
+          }
         }
-      } else {
+      }
+      if (!savedToMysql && !isHostingerEnv) {
         try {
           await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/item`, {
             method: 'POST',
@@ -4243,7 +4588,7 @@ Kembalikan HANYA JSON valid:
 
       return res.json({ success: true, item: rec });
     } catch (err: any) {
-      console.error('[POST /api/database-barang/item] Error:', err);
+      console.warn('[POST /api/database-barang/item] Error:', err?.message || err);
       return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan item barang' });
     }
   });

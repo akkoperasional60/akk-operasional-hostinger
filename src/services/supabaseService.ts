@@ -16,7 +16,25 @@ export function getSupabaseClient(): any | null {
 }
 
 async function apiJson(url: string, init?: RequestInit): Promise<any> {
-  const response = await fetch(url, init);
+  let token = '';
+  try {
+    token =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('akk_session_token_v1') : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token_v1') : null) ||
+      '';
+  } catch {}
+  const headers: Record<string, string> = {
+    ...(init?.headers ? (init.headers as Record<string, string>) : {})
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    headers['x-akk-session-token'] = token;
+  }
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    ...init,
+    headers
+  });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
   return data;
@@ -93,6 +111,13 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     return undefined;
   };
 
+  const explicitStrOrFallback = (primary: any, secondary: any, fb?: string, canon?: string): string | undefined => {
+    if (primary !== undefined && primary !== null) return String(primary).trim();
+    if (secondary !== undefined && secondary !== null) return String(secondary).trim();
+    if (fb !== undefined) return fb;
+    return canon;
+  };
+
   const existingInStore = logisticsStore
     .getFleets()
     .find(
@@ -122,21 +147,26 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
       (boxCap && mult ? Number((boxCap * (mult / 100)).toFixed(2)) : undefined)
   );
 
+  let rawLastMaint = explicitStrOrFallback(row.lastMaintenance, row.last_maintenance, effFallback?.lastMaintenance, canonical?.lastMaintenance);
+  if (rawLastMaint && rawLastMaint.includes('T')) {
+    rawLastMaint = rawLastMaint.slice(0, 10);
+  }
+
   return {
     ...(canonical || ({} as Fleet)),
     ...(effFallback || ({} as Fleet)),
     id: nonEmptyStr(row.id, effFallback?.id, canonical?.id) || `flt-${Date.now()}`,
     plateNumber: nonEmptyStr(row.plateNumber, row.plate_number, effFallback?.plateNumber, canonical?.plateNumber) || '',
     vehicleType: (nonEmptyStr(row.vehicleType, row.vehicle_type, effFallback?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as VehicleType,
-    initialCode: nonEmptyStr(row.initialCode, row.initial_code, effFallback?.initialCode, canonical?.initialCode),
-    brand: nonEmptyStr(row.brand, row.brand_name, effFallback?.brand, canonical?.brand),
-    engineCc: nonEmptyStr(row.engineCc, row.engine_cc, effFallback?.engineCc, canonical?.engineCc),
+    initialCode: explicitStrOrFallback(row.initialCode, row.initial_code, effFallback?.initialCode, canonical?.initialCode),
+    brand: explicitStrOrFallback(row.brand, row.brand_name, effFallback?.brand, canonical?.brand),
+    engineCc: explicitStrOrFallback(row.engineCc, row.engine_cc, effFallback?.engineCc, canonical?.engineCc),
     boxCapacityM3: boxCap,
-    boxDimensions: nonEmptyStr(row.boxDimensions, row.box_dimensions, effFallback?.boxDimensions, canonical?.boxDimensions),
+    boxDimensions: explicitStrOrFallback(row.boxDimensions, row.box_dimensions, effFallback?.boxDimensions, canonical?.boxDimensions),
     boxInnerMultiplierPercent: mult,
     boxInnerCapacityM3: innerCap,
-    boxInnerDimensions: nonEmptyStr(row.boxInnerDimensions, row.box_inner_dimensions, effFallback?.boxInnerDimensions, canonical?.boxInnerDimensions),
-    driverId: nonEmptyStr(row.driverId, row.driver_id, effFallback?.driverId, canonical?.driverId),
+    boxInnerDimensions: explicitStrOrFallback(row.boxInnerDimensions, row.box_inner_dimensions, effFallback?.boxInnerDimensions, canonical?.boxInnerDimensions),
+    driverId: explicitStrOrFallback(row.driverId, row.driver_id, effFallback?.driverId, canonical?.driverId),
     tonnageCapacity: numberOrFallback(row.tonnageCapacity ?? row.tonnage_capacity, effFallback?.tonnageCapacity ?? canonical?.tonnageCapacity) ?? 0,
     currentTonnage: Number(row.currentTonnage ?? row.current_tonnage ?? effFallback?.currentTonnage ?? canonical?.currentTonnage ?? 0),
     status: (nonEmptyStr(row.status, effFallback?.status, canonical?.status) || 'available') as FleetStatus,
@@ -144,13 +174,13 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     fuelLevelPercent: Number(row.fuelLevelPercent ?? row.fuel_level_percent ?? effFallback?.fuelLevelPercent ?? canonical?.fuelLevelPercent ?? 100),
     odometerKm: numberOrFallback(row.odometerKm ?? row.odometer_km, effFallback?.odometerKm ?? canonical?.odometerKm) ?? 0,
     year: numberOrFallback(row.year, effFallback?.year ?? canonical?.year) ?? new Date().getFullYear(),
-    lastMaintenance: nonEmptyStr(row.lastMaintenance, row.last_maintenance, effFallback?.lastMaintenance, canonical?.lastMaintenance),
-    kirDocUrl: nonEmptyStr(row.kirDocUrl, row.kir_doc_url, effFallback?.kirDocUrl, canonical?.kirDocUrl),
-    kirDocFileName: nonEmptyStr(row.kirDocFileName, row.kir_doc_file_name, effFallback?.kirDocFileName, canonical?.kirDocFileName),
-    kirDocUploadedAt: nonEmptyStr(row.kirDocUploadedAt, row.kir_doc_uploaded_at, effFallback?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
-    taxDueDate: nonEmptyStr(row.taxDueDate, row.tax_due_date, effFallback?.taxDueDate, canonical?.taxDueDate),
-    stnkExpiryDate: nonEmptyStr(row.stnkExpiryDate, row.stnk_expiry_date, effFallback?.stnkExpiryDate, canonical?.stnkExpiryDate),
-    kirExpiryDate: nonEmptyStr(row.kirExpiryDate, row.kir_expiry_date, effFallback?.kirExpiryDate, canonical?.kirExpiryDate)
+    lastMaintenance: rawLastMaint,
+    kirDocUrl: explicitStrOrFallback(row.kirDocUrl, row.kir_doc_url, effFallback?.kirDocUrl, canonical?.kirDocUrl),
+    kirDocFileName: explicitStrOrFallback(row.kirDocFileName, row.kir_doc_file_name, effFallback?.kirDocFileName, canonical?.kirDocFileName),
+    kirDocUploadedAt: explicitStrOrFallback(row.kirDocUploadedAt, row.kir_doc_uploaded_at, effFallback?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+    taxDueDate: explicitStrOrFallback(row.taxDueDate, row.tax_due_date, effFallback?.taxDueDate, canonical?.taxDueDate),
+    stnkExpiryDate: explicitStrOrFallback(row.stnkExpiryDate, row.stnk_expiry_date, effFallback?.stnkExpiryDate, canonical?.stnkExpiryDate),
+    kirExpiryDate: explicitStrOrFallback(row.kirExpiryDate, row.kir_expiry_date, effFallback?.kirExpiryDate, canonical?.kirExpiryDate)
   } as Fleet;
 }
 
@@ -201,9 +231,14 @@ export async function updateFleetInSupabase(id: string, updates: Partial<Fleet>)
   } catch (err: any) { return { success: false, error: err?.message }; }
 }
 
-export async function deleteFleetInSupabase(id: string, _plateNumber?: string): Promise<{ success: boolean; error?: string }> {
-  try { await apiJson(`/api/fleets/${encodeURIComponent(id)}`, { method: 'DELETE' }); return { success: true }; }
-  catch (err: any) { return { success: false, error: err?.message }; }
+export async function deleteFleetInSupabase(id: string, plateNumber?: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const query = plateNumber ? `?plateNumber=${encodeURIComponent(plateNumber)}` : '';
+    await apiJson(`/api/fleets/${encodeURIComponent(id)}${query}`, { method: 'DELETE' });
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
 }
 
 export async function fetchCrewsFromSupabase(): Promise<{ success: boolean; data: Crew[]; error?: string }> {

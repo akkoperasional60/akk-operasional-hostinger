@@ -1306,22 +1306,31 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         .map(u => (u.fullName || '').trim().toLowerCase())
         .filter(Boolean)
     );
-    const activeDriverUsers = allUsers.filter(
-      u => u.role === 'driver' && u.status === 'approved'
-    );
+    const activeDriverAndHelperUsers = allUsers
+      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+      .sort((a, b) => {
+        if (a.role === 'driver' && b.role !== 'driver') return -1;
+        if (a.role !== 'driver' && b.role === 'driver') return 1;
+        return (a.fullName || '').localeCompare(b.fullName || '');
+      });
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
-    activeDriverUsers.forEach(u => {
+    activeDriverAndHelperUsers.forEach(u => {
       const clean = (u.fullName || '').trim();
       if (clean && !names.has(clean.toLowerCase())) {
         names.add(clean.toLowerCase());
         result.push({ id: u.id, name: clean, hasAccount: true });
       }
     });
-    allCrews.forEach(c => {
+    const sortedCrews = [...allCrews].sort((a, b) => {
+      const aHelper = String(a.role || '').toLowerCase().includes('helper') || String(a.role || '').toLowerCase().includes('kernet');
+      const bHelper = String(b.role || '').toLowerCase().includes('helper') || String(b.role || '').toLowerCase().includes('kernet');
+      if (!aHelper && bHelper) return -1;
+      if (aHelper && !bHelper) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sortedCrews.forEach(c => {
       if (!c || c.status === 'off') return;
-      const roleStr = String(c.role || '').toLowerCase();
-      if (roleStr.includes('helper') || roleStr.includes('kernet')) return;
       const clean = (c.name || '').trim();
       const lower = clean.toLowerCase();
       if (clean && !names.has(lower) && !inactiveNames.has(lower)) {
@@ -1563,6 +1572,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     selectedTripIndex: number;
     replacePosition: 'driver' | 'helper' | 'helper2';
     absentReason: string;
+    isRouteDropdownOpen?: boolean;
+    isCrewDropdownOpen?: boolean;
+    routeSearchQuery?: string;
   } | null>(null);
 
   // Helper to check if two crew names refer to the same person (handles e.g. "Saiful Rizal" vs "Saifur Rizal" or "Budiono" vs "Budi")
@@ -4609,8 +4621,186 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 return true;
               });
 
+              const standbyDataTop = computeDayCrewStandbyBreakdown(activeDayObj);
+
               return (
-                <div className="space-y-2">
+                <div className="space-y-3">
+                  {/* TABEL DI ATAS RINCIAN PENGIRIMAN: KRU YANG FREE / STAND BY DI GUDANG */}
+                  <div className="pb-2 border-b border-slate-200 dark:border-slate-800 space-y-1.5">
+                    <div className="bg-amber-50/80 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
+                          <Warehouse className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[9px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-wider leading-tight">
+                              KRU FREE / STAND BY GUDANG DC (PENGGANTIAN KRU HARI H)
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold bg-emerald-600 text-white">
+                              Sinkron Portal • Driver &amp; Helper
+                            </span>
+                          </div>
+                          <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-tight">
+                            {activeDayObj.dayName}, {activeDayObj.dateString}{' '}
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                              • Cadangan Siap Gantikan Driver / Helper Area Lain ({standbyDataTop.freeStandbyCrews.length} Kru Stand By)
+                            </span>
+                          </h4>
+                        </div>
+                      </div>
+                      {canEditSchedules && standbyDataTop.freeStandbyCrews.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstCrew = standbyDataTop.freeStandbyCrews[0];
+                            setReplaceAbsentModal({
+                              isOpen: true,
+                              standbyCrewName: firstCrew.name,
+                              standbyCrewRole: firstCrew.role,
+                              dayNumber: activeDayObj.dayNumber,
+                              dateString: activeDayObj.dateString,
+                              selectedTripIndex: 0,
+                              replacePosition: firstCrew.role === 'Driver' ? 'driver' : 'helper',
+                              absentReason: '',
+                              isRouteDropdownOpen: false,
+                              isCrewDropdownOpen: false,
+                              routeSearchQuery: ''
+                            });
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-black text-[11px] transition cursor-pointer inline-flex items-center gap-1.5 shadow-2xs shrink-0"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Pilih &amp; Gantikan Kru Kiriman</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                      <table className="w-full text-xs text-left border-collapse min-w-[680px]">
+                        <thead>
+                          <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
+                            <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
+                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-44">KRU FREE / STAND BY</th>
+                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">POSISI</th>
+                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">PENUGASAN STAND BY / AREA PENGGANTI</th>
+                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
+                            <th className="py-1.5 px-2 text-center w-28">AKSI HARI H</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
+                          {standbyDataTop.freeStandbyCrews.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="py-3 px-4 text-center bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
+                                Seluruh kru aktif telah terjadwal kirim pada tanggal ini.
+                              </td>
+                            </tr>
+                          ) : (
+                            standbyDataTop.freeStandbyCrews.map((crew, idx) => {
+                              const initials = getDriverInitials(crew.name);
+                              return (
+                                <tr
+                                  key={`free-crew-top-${crew.id}-${idx}`}
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition bg-white dark:bg-slate-900"
+                                >
+                                  <td className="py-1.5 px-2 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800 text-[11px]">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 flex items-center justify-center font-black text-[9px] shrink-0">
+                                        {initials}
+                                      </div>
+                                      <span className="font-extrabold text-slate-900 dark:text-white text-xs truncate">
+                                        {crew.name}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                      crew.role === 'Driver'
+                                        ? 'bg-blue-50 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                        : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                    }`}>
+                                      {crew.role}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                    <span className={`text-[11px] font-bold ${
+                                      crew.isReplacing
+                                        ? 'text-emerald-700 dark:text-emerald-300'
+                                        : 'text-slate-700 dark:text-slate-300 font-semibold'
+                                    }`}>
+                                      {crew.warehouseDutyNote}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                    {crew.isReplacing ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                        <span>Menggantikan</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        <span>Stand By</span>
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-center">
+                                    {canEditSchedules ? (
+                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setReplaceAbsentModal({
+                                              isOpen: true,
+                                              standbyCrewName: crew.name,
+                                              standbyCrewRole: crew.role,
+                                              dayNumber: activeDayObj.dayNumber,
+                                              dateString: activeDayObj.dateString,
+                                              selectedTripIndex: 0,
+                                              replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
+                                              absentReason: '',
+                                              isRouteDropdownOpen: false,
+                                              isCrewDropdownOpen: false,
+                                              routeSearchQuery: ''
+                                            })
+                                          }
+                                          className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                          title="Gantikan Driver atau Helper kiriman area lain yang berhalangan hadir pada Hari H"
+                                        >
+                                          <RefreshCw className="w-2.5 h-2.5" />
+                                          <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
+                                        </button>
+                                        {crew.isReplacing && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
+                                            className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                            title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                                          >
+                                            <XCircle className="w-2.5 h-2.5 text-rose-500" />
+                                            <span>Tidak Jadi Ganti</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
+                                        <Eye className="w-2.5 h-2.5" />
+                                        <span>Hanya Lihat</span>
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   {/* Selected Date Title Bar - Compact */}
                   <div className="bg-slate-100 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -4987,280 +5177,488 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     </table>
                   </div>
 
-                  {/* TABEL BARU DI BAWAH RINCIAN PENGIRIMAN: KRU YANG FREE / STAND BY DI GUDANG */}
-                  {(() => {
-                    const standbyData = computeDayCrewStandbyBreakdown(activeDayObj);
+                  {/* MODAL PENGGANTIAN KRU (UI/UX DROPDOWN MODERN: TAMPILKAN SEMUA KRU PENGGANTI & SEMUA POSISI DRIVER / HELPER 1 / HELPER 2) */}
+                  {replaceAbsentModal && replaceAbsentModal.isOpen && (() => {
+                    const selectedTrip = activeDayObj.pengiriman[replaceAbsentModal.selectedTripIndex] || activeDayObj.pengiriman[0];
+                    const selectedAreaName = selectedTrip ? standardizeAreaName(selectedTrip.area) : '-';
+                    const selectedTargetCrewName = selectedTrip
+                      ? replaceAbsentModal.replacePosition === 'helper'
+                        ? (selectedTrip.helper && selectedTrip.helper !== '-' ? selectedTrip.helper : 'Belum Ada Helper 1')
+                        : replaceAbsentModal.replacePosition === 'helper2'
+                        ? (selectedTrip.helper2 && selectedTrip.helper2 !== '-' ? selectedTrip.helper2 : 'Belum Ada Helper 2')
+                        : (selectedTrip.driver || '-')
+                      : '-';
+                    const posLabelActive =
+                      replaceAbsentModal.replacePosition === 'helper'
+                        ? 'Helper 1'
+                        : replaceAbsentModal.replacePosition === 'helper2'
+                        ? 'Helper 2'
+                        : 'Driver Utama';
+
+                    const routeQuery = (replaceAbsentModal.routeSearchQuery || '').trim().toLowerCase();
+                    const filteredRoutesForModal = activeDayObj.pengiriman
+                      .map((trip, idx) => ({ trip, idx }))
+                      .filter(({ trip }) => {
+                        if (!routeQuery) return true;
+                        const areaStr = standardizeAreaName(trip.area).toLowerCase();
+                        const armStr = (trip.armada || '').toLowerCase();
+                        const drvStr = (trip.driver || '').toLowerCase();
+                        const hlp1Str = (trip.helper || '').toLowerCase();
+                        const hlp2Str = (trip.helper2 || '').toLowerCase();
+                        return (
+                          areaStr.includes(routeQuery) ||
+                          armStr.includes(routeQuery) ||
+                          drvStr.includes(routeQuery) ||
+                          hlp1Str.includes(routeQuery) ||
+                          hlp2Str.includes(routeQuery)
+                        );
+                      });
 
                     return (
-                      <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
-                        {/* Compact Header Bar: Kru Free / Stand By di Gudang (Tanpa Keterangan Total, Kirim, Free) */}
-                        <div className="bg-slate-100 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
-                              <Warehouse className="w-3.5 h-3.5" />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-wider leading-tight">
-                                  KRU FREE / STAND BY GUDANG DC
-                                </span>
-                                <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold bg-emerald-600 text-white">
-                                  Sinkron Portal
-                                </span>
+                      <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-4">
+                          {/* Header Modal */}
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+                                <Warehouse className="w-4 h-4" />
                               </div>
-                              <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-tight">
-                                {activeDayObj.dayName}, {activeDayObj.dateString}{' '}
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                                  • Cadangan Kru Berhalangan (Hari H)
-                                </span>
-                              </h4>
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                    PENGGANTIAN KRU STAND BY • HARI H
+                                  </span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
+                                    replaceAbsentModal.standbyCrewRole === 'Driver'
+                                      ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                                      : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                  }`}>
+                                    Role Asli: {replaceAbsentModal.standbyCrewRole}
+                                  </span>
+                                </div>
+                                <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                                  Kru Pengganti: {replaceAbsentModal.standbyCrewName}
+                                </h3>
+                              </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setReplaceAbsentModal(null)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
                           </div>
-                        </div>
 
-                        {/* Tabel Rincian Kru Free / Stand By - Compact & Rapat (Tanpa SIM) */}
-                        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                          <table className="w-full text-xs text-left border-collapse min-w-[680px]">
-                            <thead>
-                              <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
-                                <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
-                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-44">KRU FREE</th>
-                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">POSISI</th>
-                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">PENUGASAN STAND BY</th>
-                                <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
-                                <th className="py-1.5 px-2 text-center w-28">AKSI HARI H</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
-                              {standbyData.freeStandbyCrews.length === 0 ? (
-                                <tr>
-                                  <td colSpan={6} className="py-3 px-4 text-center bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
-                                    Seluruh kru aktif telah terjadwal kirim pada tanggal ini.
-                                  </td>
-                                </tr>
-                              ) : (
-                                standbyData.freeStandbyCrews.map((crew, idx) => {
-                                  const initials = getDriverInitials(crew.name);
-                                  return (
-                                    <tr
-                                      key={`free-crew-${crew.id}-${idx}`}
-                                      className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition bg-white dark:bg-slate-900"
-                                    >
-                                      <td className="py-1.5 px-2 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800 text-[11px]">
-                                        {idx + 1}
-                                      </td>
+                          <div className="space-y-3.5 text-xs">
+                            {/* 1. Pilih Kru Stand By Pengganti (Menampilkan SEMUA Kru Stand By: Driver & Helper) */}
+                            {standbyDataTop.freeStandbyCrews.length > 1 && (
+                              <div className="relative">
+                                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                                  <span>Kru Stand By yang Ditugaskan Menggantikan</span>
+                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                    {standbyDataTop.freeStandbyCrews.length} Kru Stand By (Driver &amp; Helper)
+                                  </span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReplaceAbsentModal(prev =>
+                                      prev ? { ...prev, isCrewDropdownOpen: !prev.isCrewDropdownOpen, isRouteDropdownOpen: false } : null
+                                    )
+                                  }
+                                  className="w-full flex items-center justify-between gap-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-left hover:border-amber-500 transition cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] flex items-center justify-center shrink-0">
+                                      {getDriverInitials(replaceAbsentModal.standbyCrewName)}
+                                    </div>
+                                    <span className="font-extrabold text-slate-900 dark:text-white truncate">
+                                      {replaceAbsentModal.standbyCrewName}
+                                    </span>
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                      replaceAbsentModal.standbyCrewRole === 'Driver'
+                                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25'
+                                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                                    }`}>
+                                      {replaceAbsentModal.standbyCrewRole}
+                                    </span>
+                                  </div>
+                                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${replaceAbsentModal.isCrewDropdownOpen ? 'rotate-180 text-amber-500' : ''}`} />
+                                </button>
 
-                                      {/* Nama Kru Free */}
-                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                        <div className="flex items-center gap-1.5">
-                                          <div className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 flex items-center justify-center font-black text-[9px] shrink-0">
-                                            {initials}
+                                {replaceAbsentModal.isCrewDropdownOpen && (
+                                  <div className="absolute left-0 right-0 z-50 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto p-1.5 space-y-1">
+                                    {standbyDataTop.freeStandbyCrews.map(stb => {
+                                      const isSelectedCrew = isSameCrewPerson(stb.name, replaceAbsentModal.standbyCrewName);
+                                      return (
+                                        <button
+                                          key={`modal-stb-${stb.id}`}
+                                          type="button"
+                                          onClick={() =>
+                                            setReplaceAbsentModal(prev =>
+                                              prev
+                                                ? {
+                                                    ...prev,
+                                                    standbyCrewName: stb.name,
+                                                    standbyCrewRole: stb.role,
+                                                    isCrewDropdownOpen: false
+                                                  }
+                                                : null
+                                            )
+                                          }
+                                          className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
+                                            isSelectedCrew
+                                              ? 'bg-amber-500 text-slate-950 font-black'
+                                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center font-black text-[10px] shrink-0">
+                                              {getDriverInitials(stb.name)}
+                                            </span>
+                                            <span className="truncate font-bold">{stb.name}</span>
                                           </div>
-                                          <span className="font-extrabold text-slate-900 dark:text-white text-xs truncate">
-                                            {crew.name}
+                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
+                                            isSelectedCrew
+                                              ? 'bg-slate-950/15 text-slate-950 border-slate-950/20'
+                                              : stb.role === 'Driver'
+                                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                              : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                          }`}>
+                                            Role: {stb.role}
                                           </span>
-                                        </div>
-                                      </td>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
 
-                                      {/* Posisi (Tanpa SIM) */}
-                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                          crew.role === 'Driver'
-                                            ? 'bg-blue-50 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                                            : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                                        }`}>
-                                          {crew.role}
+                            {/* 2. Posisi Kru yang Digantikan (Bisa Gantikan Driver Utama, Helper 1, maupun Helper 2 Lintas Role) */}
+                            <div>
+                              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                                <span>Posisi Kru yang Digantikan</span>
+                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                  Bebas Lintas Role (Driver ⇄ Helper)
+                                </span>
+                              </label>
+                              <div className="grid grid-cols-3 gap-2">
+                                {([
+                                  { id: 'driver' as const, label: 'Driver Utama', roleTag: 'Supir' },
+                                  { id: 'helper' as const, label: 'Helper 1', roleTag: 'Kernet 1' },
+                                  { id: 'helper2' as const, label: 'Helper 2', roleTag: 'Kernet 2' }
+                                ]).map(posOpt => {
+                                  const isActivePos = replaceAbsentModal.replacePosition === posOpt.id;
+                                  const previewName = selectedTrip
+                                    ? posOpt.id === 'helper'
+                                      ? (selectedTrip.helper && selectedTrip.helper !== '-' ? selectedTrip.helper : 'Kosong')
+                                      : posOpt.id === 'helper2'
+                                      ? (selectedTrip.helper2 && selectedTrip.helper2 !== '-' ? selectedTrip.helper2 : 'Kosong')
+                                      : (selectedTrip.driver || '-')
+                                    : '-';
+                                  return (
+                                    <button
+                                      key={posOpt.id}
+                                      type="button"
+                                      onClick={() =>
+                                        setReplaceAbsentModal(prev =>
+                                          prev ? { ...prev, replacePosition: posOpt.id } : null
+                                        )
+                                      }
+                                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                                        isActivePos
+                                          ? 'bg-amber-500/15 border-amber-500 ring-2 ring-amber-500/20 text-slate-900 dark:text-white'
+                                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className={`text-[11px] font-black ${isActivePos ? 'text-amber-700 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                                          {posOpt.label}
                                         </span>
-                                      </td>
+                                        {isActivePos && <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                                      </div>
+                                      <div className="text-[10px] font-bold truncate mt-1 text-slate-700 dark:text-slate-300">
+                                        {previewName}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
 
-                                      {/* Penugasan Stand By */}
-                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                        <span className={`text-[11px] font-bold ${
-                                          crew.isReplacing
-                                            ? 'text-emerald-700 dark:text-emerald-300'
-                                            : 'text-slate-700 dark:text-slate-300 font-semibold'
-                                        }`}>
-                                          {crew.warehouseDutyNote}
+                            {/* 3. Custom Modern Interactive Dropdown: Pilih Rute Area Kirim & Kru yang Digantikan (Menampilkan Driver, Helper 1 & Helper 2) */}
+                            <div className="relative">
+                              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                                <span>Pilih Rute Area Kirim &amp; Kru yang Digantikan</span>
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                  {activeDayObj.pengiriman.length} Rute Terjadwal
+                                </span>
+                              </label>
+
+                              {/* Custom Dropdown Trigger Card */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setReplaceAbsentModal(prev =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isRouteDropdownOpen: !prev.isRouteDropdownOpen,
+                                          isCrewDropdownOpen: false
+                                        }
+                                      : null
+                                  )
+                                }
+                                className={`w-full rounded-xl border bg-slate-50 dark:bg-slate-950 p-3 text-left transition cursor-pointer ${
+                                  replaceAbsentModal.isRouteDropdownOpen
+                                    ? 'border-amber-500 ring-2 ring-amber-500/20'
+                                    : 'border-slate-300 dark:border-slate-700 hover:border-amber-500/60'
+                                }`}
+                              >
+                                {selectedTrip ? (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">
+                                          #{replaceAbsentModal.selectedTripIndex + 1}
                                         </span>
-                                      </td>
+                                        <span className="font-black text-slate-900 dark:text-white text-xs sm:text-sm truncate">
+                                          {selectedAreaName}
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/25 font-mono font-bold text-[10px] shrink-0">
+                                          {selectedTrip.armada}
+                                        </span>
+                                      </div>
+                                      <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${replaceAbsentModal.isRouteDropdownOpen ? 'rotate-180 text-amber-500' : ''}`} />
+                                    </div>
 
-                                      {/* Status */}
-                                      <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                        {crew.isReplacing ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                            <span>Menggantikan</span>
-                                          </span>
-                                        ) : (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                            <span>Stand By</span>
-                                          </span>
-                                        )}
-                                      </td>
+                                    {/* Semua kru di rute ini ditampilkan jelas (Driver, Helper 1, Helper 2) */}
+                                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/80 dark:border-slate-800/80">
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                        replaceAbsentModal.replacePosition === 'driver'
+                                          ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                      }`}>
+                                        <span>Driver: {selectedTrip.driver || '-'}</span>
+                                      </span>
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                        replaceAbsentModal.replacePosition === 'helper'
+                                          ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                      }`}>
+                                        <span>Helper 1: {selectedTrip.helper && selectedTrip.helper !== '-' ? selectedTrip.helper : 'Kosong'}</span>
+                                      </span>
+                                      {(selectedTrip.helper2 && selectedTrip.helper2 !== '-' || replaceAbsentModal.replacePosition === 'helper2') && (
+                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                          replaceAbsentModal.replacePosition === 'helper2'
+                                            ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                        }`}>
+                                          <span>Helper 2: {selectedTrip.helper2 && selectedTrip.helper2 !== '-' ? selectedTrip.helper2 : 'Kosong'}</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between text-slate-400">
+                                    <span>Tidak ada pengiriman terjadwal pada tanggal ini</span>
+                                    <ChevronDown className="w-4 h-4" />
+                                  </div>
+                                )}
+                              </button>
 
-                                      {/* Aksi Penggantian Hari H */}
-                                      <td className="py-1.5 px-2 text-center">
-                                        {canEditSchedules ? (
-                                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                setReplaceAbsentModal({
-                                                  isOpen: true,
-                                                  standbyCrewName: crew.name,
-                                                  standbyCrewRole: crew.role,
-                                                  dayNumber: activeDayObj.dayNumber,
-                                                  dateString: activeDayObj.dateString,
-                                                  selectedTripIndex: 0,
-                                                  replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
-                                                  absentReason: ''
-                                                })
-                                              }
-                                              className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
-                                              title="Gantikan kru kiriman area lain yang berhalangan hadir pada Hari H"
-                                            >
-                                              <RefreshCw className="w-2.5 h-2.5" />
-                                              <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
-                                            </button>
-                                            {crew.isReplacing && (
+                              {/* Custom Dropdown Panel: Daftar Rute + Klik Langsung Driver / Helper 1 / Helper 2 */}
+                              {replaceAbsentModal.isRouteDropdownOpen && (
+                                <div className="mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                                  <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+                                    <div className="relative">
+                                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                      <input
+                                        type="text"
+                                        value={replaceAbsentModal.routeSearchQuery || ''}
+                                        onChange={(e) =>
+                                          setReplaceAbsentModal(prev =>
+                                            prev ? { ...prev, routeSearchQuery: e.target.value } : null
+                                          )
+                                        }
+                                        placeholder="Cari area kirim, nama driver, atau nama helper..."
+                                        autoFocus
+                                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="max-h-60 overflow-y-auto p-1.5 space-y-1.5">
+                                    {filteredRoutesForModal.length === 0 ? (
+                                      <div className="py-5 text-center text-[11px] text-slate-400">
+                                        Tidak ada rute atau kru yang cocok dengan pencarian.
+                                      </div>
+                                    ) : (
+                                      filteredRoutesForModal.map(({ trip, idx }) => {
+                                        const isSelectedRoute = replaceAbsentModal.selectedTripIndex === idx;
+                                        const stdArea = standardizeAreaName(trip.area);
+                                        return (
+                                          <div
+                                            key={`rep-card-${idx}`}
+                                            onClick={() =>
+                                              setReplaceAbsentModal(prev =>
+                                                prev
+                                                  ? {
+                                                      ...prev,
+                                                      selectedTripIndex: idx,
+                                                      isRouteDropdownOpen: false
+                                                    }
+                                                  : null
+                                              )
+                                            }
+                                            className={`p-2.5 rounded-xl border transition cursor-pointer ${
+                                              isSelectedRoute
+                                                ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500/30'
+                                                : 'bg-slate-50/70 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 hover:border-amber-500/50 hover:bg-slate-100/70 dark:hover:bg-slate-800/50'
+                                            }`}
+                                          >
+                                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                                              <div className="flex items-center gap-1.5 min-w-0">
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black shrink-0 ${
+                                                  isSelectedRoute ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                                }`}>
+                                                  #{idx + 1}
+                                                </span>
+                                                <span className="font-black text-slate-900 dark:text-white text-xs truncate">
+                                                  {stdArea}
+                                                </span>
+                                              </div>
+                                              <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 font-mono font-bold text-[10px] shrink-0">
+                                                {trip.armada}
+                                              </span>
+                                            </div>
+
+                                            {/* Klik langsung pada Driver, Helper 1, atau Helper 2 untuk memilih rute + posisi sekaligus */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                               <button
                                                 type="button"
-                                                onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
-                                                className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
-                                                title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setReplaceAbsentModal(prev =>
+                                                    prev
+                                                      ? {
+                                                          ...prev,
+                                                          selectedTripIndex: idx,
+                                                          replacePosition: 'driver',
+                                                          isRouteDropdownOpen: false
+                                                        }
+                                                      : null
+                                                  );
+                                                }}
+                                                className={`px-2 py-1.5 rounded-lg border text-left text-[11px] flex items-center justify-between gap-1 transition cursor-pointer ${
+                                                  isSelectedRoute && replaceAbsentModal.replacePosition === 'driver'
+                                                    ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                                                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-amber-500'
+                                                }`}
                                               >
-                                                <XCircle className="w-2.5 h-2.5 text-rose-500" />
-                                                <span>Tidak Jadi Ganti</span>
+                                                <span className="truncate">
+                                                  <strong className="opacity-75">Driver:</strong> {trip.driver || '-'}
+                                                </span>
+                                                {isSelectedRoute && replaceAbsentModal.replacePosition === 'driver' && (
+                                                  <Check className="w-3 h-3 shrink-0" />
+                                                )}
                                               </button>
-                                            )}
+
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setReplaceAbsentModal(prev =>
+                                                    prev
+                                                      ? {
+                                                          ...prev,
+                                                          selectedTripIndex: idx,
+                                                          replacePosition: 'helper',
+                                                          isRouteDropdownOpen: false
+                                                        }
+                                                      : null
+                                                  );
+                                                }}
+                                                className={`px-2 py-1.5 rounded-lg border text-left text-[11px] flex items-center justify-between gap-1 transition cursor-pointer ${
+                                                  isSelectedRoute && replaceAbsentModal.replacePosition === 'helper'
+                                                    ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
+                                                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-amber-500'
+                                                }`}
+                                              >
+                                                <span className="truncate">
+                                                  <strong className="opacity-75">Helper 1:</strong> {trip.helper && trip.helper !== '-' ? trip.helper : 'Kosong'}
+                                                </span>
+                                                {isSelectedRoute && replaceAbsentModal.replacePosition === 'helper' && (
+                                                  <Check className="w-3 h-3 shrink-0" />
+                                                )}
+                                              </button>
+                                            </div>
                                           </div>
-                                        ) : (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
-                                            <Eye className="w-2.5 h-2.5" />
-                                            <span>Hanya Lihat</span>
-                                          </span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </div>
                               )}
-                            </tbody>
-                          </table>
+                            </div>
+
+                            {/* Ringkasan Konfirmasi Penggantian */}
+                            {selectedTrip && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                                    RINGKASAN PENUGASAN PENGGANTI
+                                  </span>
+                                  <p className="text-xs font-bold text-slate-900 dark:text-white mt-0.5">
+                                    <strong>{replaceAbsentModal.standbyCrewName}</strong> menggantikan{' '}
+                                    <strong className="text-amber-600 dark:text-amber-400">
+                                      {posLabelActive} ({selectedTargetCrewName})
+                                    </strong>{' '}
+                                    di rute <strong>{selectedAreaName}</strong> ({selectedTrip.armada})
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                            {activeDayObj.pengiriman.some(p => p.backupCrewName && isSameCrewPerson(p.backupCrewName, replaceAbsentModal.standbyCrewName)) ? (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelReplaceAbsentCrew(replaceAbsentModal.standbyCrewName)}
+                                className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                                title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                              >
+                                <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                                <span>Tidak Jadi Ganti</span>
+                              </button>
+                            ) : (
+                              <div />
+                            )}
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setReplaceAbsentModal(null)}
+                                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleConfirmReplaceAbsentCrew}
+                                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition cursor-pointer shadow-sm flex items-center gap-1.5"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Konfirmasi Gantikan</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
                   })()}
-
-                  {/* MODAL PENGGANTIAN KRU (SIMPLE: HANYA POSISI KRU YANG DIGANTIKAN & PILIH RUTE AREA KIRIM) */}
-                  {replaceAbsentModal && replaceAbsentModal.isOpen && (
-                    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-4 shadow-2xl space-y-3.5">
-                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shrink-0">
-                              <Warehouse className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
-                                JADWAL FREE • STAND BY GUDANG
-                              </span>
-                              <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
-                                Kru Free: {replaceAbsentModal.standbyCrewName}
-                              </h3>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setReplaceAbsentModal(null)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-
-                        <div className="space-y-3 text-xs">
-                          <div>
-                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                              Posisi Kru yang Digantikan
-                            </label>
-                            <select
-                              value={replaceAbsentModal.replacePosition}
-                              onChange={(e) =>
-                                setReplaceAbsentModal(prev =>
-                                  prev ? { ...prev, replacePosition: e.target.value as 'driver' | 'helper' | 'helper2' } : null
-                                )
-                              }
-                              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
-                            >
-                              <option value="driver">Driver Utama</option>
-                              <option value="helper">Helper 1</option>
-                              <option value="helper2">Helper 2</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                              Pilih Rute Area Kirim
-                            </label>
-                            <select
-                              value={replaceAbsentModal.selectedTripIndex}
-                              onChange={(e) =>
-                                setReplaceAbsentModal(prev =>
-                                  prev ? { ...prev, selectedTripIndex: Number(e.target.value) } : null
-                                )
-                              }
-                              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
-                            >
-                              {activeDayObj.pengiriman.length === 0 ? (
-                                <option value={0}>Tidak ada pengiriman terjadwal pada tanggal ini</option>
-                              ) : (
-                                activeDayObj.pengiriman.map((trip, idx) => (
-                                  <option key={`rep-trip-${idx}`} value={idx}>
-                                    #{idx + 1} {standardizeAreaName(trip.area)} ({trip.armada}) — Driver: {trip.driver}
-                                  </option>
-                                ))
-                              )}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                          {activeDayObj.pengiriman.some(p => p.backupCrewName && isSameCrewPerson(p.backupCrewName, replaceAbsentModal.standbyCrewName)) ? (
-                            <button
-                              type="button"
-                              onClick={() => handleCancelReplaceAbsentCrew(replaceAbsentModal.standbyCrewName)}
-                              className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                              title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
-                            >
-                              <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                              <span>Tidak Jadi Ganti</span>
-                            </button>
-                          ) : (
-                            <div />
-                          )}
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setReplaceAbsentModal(null)}
-                              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                            >
-                              Batal
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleConfirmReplaceAbsentCrew}
-                              className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition cursor-pointer shadow-sm flex items-center gap-1.5"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Konfirmasi Gantikan</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })()}

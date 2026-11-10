@@ -13,6 +13,7 @@ import {
   Package,
   Box,
   ChevronRight,
+  ChevronDown,
   ExternalLink,
   ShieldCheck,
   RefreshCw,
@@ -334,12 +335,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     targetScheduleId: string;
     replacePosition: 'driver' | 'helper' | 'helper2';
     absentReason: string;
+    isRouteDropdownOpen: boolean;
+    isCrewDropdownOpen: boolean;
+    routeSearchQuery: string;
   }>({
     isOpen: false,
     standbyCrewName: '',
     targetScheduleId: '',
     replacePosition: 'driver',
-    absentReason: 'Berhalangan Hadir pada Hari H'
+    absentReason: 'Berhalangan Hadir pada Hari H',
+    isRouteDropdownOpen: false,
+    isCrewDropdownOpen: false,
+    routeSearchQuery: ''
   });
   const [standbySyncTick, setStandbySyncTick] = useState<number>(0);
   const checkinSectionRef = useRef<HTMLDivElement>(null);
@@ -704,10 +711,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [selectedDriverId, portalDisplayName, currentUser?.id]);
 
-  // Load checklists when selected driver or deliveries change
+  // Load & sync checklists from server when selected driver or deliveries change
   useEffect(() => {
-    const list = driverChecklistService.getChecklists();
-    setChecklists(list);
+    setChecklists(driverChecklistService.getChecklists());
+    void driverChecklistService.syncFromServer().then(setChecklists);
+    const onChecklistUpdated = () => {
+      setChecklists(driverChecklistService.getChecklists());
+    };
+    window.addEventListener('driver-checklist-updated', onChecklistUpdated);
+    return () => {
+      window.removeEventListener('driver-checklist-updated', onChecklistUpdated);
+    };
   }, [selectedDriverId, deliveries.length]);
 
   // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin (Hanya tampil pada hari tersebut, otomatis hilang keesokan harinya)
@@ -1206,11 +1220,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       primarySharedSchedule &&
         ((sharedFlow?.checklistCompleted && isSameDayFlow) ||
           (sharedFlow?.preparedForGateOut && isSameDayFlow) ||
-          (sharedFlow?.gateOutConfirmed && isSameDayFlow) ||
-          ['in_transit', 'picked_up'].includes(primarySharedSchedule.status))
+          (sharedFlow?.gateOutConfirmed && isSameDayFlow))
     );
 
-    const isDone = Boolean(matchingPreTrip || isChecklistCompletedAfterCheckin || isPreparedOrInTransit);
+    // Hanya dianggap selesai jika benar-benar sudah ada data Checklist Pra-Jalan yang tersimpan hari ini
+    const isDone = Boolean(matchingPreTrip || (isChecklistCompletedAfterCheckin && matchingPreTrip));
     const completedBy =
       matchingPreTrip?.driverName ||
       sharedFlow?.checklistCompletedBy ||
@@ -2446,7 +2460,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       areaName: string;
       driverName: string;
       helperName: string;
+      helper2Name: string;
       armadaName: string;
+      depDate?: string;
     }> = [];
 
     const seenAreaKeys = new Set<string>();
@@ -2456,18 +2472,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
       const drv = sch.crew?.name || '-';
       const hlp = sch.crewHelper?.name || '-';
+      const hlp2 = sch.crewHelper2?.name || '-';
       const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
       const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       seenAreaKeys.add(area.toUpperCase().trim());
       list.push({
         value: sch.id,
         scheduleId: sch.id,
-        label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv}${hlp !== '-' ? ` • Helper: ${hlp}` : ''}`,
+        label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv} • Helper 1: ${hlp}${hlp2 !== '-' ? ` • Helper 2: ${hlp2}` : ''}`,
         group: 'hari_ini',
         areaName: area,
         driverName: drv,
         helperName: hlp,
-        armadaName: arm
+        helper2Name: hlp2,
+        armadaName: arm,
+        depDate: (sch.departureDate || '').slice(0, 10)
       });
     });
 
@@ -2476,6 +2495,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = snap.area || 'Area Kirim';
       const drv = snap.driver || '-';
       const hlp = snap.helper || '-';
+      const hlp2 = snap.helper2 || '-';
       const rawArm = snap.armada || '-';
       const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       if (!list.some(item => item.areaName.toLowerCase() === area.toLowerCase())) {
@@ -2483,11 +2503,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         list.push({
           value: snap.id || `snap-trip-${sIdx}`,
           scheduleId: snap.id,
-          label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv}${hlp !== '-' ? ` • Helper: ${hlp}` : ''}`,
+          label: `📍 #${sIdx + 1} ${area} (${arm}) — Driver: ${drv} • Helper 1: ${hlp}${hlp2 !== '-' ? ` • Helper 2: ${hlp2}` : ''}`,
           group: 'hari_ini',
           areaName: area,
           driverName: drv,
           helperName: hlp,
+          helper2Name: hlp2,
           armadaName: arm
         });
       }
@@ -2500,6 +2521,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
       const drv = sch.crew?.name || '-';
       const hlp = sch.crewHelper?.name || '-';
+      const hlp2 = sch.crewHelper2?.name || '-';
       const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
       const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
       const depDate = (sch.departureDate || '').slice(0, 10);
@@ -2507,12 +2529,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       list.push({
         value: sch.id,
         scheduleId: sch.id,
-        label: `📅 ${area} (${depDate || 'Jadwal'}) (${arm}) — Driver: ${drv}`,
+        label: `📅 ${area} (${depDate || 'Jadwal'}) (${arm}) — Driver: ${drv} • Helper 1: ${hlp}${hlp2 !== '-' ? ` • Helper 2: ${hlp2}` : ''}`,
         group: 'terjadwal',
         areaName: area,
         driverName: drv,
         helperName: hlp,
-        armadaName: arm
+        helper2Name: hlp2,
+        armadaName: arm,
+        depDate
       });
     });
 
@@ -2528,7 +2552,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         group: 'area_resmi',
         areaName: areaName,
         driverName: 'Driver Reguler',
-        helperName: '-',
+        helperName: 'Helper 1 Reguler',
+        helper2Name: '-',
         armadaName: defaultArm
       });
     });
@@ -4262,12 +4287,43 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     <span>Check-In</span>
                   </button>
                 ) : (
-                  <div
-                    className="px-2.5 py-1.5 rounded-xl neu-pressed border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1 select-none"
-                    title="Check-Out otomatis berlaku saat Anda mengklik Tiba di Gudang"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                    <span>Aktif ({activeShift.checkinTimeFormatted}) • Auto Check-Out</span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    <div
+                      className="px-2.5 py-1.5 rounded-xl neu-pressed border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1 select-none"
+                      title="Check-Out otomatis berlaku saat Anda mengklik Tiba di Gudang"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                      <span>Aktif ({activeShift.checkinTimeFormatted})</span>
+                    </div>
+                    {effectiveJobdeskRole !== 'helper' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetFleet = assignedFleet || activeDeliveries[0]?.fleet || deliveries[0]?.fleet || fleets[0];
+                          const fresh =
+                            latestChecklist && latestChecklist.date === getLocalDateStr()
+                              ? latestChecklist
+                              : driverChecklistService.createNewChecklistTemplate(
+                                  selectedDriverId,
+                                  currentDriver?.name || portalDisplayName || 'Driver',
+                                  targetFleet?.id || 'fl-01',
+                                  targetFleet?.plateNumber || 'P 8848 U',
+                                  targetFleet?.vehicleType || 'Engkel Long Box'
+                                );
+                          setActiveChecklistToEdit(fresh);
+                          setChecklistInspectionType('pre_trip');
+                          setIsChecklistModalOpen(true);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-xs transition cursor-pointer ${
+                          hasChecklistToday
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
+                            : 'bg-amber-500 text-slate-950 hover:bg-amber-400 animate-pulse'
+                        }`}
+                      >
+                        <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>{hasChecklistToday ? 'Checklist ✓' : 'Isi Checklist Armada'}</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -4453,6 +4509,600 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             )}
 
+            {/* PANEL JADWAL FREE • STAND BY GUDANG DC (Ditempatkan DI ATAS Tampilan Jadwal agar Mudah Diakses) */}
+            {(standbyPortalInfo.isCurrentPortalUserFreeStandby ||
+              Boolean(standbyPortalInfo.activeBackupSchedule) ||
+              canManageAllPortalSchedules ||
+              standbyPortalInfo.freeStandbyCrews.length > 0) && (
+              <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/70 rounded-2xl p-4 shadow-md space-y-3.5">
+                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
+                          JADWAL HARI INI: STAND BY GUDANG DC
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-500/30">
+                          {standbyPortalInfo.activeBackupSchedule
+                            ? '● Aktif Menggantikan Kru'
+                            : '● Stand By di Gudang'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                        {standbyPortalInfo.activeDateLabel} • Kru Cadangan Siap Menggantikan Driver / Helper Kiriman Area Lain
+                      </p>
+                    </div>
+                  </div>
+
+                  {standbyPortalInfo.activeBackupSchedule && standbyReplaceForm.isOpen && (
+                    <button
+                      type="button"
+                      onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Ringkasan Status Saat Kru Sedang Menggantikan Orang Lain */}
+                {standbyPortalInfo.activeBackupSchedule && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
+                          STATUS PENGGANTIAN KRU HARI H
+                        </span>
+                        <p className="text-xs font-extrabold text-slate-900 dark:text-white mt-0.5">
+                          Menggantikan{' '}
+                          <span className="text-amber-600 dark:text-amber-400">
+                            {standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper'
+                              ? 'Helper 1'
+                              : standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper2'
+                              ? 'Helper 2'
+                              : 'Driver Utama'}{' '}
+                            ({(() => {
+                              const sch = standbyPortalInfo.activeBackupSchedule;
+                              const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
+                              const bTarget = sch.backupTargetName;
+                              const bCrew = sch.backupCrewName;
+                              if (bTarget && (!bCrew || !matchSamePerson(bTarget, bCrew))) {
+                                return bTarget;
+                              }
+                              if (area.includes('muncar')) {
+                                return 'Saipul Bahri';
+                              }
+                              return sch.crew?.name && (!bCrew || !matchSamePerson(sch.crew.name, bCrew))
+                                ? sch.crew.name
+                                : 'Kru Utama';
+                            })()})
+                          </span>
+                        </p>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                          Rute Area Kirim:{' '}
+                          <strong className="text-emerald-600 dark:text-emerald-400">
+                            {standbyPortalInfo.activeBackupSchedule.areaName ||
+                              standbyPortalInfo.activeBackupSchedule.store?.storeName ||
+                              '-'}
+                          </strong>{' '}
+                          • Armada:{' '}
+                          <strong>
+                            {(() => {
+                              const sch = standbyPortalInfo.activeBackupSchedule;
+                              const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
+                              if (area.includes('muncar')) {
+                                return 'N4 / NS2';
+                              }
+                              const code = sch.fleet?.initialCode;
+                              if (code && code !== 'N1 / NP1') {
+                                return code;
+                              }
+                              const matchedTrip = standbyPortalInfo.scheduledTrips.find(t =>
+                                (t.area || '').toLowerCase().includes(area)
+                              );
+                              if (matchedTrip?.armada && matchedTrip.armada !== '-') {
+                                return matchedTrip.armada.includes('NS2') ? 'N4 / NS2' : matchedTrip.armada;
+                              }
+                              return sch.fleet?.initialCode || sch.fleet?.plateNumber || 'N4 / NS2';
+                            })()}
+                          </strong>
+                        </p>
+                      </div>
+                      {!standbyReplaceForm.isOpen && (
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: true }))}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black transition cursor-pointer"
+                          >
+                            Ubah Rute Pengganti
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelStandbyReplaceFromPortal}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                            title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
+                          >
+                            <XCircle className="w-3 h-3 text-rose-500" />
+                            <span>Tidak Jadi Ganti</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Form Pilih Kru Stand By, Posisi & Rute Area Kirim (UI/UX Dropdown Interaktif) */}
+                {(!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
+                  <div className="space-y-3 text-xs">
+                    {/* 1. Pilih Personel Kru Stand By Pengganti (Menampilkan SEMUA Kru Stand By: Driver maupun Helper) */}
+                    {!standbyPortalInfo.isCurrentPortalUserFreeStandby &&
+                      standbyPortalInfo.freeStandbyCrews.length > 0 && (
+                        <div className="relative">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
+                            Pilih Personel Kru Stand By Pengganti (Driver &amp; Helper)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setStandbyReplaceForm(prev => ({
+                                ...prev,
+                                isCrewDropdownOpen: !prev.isCrewDropdownOpen,
+                                isRouteDropdownOpen: false
+                              }))
+                            }
+                            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 hover:border-amber-500 text-left transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-black text-[11px] shrink-0">
+                                {(
+                                  standbyReplaceForm.standbyCrewName ||
+                                  standbyPortalInfo.freeStandbyCrews[0]?.name ||
+                                  'K'
+                                )
+                                  .charAt(0)
+                                  .toUpperCase()}
+                              </span>
+                              <span className="font-black text-slate-900 dark:text-white truncate">
+                                {standbyReplaceForm.standbyCrewName ||
+                                  standbyPortalInfo.freeStandbyCrews[0]?.name ||
+                                  portalDisplayName}
+                              </span>
+                              {(() => {
+                                const cObj = standbyPortalInfo.freeStandbyCrews.find(
+                                  c =>
+                                    c.name ===
+                                    (standbyReplaceForm.standbyCrewName ||
+                                      standbyPortalInfo.freeStandbyCrews[0]?.name)
+                                );
+                                return cObj ? (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                                      cObj.role === 'Driver'
+                                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                                        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                    }`}
+                                  >
+                                    {cObj.role} Stand By
+                                  </span>
+                                ) : null;
+                              })()}
+                            </div>
+                            <ChevronDown
+                              className={`w-4 h-4 text-slate-400 transition-transform ${
+                                standbyReplaceForm.isCrewDropdownOpen ? 'rotate-180 text-amber-500' : ''
+                              }`}
+                            />
+                          </button>
+
+                          {standbyReplaceForm.isCrewDropdownOpen && (
+                            <div className="mt-1.5 rounded-xl bg-white dark:bg-slate-950 border-2 border-amber-500/50 shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-30 relative">
+                              {standbyPortalInfo.freeStandbyCrews.map(fc => {
+                                const activeCrewName =
+                                  standbyReplaceForm.standbyCrewName ||
+                                  standbyPortalInfo.freeStandbyCrews[0]?.name;
+                                const isSel = fc.name === activeCrewName;
+                                return (
+                                  <button
+                                    key={fc.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setStandbyReplaceForm(prev => ({
+                                        ...prev,
+                                        standbyCrewName: fc.name,
+                                        isCrewDropdownOpen: false
+                                      }))
+                                    }
+                                    className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                      isSel
+                                        ? 'bg-amber-500/15 text-slate-900 dark:text-white font-black'
+                                        : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                          fc.role === 'Driver'
+                                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                                            : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                        }`}
+                                      >
+                                        {fc.role}
+                                      </span>
+                                      <span className="truncate text-xs font-bold">{fc.name}</span>
+                                    </div>
+                                    {isSel && <Check className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* 2. Pilih Posisi Kru yang Digantikan (Driver Stand By bebas menggantikan Helper maupun Driver) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">
+                          Posisi Kru yang Digantikan
+                        </label>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+                          Bebas Lintas Role (Driver ↔ Helper)
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { id: 'driver' as const, label: 'Driver Utama', badge: 'Sopir' },
+                          { id: 'helper' as const, label: 'Helper 1', badge: 'Kernet 1' },
+                          { id: 'helper2' as const, label: 'Helper 2', badge: 'Kernet 2' }
+                        ].map(pos => {
+                          const isSelected = standbyReplaceForm.replacePosition === pos.id;
+                          return (
+                            <button
+                              key={pos.id}
+                              type="button"
+                              onClick={() =>
+                                setStandbyReplaceForm(prev => ({
+                                  ...prev,
+                                  replacePosition: pos.id
+                                }))
+                              }
+                              className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-300 font-black shadow-2xs'
+                                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-400'
+                              }`}
+                            >
+                              <div className="text-[11px] font-black leading-tight">{pos.label}</div>
+                              <div className="text-[9px] opacity-75 mt-0.5">{pos.badge}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 3. Custom Interactive Dropdown Pilih Rute Area Kirim & Semua Kru (Driver, Helper 1, Helper 2) */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
+                        Pilih Rute Area Kirim &amp; Kru yang Digantikan
+                      </label>
+                      {(() => {
+                        const currentTargetVal =
+                          standbyReplaceForm.targetScheduleId || standbyAvailableRouteOptions[0]?.value || '';
+                        const selectedOpt =
+                          standbyAvailableRouteOptions.find(o => o.value === currentTargetVal) ||
+                          standbyAvailableRouteOptions[0];
+                        const targetPersonOnSelected =
+                          standbyReplaceForm.replacePosition === 'driver'
+                            ? selectedOpt?.driverName || '-'
+                            : standbyReplaceForm.replacePosition === 'helper'
+                            ? selectedOpt?.helperName || '-'
+                            : selectedOpt?.helper2Name || '-';
+                        const filteredOptions = standbyAvailableRouteOptions.filter(opt => {
+                          const q = (standbyReplaceForm.routeSearchQuery || '').trim().toLowerCase();
+                          if (!q) return true;
+                          return (
+                            opt.areaName.toLowerCase().includes(q) ||
+                            opt.driverName.toLowerCase().includes(q) ||
+                            opt.helperName.toLowerCase().includes(q) ||
+                            opt.helper2Name.toLowerCase().includes(q) ||
+                            opt.armadaName.toLowerCase().includes(q)
+                          );
+                        });
+
+                        return (
+                          <div className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setStandbyReplaceForm(prev => ({
+                                  ...prev,
+                                  isRouteDropdownOpen: !prev.isRouteDropdownOpen,
+                                  isCrewDropdownOpen: false
+                                }))
+                              }
+                              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border-2 border-slate-300 dark:border-slate-700 hover:border-amber-500 text-left transition cursor-pointer flex items-center justify-between gap-2 shadow-2xs"
+                            >
+                              {selectedOpt ? (
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black text-[10px] border border-amber-500/30">
+                                      {selectedOpt.armadaName}
+                                    </span>
+                                    <span className="font-black text-slate-900 dark:text-white text-xs truncate">
+                                      {selectedOpt.areaName}
+                                    </span>
+                                    {selectedOpt.depDate && (
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                        ({selectedOpt.depDate})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded ${
+                                        standbyReplaceForm.replacePosition === 'driver'
+                                          ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300 font-black border border-blue-500/40'
+                                          : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                      }`}
+                                    >
+                                      Driver: {selectedOpt.driverName}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded ${
+                                        standbyReplaceForm.replacePosition === 'helper'
+                                          ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black border border-emerald-500/40'
+                                          : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                      }`}
+                                    >
+                                      Helper 1: {selectedOpt.helperName}
+                                    </span>
+                                    {selectedOpt.helper2Name && selectedOpt.helper2Name !== '-' && (
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded ${
+                                          standbyReplaceForm.replacePosition === 'helper2'
+                                            ? 'bg-purple-500/20 text-purple-700 dark:text-purple-300 font-black border border-purple-500/40'
+                                            : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                        }`}
+                                      >
+                                        Helper 2: {selectedOpt.helper2Name}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                    Target Digantikan:{' '}
+                                    <span className="underline">
+                                      {standbyReplaceForm.replacePosition === 'driver'
+                                        ? `Driver Utama (${targetPersonOnSelected})`
+                                        : standbyReplaceForm.replacePosition === 'helper'
+                                        ? `Helper 1 (${targetPersonOnSelected})`
+                                        : `Helper 2 (${targetPersonOnSelected})`}
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">Pilih rute area kirim...</span>
+                              )}
+                              <ChevronDown
+                                className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${
+                                  standbyReplaceForm.isRouteDropdownOpen ? 'rotate-180 text-amber-500' : ''
+                                }`}
+                              />
+                            </button>
+
+                            {standbyReplaceForm.isRouteDropdownOpen && (
+                              <div className="rounded-2xl bg-white dark:bg-slate-950 border-2 border-amber-500/60 shadow-2xl overflow-hidden z-30 relative">
+                                {/* Pencarian Rute / Nama Driver / Nama Helper */}
+                                <div className="p-2.5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 text-amber-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <input
+                                      type="text"
+                                      value={standbyReplaceForm.routeSearchQuery}
+                                      onChange={e =>
+                                        setStandbyReplaceForm(prev => ({
+                                          ...prev,
+                                          routeSearchQuery: e.target.value
+                                        }))
+                                      }
+                                      placeholder="Cari rute area, nama driver, atau nama helper..."
+                                      className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                                    />
+                                    {standbyReplaceForm.routeSearchQuery && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setStandbyReplaceForm(prev => ({ ...prev, routeSearchQuery: '' }))
+                                        }
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1.5">
+                                    💡 Klik langsung badge <strong>Driver</strong>, <strong>Helper 1</strong>, atau{' '}
+                                    <strong>Helper 2</strong> pada rute untuk memilih rute sekaligus posisinya:
+                                  </p>
+                                </div>
+
+                                <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80">
+                                  {filteredOptions.length === 0 ? (
+                                    <div className="p-4 text-center text-slate-400 text-xs">
+                                      Tidak ada rute atau nama kru yang cocok.
+                                    </div>
+                                  ) : (
+                                    filteredOptions.map(opt => {
+                                      const isRouteSelected = opt.value === currentTargetVal;
+                                      return (
+                                        <div
+                                          key={opt.value}
+                                          className={`p-2.5 transition ${
+                                            isRouteSelected
+                                              ? 'bg-amber-500/10 dark:bg-amber-500/15'
+                                              : 'hover:bg-slate-50 dark:hover:bg-slate-900/70'
+                                          }`}
+                                        >
+                                          <div
+                                            onClick={() =>
+                                              setStandbyReplaceForm(prev => ({
+                                                ...prev,
+                                                targetScheduleId: opt.value,
+                                                isRouteDropdownOpen: false
+                                              }))
+                                            }
+                                            className="flex items-center justify-between gap-2 cursor-pointer"
+                                          >
+                                            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                              <span
+                                                className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                                  opt.group === 'hari_ini'
+                                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                                    : opt.group === 'terjadwal'
+                                                    ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                                }`}
+                                              >
+                                                {opt.group === 'hari_ini'
+                                                  ? 'Hari Ini'
+                                                  : opt.group === 'terjadwal'
+                                                  ? opt.depDate || 'Terjadwal'
+                                                  : 'Rute Resmi'}
+                                              </span>
+                                              <span className="font-black text-slate-900 dark:text-white text-xs truncate">
+                                                {opt.areaName}
+                                              </span>
+                                              <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold text-[10px]">
+                                                {opt.armadaName}
+                                              </span>
+                                            </div>
+                                            {isRouteSelected && (
+                                              <Check className="w-4 h-4 text-amber-500 shrink-0" />
+                                            )}
+                                          </div>
+
+                                          {/* Pilihan Posisi Kru di Rute Ini (Driver Utama, Helper 1, Helper 2) */}
+                                          <div className="grid grid-cols-3 gap-1.5 mt-2">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setStandbyReplaceForm(prev => ({
+                                                  ...prev,
+                                                  targetScheduleId: opt.value,
+                                                  replacePosition: 'driver',
+                                                  isRouteDropdownOpen: false
+                                                }))
+                                              }
+                                              className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                                isRouteSelected &&
+                                                standbyReplaceForm.replacePosition === 'driver'
+                                                  ? 'bg-blue-600 text-white border-blue-500 font-black shadow-2xs'
+                                                  : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-400'
+                                              }`}
+                                            >
+                                              <span className="text-[9px] uppercase tracking-wider block opacity-80">
+                                                Gantikan Driver
+                                              </span>
+                                              <span className="text-[10px] font-bold truncate block">
+                                                {opt.driverName || '-'}
+                                              </span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setStandbyReplaceForm(prev => ({
+                                                  ...prev,
+                                                  targetScheduleId: opt.value,
+                                                  replacePosition: 'helper',
+                                                  isRouteDropdownOpen: false
+                                                }))
+                                              }
+                                              className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                                isRouteSelected &&
+                                                standbyReplaceForm.replacePosition === 'helper'
+                                                  ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-2xs'
+                                                  : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-400'
+                                              }`}
+                                            >
+                                              <span className="text-[9px] uppercase tracking-wider block opacity-80">
+                                                Gantikan Helper 1
+                                              </span>
+                                              <span className="text-[10px] font-bold truncate block">
+                                                {opt.helperName && opt.helperName !== '-'
+                                                  ? opt.helperName
+                                                  : 'Slot Helper 1'}
+                                              </span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setStandbyReplaceForm(prev => ({
+                                                  ...prev,
+                                                  targetScheduleId: opt.value,
+                                                  replacePosition: 'helper2',
+                                                  isRouteDropdownOpen: false
+                                                }))
+                                              }
+                                              className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                                isRouteSelected &&
+                                                standbyReplaceForm.replacePosition === 'helper2'
+                                                  ? 'bg-purple-600 text-white border-purple-500 font-black shadow-2xs'
+                                                  : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-purple-400'
+                                              }`}
+                                            >
+                                              <span className="text-[9px] uppercase tracking-wider block opacity-80">
+                                                Gantikan Helper 2
+                                              </span>
+                                              <span className="text-[10px] font-bold truncate block">
+                                                {opt.helper2Name && opt.helper2Name !== '-'
+                                                  ? opt.helper2Name
+                                                  : 'Tambah/Ganti H2'}
+                                              </span>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      {Boolean(standbyPortalInfo.activeBackupSchedule) && (
+                        <button
+                          type="button"
+                          onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
+                          className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer text-center"
+                        >
+                          Batal
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleConfirmStandbyReplaceFromPortal}
+                        className={`${
+                          Boolean(standbyPortalInfo.activeBackupSchedule) ? 'w-2/3' : 'w-full'
+                        } py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Search Input Bar (Area Kirim, Helper, Driver) */}
             <div className="relative">
               <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -4607,228 +5257,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
-            {/* PANEL JADWAL FREE • STAND BY GUDANG (Tampil untuk Kru yang Stand By di Gudang hari ini maupun yang sedang Menggantikan Kru Lain) */}
-            {(activeTab === 'active' || activeTab === 'scheduled' || activeTab === 'all') &&
-              (standbyPortalInfo.isCurrentPortalUserFreeStandby || Boolean(standbyPortalInfo.activeBackupSchedule)) && (
-                <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/60 rounded-2xl p-4 shadow-md space-y-3">
-                  <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
-                        <Building2 className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
-                            JADWAL HARI INI: STAND BY GUDANG DC
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-500/30">
-                            {standbyPortalInfo.activeBackupSchedule ? '● Aktif Menggantikan Kru' : '● Stand By di Gudang'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                          {standbyPortalInfo.activeDateLabel} • Kru Cadangan Siap Menggantikan Kru Kiriman Berhalangan
-                        </p>
-                      </div>
-                    </div>
-
-                    {standbyPortalInfo.activeBackupSchedule && standbyReplaceForm.isOpen && (
-                      <button
-                        type="button"
-                        onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
-                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer p-1"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Ringkasan Status Saat Kru Sedang Menggantikan Orang Lain */}
-                  {standbyPortalInfo.activeBackupSchedule && (
-                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
-                            STATUS PENGGANTIAN KRU HARI H
-                          </span>
-                          <p className="text-xs font-extrabold text-slate-900 dark:text-white mt-0.5">
-                            Menggantikan{' '}
-                            <span className="text-amber-600 dark:text-amber-400">
-                              {standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper'
-                                ? 'Helper 1'
-                                : standbyPortalInfo.activeBackupSchedule.backupPosition === 'helper2'
-                                ? 'Helper 2'
-                                : 'Driver Utama'}{' '}
-                              ({(() => {
-                                const sch = standbyPortalInfo.activeBackupSchedule;
-                                const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
-                                const bTarget = sch.backupTargetName;
-                                const bCrew = sch.backupCrewName;
-                                if (bTarget && (!bCrew || !matchSamePerson(bTarget, bCrew))) {
-                                  return bTarget;
-                                }
-                                if (area.includes('muncar')) {
-                                  return 'Saipul Bahri';
-                                }
-                                return sch.crew?.name && (!bCrew || !matchSamePerson(sch.crew.name, bCrew))
-                                  ? sch.crew.name
-                                  : 'Driver Utama';
-                              })()})
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                            Rute Area Kirim:{' '}
-                            <strong className="text-emerald-600 dark:text-emerald-400">
-                              {standbyPortalInfo.activeBackupSchedule.areaName ||
-                                standbyPortalInfo.activeBackupSchedule.store?.storeName ||
-                                '-'}
-                            </strong>{' '}
-                            • Armada:{' '}
-                            <strong>
-                              {(() => {
-                                const sch = standbyPortalInfo.activeBackupSchedule;
-                                const area = (sch.areaName || sch.store?.storeName || '').toLowerCase();
-                                if (area.includes('muncar')) {
-                                  return 'N4 / NS2';
-                                }
-                                const code = sch.fleet?.initialCode;
-                                if (code && code !== 'N1 / NP1') {
-                                  return code;
-                                }
-                                const matchedTrip = standbyPortalInfo.scheduledTrips.find(
-                                  t => (t.area || '').toLowerCase().includes(area)
-                                );
-                                if (matchedTrip?.armada && matchedTrip.armada !== '-') {
-                                  return matchedTrip.armada.includes('NS2') ? 'N4 / NS2' : matchedTrip.armada;
-                                }
-                                return sch.fleet?.initialCode || sch.fleet?.plateNumber || 'N4 / NS2';
-                              })()}
-                            </strong>
-                          </p>
-                        </div>
-                        {!standbyReplaceForm.isOpen && (
-                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                            <button
-                              type="button"
-                              onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: true }))}
-                              className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black transition cursor-pointer"
-                            >
-                              Ubah Rute Pengganti
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelStandbyReplaceFromPortal}
-                              className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
-                              title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
-                            >
-                              <XCircle className="w-3 h-3 text-rose-500" />
-                              <span>Tidak Jadi Ganti</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Form Pilih Rute & Posisi Kru yang Digantikan */}
-                  {(!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
-                    <>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                            Posisi Kru yang Digantikan
-                          </label>
-                          <select
-                            value={standbyReplaceForm.replacePosition}
-                            onChange={(e) =>
-                              setStandbyReplaceForm(prev => ({
-                                ...prev,
-                                replacePosition: e.target.value as 'driver' | 'helper' | 'helper2'
-                              }))
-                            }
-                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white"
-                          >
-                            <option value="driver">Driver Utama</option>
-                            <option value="helper">Helper 1</option>
-                            <option value="helper2">Helper 2</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                            Pilih Rute Area Kirim (Menggantikan Orang Lain)
-                          </label>
-                          <select
-                            value={standbyReplaceForm.targetScheduleId || standbyAvailableRouteOptions[0]?.value || ''}
-                            onChange={(e) =>
-                              setStandbyReplaceForm(prev => ({ ...prev, targetScheduleId: e.target.value }))
-                            }
-                            className="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 shadow-xs cursor-pointer"
-                          >
-                            {standbyAvailableRouteOptions.length === 0 ? (
-                              <option value="" disabled>-- Memuat Daftar Rute Area Kirim... --</option>
-                            ) : (
-                              <>
-                                {standbyAvailableRouteOptions.some(o => o.group === 'hari_ini') && (
-                                  <optgroup label="📍 Rute Kiriman Hari Ini (Terjadwal)">
-                                    {standbyAvailableRouteOptions
-                                      .filter(o => o.group === 'hari_ini')
-                                      .map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                          {opt.label}
-                                        </option>
-                                      ))}
-                                  </optgroup>
-                                )}
-                                {standbyAvailableRouteOptions.some(o => o.group === 'terjadwal') && (
-                                  <optgroup label="📅 Rute Terjadwal di Sistem">
-                                    {standbyAvailableRouteOptions
-                                      .filter(o => o.group === 'terjadwal')
-                                      .map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                          {opt.label}
-                                        </option>
-                                      ))}
-                                  </optgroup>
-                                )}
-                                <optgroup label="🚚 Semua Rute Area Pengiriman Resmi PT AKK">
-                                  {standbyAvailableRouteOptions
-                                    .filter(o => o.group === 'area_resmi')
-                                    .map(opt => (
-                                      <option key={opt.value} value={opt.value}>
-                                        {opt.label}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              </>
-                            )}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {Boolean(standbyPortalInfo.activeBackupSchedule) && (
-                          <button
-                            type="button"
-                            onClick={() => setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }))}
-                            className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer text-center"
-                          >
-                            Batal
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleConfirmStandbyReplaceFromPortal}
-                          className={`${Boolean(standbyPortalInfo.activeBackupSchedule) ? 'w-2/3' : 'w-full'} py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm`}
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Konfirmasi Gantikan Tugas Kiriman Ini</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
               {/* Integrasi Form Kirim pada Portal Driver saat ini di-OFF-kan terlebih dahulu */}
               {false && formKirimList.filter(fk => fk.financeStatus === 'approved_finance').length > 0 && (
                 <div className="hidden" />
@@ -4931,13 +5359,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              setStandbyReplaceForm({
+                              setStandbyReplaceForm(prev => ({
+                                ...prev,
                                 isOpen: true,
                                 standbyCrewName: delivery.backupCrewName || portalDisplayName,
                                 targetScheduleId: delivery.id,
                                 replacePosition: delivery.backupPosition || 'driver',
                                 absentReason: 'Berhalangan Hadir pada Hari H'
-                              })
+                              }))
                             }
                             className="px-2 py-0.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 text-[10px] font-bold shrink-0 cursor-pointer"
                           >
@@ -7620,29 +8049,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             return;
           }
 
-          // 2. Jika partner (Driver/Helper dalam 1 jadwal/armada yang sama) SUDAH isi armada & checklist,
-          // langsung sinkronkan ke Jadwal Aktif (Keluar Gerbang / Check-Out) tanpa mengulang pengisian!
-          if (sharedCrewPreTripState.isDone) {
-            setIsFleetLockedAfterCheckin(true);
-            setIsChecklistCompletedAfterCheckin(true);
-            if (assignedFleet?.id) {
-              setSelectedFleetId(assignedFleet.id);
-              writeDriverScopedValue('akk_locked_fleet_', assignedFleet.id);
-            }
-            writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
-            writeDriverScopedValue('akk_checklist_done_', todayStr);
-            setIsPostCheckinFleetModalOpen(false);
-            setBottomNav('deliveries');
-            setActiveTab('active');
-            addNotification(
-              'delivery',
-              'Check-In Tersinkronisasi • Siap Keluar Gerbang',
-              `Armada (${assignedFleet?.plateNumber || ''}) & Checklist telah diselesaikan oleh ${sharedCrewPreTripState.completedBy}. Tampilan langsung menuju Jadwal Aktif untuk Keluar Gerbang.`
-            );
-            return;
-          }
-
-          // 3. Alur Khusus DRIVER: Setelah Check-In, SISTEM LANGSUNG MEMBUKA FORM CHECKLIST ARMADA PRA-BERANGKAT!
+          // 2. Alur Khusus DRIVER: Setelah Check-In, SISTEM LANGSUNG MEMBUKA FORM CHECKLIST ARMADA PRA-BERANGKAT!
           const targetFleet = assignedFleet || activeDeliveries[0]?.fleet || deliveries[0]?.fleet || fleets[0];
           if (targetFleet?.id) {
             setSelectedFleetId(targetFleet.id);

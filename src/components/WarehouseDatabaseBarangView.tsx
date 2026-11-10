@@ -106,6 +106,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [showExcelPreview, setShowExcelPreview] = useState(false);
   const [importMode, setImportMode] = useState<'replace_all' | 'append'>('replace_all');
 
+  // Modal Filter & Ekspor Excel (Satuan, Kubikasi, Berat, Foto)
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportUnitFilter, setExportUnitFilter] = useState<string>('ALL');
+  const [exportVolFilter, setExportVolFilter] = useState<'ALL' | 'has_vol' | 'no_vol'>('ALL');
+  const [exportBeratFilter, setExportBeratFilter] = useState<'ALL' | 'has_berat' | 'no_berat'>('ALL');
+  const [exportFotoFilter, setExportFotoFilter] = useState<'ALL' | 'has_photo' | 'no_photo'>('ALL');
+
   // Modal Tambah / Edit Barang (Template Foto 1)
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<DatabaseBarangRecord | null>(null);
@@ -590,7 +597,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         title: persistedToMysql ? `${newUrls.length} Foto Berhasil Masuk MySQL` : 'Foto Baru Hanya Tersimpan di Browser',
         message: persistedToMysql
           ? `Total ${updatedUrls.length} foto untuk ${saved.noBarang} telah diterima MySQL.`
-          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk MySQL. Gunakan tombol Pulihkan Foto Lokal ke MySQL dari perangkat ini.`
+          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk MySQL. Gunakan tombol Load Foto ke DB dari perangkat ini.`
       });
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
@@ -662,12 +669,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       if (result.localPhotoSkuCount === 0) {
         setFeedbackModal({
           title: 'Foto Lokal Tidak Ditemukan',
-          message: `Browser ini tidak menyimpan foto lama. MySQL saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Pulihkan Foto Lokal di sana.`
+          message: `Browser ini tidak menyimpan foto lama. MySQL saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Load Foto ke DB di sana.`
         });
         return;
       }
       setFeedbackModal({
-        title: result.failedSkuCount > 0 ? 'Sebagian Foto Belum Berhasil Dikirim' : 'Pemulihan Foto ke MySQL Selesai',
+        title: result.failedSkuCount > 0 ? 'Sebagian Foto Belum Berhasil Dikirim' : 'Load Foto ke DB Selesai',
         message: `Ditemukan ${result.localPhotoSkuCount} barang berfoto pada browser ini. ` +
           `Upload berhasil ${result.succeededSkuCount}, gagal ${result.failedSkuCount}. ` +
           `Barang berfoto di MySQL: ${result.beforePhotoSkuCount} menjadi ${result.afterPhotoSkuCount}. ` +
@@ -927,7 +934,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       title: persistedToMysql ? (editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan') : 'Data Tersimpan Lokal, MySQL Gagal',
       message: persistedToMysql
         ? `Data "${saved.deskripsiBarang}" (${saved.noBarang}) telah masuk MySQL dengan ${dokumentasiUrls.length} foto dokumentasi.`
-        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di MySQL. Coba tombol Pulihkan Foto Lokal ke MySQL.`
+        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di MySQL. Coba tombol Load Foto ke DB.`
     });
   };
 
@@ -1004,27 +1011,151 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     XLSX.writeFile(wb, 'Template_Database_Barang_AKK.xlsx');
   };
 
-  const handleExportDatabaseBarang = () => {
-    const rows = filteredItems.map((item, idx) => ({
-      No: idx + 1,
-      'No. Barang': item.noBarang,
-      'Deskripsi Barang': item.deskripsiBarang || item.keteranganBarang,
-      'Unit 1': item.unit1 || item.satuan,
-      'Unit 2': item.unit2 || '',
-      'Unit 3': item.unit3 || '',
-      'Rasio 2': item.rasio2 ?? '',
-      'Rasio 3': item.rasio3 ?? '',
-      'Panjang(L)cm': item.panjangCm,
-      'Lebar(W)cm': item.lebarCm,
-      'Tinggi(H)cm': item.tinggiCm,
-      'VOL(M3)': item.volM3,
-      'Berat(kg)': item.beratKg,
-      'Terakhir Diperbarui': item.updatedAt
-    }));
+  const exportFilteredItems = useMemo(() => {
+    const result = items.filter(item => {
+      const matchSearch = databaseBarangService.matchesSearchQuery(item, searchQuery);
+
+      const matchUnit =
+        exportUnitFilter === 'ALL' ||
+        (item.unit1 || '').toLowerCase() === exportUnitFilter.toLowerCase() ||
+        (item.unit2 || '').toLowerCase() === exportUnitFilter.toLowerCase();
+
+      const itemVol =
+        Number(item.volM3) ||
+        (item.panjangCm > 0 && item.lebarCm > 0 && item.tinggiCm > 0
+          ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm)
+          : 0);
+      const matchVol =
+        exportVolFilter === 'ALL' ||
+        (exportVolFilter === 'has_vol' && itemVol > 0) ||
+        (exportVolFilter === 'no_vol' && itemVol === 0);
+
+      const itemBerat = Number(item.beratKg) || 0;
+      const matchBerat =
+        exportBeratFilter === 'ALL' ||
+        (exportBeratFilter === 'has_berat' && itemBerat > 0) ||
+        (exportBeratFilter === 'no_berat' && itemBerat === 0);
+
+      const hasCustomPhoto = Boolean(
+        (item.dokumentasiUrls && item.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml'))) ||
+          (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== '')
+      );
+      const matchFoto =
+        exportFotoFilter === 'ALL' ||
+        (exportFotoFilter === 'has_photo' && hasCustomPhoto) ||
+        (exportFotoFilter === 'no_photo' && !hasCustomPhoto);
+
+      return matchSearch && matchUnit && matchVol && matchBerat && matchFoto;
+    });
+
+    if (sortBy === 'nama_asc') {
+      result.sort((a, b) =>
+        (a.deskripsiBarang || a.keteranganBarang || '').localeCompare(
+          b.deskripsiBarang || b.keteranganBarang || '',
+          'id',
+          { numeric: true }
+        )
+      );
+    } else if (sortBy === 'nama_desc') {
+      result.sort((a, b) =>
+        (b.deskripsiBarang || b.keteranganBarang || '').localeCompare(
+          a.deskripsiBarang || a.keteranganBarang || '',
+          'id',
+          { numeric: true }
+        )
+      );
+    } else if (sortBy === 'no_asc') {
+      result.sort((a, b) => a.noBarang.localeCompare(b.noBarang, 'id', { numeric: true }));
+    } else if (sortBy === 'no_desc') {
+      result.sort((a, b) => b.noBarang.localeCompare(a.noBarang, 'id', { numeric: true }));
+    } else if (sortBy === 'berat_asc') {
+      result.sort((a, b) => (Number(a.beratKg) || 0) - (Number(b.beratKg) || 0));
+    } else if (sortBy === 'berat_desc') {
+      result.sort((a, b) => (Number(b.beratKg) || 0) - (Number(a.beratKg) || 0));
+    } else if (sortBy === 'vol_asc') {
+      result.sort((a, b) => (Number(a.volM3) || 0) - (Number(b.volM3) || 0));
+    } else if (sortBy === 'vol_desc') {
+      result.sort((a, b) => (Number(b.volM3) || 0) - (Number(a.volM3) || 0));
+    }
+
+    return result;
+  }, [items, searchQuery, exportUnitFilter, exportVolFilter, exportBeratFilter, exportFotoFilter, sortBy]);
+
+  const openExportExcelModal = () => {
+    setExportUnitFilter(unitFilter);
+    setExportVolFilter(volFilter);
+    setExportBeratFilter(beratFilter);
+    setExportFotoFilter(fotoFilter);
+    setIsExportModalOpen(true);
+  };
+
+  const handleExportDatabaseBarang = (targetItems: DatabaseBarangRecord[] = exportFilteredItems) => {
+    const rows = targetItems.map((item, idx) => {
+      const itemVol =
+        Number(item.volM3) ||
+        (item.panjangCm > 0 && item.lebarCm > 0 && item.tinggiCm > 0
+          ? calculateVolM3(item.panjangCm, item.lebarCm, item.tinggiCm)
+          : 0);
+      const itemBerat = Number(item.beratKg) || 0;
+      const photoList =
+        Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
+          ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
+          : item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== ''
+          ? [item.dokumentasiUrl]
+          : [];
+      const hasPhoto = photoList.length > 0;
+      const satuanUtama = item.unit1 || item.satuan || 'Pcs';
+
+      return {
+        No: idx + 1,
+        'No. Barang': item.noBarang,
+        'Deskripsi Barang': item.deskripsiBarang || item.keteranganBarang,
+        Satuan: satuanUtama,
+        'Unit 1': satuanUtama,
+        'Unit 2': item.unit2 || '',
+        'Unit 3': item.unit3 || '',
+        'Rasio 2': item.rasio2 ?? 0,
+        'Rasio 3': item.rasio3 ?? 0,
+        'Panjang(L)cm': item.panjangCm || 0,
+        'Lebar(W)cm': item.lebarCm || 0,
+        'Tinggi(H)cm': item.tinggiCm || 0,
+        'VOL(M3)': itemVol,
+        'Status Kubikasi': itemVol > 0 ? 'Memiliki Kubikasi' : 'Tanpa Kubikasi',
+        'Berat(kg)': itemBerat,
+        'Status Berat': itemBerat > 0 ? 'Memiliki Berat' : 'Tanpa Berat',
+        Foto: hasPhoto ? `Sudah Ada Foto (${photoList.length} Foto)` : 'Belum Ada Foto',
+        'Terakhir Diperbarui': item.updatedAt
+      };
+    });
+
     const ws = XLSX.utils.json_to_sheet(rows);
+    if (ws['!ref']) {
+      ws['!autofilter'] = { ref: ws['!ref'] };
+    }
+    ws['!cols'] = [
+      { wch: 6 },  // No
+      { wch: 15 }, // No. Barang
+      { wch: 42 }, // Deskripsi Barang
+      { wch: 10 }, // Satuan
+      { wch: 10 }, // Unit 1
+      { wch: 10 }, // Unit 2
+      { wch: 10 }, // Unit 3
+      { wch: 10 }, // Rasio 2
+      { wch: 10 }, // Rasio 3
+      { wch: 14 }, // Panjang(L)cm
+      { wch: 14 }, // Lebar(W)cm
+      { wch: 14 }, // Tinggi(H)cm
+      { wch: 12 }, // VOL(M3)
+      { wch: 18 }, // Status Kubikasi
+      { wch: 12 }, // Berat(kg)
+      { wch: 16 }, // Status Berat
+      { wch: 24 }, // Foto
+      { wch: 18 }  // Terakhir Diperbarui
+    ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Database Barang');
     XLSX.writeFile(wb, `Database_Barang_AKK_${new Date().toISOString().split('T')[0]}.xlsx`);
+    setIsExportModalOpen(false);
   };
 
   const handleExcelFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1494,26 +1625,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={handleManualServerSync}
-            disabled={syncStatus.isSyncing}
-            className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
-            title="Sinkronkan dua arah secara paksa antara IndexedDB HP, PC, dan Server MySQL"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
-            <span>{syncStatus.isSyncing ? `Sinkron (${syncStatus.progressPct}%)...` : 'Sinkron 2 Arah (PC ↔ HP)'}</span>
-          </button>
-          <button
-            type="button"
             onClick={handleRecoverLocalPhotos}
             disabled={syncStatus.isSyncing}
             className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60"
             title="Kirim ulang seluruh foto yang masih tersimpan di IndexedDB browser ini ke MySQL; tidak menghapus foto lokal"
           >
-            Pulihkan Foto Lokal ke MySQL
+            Load Foto ke DB
           </button>
           <button
             type="button"
-            onClick={handleExportDatabaseBarang}
+            onClick={openExportExcelModal}
             className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
@@ -1532,8 +1653,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             onClick={openCreateModal}
             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Tambah Barang</span>
+            <span>Tambah Barang</span>
           </button>
         </div>
       </div>
@@ -3494,6 +3614,166 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           </div>
         );
       })()}
+
+      {/* Modal Filter & Ekspor Excel Database Barang (Satuan, Kubikasi, Berat, Foto) */}
+      {isExportModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setIsExportModalOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-blue-100">
+                    Filter &amp; Unduh Spreadsheet (.XLSX)
+                  </div>
+                  <h4 className="text-sm font-black tracking-tight text-white">
+                    Ekspor Excel Database Barang
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExportModalOpen(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Pilih filter data <strong>Satuan, Kubikasi, Berat, dan Foto</strong> yang ingin diekspor ke dalam file Excel. File hasil ekspor juga telah dilengkapi kolom status dan <strong>AutoFilter Excel</strong> otomatis.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Filter Satuan */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    1. Filter Satuan
+                  </label>
+                  <select
+                    value={exportUnitFilter}
+                    onChange={e => setExportUnitFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Semua Satuan ({items.length})</option>
+                    {availableUnits.map(u => (
+                      <option key={u} value={u}>
+                        Satuan: {u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filter Kubikasi */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    2. Filter Kubikasi
+                  </label>
+                  <select
+                    value={exportVolFilter}
+                    onChange={e => setExportVolFilter(e.target.value as 'ALL' | 'has_vol' | 'no_vol')}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Semua Kubikasi</option>
+                    <option value="has_vol">📦 Memiliki Kubikasi &gt; 0</option>
+                    <option value="no_vol">⚪ Tanpa Kubikasi (0)</option>
+                  </select>
+                </div>
+
+                {/* Filter Berat */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    3. Filter Berat
+                  </label>
+                  <select
+                    value={exportBeratFilter}
+                    onChange={e => setExportBeratFilter(e.target.value as 'ALL' | 'has_berat' | 'no_berat')}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Semua Berat</option>
+                    <option value="has_berat">⚖️ Memiliki Berat &gt; 0 kg</option>
+                    <option value="no_berat">⚪ Tanpa Berat (0 kg)</option>
+                  </select>
+                </div>
+
+                {/* Filter Foto */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    4. Filter Foto
+                  </label>
+                  <select
+                    value={exportFotoFilter}
+                    onChange={e => setExportFotoFilter(e.target.value as 'ALL' | 'has_photo' | 'no_photo')}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">📷 Semua Foto ({items.length})</option>
+                    <option value="has_photo">✅ Sudah Ada Foto ({photoStats.withPhoto})</option>
+                    <option value="no_photo">⚠️ Belum Ada Foto ({photoStats.withoutPhoto})</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Ringkasan Filter Ekspor */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    Total Baris Siap Diekspor:
+                  </div>
+                  <div className="text-base font-black text-blue-700 dark:text-blue-400 font-mono">
+                    {exportFilteredItems.length.toLocaleString('id-ID')} <span className="text-xs font-bold text-slate-500">/ {items.length.toLocaleString('id-ID')} Barang</span>
+                  </div>
+                </div>
+                {(exportUnitFilter !== 'ALL' || exportVolFilter !== 'ALL' || exportBeratFilter !== 'ALL' || exportFotoFilter !== 'ALL') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportUnitFilter('ALL');
+                      setExportVolFilter('ALL');
+                      setExportBeratFilter('ALL');
+                      setExportFotoFilter('ALL');
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-50 transition cursor-pointer flex items-center gap-1"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Reset Filter</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsExportModalOpen(false)}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={exportFilteredItems.length === 0}
+                  onClick={() => handleExportDatabaseBarang(exportFilteredItems)}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh Excel ({exportFilteredItems.length.toLocaleString('id-ID')})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom Delete Confirmation Modal (Menggantikan window.confirm browser bawaan) */}
       {itemToDelete && (
