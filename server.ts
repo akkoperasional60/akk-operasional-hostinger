@@ -397,22 +397,29 @@ async function startServer() {
     }
     if (!perms || typeof perms !== 'object') return undefined;
 
-    const topMod = perms.modules?.[moduleId];
-    if (topMod !== undefined) {
-      if (!topMod.enabled) return 'none';
-      let bestTop: 'full_access' | 'read_only' | 'none' = 'none';
-      let foundTop = false;
-      for (const subId of subMenuIds) {
-        const lvl = topMod.subMenus?.[subId];
-        if (lvl === 'full_access') return 'full_access';
-        if (lvl === 'read_only') {
-          bestTop = 'read_only';
-          foundTop = true;
-        } else if (lvl === 'none') {
-          foundTop = true;
+    const candidateModules =
+      moduleId === 'warehouse' || moduleId === 'wms_gudang'
+        ? ['wms_gudang', 'warehouse']
+        : [moduleId];
+
+    for (const modKey of candidateModules) {
+      const topMod = perms.modules?.[modKey];
+      if (topMod !== undefined) {
+        if (!topMod.enabled) return 'none';
+        let bestTop: 'full_access' | 'read_only' | 'none' = 'none';
+        let foundTop = false;
+        for (const subId of subMenuIds) {
+          const lvl = topMod.subMenus?.[subId];
+          if (lvl === 'full_access') return 'full_access';
+          if (lvl === 'read_only') {
+            bestTop = 'read_only';
+            foundTop = true;
+          } else if (lvl === 'none') {
+            foundTop = true;
+          }
         }
+        if (foundTop) return bestTop;
       }
-      if (foundTop) return bestTop;
     }
 
     if (perms.branchPermissions && typeof perms.branchPermissions === 'object') {
@@ -420,16 +427,18 @@ async function startServer() {
       let foundAny = false;
       for (const bEntry of Object.values(perms.branchPermissions) as any[]) {
         if (!bEntry?.enabled) continue;
-        const bMod = bEntry.modules?.[moduleId];
-        if (!bMod?.enabled) continue;
-        for (const subId of subMenuIds) {
-          const lvl = bMod.subMenus?.[subId];
-          if (lvl === 'full_access') return 'full_access';
-          if (lvl === 'read_only') {
-            best = 'read_only';
-            foundAny = true;
-          } else if (lvl === 'none') {
-            foundAny = true;
+        for (const modKey of candidateModules) {
+          const bMod = bEntry.modules?.[modKey];
+          if (!bMod?.enabled) continue;
+          for (const subId of subMenuIds) {
+            const lvl = bMod.subMenus?.[subId];
+            if (lvl === 'full_access') return 'full_access';
+            if (lvl === 'read_only') {
+              best = 'read_only';
+              foundAny = true;
+            } else if (lvl === 'none') {
+              foundAny = true;
+            }
           }
         }
       }
@@ -486,7 +495,7 @@ async function startServer() {
   // Server-side RBAC: Enforces both User Management permissions_json (Hak Akses single source of truth) and role fallbacks.
   const requireLogisticsWrite = requireModuleWrite(
     'logistics',
-    ['fleets', 'spareparts', 'fuel_efficiency', 'schedules', 'fleet_forms', 'warehouse_fleet_cubication', 'armada_ceklis'],
+    ['fleets', 'crews', 'spareparts', 'fuel_efficiency', 'schedules', 'fleet_procurement', 'fleet_forms', 'box_simulation', 'warehouse_fleet_cubication', 'armada_ceklis', 'logistics_dashboard'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman']
   );
   const requireScheduleWrite = requireModuleWrite(
@@ -496,7 +505,7 @@ async function startServer() {
   );
   const requireScheduleStatusWrite = requireModuleWrite(
     'logistics',
-    ['schedules', 'portal_driver', 'driver_reports', 'rencana_rute'],
+    ['schedules', 'driver_portal', 'portal_driver', 'crew_reports', 'driver_reports', 'rencana_rute'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper']
   );
   const requireStoreWrite = requireModuleWrite(
@@ -505,13 +514,13 @@ async function startServer() {
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline']
   );
   const requireWarehouseAccess = requireModuleWrite(
-    'warehouse',
-    ['warehouse_scanner', 'warehouse_inventory', 'warehouse_inbound', 'warehouse_outbound', 'warehouse_opname', 'stok_barang'],
+    'wms_gudang',
+    ['database_barang', 'wms_summary', 'wms_inventory', 'wms_floor_map', 'wms_inbound_outbound', 'wms_opname', 'warehouse_scanner', 'warehouse_inventory', 'warehouse_inbound', 'warehouse_outbound', 'warehouse_opname', 'stok_barang'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin']
   );
   const requireAttendanceWrite = requireModuleWrite(
     'hr',
-    ['attendance', 'hr_data_karyawan', 'hr_dashboard', 'absensi_kehadiran'],
+    ['hr_dashboard', 'ga_security', 'training_videos', 'attendance', 'hr_data_karyawan', 'absensi_kehadiran'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper']
   );
 
@@ -1070,43 +1079,109 @@ async function startServer() {
     const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
     if (data.role !== undefined && !allowedRoles.has(String(data.role))) return res.status(400).json({ success: false, error: 'Role tidak valid' });
     if (data.status !== undefined && !allowedStatuses.has(String(data.status))) return res.status(400).json({ success: false, error: 'Status tidak valid' });
+    const cleanInputEmail = String(data.email || '').trim().toLowerCase();
+    const cleanInputName = String(data.fullName || data.name || '').trim();
     try {
-      const existing = await mysqlQuery<any[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [id]);
-      if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
-      const u = existing[0];
-      const nextStatus = data.status ?? u.status;
-      const approvedAt = nextStatus === 'approved' ? (u.approved_at || new Date()) : u.approved_at;
-      const approvedBy = nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by;
-      const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : u.permissions_json;
-      await mysqlQuery(
-        `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, permissions_json=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
-        [
-          String(data.email ?? u.email).trim().toLowerCase(), String(data.fullName ?? data.name ?? u.full_name).trim(), data.role ?? u.role,
-          data.department ?? u.department, data.phone ?? u.phone, nextStatus, permissionsJson, data.notes ?? u.notes, approvedAt, approvedBy, id
-        ]
-      );
-      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      let existing = await mysqlQuery<any[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [id]);
+      if ((!Array.isArray(existing) || existing.length === 0) && (cleanInputEmail || cleanInputName)) {
+        existing = await mysqlQuery<any[]>(
+          'SELECT * FROM users WHERE (email <> "" AND LOWER(email) = ?) OR (full_name <> "" AND LOWER(full_name) = ?) LIMIT 1',
+          [cleanInputEmail || '__none__', cleanInputName.toLowerCase() || '__none__']
+        );
+      }
+      let targetUserId = id;
+      let resolvedRole = String(data.role || 'unassigned');
+      let resolvedFullName = cleanInputName;
+
+      if (!Array.isArray(existing) || existing.length === 0) {
+        if (!cleanInputEmail && !cleanInputName) {
+          return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+        }
+        const insertStatus = allowedStatuses.has(String(data.status)) ? String(data.status) : 'approved';
+        const insertRole = allowedRoles.has(String(data.role)) ? String(data.role) : 'unassigned';
+        resolvedRole = insertRole;
+        resolvedFullName = cleanInputName || cleanInputEmail.split('@')[0] || 'Pengguna';
+        const fallbackEmail = cleanInputEmail || `${resolvedFullName.toLowerCase().replace(/[^a-z0-9]/g, '')}@gmail.com`;
+        const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : null;
+        await mysqlQuery(
+          `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, permissions_json, approved_at, approved_by, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            id,
+            fallbackEmail,
+            hashPassword('AkkDefault2026!'),
+            resolvedFullName,
+            insertRole,
+            String(data.department || 'Logistik'),
+            String(data.phone || ''),
+            insertStatus,
+            permissionsJson,
+            insertStatus === 'approved' ? new Date() : null,
+            insertStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || 'Super Admin') : null,
+            data.notes || null
+          ]
+        );
+      } else {
+        const u = existing[0];
+        targetUserId = String(u.id || id);
+        const nextStatus = data.status ?? u.status;
+        const nextRole = data.role ?? u.role;
+        resolvedRole = String(nextRole);
+        resolvedFullName = String(data.fullName ?? data.name ?? u.full_name).trim();
+        const approvedAt = nextStatus === 'approved' ? (u.approved_at || new Date()) : u.approved_at;
+        const approvedBy = nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by;
+        const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : u.permissions_json;
+        await mysqlQuery(
+          `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, permissions_json=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
+          [
+            String(data.email ?? u.email).trim().toLowerCase(),
+            resolvedFullName,
+            nextRole,
+            data.department ?? u.department,
+            data.phone ?? u.phone,
+            nextStatus,
+            permissionsJson,
+            data.notes ?? u.notes,
+            approvedAt,
+            approvedBy,
+            targetUserId
+          ]
+        );
+      }
+
+      // Jika role akun bukan lagi driver / crew_helper (misal diubah ke Gudang / warehouse_admin, Sales, dll),
+      // hapus entri kru lama di tabel crews agar tidak pernah muncul lagi di jadwal pengiriman / stand by.
+      if (resolvedRole !== 'driver' && resolvedRole !== 'crew_helper') {
+        const lowerFull = resolvedFullName.toLowerCase();
+        const altNameUllah = lowerFull.replace(/\bulloh\b/g, 'ullah');
+        const altNameUlloh = lowerFull.replace(/\bullah\b/g, 'ulloh');
+        await mysqlQuery(
+          `DELETE FROM crews WHERE id = ? OR LOWER(name) IN (?, ?, ?)`,
+          [`crw-${targetUserId}`, lowerFull, altNameUllah, altNameUlloh]
+        ).catch(() => {});
+      }
+
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [targetUserId]);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
       if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
-        const existingPreview = previewSessionUsers.get(id);
-        if (existingPreview) {
-          const updatedPreview = {
-            ...existingPreview,
-            email: String(data.email ?? existingPreview.email).trim().toLowerCase(),
-            full_name: String(data.fullName ?? data.name ?? existingPreview.full_name).trim(),
-            role: data.role ?? existingPreview.role,
-            department: data.department ?? existingPreview.department,
-            phone: data.phone ?? existingPreview.phone,
-            status: data.status ?? existingPreview.status,
-            permissions_json: data.permissions !== undefined ? JSON.stringify(data.permissions) : existingPreview.permissions_json,
-            notes: data.notes ?? existingPreview.notes
-          };
-          previewSessionUsers.set(id, updatedPreview);
-          return res.json({ success: true, source: 'preview_session', user: publicUser(updatedPreview) });
-        }
+        const existingPreview = previewSessionUsers.get(id) || {};
+        const updatedPreview = {
+          ...existingPreview,
+          id,
+          email: String(data.email ?? existingPreview.email ?? '').trim().toLowerCase(),
+          full_name: String(data.fullName ?? data.name ?? existingPreview.full_name ?? 'Pengguna').trim(),
+          role: data.role ?? existingPreview.role ?? 'unassigned',
+          department: data.department ?? existingPreview.department ?? 'Logistik',
+          phone: data.phone ?? existingPreview.phone ?? '',
+          status: data.status ?? existingPreview.status ?? 'approved',
+          permissions_json: data.permissions !== undefined ? JSON.stringify(data.permissions) : existingPreview.permissions_json,
+          notes: data.notes ?? existingPreview.notes
+        };
+        previewSessionUsers.set(id, updatedPreview);
+        return res.json({ success: true, source: 'preview_session', user: publicUser(updatedPreview) });
       }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui pengguna' });
     }
@@ -3823,6 +3898,8 @@ Kembalikan HANYA JSON valid:
   };
 
   const preservedServerPhotosByCode = new Map<string, string[]>();
+  const serverDeletedPhotoUrls = new Set<string>();
+  const serverClearedPhotoCodes = new Set<string>();
   const PRODUCTION_BRIDGE_ORIGIN = 'https://akkoperasional.com';
   const isHostingerEnv = process.env.NODE_ENV === 'production' && !process.env.K_SERVICE;
 
@@ -3923,7 +4000,7 @@ Kembalikan HANYA JSON valid:
       if (hasPhoto) memPhotoCodes.add(code);
     }
     for (const [code, urls] of preservedServerPhotosByCode.entries()) {
-      if (code && Array.isArray(urls) && urls.length > 0) {
+      if (code && !serverClearedPhotoCodes.has(code) && Array.isArray(urls) && urls.length > 0) {
         memCodes.add(code);
         memPhotoCodes.add(code);
       }
@@ -3988,7 +4065,19 @@ Kembalikan HANYA JSON valid:
             !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
       );
 
-      const combinedPhotoItems = deduplicateAndMergeDatabaseBarangRows([...dbPhotoItems, ...memPhotoItems]);
+      const combinedPhotoItems = deduplicateAndMergeDatabaseBarangRows([...dbPhotoItems, ...memPhotoItems])
+        .filter(it => !serverClearedPhotoCodes.has(String(it.noBarang || '').trim().toUpperCase()))
+        .map(it => {
+          const code = String(it.noBarang || '').trim().toUpperCase();
+          const cleanUrls = (it.dokumentasiUrls || []).filter((u: any) => typeof u === 'string' && u.trim() && !serverDeletedPhotoUrls.has(u));
+          return {
+            ...it,
+            dokumentasiUrls: cleanUrls,
+            dokumentasiUrl: cleanUrls[0] || ''
+          };
+        })
+        .filter(it => it.dokumentasiUrls.length > 0);
+
       combinedPhotoItems.forEach(it => {
         if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
           preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
@@ -4601,6 +4690,152 @@ Kembalikan HANYA JSON valid:
     } catch (err: any) {
       console.warn('[POST /api/database-barang/item] Error:', err?.message || err);
       return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan item barang' });
+    }
+  });
+
+  // Endpoint khusus untuk menghapus foto secara permanen agar tidak muncul kembali saat sinkronisasi / push website baru
+  app.post('/api/database-barang/delete-photo', async (req: any, res: any) => {
+    try {
+      const { noBarang, photoUrl, clearAll, updatedUrls } = req.body || {};
+      const code = String(noBarang || '').trim().toUpperCase();
+      if (!code) {
+        return res.status(400).json({ success: false, error: 'No barang tidak valid' });
+      }
+
+      if (photoUrl && typeof photoUrl === 'string') {
+        serverDeletedPhotoUrls.add(photoUrl);
+      }
+      if (clearAll) {
+        serverClearedPhotoCodes.add(code);
+      } else {
+        serverClearedPhotoCodes.delete(code);
+      }
+
+      const existingIdx = memoryDatabaseBarang.findIndex(x => String(x.noBarang).toUpperCase() === code);
+      const existingMem = existingIdx >= 0 ? memoryDatabaseBarang[existingIdx] : null;
+
+      let finalUrls: string[] = [];
+      if (clearAll) {
+        finalUrls = [];
+        preservedServerPhotosByCode.delete(code);
+      } else if (Array.isArray(updatedUrls)) {
+        finalUrls = updatedUrls.filter((u: any) => typeof u === 'string' && u.trim() && !serverDeletedPhotoUrls.has(u));
+        preservedServerPhotosByCode.set(code, finalUrls);
+      } else if (existingMem && Array.isArray(existingMem.dokumentasiUrls)) {
+        finalUrls = existingMem.dokumentasiUrls.filter((u: any) => u !== photoUrl && !serverDeletedPhotoUrls.has(u));
+        preservedServerPhotosByCode.set(code, finalUrls);
+      }
+
+      if (existingMem) {
+        existingMem.dokumentasiUrls = finalUrls;
+        existingMem.dokumentasiUrl = finalUrls[0] || '';
+      }
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `UPDATE wms_database_barang
+             SET dokumentasi_url = ?, dokumentasi_urls_json = ?
+             WHERE UPPER(no_barang) = ?`,
+            [finalUrls[0] || '', JSON.stringify(finalUrls), code]
+          );
+        } catch (dbErr: any) {
+          console.warn('[Database Barang Delete Photo] MySQL update warning:', dbErr?.message || dbErr);
+        }
+      }
+
+      return res.json({ success: true, code, remainingPhotos: finalUrls.length });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus foto' });
+    }
+  });
+
+  // Endpoint untuk membersihkan foto MySQL secara massal (hanya menyisakan SKU yang di-keep)
+  app.post('/api/database-barang/photos/bulk-delete', async (req: any, res: any) => {
+    try {
+      const { codes, keepCodes } = req.body || {};
+      let targetCodes: string[] = [];
+
+      if (Array.isArray(codes) && codes.length > 0) {
+        targetCodes = codes.map((c: any) => String(c).trim().toUpperCase());
+      } else if (Array.isArray(keepCodes)) {
+        const keepSet = new Set(keepCodes.map((c: any) => String(c).trim().toUpperCase()));
+        targetCodes = memoryDatabaseBarang
+          .filter(x => {
+            const code = String(x.noBarang || '').trim().toUpperCase();
+            const hasPhoto = (Array.isArray(x.dokumentasiUrls) && x.dokumentasiUrls.length > 0) ||
+              (typeof x.dokumentasiUrl === 'string' && x.dokumentasiUrl.trim() !== '' && !x.dokumentasiUrl.startsWith('data:image/svg+xml'));
+            return hasPhoto && !keepSet.has(code);
+          })
+          .map(x => String(x.noBarang || '').trim().toUpperCase());
+
+        for (const code of preservedServerPhotosByCode.keys()) {
+          if (!keepSet.has(code) && !targetCodes.includes(code)) {
+            targetCodes.push(code);
+          }
+        }
+
+        if (isDatabaseConfigured()) {
+          try {
+            const photoRows = await mysqlQuery<any[]>(
+              `SELECT no_barang FROM wms_database_barang WHERE (dokumentasi_url != '' OR (dokumentasi_urls_json != '[]' AND dokumentasi_urls_json IS NOT NULL))`
+            );
+            if (Array.isArray(photoRows)) {
+              for (const r of photoRows) {
+                const c = String(r.no_barang || '').trim().toUpperCase();
+                if (c && !keepSet.has(c) && !targetCodes.includes(c)) {
+                  targetCodes.push(c);
+                }
+              }
+            }
+          } catch (dbErr: any) {
+            console.warn('[Bulk Delete Photos] Query MySQL error:', dbErr?.message || dbErr);
+          }
+        }
+      }
+
+      for (const c of targetCodes) {
+        serverClearedPhotoCodes.add(c);
+        preservedServerPhotosByCode.delete(c);
+      }
+
+      memoryDatabaseBarang = memoryDatabaseBarang.map(item => {
+        const code = String(item.noBarang || '').trim().toUpperCase();
+        if (targetCodes.includes(code)) {
+          return {
+            ...item,
+            dokumentasiUrl: '',
+            dokumentasiUrls: []
+          };
+        }
+        return item;
+      });
+
+      if (isDatabaseConfigured()) {
+        try {
+          for (const c of targetCodes) {
+            await mysqlQuery(
+              `UPDATE wms_database_barang SET dokumentasi_url = '', dokumentasi_urls_json = '[]' WHERE UPPER(no_barang) = ?`,
+              [c]
+            );
+          }
+        } catch (dbErr: any) {
+          console.warn('[Bulk Delete Photos] MySQL error:', dbErr?.message || dbErr);
+        }
+      }
+
+      const remainingPhotoCount = memoryDatabaseBarang.filter(
+        x => (Array.isArray(x.dokumentasiUrls) && x.dokumentasiUrls.length > 0) || (x.dokumentasiUrl && !x.dokumentasiUrl.startsWith('data:image/svg+xml'))
+      ).length;
+
+      return res.json({
+        success: true,
+        deletedCount: targetCodes.length,
+        remainingPhotoCount,
+        deletedCodes: targetCodes
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus foto massal' });
     }
   });
 

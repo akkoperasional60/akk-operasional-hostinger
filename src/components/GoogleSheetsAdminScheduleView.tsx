@@ -1290,6 +1290,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     void logisticsStore.hydrateOperationalDataFromHostinger();
     const unsub = logisticsStore.subscribe(() => {
       setStoreRevision(prev => prev + 1);
+      setOfficialCrewsList(crewAutoMapper.getOfficialCrewList());
     });
     return unsub;
   }, []);
@@ -1300,14 +1301,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const getIntegratedDrivers = () => {
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
-    const inactiveNames = new Set(
-      allUsers
-        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
-        .map(u => (u.fullName || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
     const activeDriverAndHelperUsers = allUsers
-      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
       .sort((a, b) => {
         if (a.role === 'driver' && b.role !== 'driver') return -1;
         if (a.role !== 'driver' && b.role === 'driver') return 1;
@@ -1333,10 +1328,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (!c || c.status === 'off') return;
       const clean = (c.name || '').trim();
       const lower = clean.toLowerCase();
-      if (clean && !names.has(lower) && !inactiveNames.has(lower)) {
-        names.add(lower);
-        result.push({ id: c.id, name: clean, hasAccount: true });
-      }
+      if (!clean || names.has(lower)) return;
+      if (result.some(r => logisticsStore.isSameCrewPersonName(r.name, clean))) return;
+      const matchedUser = allUsers.find(
+        u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, clean)
+      );
+      if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) return;
+      names.add(lower);
+      result.push({ id: c.id, name: clean, hasAccount: true });
     });
     return result;
   };
@@ -1344,14 +1343,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const getIntegratedHelpers = () => {
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
-    const inactiveNames = new Set(
-      allUsers
-        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
-        .map(u => (u.fullName || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
-    const activeHelperAndDriverUsers = allUsers.filter(
-      u => (u.role === 'crew_helper' || u.role === 'driver') && u.status === 'approved'
+    const activeHelperAndDriverUsers = allUsers.filter(u =>
+      logisticsStore.isActiveDeliveryCrewUser(u)
     );
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
@@ -1368,7 +1361,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         result.push({ id: u.id, name: clean, hasAccount: true });
       }
     });
-    // Tambahkan kru dari tabel crews jika belum ada di daftar
+    // Tambahkan kru dari tabel crews jika belum ada di daftar dan bukan akun non-kru
     const sortedCrews = [...allCrews].sort((a, b) => {
       const aHelper = String(a.role || '').toLowerCase().includes('helper') || String(a.role || '').toLowerCase().includes('kernet');
       const bHelper = String(b.role || '').toLowerCase().includes('helper') || String(b.role || '').toLowerCase().includes('kernet');
@@ -1380,10 +1373,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (!c || c.status === 'off') return;
       const clean = (c.name || '').trim();
       const lower = clean.toLowerCase();
-      if (clean && !names.has(lower) && !inactiveNames.has(lower)) {
-        names.add(lower);
-        result.push({ id: c.id, name: clean, hasAccount: true });
-      }
+      if (!clean || names.has(lower)) return;
+      if (result.some(r => logisticsStore.isSameCrewPersonName(r.name, clean))) return;
+      const matchedUser = allUsers.find(
+        u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, clean)
+      );
+      if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) return;
+      names.add(lower);
+      result.push({ id: c.id, name: clean, hasAccount: true });
     });
     return result;
   };
@@ -1595,12 +1592,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     routeSearchQuery?: string;
   } | null>(null);
 
-  // Helper to check if two crew names refer to the same person (handles e.g. "Saiful Rizal" vs "Saifur Rizal" or "Budiono" vs "Budi")
+  // Helper to check if two crew names refer to the same person (handles e.g. "Saiful Rizal" vs "Saifur Rizal" or "Rifaldi Aminulloh" vs "Rifaldi Aminullah")
   const isSameCrewPerson = (nameA: string, nameB: string): boolean => {
     const cleanA = (nameA || '').trim().toLowerCase();
     const cleanB = (nameB || '').trim().toLowerCase();
     if (!cleanA || !cleanB || cleanA === '-' || cleanB === '-') return false;
     if (cleanA === cleanB) return true;
+    if (logisticsStore.isSameCrewPersonName(cleanA, cleanB)) return true;
     if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
     // Handle Saiful Rizal / Saifur Rizal
     if ((cleanA.includes('saiful') || cleanA.includes('saifur')) && (cleanB.includes('saiful') || cleanB.includes('saifur')) && cleanA.includes('rizal') && cleanB.includes('rizal')) {
@@ -1651,11 +1649,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       });
     };
 
-    // 1. Approved Driver & Helper accounts in Portal (filtered by selectedBranchId)
+    // 1. Approved Driver & Helper accounts in Portal (filtered by selectedBranchId & active delivery crew RBAC)
     const allUsers = logisticsStore.getUsers();
     allUsers
       .filter(u => {
-        if ((u.role !== 'driver' && u.role !== 'crew_helper') || u.status !== 'approved') return false;
+        if (!logisticsStore.isActiveDeliveryCrewUser(u)) return false;
         if (selectedBranchId !== 'ALL') {
           const crewBranchId = branchStore.getCrewBranchId(u.id, u.fullName);
           if (crewBranchId !== selectedBranchId) return false;
@@ -1673,11 +1671,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         );
       });
 
-    // 2. Active Crews from Master Crew Database (filtered by selectedBranchId)
+    // 2. Active Crews from Master Crew Database (filtered by selectedBranchId & excluding any non-crew user accounts)
     const allCrews = logisticsStore.getCrews();
     allCrews
       .filter(c => {
         if (c.status === 'off') return false;
+        const matchedUser = allUsers.find(
+          u => `crw-${u.id}` === c.id || isSameCrewPerson(u.fullName, c.name)
+        );
+        if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) {
+          return false;
+        }
         if (selectedBranchId !== 'ALL') {
           const crewBranchId = branchStore.getCrewBranchId(c.id, c.name);
           if (crewBranchId !== selectedBranchId) return false;
@@ -4954,7 +4958,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[11px]">
                                         {p.armada}
                                       </span>
-                                      {(() => {
+                                      {selectedBranchId === 'ALL' && (() => {
                                         const br = branchStore.getScheduleBranch(p.id, p.area, p.armada);
                                         return (
                                           <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-300 dark:border-slate-700">

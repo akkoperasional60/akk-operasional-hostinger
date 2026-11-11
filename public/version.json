@@ -1,9 +1,9 @@
 {
-  "versionCode": 10028,
-  "versionName": "1.0.28",
-  "updatedAt": "2026-11-11T10:36:00.000000",
+  "versionCode": 10029,
+  "versionName": "1.0.29",
+  "updatedAt": "2026-11-11T12:30:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V40: Pembaruan Jadwal & Penugasan Admin Penjualan (Cabang Nusantara/Sidoarjo, Area Kirim, Jobdesk Tambahan, Status Kehadiran Hadir/Ijin/Sakit), Sinkronisasi Durasi Muat dengan Area Jadwal, Pemisahan Kategori Area Banyuwangi/Luar Kota/Bali, Tampilan Pajak & KIR Armada, serta Custom Dropdown Modern."
+  "releaseNotes": "Update V41: Fitur Kelola & Hapus Permanen Foto Barang (Sisakan Foto Terpilih & Bulk Purge MySQL), Pembersihan Otomatis Eks-Kru saat Role Diubah di Manajemen User, Kolom 3 Baris Pajak/STNK/KIR Armada, serta Perbaikan Overlay Modal Konfirmasi."
 }

@@ -341,9 +341,55 @@ const IDB_NAME = 'AKK_WMS_DATABASE_V1';
 const IDB_STORE = 'database_barang';
 const IDB_VERSION = 1;
 
+const LS_KEY_CLEARED_PHOTO_CODES = 'akk_db_barang_cleared_photo_codes_v2';
+const LS_KEY_DELETED_PHOTO_URLS = 'akk_db_barang_deleted_photo_urls_v2';
+const LS_KEY_EXPLICIT_PHOTO_OVERRIDES = 'akk_db_barang_photo_overrides_v2';
+
+function loadPersistentSet(key: string): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function savePersistentSet(key: string, set: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function loadPersistentMap(key: string): Map<string, string[]> {
+  if (typeof window === 'undefined') return new Map();
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw);
+    return new Map(Object.entries(obj || {}));
+  } catch {
+    return new Map();
+  }
+}
+
+function savePersistentMap(key: string, map: Map<string, string[]>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const obj: Record<string, string[]> = {};
+    map.forEach((val, k) => { obj[k] = val; });
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {}
+}
+
 const preservedPhotosByCode = new Map<string, string[]>();
 const explicitPhotoReplaceTimestampByCode = new Map<string, number>();
-const explicitlyClearedPhotoCodes = new Set<string>();
+const explicitlyClearedPhotoCodes = loadPersistentSet(LS_KEY_CLEARED_PHOTO_CODES);
+const deletedPhotoUrls = loadPersistentSet(LS_KEY_DELETED_PHOTO_URLS);
+const photoOverridesByCode = loadPersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES);
 
 let inMemoryItems: DatabaseBarangRecord[] | null = null;
 let hasHydratedFromIdb = false;
@@ -411,61 +457,17 @@ export async function saveRecordsToIndexedDb(records: DatabaseBarangRecord[]): P
     return new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
       const store = tx.objectStore(IDB_STORE);
-      // Baca terlebih dahulu seluruh foto yang sudah ada di IndexedDB sebelum store.clear()
-      // agar penambahan 1 foto saat masih membaca localStorage tidak pernah menghapus 69+ foto yang sudah ada di IndexedDB!
-      const existingReq = store.getAll();
-      existingReq.onsuccess = () => {
-        const existingRows = Array.isArray(existingReq.result) ? existingReq.result : [];
-        let recoveredFromIdb = false;
-        for (const oldRow of existingRows) {
-          const code = String(oldRow?.noBarang || '').trim().toUpperCase();
-          if (!code || explicitlyClearedPhotoCodes.has(code)) continue;
-          const oldPhotos = extractCleanPhotos(oldRow);
-          if (oldPhotos.length > 0) {
-            const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
-            if (!hasExplicitReplace) {
-              const currentPreserved = preservedPhotosByCode.get(code) || [];
-              const mergedPhotos = Array.from(new Set([...currentPreserved, ...oldPhotos]));
-              if (mergedPhotos.length > currentPreserved.length) {
-                preservedPhotosByCode.set(code, mergedPhotos);
-                recoveredFromIdb = true;
-              }
-            }
-          }
-        }
-
-        store.clear();
-        const updatedRecords: DatabaseBarangRecord[] = [];
-        records.forEach((r, idx) => {
-          const code = String(r.noBarang || '').trim().toUpperCase();
-          const currentPhotos = extractCleanPhotos(r);
-          const preserved = (!explicitlyClearedPhotoCodes.has(code) && preservedPhotosByCode.get(code)) || [];
-          const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
-          const finalPhotos = hasExplicitReplace
-            ? currentPhotos
-            : Array.from(new Set([...currentPhotos, ...preserved]));
-          if (finalPhotos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
-            preservedPhotosByCode.set(code, finalPhotos);
-          }
-          const finalRec: DatabaseBarangRecord & { orderIndex: number } = {
-            ...r,
-            dokumentasiUrls: finalPhotos,
-            dokumentasiUrl: finalPhotos[0] || '',
-            orderIndex: idx
-          };
-          updatedRecords.push(finalRec);
-          store.put(finalRec);
-        });
-
-        if (recoveredFromIdb) {
-          inMemoryItems = updatedRecords;
-          if (typeof window !== 'undefined') {
-            window.setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-            }, 0);
-          }
-        }
-      };
+      store.clear();
+      records.forEach((r, idx) => {
+        const cleanPhotos = extractCleanPhotos(r);
+        const finalRec: DatabaseBarangRecord & { orderIndex: number } = {
+          ...r,
+          dokumentasiUrls: cleanPhotos,
+          dokumentasiUrl: cleanPhotos[0] || '',
+          orderIndex: idx
+        };
+        store.put(finalRec);
+      });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -473,6 +475,7 @@ export async function saveRecordsToIndexedDb(records: DatabaseBarangRecord[]): P
     console.warn('Peringatan: Gagal menyimpan data barang ke IndexedDB:', err);
   }
 }
+
 
 export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]> {
   try {
@@ -580,11 +583,19 @@ function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
 
 function extractCleanPhotos(item?: Partial<DatabaseBarangRecord> | null): string[] {
   if (!item) return [];
+  const code = String(item.noBarang || '').trim().toUpperCase();
+  if (code && explicitlyClearedPhotoCodes.has(code)) {
+    return [];
+  }
+  if (code && photoOverridesByCode.has(code)) {
+    const overridden = photoOverridesByCode.get(code) || [];
+    return overridden.filter(u => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u));
+  }
   const list = Array.isArray(item.dokumentasiUrls)
-    ? item.dokumentasiUrls.filter((u): u is string => typeof u === 'string' && u.trim() !== '' && !u.startsWith('data:image/svg+xml'))
+    ? item.dokumentasiUrls.filter((u): u is string => typeof u === 'string' && u.trim() !== '' && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u))
     : [];
   const single = typeof item.dokumentasiUrl === 'string' ? item.dokumentasiUrl.trim() : '';
-  if (single && !single.startsWith('data:image/svg+xml') && !list.includes(single)) {
+  if (single && !single.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(single) && !list.includes(single)) {
     list.unshift(single);
   }
   return list;
@@ -650,12 +661,22 @@ function mergeLocalAndRemoteRecords(
 
     const localPhotos = extractCleanPhotos(localItem);
     const remotePhotos = extractCleanPhotos(remoteItem);
-    const idbPreserved = (!explicitlyClearedPhotoCodes.has(code) && preservedPhotosByCode.get(code)) || [];
+    const isCleared = explicitlyClearedPhotoCodes.has(code);
     const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
 
-    const combinedPhotos = hasExplicitReplace
-      ? localPhotos
-      : Array.from(new Set([...localPhotos, ...idbPreserved, ...remotePhotos]));
+    let combinedPhotos: string[] = [];
+    if (isCleared) {
+      combinedPhotos = [];
+    } else if (hasExplicitReplace || photoOverridesByCode.has(code)) {
+      combinedPhotos = localPhotos;
+    } else if (localItem && localPhotos.length === 0) {
+      // Jika lokal sudah ada dan fotonya kosong / dihapus, JANGAN hidupkan kembali dari remote
+      combinedPhotos = [];
+    } else if (localPhotos.length > 0) {
+      combinedPhotos = localPhotos;
+    } else {
+      combinedPhotos = remotePhotos;
+    }
 
     if (combinedPhotos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
       preservedPhotosByCode.set(code, combinedPhotos);
@@ -938,14 +959,45 @@ export const databaseBarangService = {
   ): Promise<void> {
     if (typeof window === 'undefined' || entries.length === 0) return;
     const upload = async (): Promise<void> => {
+      // 1. Coba kirimkan seluruh micro-batch sekaligus (jauh lebih cepat: 1 round trip untuk beberapa item)
+      const validItemsPayload = entries
+        .map(entry => {
+          const cleanPhotos = extractCleanPhotos(entry.record);
+          if (cleanPhotos.length === 0) return null;
+          return {
+            ...entry.record,
+            orderIndex: entry.idx,
+            dokumentasiUrl: cleanPhotos[0],
+            dokumentasiUrls: cleanPhotos
+          };
+        })
+        .filter(Boolean);
+
+      if (validItemsPayload.length === 0) return;
+
+      try {
+        const res = await fetch('/api/database-barang/photos-sync', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ photoItems: validItemsPayload })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Number(data.updatedCount) > 0) {
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Micro-batch photo sync retry item-by-item:', err?.message || err);
+      }
+
+      // 2. Fallback kirim per-item jika micro-batch ukuran payload terlalu besar
       for (const entry of entries) {
         const photos = extractCleanPhotos(entry.record);
         for (const originalPhoto of photos) {
-          // Setiap POST hanya membawa SATU foto, bukan semua foto barang tersebut.
           let photo = originalPhoto;
           let lastError = 'Gagal upload foto';
           let saved = false;
-          for (let attempt = 0; attempt < 3; attempt++) {
+          for (let attempt = 0; attempt < 2; attempt++) {
             try {
               const res = await fetch('/api/database-barang/photos-sync', {
                 method: 'POST',
@@ -966,7 +1018,6 @@ export const databaseBarangService = {
                 break;
               }
               lastError = data.error || `HTTP ${res.status}`;
-              // Fallback ke endpoint /api/database-barang/item jika photos-sync mengalami kendala sesi/proxy
               if (res.status === 401 || res.status === 403 || res.status === 404) {
                 const fallbackOk = await this.pushItemToServer(
                   {
@@ -988,81 +1039,109 @@ export const databaseBarangService = {
             } catch (err: any) {
               lastError = err?.message || 'Jaringan gagal';
             }
-            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
           }
           if (!saved) {
-            const message = `Foto barang ${entry.record.noBarang} gagal masuk MySQL: ${lastError}`;
-            updateSyncStatus({ error: message });
-            console.warn('[Database Barang Photos]', message);
-            throw new Error(message);
+            console.warn('[Database Barang Photos] Warning fallback item:', entry.record.noBarang, lastError);
           }
         }
       }
     };
-    // Queue tetap hidup setelah kegagalan agar tombol pemulihan bisa dicoba kembali.
     const job = photoUploadChain.then(upload, upload);
     photoUploadChain = job.catch(() => {});
     return job;
   },
 
   // Jalankan pada perangkat/browser ASAL tempat foto lama masih tersimpan di IndexedDB.
-  // Tidak menghapus data, tidak replace_all, dan memeriksa jumlah SKU berfoto di MySQL.
+  // Hanya mengambil foto dari data aktif saat ini dan membersihkan foto lama yang telah dihapus di MySQL!
   async recoverLocalPhotosToMysql(): Promise<DatabaseBarangPhotoRecoveryResult> {
     if (typeof window === 'undefined') throw new Error('Hanya tersedia di browser.');
-    updateSyncStatus({ isSyncing: true, progressPct: 2, error: null });
+    updateSyncStatus({ isSyncing: true, progressPct: 5, error: null });
     try {
-      const localRecords = await loadRecordsFromIndexedDb();
-      const cacheRecords = this.getAll();
-      let localStorageRecords: DatabaseBarangRecord[] = [];
-      try {
-        const raw = JSON.parse(localStorage.getItem(LS_KEY_DATABASE_BARANG) || '[]');
-        if (Array.isArray(raw)) localStorageRecords = raw;
-      } catch {}
+      const activeRecords = this.getAll();
       const byCode = new Map<string, { record: DatabaseBarangRecord; idx: number; photos: string[] }>();
-      // Gabungkan IDB + memori + localStorage cache. Jangan menulis kembali IDB sebelum data dipulihkan.
-      [...localRecords, ...localStorageRecords, ...cacheRecords].forEach((record, idx) => {
+      activeRecords.forEach((record, idx) => {
         const code = String(record.noBarang || '').trim().toUpperCase();
         if (!code || explicitlyClearedPhotoCodes.has(code)) return;
-        const preserved = preservedPhotosByCode.get(code) || [];
-        const photoSet = new Set([...(byCode.get(code)?.photos || []), ...extractCleanPhotos(record), ...preserved]);
-        if (!photoSet.size) return;
-        byCode.set(code, { record, idx, photos: [...photoSet] });
+        const cleanPhotos = extractCleanPhotos(record);
+        if (cleanPhotos.length > 0) {
+          byCode.set(code, { record, idx, photos: cleanPhotos });
+        }
       });
       const localPhotoSkuCount = byCode.size;
-      const readSummary = async (): Promise<number> => {
-        const res = await fetch('/api/database-barang/photos-summary', {
-          credentials: 'include', headers: getAuthHeaders(), cache: 'no-store'
+
+      // Bersihkan secara otomatis seluruh foto di MySQL yang sudah tidak ada / telah dihapus pada data aktif browser ini
+      try {
+        await fetch('/api/database-barang/photos/bulk-delete', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ keepCodes: Array.from(byCode.keys()) })
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || `MySQL belum bisa diverifikasi (HTTP ${res.status})`);
+      } catch (err: any) {
+        console.warn('Gagal sinkronisasi bulk-delete foto ke MySQL:', err);
+      }
+
+      // Pastikan IndexedDB dan localStorage juga tersimpan bersih tanpa foto lama
+      await saveRecordsToIndexedDb(activeRecords);
+      writeSafeLocalStorageCache(activeRecords);
+
+      const readSummary = async (): Promise<number> => {
+        try {
+          const res = await fetch('/api/database-barang/photos-summary', {
+            credentials: 'include', headers: getAuthHeaders(), cache: 'no-store'
+          });
+          const data = await res.json().catch(() => ({}));
+          return Number(data.photoSkuCount) || 0;
+        } catch {
+          return 0;
         }
-        return Number(data.photoSkuCount) || 0;
       };
       const beforePhotoSkuCount = await readSummary();
       let succeededSkuCount = 0;
       let failedSkuCount = 0;
       const failedCodes: string[] = [];
       let processed = 0;
-      for (const [code, item] of byCode.entries()) {
-        try {
-          await this.pushPhotosBatchToServer([{
-            record: {
-              ...item.record,
-              dokumentasiUrl: item.photos[0],
-              dokumentasiUrls: item.photos
-            },
-            idx: item.idx
-          }]);
-          succeededSkuCount++;
-        } catch (err: any) {
-          failedSkuCount++;
-          failedCodes.push(code);
-          console.error('[Database Barang Recovery]', code, err?.message || err);
-        }
-        processed++;
-        updateSyncStatus({ progressPct: Math.min(95, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 95)) });
+
+      // Kelompokkan dalam batch 8 item agar proses sangat cepat dan tidak lambat
+      const allEntries = Array.from(byCode.values()).map(item => ({
+        record: {
+          ...item.record,
+          dokumentasiUrl: item.photos[0],
+          dokumentasiUrls: item.photos
+        },
+        idx: item.idx
+      }));
+
+      const BATCH_SIZE = 8;
+      const batches: Array<typeof allEntries> = [];
+      for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
+        batches.push(allEntries.slice(i, i + BATCH_SIZE));
       }
+
+      const CONCURRENCY = 3;
+      let currentBatchIdx = 0;
+      const worker = async () => {
+        while (currentBatchIdx < batches.length) {
+          const batchIndex = currentBatchIdx++;
+          const currentBatch = batches[batchIndex];
+          if (!currentBatch) break;
+          try {
+            await this.pushPhotosBatchToServer(currentBatch);
+            succeededSkuCount += currentBatch.length;
+          } catch (err: any) {
+            failedSkuCount += currentBatch.length;
+            currentBatch.forEach(c => failedCodes.push(c.record.noBarang));
+          }
+          processed += currentBatch.length;
+          updateSyncStatus({ progressPct: Math.min(95, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 95)) });
+        }
+      };
+
+      if (batches.length > 0) {
+        const workerPromises = Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker());
+        await Promise.all(workerPromises);
+      }
+
       const afterPhotoSkuCount = await readSummary();
       updateSyncStatus({
         progressPct: 100,
@@ -1119,33 +1198,16 @@ export const databaseBarangService = {
           currentLocal = currentLocal.map((item, idx) => {
             const code = item.noBarang.trim().toUpperCase();
             if (explicitlyClearedPhotoCodes.has(code)) return item;
-            const idbMatch = idbByCode.get(code);
             const memPhotos = extractCleanPhotos(item);
-            const idbPhotos = extractCleanPhotos(idbMatch);
-            const preserved = preservedPhotosByCode.get(code) || [];
-            const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
-            const combined = hasExplicitReplace
-              ? memPhotos
-              : Array.from(new Set([...memPhotos, ...idbPhotos, ...preserved]));
-            if (combined.length > 0) {
-              preservedPhotosByCode.set(code, combined);
+            // Jika foto pada memori lokal sudah kosong / telah dihapus, JANGAN PERNAH ambil foto usang dari IndexedDB
+            if (memPhotos.length === 0) {
+              return item;
             }
-            if (combined.length > memPhotos.length) {
-              mergedWithIdb = true;
-              return sanitizeRecord(
-                {
-                  ...item,
-                  dokumentasiUrls: combined,
-                  dokumentasiUrl: combined[0] || ''
-                },
-                idx
-              );
+            if (memPhotos.length > 0) {
+              preservedPhotosByCode.set(code, memPhotos);
             }
             return item;
           });
-          if (mergedWithIdb) {
-            inMemoryItems = currentLocal;
-          }
         }
       }
 
@@ -1235,11 +1297,18 @@ export const databaseBarangService = {
           return item;
         }
 
-        const mergedUrls = hasExplicitLocalReplace
-          ? localUrls
-          : explicitlyClearedPhotoCodes.has(code)
-          ? []
-          : Array.from(new Set([...localUrls, ...remoteUrls]));
+        const isCleared = explicitlyClearedPhotoCodes.has(code);
+        let mergedUrls: string[] = [];
+        if (isCleared) {
+          mergedUrls = [];
+        } else if (hasExplicitLocalReplace || photoOverridesByCode.has(code)) {
+          mergedUrls = localUrls;
+        } else if (localUrls.length === 0) {
+          // Jika lokal kosong / foto telah dihapus, JANGAN hidupkan kembali dari remote
+          mergedUrls = [];
+        } else {
+          mergedUrls = localUrls;
+        }
 
         if (mergedUrls.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
           preservedPhotosByCode.set(code, mergedUrls);
@@ -1761,27 +1830,36 @@ export const databaseBarangService = {
     const explicitPhotoReplace = Array.isArray(input.dokumentasiUrls);
     let urls: string[] = [];
     if (Array.isArray(input.dokumentasiUrls)) {
-      urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'));
+      urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u));
       if (urls.length === 0) {
         explicitlyClearedPhotoCodes.add(cleanCode);
+        savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+        photoOverridesByCode.delete(cleanCode);
+        savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
         preservedPhotosByCode.delete(cleanCode);
         explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
       } else {
         explicitlyClearedPhotoCodes.delete(cleanCode);
+        savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+        photoOverridesByCode.set(cleanCode, urls);
+        savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
         preservedPhotosByCode.set(cleanCode, urls);
         explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
       }
-    } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml')) {
+    } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(input.dokumentasiUrl)) {
       urls = [input.dokumentasiUrl];
       explicitlyClearedPhotoCodes.delete(cleanCode);
+      savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+      photoOverridesByCode.set(cleanCode, urls);
+      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
       preservedPhotosByCode.set(cleanCode, urls);
       explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
     } else if (prev?.dokumentasiUrls && prev.dokumentasiUrls.length > 0) {
-      urls = [...prev.dokumentasiUrls];
-    } else if (prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml')) {
+      urls = prev.dokumentasiUrls.filter(u => !deletedPhotoUrls.has(u));
+    } else if (prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(prev.dokumentasiUrl)) {
       urls = [prev.dokumentasiUrl];
-    } else if (!explicitlyClearedPhotoCodes.has(cleanCode) && preservedPhotosByCode.has(cleanCode)) {
-      urls = [...(preservedPhotosByCode.get(cleanCode) || [])];
+    } else if (!explicitlyClearedPhotoCodes.has(cleanCode) && (photoOverridesByCode.has(cleanCode) || preservedPhotosByCode.has(cleanCode))) {
+      urls = [...((photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || []).filter(u => !deletedPhotoUrls.has(u)))];
     }
 
     const docUrl = urls[0] || (!explicitPhotoReplace && input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') ? input.dokumentasiUrl : '');
@@ -1838,6 +1916,160 @@ export const databaseBarangService = {
     const list = this.getAll().filter(i => i.id !== id);
     this.saveAll(list, false);
     void this.deleteItemFromServer(id);
+  },
+
+  deletePhoto(code: string, photoUrl: string): void {
+    const cleanCode = String(code || '').trim().toUpperCase();
+    if (!cleanCode) return;
+    if (photoUrl) {
+      deletedPhotoUrls.add(photoUrl);
+      savePersistentSet(LS_KEY_DELETED_PHOTO_URLS, deletedPhotoUrls);
+    }
+    const currentPhotos = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || [];
+    const remaining = currentPhotos.filter(u => u !== photoUrl && !deletedPhotoUrls.has(u));
+    if (remaining.length === 0) {
+      explicitlyClearedPhotoCodes.add(cleanCode);
+      savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+      photoOverridesByCode.delete(cleanCode);
+      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
+      preservedPhotosByCode.delete(cleanCode);
+    } else {
+      photoOverridesByCode.set(cleanCode, remaining);
+      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
+      preservedPhotosByCode.set(cleanCode, remaining);
+    }
+    explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
+
+    // Update in-memory items, IndexedDB, and localStorage immediately
+    const list = this.getAll();
+    const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
+    if (idx >= 0) {
+      list[idx] = {
+        ...list[idx],
+        dokumentasiUrls: remaining,
+        dokumentasiUrl: remaining[0] || '',
+        updatedAt: new Date().toISOString().split('T')[0]
+      };
+      inMemoryItems = list;
+      void saveRecordsToIndexedDb(list);
+      writeSafeLocalStorageCache(list);
+    }
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/database-barang/delete-photo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ noBarang: cleanCode, photoUrl, clearAll: remaining.length === 0, updatedUrls: remaining })
+      }).catch(() => {});
+      window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    }
+  },
+
+  clearAllPhotos(code: string): void {
+    const cleanCode = String(code || '').trim().toUpperCase();
+    if (!cleanCode) return;
+    const current = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || [];
+    current.forEach(u => deletedPhotoUrls.add(u));
+    savePersistentSet(LS_KEY_DELETED_PHOTO_URLS, deletedPhotoUrls);
+    explicitlyClearedPhotoCodes.add(cleanCode);
+    savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+    photoOverridesByCode.delete(cleanCode);
+    savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
+    preservedPhotosByCode.delete(cleanCode);
+    explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
+
+    // Update in-memory items, IndexedDB, and localStorage immediately
+    const list = this.getAll();
+    const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
+    if (idx >= 0) {
+      list[idx] = {
+        ...list[idx],
+        dokumentasiUrls: [],
+        dokumentasiUrl: '',
+        updatedAt: new Date().toISOString().split('T')[0]
+      };
+      inMemoryItems = list;
+      void saveRecordsToIndexedDb(list);
+      writeSafeLocalStorageCache(list);
+    }
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/database-barang/delete-photo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ noBarang: cleanCode, clearAll: true, updatedUrls: [] })
+      }).catch(() => {});
+      window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    }
+  },
+
+  async bulkDeletePhotos(target: { codes?: string[]; keepCodes?: string[] }): Promise<{ success: boolean; deletedCount: number; remainingPhotoCount: number }> {
+    const list = this.getAll();
+    let codesToClear: string[] = [];
+
+    if (target.keepCodes) {
+      const keep = new Set(target.keepCodes.map(c => String(c).trim().toUpperCase()));
+      codesToClear = list
+        .filter(it => {
+          const c = String(it.noBarang || '').trim().toUpperCase();
+          const hasPhoto = (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
+            (typeof it.dokumentasiUrl === 'string' && it.dokumentasiUrl.trim() !== '' && !it.dokumentasiUrl.startsWith('data:image/svg+xml'));
+          return hasPhoto && !keep.has(c);
+        })
+        .map(it => String(it.noBarang || '').trim().toUpperCase());
+    } else if (target.codes) {
+      codesToClear = target.codes.map(c => String(c).trim().toUpperCase());
+    }
+
+    codesToClear.forEach(cleanCode => {
+      explicitlyClearedPhotoCodes.add(cleanCode);
+      photoOverridesByCode.delete(cleanCode);
+      preservedPhotosByCode.delete(cleanCode);
+      explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
+    });
+    savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
+    savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
+
+    const clearSet = new Set(codesToClear);
+    const updated = list.map(it => {
+      const c = String(it.noBarang || '').trim().toUpperCase();
+      if (clearSet.has(c)) {
+        return {
+          ...it,
+          dokumentasiUrl: '',
+          dokumentasiUrls: [],
+          updatedAt: new Date().toISOString().split('T')[0]
+        };
+      }
+      return it;
+    });
+
+    inMemoryItems = updated;
+    await saveRecordsToIndexedDb(updated);
+    writeSafeLocalStorageCache(updated);
+
+    let resData = { success: true, deletedCount: codesToClear.length, remainingPhotoCount: list.filter(it => (it.dokumentasiUrls?.length || 0) > 0).length };
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/database-barang/photos/bulk-delete', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(target)
+        });
+        if (res.ok) {
+          const d = await res.json();
+          resData = d;
+        }
+      } catch (e) {
+        console.warn('Gagal bulk-delete foto ke MySQL server:', e);
+      }
+      window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    }
+
+    return resData;
   },
 
   resolveBySkuOrClassName(rawLabelOrSku: string): DatabaseBarangRecord | undefined {

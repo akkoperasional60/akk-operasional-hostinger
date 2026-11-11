@@ -376,6 +376,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         diffDays
       };
     }
+    if (diffDays === 0) {
+      return { 
+        label: 'Sisa 0 hari', 
+        color: 'text-rose-400 bg-rose-500/15 border-rose-500/30',
+        isExpired: true,
+        isNear: true,
+        diffDays: 0
+      };
+    }
     if (diffDays <= defaultDaysWarn) {
       return { 
         label: `Sisa ${diffDays} hari`, 
@@ -1225,10 +1234,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )}
       </div>
 
-      {/* Modal Notifikasi Konfirmasi Penyimpanan Data (Desain Modern Tanpa Keterangan MySQL) */}
+      {/* Modal Notifikasi Konfirmasi Penyimpanan Data (Tampil langsung di depan halaman Data Armada) */}
       {syncFeedback && (
         <div
-          className="fixed inset-0 z-[70] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[1300] bg-slate-950/60 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.45)' }}
           onClick={() => setSyncFeedback(null)}
         >
           <div
@@ -1422,7 +1432,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-2.5 px-3 whitespace-nowrap">Tipe &amp; Kubikasi Box</th>
                   <th className="py-2.5 px-3 text-center whitespace-nowrap">Status Kondisi &amp; Area Kirim</th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Sopir / PIC</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / KIR</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / STNK / KIR</th>
                   <th className="py-2.5 px-3 text-center w-24 whitespace-nowrap">Aksi</th>
                 </tr>
               </thead>
@@ -1442,6 +1452,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     const kirDateVal = fleet.lastMaintenance || fleet.kirExpiryDate;
                     const kirStatus = getExpiryStatus(kirDateVal);
                     const taxStatus = getExpiryStatus(fleet.taxDueDate);
+                    const stnkDateVal = fleet.stnkExpiryDate;
+                    const stnkStatus = getExpiryStatus(stnkDateVal);
 
                     return (
                       <tr key={fleet.id} className="hover:bg-slate-850/50 transition">
@@ -1457,23 +1469,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                               {fleet.plateNumber}
                             </span>
                           </div>
-                          <div className="mt-1 flex items-center gap-1">
-                            <span className="text-[9px] text-slate-400">Gudang:</span>
-                            <select
-                              value={branchStore.getFleetBranch(fleet.id).id}
-                              onChange={(e) => {
-                                branchStore.setFleetBranch(fleet.id, e.target.value);
-                                setBranches(branchStore.getActiveBranches());
-                              }}
-                              className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
-                            >
-                              {branches.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                  {b.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          {selectedBranchId === 'ALL' && (
+                            <div className="mt-1 flex items-center gap-1">
+                              <select
+                                value={branchStore.getFleetBranch(fleet.id).id}
+                                onChange={(e) => {
+                                  branchStore.setFleetBranch(fleet.id, e.target.value);
+                                  setBranches(branchStore.getActiveBranches());
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
+                              >
+                                {branches.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
@@ -1528,13 +1541,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           )}
                         </td>
 
-                        {/* Pajak & KIR: Menampilkan tanggal dan status untuk Pajak (Tahunan) dan KIR secara berdampingan/terstruktur */}
+                        {/* Pajak, STNK & KIR: Menampilkan tanggal jatuh tempo dan status untuk Pajak (Tahunan), STNK (5 Tahunan), dan KIR secara terstruktur */}
                         <td className="py-2 px-3 whitespace-nowrap">
-                          <div className="flex flex-col gap-1.5 min-w-[215px]">
+                          <div className="flex flex-col gap-1.5 min-w-[225px]">
                             {/* Baris 1: PAJAK */}
                             <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
                               <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 min-w-[40px] text-center">
                                   PAJAK
                                 </span>
                                 <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
@@ -1546,10 +1559,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                               </span>
                             </div>
 
-                            {/* Baris 2: KIR */}
+                            {/* Baris 2: STNK */}
                             <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
                               <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 min-w-[40px] text-center">
+                                  STNK
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {stnkDateVal ? formatIndoDate(stnkDateVal) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${stnkStatus.color}`}>
+                                {stnkStatus.label}
+                              </span>
+                            </div>
+
+                            {/* Baris 3: KIR */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/30 min-w-[40px] text-center">
                                   KIR
                                 </span>
                                 <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
@@ -2934,7 +2962,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   {(editingFleet.lastMaintenance || editingFleet.kirExpiryDate) && (
                     <div className="text-[10px] text-teal-400 mt-1 font-medium flex items-center justify-between">
                       <span>{formatIndoDate(editingFleet.lastMaintenance || editingFleet.kirExpiryDate)}</span>
-                      <span>{getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).label}</span>
+                      <span className={getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).label}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -3141,7 +3171,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   {editingFleet.taxDueDate && (
                     <div className="text-[10px] text-blue-400 mt-1 font-medium flex items-center justify-between">
                       <span>{formatIndoDate(editingFleet.taxDueDate)}</span>
-                      <span>{getExpiryStatus(editingFleet.taxDueDate).label}</span>
+                      <span className={getExpiryStatus(editingFleet.taxDueDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.taxDueDate).label}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -3159,7 +3191,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   {editingFleet.stnkExpiryDate && (
                     <div className="text-[10px] text-amber-400 mt-1 font-medium flex items-center justify-between">
                       <span>{formatIndoDate(editingFleet.stnkExpiryDate)}</span>
-                      <span>{getExpiryStatus(editingFleet.stnkExpiryDate).label}</span>
+                      <span className={getExpiryStatus(editingFleet.stnkExpiryDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.stnkExpiryDate).label}
+                      </span>
                     </div>
                   )}
                 </div>

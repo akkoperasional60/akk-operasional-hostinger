@@ -2147,9 +2147,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       pool.push({ id, name: clean, role, phone, licenseType });
     };
 
-    logisticsStore
-      .getUsers()
-      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+    const allPortalUsers = logisticsStore.getUsers();
+    allPortalUsers
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
       .forEach(u => {
         addPoolMember(
           u.id,
@@ -2162,7 +2162,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     logisticsStore
       .getCrews()
-      .filter(c => c.status !== 'off')
+      .filter(c => {
+        if (c.status === 'off') return false;
+        const matchedU = allPortalUsers.find(
+          u => `crw-${u.id}` === c.id || matchSamePerson(u.fullName, c.name)
+        );
+        if (matchedU && !logisticsStore.isActiveDeliveryCrewUser(matchedU)) return false;
+        return true;
+      })
       .forEach(c => {
         const isHelper = (c.role || '').toLowerCase().includes('helper') || (c.role || '').toLowerCase().includes('kernet');
         addPoolMember(
@@ -5218,7 +5225,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   >
                     <option value="all">📋 Tampilkan Semua Jadwal Kru (Driver &amp; Helper)</option>
                     {logisticsStore.getUsers()
-                      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+                      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
                       .map(u => (
                         <option key={u.id} value={u.fullName}>
                           👤 Jadwal {u.fullName}

@@ -7,6 +7,7 @@ import {
   UserProfile,
   UserRole,
   UserApprovalStatus,
+  UserPermissions,
   CrewDeliveryHistory,
   AreaDeliveryStat,
   AreaApprovalRequest,
@@ -1908,6 +1909,60 @@ class LogisticsStore {
     this.notify();
   }
 
+  public isSameCrewPersonName(nameA: string, nameB: string): boolean {
+    const cleanA = (nameA || '').trim().toLowerCase();
+    const cleanB = (nameB || '').trim().toLowerCase();
+    if (!cleanA || !cleanB || cleanA === '-' || cleanB === '-') return false;
+    if (cleanA === cleanB) return true;
+    const norm = (s: string) =>
+      s
+        .replace(/\bulloh\b/g, 'ullah')
+        .replace(/\bsaifur\b/g, 'saiful')
+        .replace(/\bmoh\.?\b/g, 'muhammad')
+        .replace(/\bmohammad\b/g, 'muhammad')
+        .replace(/\bach\.?\b/g, 'achmad')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const nA = norm(cleanA);
+    const nB = norm(cleanB);
+    if (!nA || !nB) return false;
+    if (nA === nB) return true;
+    if (nA.length >= 6 && nB.length >= 6 && (nA.includes(nB) || nB.includes(nA))) return true;
+    return false;
+  }
+
+  /**
+   * Mengecek apakah akun pengguna merupakan Kru Pengiriman aktif (Driver / Helper)
+   * berdasarkan Role DAN Hak Akses (permissions) di Manajemen User.
+   * Jika role telah diubah (misal ke Gudang / warehouse_admin, Sales, HR, dll) ATAU
+   * seluruh akses Logistik & Pengiriman dicabut (0 AKSES), maka BUKAN lagi kru pengiriman.
+   */
+  public isActiveDeliveryCrewUser(u: UserProfile | null | undefined): boolean {
+    if (!u) return false;
+    if (u.status !== 'approved') return false;
+    if (u.role !== 'driver' && u.role !== 'crew_helper') return false;
+
+    if (u.permissions?.modules?.logistics && u.permissions.modules.logistics.enabled === false) {
+      const subMenus = u.permissions.modules.logistics.subMenus || {};
+      const hasAnyLogisticsSub = Object.values(subMenus).some(v => v === 'full_access' || v === 'read_only');
+      if (!hasAnyLogisticsSub) return false;
+    }
+
+    if (u.permissions?.branchPermissions && Object.keys(u.permissions.branchPermissions).length > 0) {
+      const branchEntries = Object.values(u.permissions.branchPermissions);
+      const anyBranchHasLogistics = branchEntries.some(b => {
+        if (!b?.enabled) return false;
+        const logMod = b.modules?.logistics;
+        if (!logMod?.enabled) return false;
+        return Object.values(logMod.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
+      });
+      if (!anyBranchHasLogistics) return false;
+    }
+
+    return true;
+  }
+
   /**
    * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (role: driver / crew_helper)
    * tanpa memicu efek samping penyimpanan atau notifikasi listener.
@@ -1915,24 +1970,21 @@ class LogisticsStore {
   private computeSyncedCrews(): Crew[] {
     const syncedCrews: Crew[] = [];
     const seenNames = new Set<string>();
-    const isCurrentSuperAdmin = this.currentUser?.role === 'super_admin';
 
     for (const u of this.users) {
-      if (u.role !== 'driver' && u.role !== 'crew_helper') continue;
-      if (u.status === 'rejected') continue;
-      // Sembunyikan akun driver/helper yang nonaktif pada user selain Super Admin
-      if (!isCurrentSuperAdmin && u.status === 'inactive') continue;
+      if (!this.isActiveDeliveryCrewUser(u)) continue;
 
       const cleanName = (u.fullName || '').trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
       if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
+      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
 
       const existingInStore = (this.crews || []).find(
-        c => c && c.name && (c.name.trim().toLowerCase() === lowerName || c.id === `crw-${u.id}`)
+        c => c && c.name && (c.id === `crw-${u.id}` || this.isSameCrewPersonName(c.name, cleanName))
       );
       const existingInInitial = INITIAL_CREWS.find(
-        c => c.name.trim().toLowerCase() === lowerName
+        c => this.isSameCrewPersonName(c.name, cleanName)
       );
       const refCrew = existingInStore || existingInInitial;
 
@@ -1941,9 +1993,7 @@ class LogisticsStore {
         ? 'Kernet / Helper'
         : (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama');
 
-      const crewStatus: Crew['status'] = u.status === 'inactive'
-        ? 'off'
-        : (existingInStore?.status === 'on-duty' ? 'on-duty' : 'available');
+      const crewStatus: Crew['status'] = existingInStore?.status === 'on-duty' ? 'on-duty' : 'available';
 
       const crewItem: Crew = {
         id: crewId,
@@ -1962,22 +2012,27 @@ class LogisticsStore {
       syncedCrews.push(crewItem);
     }
 
-    // Preserve active crews loaded from /api/crews that are not already in syncedCrews
-    // (unless explicitly marked inactive/rejected in this.users)
-    const inactiveOrRejectedNames = new Set(
-      this.users
-        .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && (u.status === 'inactive' || u.status === 'rejected'))
-        .map(u => (u.fullName || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
-
+    // Hanya pertahankan kru dari this.crews yang BELUM memiliki akun di this.users.
+    // Jika kru memiliki akun di this.users (termasuk variasi ejaan seperti Rifaldi Aminulloh / Aminullah)
+    // namun akun tersebut bukan lagi kru pengiriman aktif (misal sudah diubah ke Gudang / warehouse_admin),
+    // maka JANGAN pernah dimasukkan kembali ke syncedCrews!
     for (const c of (this.crews || [])) {
       if (!c || !c.name) continue;
       const cleanName = c.name.trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
       if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
-      if (!isCurrentSuperAdmin && (c.status === 'off' || inactiveOrRejectedNames.has(lowerName))) continue;
+      if (c.status === 'off') continue;
+      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
+
+      const matchedUserInStore = this.users.find(
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, cleanName)
+      );
+      if (matchedUserInStore) {
+        // Sudah diproses di loop pertama jika aktif, atau sengaja dikecualikan karena role/aksesnya bukan kru lagi
+        continue;
+      }
+
       seenNames.add(lowerName);
       syncedCrews.push(c);
     }
@@ -2011,13 +2066,12 @@ class LogisticsStore {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const drivers = all.filter(c => {
       const linkedUser = this.users.find(
-        u => (u.role === 'driver' || u.role === 'crew_helper') &&
-          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return linkedUser.status === 'approved' && linkedUser.role === 'driver';
+        return this.isActiveDeliveryCrewUser(linkedUser) && linkedUser.role === 'driver';
       }
-      return false;
+      return !(c.role || '').toLowerCase().includes('helper') && !(c.role || '').toLowerCase().includes('kernet');
     });
     return drivers;
   }
@@ -2026,13 +2080,12 @@ class LogisticsStore {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const helpers = all.filter(c => {
       const linkedUser = this.users.find(
-        u => (u.role === 'driver' || u.role === 'crew_helper') &&
-          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return linkedUser.status === 'approved' && (linkedUser.role === 'crew_helper' || linkedUser.role === 'driver');
+        return this.isActiveDeliveryCrewUser(linkedUser);
       }
-      return false;
+      return true;
     });
     return helpers;
   }
@@ -2534,9 +2587,25 @@ class LogisticsStore {
     return this.users;
   }
 
+  private buildSessionAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
+    const savedToken =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+      '';
+    const headers: Record<string, string> = { ...(extraHeaders || {}) };
+    if (savedToken) {
+      headers['Authorization'] = `Bearer ${savedToken}`;
+      headers['x-akk-session-token'] = savedToken;
+    }
+    return headers;
+  }
+
   public async refreshUsersFromHostinger(): Promise<boolean> {
     try {
-      const response = await fetch('/api/users', { credentials: 'same-origin' });
+      const response = await fetch('/api/users', {
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
       if (!response.ok) return false;
       const payload = await response.json();
       if (!Array.isArray(payload?.data)) return false;
@@ -2546,11 +2615,11 @@ class LogisticsStore {
           .filter(u => u.email)
           .map(u => [u.email.trim().toLowerCase(), u])
       );
-      const mappedUsers = payload.data.map((r: any) => {
+      const mappedUsers: UserProfile[] = payload.data.map((r: any) => {
         const cleanEmail = String(r.email || '').trim().toLowerCase();
         const local = localById.get(r.id) || (cleanEmail ? localByEmail.get(cleanEmail) : undefined);
         const role = (r.role || local?.role || 'unassigned') as UserRole;
-        const remotePerms = r.permissions && r.permissions.modules ? r.permissions : undefined;
+        const remotePerms = r.permissions && (r.permissions.modules || r.permissions.branchPermissions) ? r.permissions : undefined;
         const rawRemoteName = String(r.fullName || r.name || '').trim();
         const resolvedFullName = (cleanEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
           ? 'Hendri'
@@ -2572,6 +2641,21 @@ class LogisticsStore {
           permissions: normalizeUserPermissions(role, remotePerms || local?.permissions)
         } as UserProfile;
       });
+
+      // Pertahankan akun lokal yang belum ada di respons server (misal di mode preview atau baru diedit secara lokal)
+      for (const localU of this.users) {
+        const localEmail = (localU.email || '').trim().toLowerCase();
+        const alreadyInMapped = mappedUsers.some(
+          mu =>
+            mu.id === localU.id ||
+            (localEmail && (mu.email || '').trim().toLowerCase() === localEmail) ||
+            this.isSameCrewPersonName(mu.fullName, localU.fullName)
+        );
+        if (!alreadyInMapped) {
+          mappedUsers.push(localU);
+        }
+      }
+
       this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
@@ -2601,7 +2685,7 @@ class LogisticsStore {
     delete payload.password;
     fetch(`/api/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify(payload)
     }).catch(err => console.warn('[Hostinger Users] Sync update gagal:', err));
@@ -2752,13 +2836,64 @@ class LogisticsStore {
 
     const existing = this.users[userIndex];
     const oldName = existing.fullName;
+    const oldRole = existing.role;
     const targetRole = (data.role || existing.role) as UserRole;
+    const roleChanged = Boolean(data.role && data.role !== oldRole);
 
-    const rawPermissions = data.permissions
-      ? data.permissions
-      : existing.permissions && (existing.permissions.modules || existing.permissions.branchPermissions)
-      ? existing.permissions
-      : { modules: getDefaultPermissionsForRole(targetRole) };
+    let rawPermissions: UserPermissions | undefined;
+    if (data.permissions) {
+      rawPermissions = data.permissions;
+    } else if (roleChanged) {
+      const wasCrewRole = oldRole === 'driver' || oldRole === 'crew_helper';
+      const isNowCrewRole = targetRole === 'driver' || targetRole === 'crew_helper';
+      const existingMods = existing.permissions?.modules || {};
+      const hasCustomNonLogisticsAccess = Object.entries(existingMods).some(
+        ([modKey, modVal]) =>
+          modKey !== 'logistics' &&
+          modVal?.enabled &&
+          Object.values(modVal.subMenus || {}).some(v => v === 'full_access' || v === 'read_only')
+      );
+
+      if (wasCrewRole && !isNowCrewRole) {
+        if (hasCustomNonLogisticsAccess) {
+          // Pertahankan hak akses kustom non-logistik yang sudah diatur (misal Gudang -> Database Barang)
+          // sambil memastikan akses kru logistik lama dinonaktifkan.
+          const cleanedModules: UserPermissions['modules'] = JSON.parse(JSON.stringify(existingMods));
+          if (cleanedModules.logistics) {
+            cleanedModules.logistics.enabled = false;
+            Object.keys(cleanedModules.logistics.subMenus || {}).forEach(k => {
+              cleanedModules.logistics.subMenus[k] = 'none';
+            });
+          }
+          const cleanedBranches = existing.permissions?.branchPermissions
+            ? JSON.parse(JSON.stringify(existing.permissions.branchPermissions))
+            : undefined;
+          if (cleanedBranches) {
+            Object.values(cleanedBranches).forEach((bEntry: any) => {
+              if (bEntry?.modules?.logistics) {
+                bEntry.modules.logistics.enabled = false;
+                Object.keys(bEntry.modules.logistics.subMenus || {}).forEach(k => {
+                  bEntry.modules.logistics.subMenus[k] = 'none';
+                });
+              }
+            });
+          }
+          rawPermissions = {
+            modules: cleanedModules,
+            branchPermissions: cleanedBranches
+          };
+        } else {
+          // Gunakan default permissions untuk role baru (misal Gudang / Sales / HR)
+          rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
+        }
+      } else {
+        rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
+      }
+    } else if (existing.permissions && (existing.permissions.modules || existing.permissions.branchPermissions)) {
+      rawPermissions = existing.permissions;
+    } else {
+      rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
+    }
 
     const nextPermissions = normalizeUserPermissions(targetRole, rawPermissions);
 
@@ -2776,12 +2911,34 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
 
-    // Direct synchronization: If name or phone changed, sync with crew pool & active schedules
-    if (data.fullName && data.fullName !== oldName) {
+    // Jika akun user ini bukan lagi kru pengiriman aktif (misal diubah ke Gudang / warehouse_admin atau 0 AKSES Logistik),
+    // bersihkan entri kru terkait dari this.crews dan database server agar langsung hilang dari jadwal & stand by!
+    if (!this.isActiveDeliveryCrewUser(updatedUser)) {
+      const crewsToRemove = (this.crews || []).filter(
+        c =>
+          c &&
+          (c.id === `crw-${userId}` ||
+            this.isSameCrewPersonName(c.name, oldName) ||
+            this.isSameCrewPersonName(c.name, updatedUser.fullName))
+      );
+      if (crewsToRemove.length > 0) {
+        const removeIds = new Set(crewsToRemove.map(c => c.id));
+        this.crews = (this.crews || []).filter(c => !removeIds.has(c.id));
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+        crewsToRemove.forEach(c => {
+          fetch(`/api/crews/${encodeURIComponent(c.id)}`, {
+            method: 'DELETE',
+            headers: this.buildSessionAuthHeaders(),
+            credentials: 'same-origin'
+          }).catch(() => {});
+        });
+      }
+    } else if (data.fullName && data.fullName !== oldName) {
+      // Direct synchronization: If name or phone changed on an active crew, sync with crew pool & active schedules
       const newName = data.fullName;
       let crewsUpdated = false;
       this.crews = this.crews.map(c => {
-        if (c.name.toLowerCase() === oldName.toLowerCase() || (c.phone && existing.phone && c.phone === existing.phone)) {
+        if (this.isSameCrewPersonName(c.name, oldName) || (c.phone && existing.phone && c.phone === existing.phone)) {
           crewsUpdated = true;
           return { ...c, name: newName, phone: data.phone || c.phone };
         }
@@ -2798,15 +2955,15 @@ class LogisticsStore {
         let newHelper = s.crewHelper;
         let newHelper2 = s.crewHelper2;
 
-        if (s.crew && s.crew.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crew && this.isSameCrewPersonName(s.crew.name, oldName)) {
           newCrew = { ...s.crew, name: newName };
           changed = true;
         }
-        if (s.crewHelper && s.crewHelper.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crewHelper && this.isSameCrewPersonName(s.crewHelper.name, oldName)) {
           newHelper = { ...s.crewHelper, name: newName };
           changed = true;
         }
-        if (s.crewHelper2 && s.crewHelper2.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crewHelper2 && this.isSameCrewPersonName(s.crewHelper2.name, oldName)) {
           newHelper2 = { ...s.crewHelper2, name: newName };
           changed = true;
         }
@@ -2829,11 +2986,21 @@ class LogisticsStore {
   }
 
   public deleteUser(userId: string) {
+    const target = this.users.find(u => u.id === userId);
     this.users = this.users.filter(u => u.id !== userId);
+    if (target) {
+      this.crews = (this.crews || []).filter(
+        c => c.id !== `crw-${userId}` && !this.isSameCrewPersonName(c.name, target.fullName)
+      );
+      this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+    }
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
-    fetch(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE', credentials: 'same-origin' })
-      .catch(err => console.warn('[Hostinger Users] Hapus user gagal:', err));
+    fetch(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: this.buildSessionAuthHeaders(),
+      credentials: 'same-origin'
+    }).catch(err => console.warn('[Hostinger Users] Hapus user gagal:', err));
     this.notify();
   }
 
@@ -2870,7 +3037,7 @@ class LogisticsStore {
     const endpoint = this.currentUser?.role === 'super_admin' ? '/api/users' : '/api/auth/register';
     fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify({
         id: newUser.id,
@@ -3487,7 +3654,7 @@ class LogisticsStore {
     try {
       const response = await fetch(`/api/users/${encodeURIComponent(userId)}/password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'same-origin',
         body: JSON.stringify({ password: newPassword })
       });

@@ -726,6 +726,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       return;
     }
 
+    const roleChanged = editFormData.role !== editingUser.role;
     const success = logisticsStore.updateUserProfile(editingUser.id, {
       fullName: editFormData.fullName.trim(),
       email: editFormData.email.trim(),
@@ -738,6 +739,28 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     });
 
     if (success) {
+      const updatedUserObj = logisticsStore.getUsers().find(u => u.id === editingUser.id);
+      if (updatedUserObj && roleChanged) {
+        const syncedBranchPerms = branchStore.getUserBranchPermissions(
+          updatedUserObj.id,
+          updatedUserObj.role,
+          updatedUserObj.permissions?.modules,
+          updatedUserObj.permissions?.branchPermissions
+        );
+        branchStore.saveUserBranchPermissions(updatedUserObj.id, syncedBranchPerms);
+        const mergedMods = computeMergedModulesFromBranches(syncedBranchPerms, updatedUserObj.role);
+        logisticsStore.updateUserProfile(updatedUserObj.id, {
+          permissions: {
+            modules: mergedMods,
+            branchPermissions: syncedBranchPerms
+          }
+        });
+        if (selectedUserId === updatedUserObj.id) {
+          prevLoadedUserIdRef.current = null;
+          setBranchPermissions(syncedBranchPerms);
+          setEditingPermissions(mergedMods);
+        }
+      }
       setSaveSuccessMessage(`Profil "${editFormData.fullName}" berhasil diperbarui.`);
       setTimeout(() => setSaveSuccessMessage(null), 4000);
       setEditingUser(null);
@@ -774,6 +797,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
     });
 
+    const initialBranchPerms = branchStore.getUserBranchPermissions(
+      created.id,
+      chosenRole,
+      created.permissions?.modules
+    );
+    branchStore.saveUserBranchPermissions(created.id, initialBranchPerms);
+    const mergedNewMods = computeMergedModulesFromBranches(initialBranchPerms, chosenRole);
+    logisticsStore.updateUserProfile(created.id, {
+      permissions: {
+        modules: mergedNewMods,
+        branchPermissions: initialBranchPerms
+      }
+    });
+
+    prevLoadedUserIdRef.current = null;
     setIsAddUserModalOpen(false);
     setSelectedUserId(created.id);
     setNewUser({

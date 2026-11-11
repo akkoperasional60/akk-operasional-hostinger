@@ -37,7 +37,8 @@ import {
   RotateCcw,
   RotateCw,
   Crop,
-  Check
+  Check,
+  ImageMinus
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -76,6 +77,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     let totalVol = 0;
     let countWithVol = 0;
     let totalBeratKg = 0;
+    let countWithBerat = 0;
 
     items.forEach(item => {
       const vol = Number(item.volM3) || 0;
@@ -86,16 +88,20 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       }
       if (berat > 0) {
         totalBeratKg += berat;
+        countWithBerat++;
       }
     });
 
     const avgKubikasiUnit = countWithVol > 0 ? totalVol / countWithVol : 0;
+    const avgBeratUnit = countWithBerat > 0 ? totalBeratKg / countWithBerat : 0;
 
     return {
       totalSku,
       avgKubikasiUnit,
-      totalKubikasiStokM3: totalVol,
-      totalBeratStokKg: totalBeratKg
+      avgBeratUnit,
+      countWithBerat,
+      totalKubikasiM3: totalVol,
+      totalBeratKg
     };
   }, [items]);
 
@@ -178,6 +184,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     variant?: 'success' | 'danger' | 'info';
     badge?: string;
   } | null>(null);
+
+  // Modal Kelola & Bersihkan Foto Berlebih (sisakan 3 foto terpilih)
+  const [isManagePhotosModalOpen, setIsManagePhotosModalOpen] = useState(false);
+  const [selectedKeepCodes, setSelectedKeepCodes] = useState<string[]>([]);
+  const [isPurgingPhotos, setIsPurgingPhotos] = useState(false);
+  const [managePhotoSearch, setManagePhotoSearch] = useState('');
 
   // Direct Live Camera & HP Camera capture state
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
@@ -322,7 +334,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
       ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
       : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
+    const removedUrl = existingUrls[photoIdx];
     const updatedUrls = existingUrls.filter((_, idx) => idx !== photoIdx);
+
+    if (removedUrl) {
+      databaseBarangService.deletePhoto(item.noBarang, removedUrl);
+    }
     const saved = databaseBarangService.upsertItem({
       ...item,
       dokumentasiUrls: updatedUrls,
@@ -331,6 +348,18 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setItems(databaseBarangService.getAll());
     setPreviewDocItem(saved);
     setActivePhotoIndex(prev => Math.max(0, Math.min(prev, updatedUrls.length - 1)));
+  };
+
+  const handleClearAllPhotosFromPreview = (item: DatabaseBarangRecord) => {
+    databaseBarangService.clearAllPhotos(item.noBarang);
+    const saved = databaseBarangService.upsertItem({
+      ...item,
+      dokumentasiUrls: [],
+      dokumentasiUrl: ''
+    });
+    setItems(databaseBarangService.getAll());
+    setPreviewDocItem(saved);
+    setActivePhotoIndex(0);
   };
 
   const handleSetPrimaryPhotoInPreview = (item: DatabaseBarangRecord, photoIdx: number) => {
@@ -687,6 +716,62 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         title: 'Gagal Menghubungkan Foto ke MySQL',
         message: `${err?.message || 'Server belum tersedia'}. Foto asli di browser tetap aman. Pastikan patch sudah dideploy ke aplikasi yang aktif.`
       });
+    }
+  };
+
+  const handleOpenManagePhotosModal = () => {
+    const itemsWithPhotos = items.filter(i => {
+      const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
+      return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
+    });
+    // Default: tandai 3 barang pertama jika user mau menyisakan 3 barang
+    setSelectedKeepCodes(itemsWithPhotos.slice(0, 3).map(i => i.noBarang.trim().toUpperCase()));
+    setManagePhotoSearch('');
+    setIsManagePhotosModalOpen(true);
+  };
+
+  const handleToggleKeepCode = (code: string) => {
+    const clean = code.trim().toUpperCase();
+    setSelectedKeepCodes(prev =>
+      prev.includes(clean) ? prev.filter(c => c !== clean) : [...prev, clean]
+    );
+  };
+
+  const handleSelectFirst3Photos = () => {
+    const itemsWithPhotos = items.filter(i => {
+      const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
+      return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
+    });
+    setSelectedKeepCodes(itemsWithPhotos.slice(0, 3).map(i => i.noBarang.trim().toUpperCase()));
+  };
+
+  const handleExecuteBulkPurgePhotos = async () => {
+    if (selectedKeepCodes.length === 0) {
+      if (!window.confirm('Tidak ada barang yang dipilih untuk disimpan fotonya. Seluruh foto barang akan dihapus permanen dari browser & database MySQL. Lanjutkan?')) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`Simpan foto dari ${selectedKeepCodes.length} barang terpilih, dan HAPUS PERMANEN seluruh foto barang lainnya dari browser & database MySQL?`)) {
+        return;
+      }
+    }
+
+    setIsPurgingPhotos(true);
+    try {
+      const res = await databaseBarangService.bulkDeletePhotos({ keepCodes: selectedKeepCodes });
+      setItems(databaseBarangService.getAll());
+      setIsManagePhotosModalOpen(false);
+      setFeedbackModal({
+        title: 'Pembersihan Foto Selesai',
+        message: `Foto dari ${res.deletedCount} barang telah dibersihkan secara permanen. Sekarang tersisa tepat ${selectedKeepCodes.length} barang berfoto di sistem dan MySQL. Foto tidak akan muncul kembali saat reload maupun push website baru.`
+      });
+    } catch (e: any) {
+      setFeedbackModal({
+        title: 'Gagal Membersihkan Foto',
+        message: e?.message || 'Terjadi kesalahan jaringan saat menghapus foto'
+      });
+    } finally {
+      setIsPurgingPhotos(false);
     }
   };
 
@@ -1627,10 +1712,20 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             type="button"
             onClick={handleRecoverLocalPhotos}
             disabled={syncStatus.isSyncing}
-            className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60"
-            title="Kirim ulang seluruh foto yang masih tersimpan di IndexedDB browser ini ke MySQL; tidak menghapus foto lokal"
+            className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
+            title="Kirim seluruh foto dari browser ini ke MySQL dengan cepat"
           >
-            Load Foto ke DB
+            {syncStatus.isSyncing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+            <span>{syncStatus.isSyncing ? `Memuat (${syncStatus.progressPct}%)...` : 'Load Foto ke DB'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenManagePhotosModal}
+            className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-800 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+            title="Kelola & bersihkan foto berlebih, sisakan tepat 3 foto terpilih"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+            <span>Kelola Foto ({photoStats.withPhoto})</span>
           </button>
           <button
             type="button"
@@ -1693,12 +1788,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Total Kubikasi Stok Gudang
+              Total Kubikasi Master Barang
             </span>
             <Layers className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
-            {cubicationMetrics.totalKubikasiStokM3.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m&sup3;
+            {cubicationMetrics.totalKubikasiM3.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m&sup3;
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
             Akumulasi volume seluruh item database
@@ -1708,15 +1803,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Total Berat Stok Gudang
+              Rata-Rata Berat / Unit
             </span>
             <Scale className="w-4 h-4 text-blue-500" />
           </div>
           <div className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
-            {(cubicationMetrics.totalBeratStokKg / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} Ton
+            {cubicationMetrics.avgBeratUnit.toFixed(2)} Kg
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Setara {Math.round(cubicationMetrics.totalBeratStokKg).toLocaleString('id-ID')} Kg total berat barang
+            Berat rata-rata ({cubicationMetrics.countWithBerat.toLocaleString('id-ID')} SKU memiliki data berat)
           </p>
         </div>
       </div>
@@ -1831,6 +1926,18 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
               </span>
             )}
 
+            {fotoFilter === 'has_photo' && (
+              <button
+                type="button"
+                onClick={handleOpenManagePhotosModal}
+                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                title="Kelola barang berfoto dan hapus foto berlebih"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Sisakan 3 Foto Terpilih ({photoStats.withPhoto})</span>
+              </button>
+            )}
+
             {(searchQuery || unitFilter !== 'ALL' || volFilter !== 'ALL' || beratFilter !== 'ALL' || fotoFilter !== 'ALL' || sortBy !== 'default') && (
               <button
                 type="button"
@@ -1907,7 +2014,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
               <span>Tabel Database Barang</span>
               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                {tableMode === 'compact' ? 'Tampilan Ringkas (Responsif)' : 'Tampilan Semua Kolom Spreadsheet'}
+                {tableMode === 'compact' ? 'Ringkas (Responsif)' : 'Semua Kolom Spreadsheet'}
               </span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1969,22 +2076,37 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             <Camera className="w-3.5 h-3.5" />
                           </button>
                           {hasCustomPhoto && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewDocItem(item);
-                                setActivePhotoIndex(0);
-                              }}
-                              className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/70"
-                              title={`Lihat ${photoList.length} Foto Dokumentasi`}
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              {photoList.length > 1 && (
-                                <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
-                                  {photoList.length}
-                                </span>
-                              )}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewDocItem(item);
+                                  setActivePhotoIndex(0);
+                                }}
+                                className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/70"
+                                title={`Lihat ${photoList.length} Foto Dokumentasi`}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                {photoList.length > 1 && (
+                                  <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
+                                    {photoList.length}
+                                  </span>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (window.confirm(`Hapus foto untuk ${item.noBarang}? Foto akan dihapus permanen dari browser dan database MySQL.`)) {
+                                    handleClearAllPhotosFromPreview(item);
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                                title="Hapus Foto Barang Ini (Permanen)"
+                              >
+                                <ImageMinus className="w-3.5 h-3.5" />
+                              </button>
+                            </>
                           )}
                           <button
                             type="button"
@@ -2194,22 +2316,37 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                 <Camera className="w-3.5 h-3.5" />
                               </button>
                               {hasCustomPhoto && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewDocItem(item);
-                                    setActivePhotoIndex(0);
-                                  }}
-                                  className="relative p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-700 dark:text-blue-300 transition cursor-pointer"
-                                  title={`Lihat ${photoList.length} Foto Dokumentasi`}
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  {photoList.length > 1 && (
-                                    <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
-                                      {photoList.length}
-                                    </span>
-                                  )}
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPreviewDocItem(item);
+                                      setActivePhotoIndex(0);
+                                    }}
+                                    className="relative p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-700 dark:text-blue-300 transition cursor-pointer"
+                                    title={`Lihat ${photoList.length} Foto Dokumentasi`}
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    {photoList.length > 1 && (
+                                      <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center shadow-2xs">
+                                        {photoList.length}
+                                      </span>
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (window.confirm(`Hapus foto untuk ${item.noBarang}? Foto akan dihapus permanen dari browser dan database MySQL.`)) {
+                                        handleClearAllPhotosFromPreview(item);
+                                      }
+                                    }}
+                                    className="p-1 rounded-md bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                                    title="Hapus Foto Barang Ini (Permanen)"
+                                  >
+                                    <ImageMinus className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
                               )}
                               <button
                                 type="button"
@@ -3205,14 +3342,27 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                           </button>
                         )}
                         {!isCropMode && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
-                            className="p-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer"
-                            title="Hapus foto ini"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
+                              className="px-2 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                              title="Hapus foto ini secara permanen"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus</span>
+                            </button>
+                            {totalPhotos > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleClearAllPhotosFromPreview(previewDocItem)}
+                                className="px-2 py-1.5 rounded-xl bg-rose-800/90 hover:bg-rose-700 text-white shadow-md backdrop-blur-xs transition cursor-pointer text-[10px] font-bold"
+                                title="Hapus semua foto untuk barang ini"
+                              >
+                                Hapus Semua ({totalPhotos})
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3860,6 +4010,216 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           </div>
         </div>
       )}
+
+      {/* Modal Kelola & Bersihkan Foto Berlebih (Sisakan Sisa 3 Foto Terpilih) */}
+      {isManagePhotosModalOpen && (() => {
+        const itemsWithPhotos = items.filter(i => {
+          const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
+          return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
+        });
+        const q = managePhotoSearch.trim().toLowerCase();
+        const displayList = q
+          ? itemsWithPhotos.filter(i =>
+              (i.noBarang || '').toLowerCase().includes(q) ||
+              (i.deskripsiBarang || '').toLowerCase().includes(q)
+            )
+          : itemsWithPhotos;
+        const purgeCount = Math.max(0, itemsWithPhotos.length - selectedKeepCodes.length);
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in"
+            onClick={() => !isPurgingPhotos && setIsManagePhotosModalOpen(false)}
+          >
+            <div
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900 px-6 py-4 flex items-center justify-between text-white shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-blue-200">
+                      Pembersihan Foto Barang
+                    </div>
+                    <h4 className="text-sm sm:text-base font-black tracking-tight text-white">
+                      Kelola Foto Aktif &amp; Sisakan Foto Terpilih
+                    </h4>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isPurgingPhotos}
+                  onClick={() => setIsManagePhotosModalOpen(false)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer disabled:opacity-50"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Instructions and Controls */}
+              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Tandai barang yang fotonya <strong>tetap ingin disimpan</strong> (misal: tepat 3 barang). Seluruh foto dari barang lainnya akan <strong>dihapus permanen</strong> dari browser (IndexedDB &amp; LocalStorage) serta database MySQL, sehingga tidak akan muncul kembali saat reload atau push website baru.
+                </p>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isPurgingPhotos}
+                      onClick={handleSelectFirst3Photos}
+                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Pilih 3 Barang Pertama</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPurgingPhotos}
+                      onClick={() => setSelectedKeepCodes(itemsWithPhotos.map(i => i.noBarang.trim().toUpperCase()))}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      Pilih Semua
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPurgingPhotos}
+                      onClick={() => setSelectedKeepCodes([])}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      Batal Pilih
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-mono">
+                      Disimpan: {selectedKeepCodes.length}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700 font-mono">
+                      Dihapus: {purgeCount}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={managePhotoSearch}
+                    onChange={e => setManagePhotoSearch(e.target.value)}
+                    placeholder="Cari kode atau nama barang berfoto..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* List of Photo Items */}
+              <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 dark:divide-slate-800/80">
+                {displayList.length > 0 ? (
+                  displayList.map(item => {
+                    const cleanCode = item.noBarang.trim().toUpperCase();
+                    const isKept = selectedKeepCodes.includes(cleanCode);
+                    const thumb = databaseBarangService.getItemThumbnail(item);
+                    const photoCount = (item.dokumentasiUrls?.length || 0) || (item.dokumentasiUrl ? 1 : 0);
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => !isPurgingPhotos && handleToggleKeepCode(cleanCode)}
+                        className={`py-2 px-2.5 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition ${
+                          isKept
+                            ? 'bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40 opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isKept}
+                            onChange={() => {}}
+                            disabled={isPurgingPhotos}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
+                          />
+                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 shrink-0 flex items-center justify-center">
+                            <img src={thumb} alt={item.noBarang} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono font-black text-xs text-blue-700 dark:text-blue-400">
+                                {item.noBarang}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                ({photoCount} foto)
+                              </span>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                              {item.deskripsiBarang || item.keteranganBarang}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          {isKept ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-extrabold text-[10px]">
+                              <Check className="w-3 h-3" />
+                              <span>Tetap Disimpan</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-300 font-extrabold text-[10px]">
+                              <Trash2 className="w-3 h-3" />
+                              <span>Akan Dihapus</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="py-12 text-center text-slate-400 text-xs">
+                    Tidak ditemukan barang berfoto yang sesuai pencarian.
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0">
+                <button
+                  type="button"
+                  disabled={isPurgingPhotos}
+                  onClick={() => setIsManagePhotosModalOpen(false)}
+                  className="py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  disabled={isPurgingPhotos}
+                  onClick={handleExecuteBulkPurgePhotos}
+                  className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  {isPurgingPhotos ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Sedang Membersihkan MySQL &amp; Browser...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>
+                        Hapus Permanen {purgeCount} Foto (Sisakan {selectedKeepCodes.length})
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modern Feedback Notification Modal */}
       {feedbackModal && (

@@ -38,14 +38,17 @@ export interface SalesHeaderFilterProps {
 }
 
 export function isSalesAdminUser(u: UserProfile): boolean {
-  if (!u || u.status === 'rejected' || u.status === 'inactive') return false;
+  if (!u || u.status !== 'approved') return false;
   const deptClean = (u.department || '').trim().toLowerCase();
   const deptMatch = deptClean === 'adm. penjualan' || deptClean === 'admin penjualan';
   if (u.role === 'super_admin') {
     return deptMatch;
   }
   const hasSalesAccess = canAccess(u, 'sales_admin');
-  return hasSalesAccess || u.role === 'sales_admin' || deptMatch;
+  if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
+    return false;
+  }
+  return u.role === 'sales_admin' || hasSalesAccess;
 }
 
 export function useSalesAdminUsers(): UserProfile[] {

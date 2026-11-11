@@ -531,7 +531,7 @@ export const WarehouseManagementSystem: React.FC<{
               inferKategoriBarang(rec.noBarang, rec.deskripsiBarang || rec.keteranganBarang),
             noBarang: rec.noBarang,
             namaBarang: rec.deskripsiBarang || rec.keteranganBarang,
-            stokTersedia: ex?.stokTersedia ?? rec.stokTersedia ?? 1000,
+            stokTersedia: ex?.stokTersedia ?? rec.stokTersedia ?? 0,
             satuan: rec.unit1 || rec.satuan || ex?.satuan || 'Pcs',
             cabang: ex?.cabang || rec.cabang || 'Banyuwangi',
             lokasiStock: ex?.lokasiStock || 'Gudang Utama Argopuro',

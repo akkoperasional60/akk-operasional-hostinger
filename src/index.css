@@ -586,7 +586,9 @@ html.light .bg-slate-950\/40:not(.fixed) {
 /* Global Modal Overlay Fix: Ensure all fixed modals sit above sticky header (z-1050) & sidebar (z-1100)
    and never clip their top content when viewport zoom is 80% - 150% */
 div.fixed.inset-0.z-50,
-div.fixed.inset-0.z-\[1300\] {
+div.fixed.inset-0.z-\[70\],
+div.fixed.inset-0.z-\[1300\],
+div.fixed.inset-0.z-\[1400\] {
   z-index: 1300 !important;
   overflow-y: auto !important;
   align-items: flex-start !important;
@@ -595,16 +597,19 @@ div.fixed.inset-0.z-\[1300\] {
 }
 
 div.fixed.inset-0.z-50 > div,
-div.fixed.inset-0.z-\[1300\] > div {
+div.fixed.inset-0.z-\[70\] > div,
+div.fixed.inset-0.z-\[1300\] > div,
+div.fixed.inset-0.z-\[1400\] > div {
   margin-top: auto !important;
   margin-bottom: auto !important;
 }
 
 html.light div.fixed.inset-0.bg-slate-950\/80,
 html.light div.fixed.inset-0.bg-slate-950\/85,
+html.light div.fixed.inset-0.bg-slate-950\/70,
 html.light div.fixed.inset-0.bg-slate-950\/60,
 html.light div.fixed.inset-0.bg-slate-900\/60 {
-  background-color: rgba(15, 23, 42, 0.55) !important;
+  background-color: rgba(15, 23, 42, 0.45) !important;
 }
 
 html.light .bg-slate-900 {
@@ -875,13 +880,13 @@ html.light .bg-indigo-950\/60 {
   border-color: #818cf8 !important;
 }
 
-html.light .bg-slate-950,
-html.light .bg-slate-950\/95,
-html.light .bg-slate-950\/90,
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/70,
-html.light .bg-slate-950\/50,
-html.light .bg-slate-950\/30 {
+html.light .bg-slate-950:not(.fixed),
+html.light .bg-slate-950\/95:not(.fixed),
+html.light .bg-slate-950\/90:not(.fixed),
+html.light .bg-slate-950\/80:not(.fixed),
+html.light .bg-slate-950\/70:not(.fixed),
+html.light .bg-slate-950\/50:not(.fixed),
+html.light .bg-slate-950\/30:not(.fixed) {
   background-color: #f8fafc !important;
   border-color: #e2e8f0 !important;
 }
