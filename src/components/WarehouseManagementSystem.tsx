@@ -19,7 +19,8 @@ import {
   RefreshCw,
   X,
   Sliders,
-  Filter
+  Filter,
+  Trash2
 } from 'lucide-react';
 import { Warehouse3DSimulation } from './Warehouse3DSimulation';
 import {
@@ -475,90 +476,14 @@ export const WarehouseManagementSystem: React.FC<{
 }> = ({ initialTab = 'overview', onNavigateTab }) => {
   const [activeTab, setActiveTab] = useState<WmsSubTab>(initialTab);
 
-  // Master SKU State (persisted in localStorage & synced with Database Barang)
+  // Master SKU State (Kosong secara default, terpisah dari Database Barang penjualan)
   const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>(() => {
     try {
-      const savedV3 = localStorage.getItem(LS_KEY_MASTER_SKU);
-      const savedLegacy = localStorage.getItem(LS_KEY_MASTER_SKU_LEGACY);
-      const saved = savedV3 || savedLegacy;
-      try {
-        if (savedLegacy) localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
-      } catch {}
-
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const cleaned = parsed.filter((item: any) => !isLegacySeededBarang(item?.noBarang));
-          if (cleaned.length > 0) {
-            return cleaned.map((item: any) => ({
-              ...item,
-              kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
-            }));
-          }
-        }
-      }
-    } catch {
-      // ignore malformed local cache
-    }
-    return INITIAL_MASTER_SKUS;
+      localStorage.removeItem(LS_KEY_MASTER_SKU);
+      localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+    } catch {}
+    return [];
   });
-
-  // Hydrate & synchronize Master SKU with Database Barang (IndexedDB) and purge any legacy items
-  useEffect(() => {
-    let active = true;
-    const syncFromDatabaseBarang = (records: ReturnType<typeof databaseBarangService.getAll>) => {
-      if (!active) return;
-      const validRecords = records.filter(r => !isLegacySeededBarang(r.noBarang));
-      if (validRecords.length === 0) {
-        setSkuItems(prev => prev.filter(item => !isLegacySeededBarang(item.noBarang)));
-        return;
-      }
-      setSkuItems(prev => {
-        const existingByCode = new Map<string, MasterSkuRecord>();
-        prev.forEach(item => {
-          if (!isLegacySeededBarang(item.noBarang)) {
-            existingByCode.set(item.noBarang.trim().toUpperCase(), item);
-          }
-        });
-        return validRecords.map(rec => {
-          const key = rec.noBarang.trim().toUpperCase();
-          const ex = existingByCode.get(key);
-          return {
-            id: ex?.id || rec.id,
-            kategoriBarang:
-              rec.kategoriBarang ||
-              ex?.kategoriBarang ||
-              inferKategoriBarang(rec.noBarang, rec.deskripsiBarang || rec.keteranganBarang),
-            noBarang: rec.noBarang,
-            namaBarang: rec.deskripsiBarang || rec.keteranganBarang,
-            stokTersedia: ex?.stokTersedia ?? rec.stokTersedia ?? 0,
-            satuan: rec.unit1 || rec.satuan || ex?.satuan || 'Pcs',
-            cabang: ex?.cabang || rec.cabang || 'Banyuwangi',
-            lokasiStock: ex?.lokasiStock || 'Gudang Utama Argopuro',
-            tanggalStok: rec.updatedAt || ex?.tanggalStok,
-            panjangCm: rec.panjangCm,
-            lebarCm: rec.lebarCm,
-            tinggiCm: rec.tinggiCm,
-            kubikasiM3: rec.volM3,
-            beratKg: rec.beratKg
-          };
-        });
-      });
-    };
-
-    databaseBarangService.ensureHydrated().then(records => {
-      syncFromDatabaseBarang(records);
-    });
-
-    const handleDbUpdated = () => {
-      syncFromDatabaseBarang(databaseBarangService.getAll());
-    };
-    window.addEventListener('akk-database-barang-updated', handleDbUpdated);
-    return () => {
-      active = false;
-      window.removeEventListener('akk-database-barang-updated', handleDbUpdated);
-    };
-  }, []);
 
   // Kartu Stok Analysis State (persisted in localStorage)
   const [kartuStokList, setKartuStokList] = useState<KartuStokAnalysisRecord[]>(() => {
@@ -2477,6 +2402,27 @@ export const WarehouseManagementSystem: React.FC<{
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {skuItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSkuItems([]);
+                    try {
+                      localStorage.removeItem(LS_KEY_MASTER_SKU);
+                      localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+                    } catch {}
+                    setPopupModal({
+                      title: 'Data Berhasil Dikosongkan',
+                      message: 'Seluruh data ringkasan gudang Master SKU telah berhasil dibersihkan.'
+                    });
+                  }}
+                  className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  title="Kosongkan seluruh data ringkasan gudang"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Kosongkan Data ({skuItems.length})</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setIsUploadSkuPageOpen(true)}
@@ -2671,8 +2617,20 @@ export const WarehouseManagementSystem: React.FC<{
                     })
                   ) : (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
-                        Tidak ada data barang yang cocok dengan pencarian.
+                      <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Package className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                          <div className="font-bold text-slate-700 dark:text-slate-300 text-sm">
+                            {skuItems.length === 0
+                              ? 'Ringkasan Gudang Kosong (0 SKU)'
+                              : 'Tidak ada data barang yang cocok dengan pencarian atau filter cabang.'}
+                          </div>
+                          {skuItems.length === 0 && (
+                            <p className="text-[11px] text-slate-400 max-w-sm">
+                              Gunakan tombol <strong>Unggah File (Upload Excel)</strong> atau <strong>Tambah Master SKU</strong> di atas untuk memasukkan data stok fisik gudang.
+                            </p>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

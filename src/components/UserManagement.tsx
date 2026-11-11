@@ -139,7 +139,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     if (e) e.stopPropagation();
     setPageModalNotification({
       title: 'Password Tidak Dapat Ditampilkan',
-      message: 'Password disimpan sebagai hash scrypt di Hostinger MySQL. Gunakan menu Reset Password untuk menetapkan password baru.',
+      message: 'Password disimpan sebagai hash scrypt terenkripsi di server database. Gunakan menu Reset Password untuk menetapkan password baru.',
       type: 'info'
     });
   };

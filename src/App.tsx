@@ -287,7 +287,7 @@ export default function App() {
       case 'customer_map': return 'Pemetaan Toko Retail & Mitra';
       case 'branches': return 'Master Cabang (Multi-Store)';
       case 'users': return 'Approval & Manajemen Pengguna';
-      case 'architecture': return 'Arsitektur Database Hostinger MySQL';
+      case 'architecture': return 'Arsitektur Database Server';
       case 'e2e_testing': return 'Pusat Pengujian E2E & Simulasi Akun Pengguna';
       default: return 'Sistem Operasional AKK';
     }

@@ -1,9 +1,9 @@
 {
-  "versionCode": 10029,
-  "versionName": "1.0.29",
-  "updatedAt": "2026-11-11T12:30:00.000000",
+  "versionCode": 10030,
+  "versionName": "1.0.30",
+  "updatedAt": "2026-11-11T16:06:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V41: Fitur Kelola & Hapus Permanen Foto Barang (Sisakan Foto Terpilih & Bulk Purge MySQL), Pembersihan Otomatis Eks-Kru saat Role Diubah di Manajemen User, Kolom 3 Baris Pajak/STNK/KIR Armada, serta Perbaikan Overlay Modal Konfirmasi."
+  "releaseNotes": "Update V42: Modal Edit & Hapus Penugasan Admin Penjualan, Fitur Crop Rasio (1:1, 4:3, 16:9, Lingkaran) & Modal Konfirmasi Hapus Foto Database Barang, Instant Hydration Tanpa Jeda Reload, Pemisahan Master SKU Gudang, serta Modal Kustom Bypass Checklist Super Admin."
 }

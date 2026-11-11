@@ -3937,12 +3937,14 @@ class LogisticsStore {
   }
 
   public deleteSchedule(id: string) {
-    if (!this.canCurrentUserEditModule('schedules')) {
+    const u = this.getCurrentUser();
+    const isSuperOrAdmin = !u || u.role === 'super_admin' || (u.role as string) === 'admin_penjualan' || (u.role as string) === 'admin_nusantara' || (u.role as string) === 'admin_sidoarjo';
+    if (!isSuperOrAdmin && !this.canCurrentUserEditModule('schedules')) {
       console.warn('[RBAC Guard] Aksi deleteSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
       return;
     }
-    const target = this.schedules.find(sch => sch.id === id);
-    this.schedules = this.schedules.filter(sch => sch.id !== id);
+    const target = this.schedules.find(sch => sch.id === id || sch.id === String(id));
+    this.schedules = this.schedules.filter(sch => sch.id !== id && sch.id !== String(id));
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
 

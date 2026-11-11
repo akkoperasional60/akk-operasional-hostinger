@@ -1447,7 +1447,41 @@ export const databaseBarangService = {
           }
         }
 
-        // 2. Sinkronisasi dengan Server MySQL (/api/database-barang) agar PC & HP menampilkan data yang sama
+        if (localList.length > 0) {
+          hasHydratedFromIdb = true;
+          // Jalankan sinkronisasi remote MySQL di latar belakang (asynchronous non-blocking)
+          // agar saat halaman direload, data langsung tampil INSTAN tanpa jeda loading!
+          void (async () => {
+            try {
+              const remoteList = await this.fetchFromServer();
+              if (remoteList !== null && remoteList.length > 0) {
+                const {
+                  merged,
+                  shouldPushToServer,
+                  shouldSaveLocally,
+                  itemsWithLocalPhotosToPush
+                } = mergeLocalAndRemoteRecords(localList, remoteList);
+                if (shouldSaveLocally || merged.length !== localList.length) {
+                  inMemoryItems = merged;
+                  await saveRecordsToIndexedDb(merged);
+                  writeSafeLocalStorageCache(merged);
+                  window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+                }
+                if (itemsWithLocalPhotosToPush.length > 0) {
+                  void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(() => {});
+                } else if (shouldPushToServer && merged.length > 0) {
+                  void this.syncAllToServer(merged, 'replace_all');
+                }
+              }
+            } catch (bgErr) {
+              console.warn('Background sync error:', bgErr);
+            }
+          })();
+
+          return [...localList];
+        }
+
+        // 2. Jika data lokal benar-benar masih kosong (misal pertama kali buka browser baru), tarik dari Server MySQL
         const remoteList = await this.fetchFromServer();
         if (remoteList !== null) {
           const {
@@ -1465,11 +1499,8 @@ export const databaseBarangService = {
             window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
           }
 
-          // Dorong segera semua item yang memiliki foto di device ini (misal 69 foto di HP) tapi belum ada di server!
           if (itemsWithLocalPhotosToPush.length > 0) {
-            void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(err => {
-              updateSyncStatus({ error: err?.message || 'Gagal kirim foto ke MySQL' });
-            });
+            void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(() => {});
           } else if (shouldPushToServer && merged.length > 0) {
             void this.syncAllToServer(merged, 'replace_all');
           }

@@ -1257,6 +1257,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [isUploadConfigModalOpen, setIsUploadConfigModalOpen] = useState<boolean>(false);
   const [activeSubPage, setActiveSubPage] = useState<'schedule' | 'upload_excel' | 'upload_process'>('schedule');
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ p: DeliveryAssignment; dayNumber: number; tripIndex: number; dateString: string } | null>(null);
+  const [bypassConfirmModal, setBypassConfirmModal] = useState<{ schId: string; p: DeliveryAssignment; matchedSch?: Schedule } | null>(null);
 
   useEffect(() => {
     if (!deleteConfirmModal) return;
@@ -4988,64 +4989,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       {logisticsStore.getCurrentUser()?.role === 'super_admin' && currentStatus !== 'delivered' && (
                                         <button
                                           type="button"
-                                          onClick={async () => {
+                                          onClick={() => {
                                             const schId = matchedSch?.id || p.id;
                                             if (!schId) return;
-                                            if (!confirm(`Tembus jadwal ${p.area} (${p.driver}) langsung ke status Selesai tanpa checklist? (Khusus Super Admin)`)) return;
-                                            
-                                            const adminName = logisticsStore.getCurrentUser()?.fullName || 'Super Admin';
-                                            const nowIso = new Date().toISOString();
-
-                                            // Optimistically update schedule in local store
-                                            if (matchedSch) {
-                                              const deliveredSchedule = {
-                                                ...matchedSch,
-                                                status: 'delivered' as const,
-                                                isChecklistBypassed: true,
-                                                checklistBypassedBy: adminName,
-                                                checklistBypassedAt: nowIso
-                                              };
-                                              logisticsStore.updateSchedule(matchedSch.id, deliveredSchedule);
-                                              try {
-                                                const wb = driverWaybillService.getWaybillForSchedule(deliveredSchedule);
-                                                driverWaybillService.updateWaybillStatus(wb.id, 'delivered', 'Bypass Checklist Super Admin');
-                                              } catch (e) {}
-                                            }
-
-                                            logisticsStore.addScheduleChangeLog({
-                                              actionType: 'manual_edit',
-                                              fileName: `Bypass Checklist Admin (${p.area})`,
-                                              userName: adminName,
-                                              userRole: 'Super Admin',
-                                              summary: `Tembus jadwal ${p.area} tanpa checklist`,
-                                              changes: [
-                                                `Jadwal ${p.area} berhasil ditembus dan disimpan ke status Selesai tanpa checklist oleh Super Admin.`
-                                              ]
-                                            });
-
-                                            try {
-                                              const response = await fetch(`/api/schedules/${encodeURIComponent(schId)}/bypass-checklist`, {
-                                                method: 'POST',
-                                                credentials: 'same-origin',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                  note: `Input histori jadwal ${p.area}`,
-                                                  postTripFleetStatus: 'available',
-                                                  schedule: matchedSch ? {
-                                                    ...matchedSch,
-                                                    status: 'delivered',
-                                                    isChecklistBypassed: true,
-                                                    checklistBypassedBy: adminName,
-                                                    checklistBypassedAt: nowIso
-                                                  } : undefined
-                                                })
-                                              });
-                                              if (response.ok) {
-                                                await logisticsStore.hydrateOperationalDataFromHostinger().catch(() => {});
-                                              }
-                                            } catch (netErr) {
-                                              console.warn('[Bypass Checklist Admin Sync Warning]', netErr);
-                                            }
+                                            setBypassConfirmModal({ schId, p, matchedSch });
                                           }}
                                           className="p-1 rounded-md bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 dark:text-amber-400 border border-amber-500/40 transition cursor-pointer"
                                           title="Tembus & Simpan Selesai Tanpa Checklist (Super Admin)"
@@ -7482,6 +7429,123 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               >
                 <Download className="w-4 h-4" />
                 <span>Unduh Template .XLSX Standar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pop-Up Modal Konfirmasi Tembus Status Selesai (Bypass Checklist Super Admin) */}
+      {bypassConfirmModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-500 border border-amber-500/30 shrink-0">
+                <Zap className="w-6 h-6 fill-current" />
+              </div>
+              <div className="space-y-1 min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Akses Khusus Super Admin
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                  Tembus Status Selesai Tanpa Checklist?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Jadwal pengiriman armada ini akan langsung diubah ke status <strong>Selesai (Delivered)</strong> dan disimpan ke riwayat tanpa melalui checklist supir.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Area Tujuan:</span>
+                <span className="font-black text-emerald-600 dark:text-emerald-400">{bypassConfirmModal.p.area}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Driver / Supir:</span>
+                <span className="font-bold text-slate-900 dark:text-white">{bypassConfirmModal.p.driver}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                <span className="font-semibold">Armada:</span>
+                <span className="font-bold text-slate-900 dark:text-white">{bypassConfirmModal.p.armada}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setBypassConfirmModal(null)}
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={async () => {
+                  const { schId, p, matchedSch } = bypassConfirmModal;
+                  setBypassConfirmModal(null);
+                  
+                  const adminName = logisticsStore.getCurrentUser()?.fullName || "Super Admin";
+                  const nowIso = new Date().toISOString();
+
+                  if (matchedSch) {
+                    const deliveredSchedule = {
+                      ...matchedSch,
+                      status: "delivered" as const,
+                      isChecklistBypassed: true,
+                      checklistBypassedBy: adminName,
+                      checklistBypassedAt: nowIso
+                    };
+                    logisticsStore.updateSchedule(matchedSch.id, deliveredSchedule);
+                    try {
+                      const wb = driverWaybillService.getWaybillForSchedule(deliveredSchedule);
+                      driverWaybillService.updateWaybillStatus(wb.id, "delivered", "Bypass Checklist Super Admin");
+                    } catch (e) {}
+                  }
+
+                  logisticsStore.addScheduleChangeLog({
+                    actionType: "manual_edit",
+                    fileName: `Bypass Checklist Admin (${p.area})`,
+                    userName: adminName,
+                    userRole: "Super Admin",
+                    summary: `Tembus jadwal ${p.area} tanpa checklist`,
+                    changes: [
+                      `Jadwal ${p.area} berhasil ditembus dan disimpan ke status Selesai tanpa checklist oleh Super Admin.`
+                    ]
+                  });
+
+                  setSyncSuccessMessage(`⚡ Jadwal ${p.area} (${p.driver}) berhasil ditembus & disimpan ke status Selesai.`);
+                  setTimeout(() => setSyncSuccessMessage(null), 5000);
+
+                  try {
+                    const response = await fetch(`/api/schedules/${encodeURIComponent(schId)}/bypass-checklist`, {
+                      method: "POST",
+                      credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        note: `Input histori jadwal ${p.area}`,
+                        postTripFleetStatus: "available",
+                        schedule: matchedSch ? {
+                          ...matchedSch,
+                          status: "delivered",
+                          isChecklistBypassed: true,
+                          checklistBypassedBy: adminName,
+                          checklistBypassedAt: nowIso
+                        } : undefined
+                      })
+                    });
+                    if (response.ok) {
+                      await logisticsStore.hydrateOperationalDataFromHostinger().catch(() => {});
+                    }
+                  } catch (netErr) {
+                    console.warn("[Bypass Checklist Admin Sync Warning]", netErr);
+                  }
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-lg shadow-amber-500/25 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Ya, Tembus Selesai</span>
               </button>
             </div>
           </div>

@@ -4137,6 +4137,10 @@ Kembalikan HANYA JSON valid:
           ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
           : [];
         const mergedUrls = Array.from(new Set([...existingUrls, ...prevSaved, ...incomingUrls]));
+        serverClearedPhotoCodes.delete(code);
+        for (const u of incomingUrls) {
+          serverDeletedPhotoUrls.delete(u);
+        }
 
         let canonicalId = String(existingMem?.id || rawItem?.id || `dbb-${code}`);
         if (mysqlAvailable) {
@@ -4554,6 +4558,10 @@ Kembalikan HANYA JSON valid:
       const finalUrls = replacePhotos ? incomingUrls : Array.from(new Set([...incomingUrls, ...prevUrls]));
       if (finalUrls.length > 0) {
         preservedServerPhotosByCode.set(code, finalUrls);
+        serverClearedPhotoCodes.delete(code);
+        for (const u of finalUrls) {
+          serverDeletedPhotoUrls.delete(u);
+        }
       } else if (replacePhotos) {
         preservedServerPhotosByCode.delete(code);
       }

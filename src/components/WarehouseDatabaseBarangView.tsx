@@ -37,8 +37,7 @@ import {
   RotateCcw,
   RotateCw,
   Crop,
-  Check,
-  ImageMinus
+  Check
 } from 'lucide-react';
 import {
   databaseBarangService,
@@ -155,11 +154,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   const [liveCameraZoom, setLiveCameraZoom] = useState<number>(1);
   const [isCropMode, setIsCropMode] = useState<boolean>(false);
   const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number }>({
-    x: 10,
-    y: 10,
-    w: 80,
-    h: 80
+    x: 0,
+    y: 0,
+    w: 100,
+    h: 100
   });
+  const [cropShape, setCropShape] = useState<'rect' | 'circle'>('rect');
+  const [cropAspectRatio, setCropAspectRatio] = useState<'free' | '1:1' | '4:3' | '3:4' | '16:9'>('free');
   const [isApplyingCrop, setIsApplyingCrop] = useState<boolean>(false);
   const cropContainerRef = React.useRef<HTMLDivElement | null>(null);
   const cropDragRef = React.useRef<{
@@ -185,11 +186,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     badge?: string;
   } | null>(null);
 
-  // Modal Kelola & Bersihkan Foto Berlebih (sisakan 3 foto terpilih)
-  const [isManagePhotosModalOpen, setIsManagePhotosModalOpen] = useState(false);
-  const [selectedKeepCodes, setSelectedKeepCodes] = useState<string[]>([]);
-  const [isPurgingPhotos, setIsPurgingPhotos] = useState(false);
-  const [managePhotoSearch, setManagePhotoSearch] = useState('');
+  // Custom Confirmation Modal for Photo Deletion (menggantikan alert/confirm browser)
+  const [photoToDelete, setPhotoToDelete] = useState<{
+    item: DatabaseBarangRecord;
+    photoIdx: number;
+    isAll?: boolean;
+    photoUrl?: string;
+  } | null>(null);
 
   // Direct Live Camera & HP Camera capture state
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
@@ -507,6 +510,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
+      if (cropShape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(sw / 2, sh / 2, sw / 2, sh / 2, 0, 0, 2 * Math.PI);
+        ctx.clip();
+      }
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
       const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
@@ -623,10 +631,10 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       }
       const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
       setFeedbackModal({
-        title: persistedToMysql ? `${newUrls.length} Foto Berhasil Masuk MySQL` : 'Foto Baru Hanya Tersimpan di Browser',
+        title: persistedToMysql ? `${newUrls.length} Foto Berhasil Masuk Database Pusat` : 'Foto Baru Hanya Tersimpan di Browser',
         message: persistedToMysql
-          ? `Total ${updatedUrls.length} foto untuk ${saved.noBarang} telah diterima MySQL.`
-          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk MySQL. Gunakan tombol Load Foto ke DB dari perangkat ini.`
+          ? `Total ${updatedUrls.length} foto untuk ${saved.noBarang} telah diterima database pusat.`
+          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk database pusat. Gunakan tombol Load Foto ke DB dari perangkat ini.`
       });
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
@@ -669,7 +677,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     try {
       result = await databaseBarangService.forceSyncNow();
     } catch (err: any) {
-      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server MySQL.' });
+      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server database.' });
       return;
     }
     const syncError = databaseBarangService.getSyncStatus().error;
@@ -685,9 +693,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setFeedbackModal({
       title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi 2 Arah (PC ↔ HP) Berhasil' : 'Server Belum Memiliki Data Barang'),
       message:
-        syncError ? `Server melaporkan masalah: ${syncError}. Data lokal belum dihapus. Gunakan tombol Pulihkan Foto Lokal ke MySQL dari perangkat asal.` : result.count > 0
-          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh dua arah antara Server MySQL, tampilan PC, dan tampilan HP.`
-          : 'Saat ini belum ada data di Server MySQL. Buka halaman Database Barang di perangkat tempat Anda menginput data agar otomatis terunggah ke server.'
+        syncError ? `Server melaporkan masalah: ${syncError}. Data lokal belum dihapus. Gunakan tombol Pulihkan Foto Lokal ke DB dari perangkat asal.` : result.count > 0
+          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh dua arah antara server database, tampilan PC, dan tampilan HP.`
+          : 'Saat ini belum ada data di server database. Buka halaman Database Barang di perangkat tempat Anda menginput data agar otomatis terunggah ke server.'
     });
   };
 
@@ -698,7 +706,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       if (result.localPhotoSkuCount === 0) {
         setFeedbackModal({
           title: 'Foto Lokal Tidak Ditemukan',
-          message: `Browser ini tidak menyimpan foto lama. MySQL saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Load Foto ke DB di sana.`
+          message: `Browser ini tidak menyimpan foto lama. Server database saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Load Foto ke DB di sana.`
         });
         return;
       }
@@ -706,73 +714,32 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         title: result.failedSkuCount > 0 ? 'Sebagian Foto Belum Berhasil Dikirim' : 'Load Foto ke DB Selesai',
         message: `Ditemukan ${result.localPhotoSkuCount} barang berfoto pada browser ini. ` +
           `Upload berhasil ${result.succeededSkuCount}, gagal ${result.failedSkuCount}. ` +
-          `Barang berfoto di MySQL: ${result.beforePhotoSkuCount} menjadi ${result.afterPhotoSkuCount}. ` +
+          `Barang berfoto di database pusat: ${result.beforePhotoSkuCount} menjadi ${result.afterPhotoSkuCount}. ` +
           (result.failedSkuCount ? `Contoh SKU gagal: ${result.failedCodes.slice(0, 5).join(', ')}. ` : '') +
           (result.afterPhotoSkuCount === result.beforePhotoSkuCount ? `Jika jumlah belum bertambah, coba perangkat/browser ASAL tempat foto lama disimpan. ` : '') +
-          `Foto asli di browser tidak dihapus. Periksa lagi di phpMyAdmin.`
+          `Foto asli di browser tidak dihapus. Periksa lagi di database.`
       });
     } catch (err: any) {
       setFeedbackModal({
-        title: 'Gagal Menghubungkan Foto ke MySQL',
+        title: 'Gagal Menghubungkan Foto ke Server Database',
         message: `${err?.message || 'Server belum tersedia'}. Foto asli di browser tetap aman. Pastikan patch sudah dideploy ke aplikasi yang aktif.`
       });
     }
   };
 
-  const handleOpenManagePhotosModal = () => {
-    const itemsWithPhotos = items.filter(i => {
-      const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
-      return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
-    });
-    // Default: tandai 3 barang pertama jika user mau menyisakan 3 barang
-    setSelectedKeepCodes(itemsWithPhotos.slice(0, 3).map(i => i.noBarang.trim().toUpperCase()));
-    setManagePhotoSearch('');
-    setIsManagePhotosModalOpen(true);
-  };
-
-  const handleToggleKeepCode = (code: string) => {
-    const clean = code.trim().toUpperCase();
-    setSelectedKeepCodes(prev =>
-      prev.includes(clean) ? prev.filter(c => c !== clean) : [...prev, clean]
-    );
-  };
-
-  const handleSelectFirst3Photos = () => {
-    const itemsWithPhotos = items.filter(i => {
-      const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
-      return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
-    });
-    setSelectedKeepCodes(itemsWithPhotos.slice(0, 3).map(i => i.noBarang.trim().toUpperCase()));
-  };
-
-  const handleExecuteBulkPurgePhotos = async () => {
-    if (selectedKeepCodes.length === 0) {
-      if (!window.confirm('Tidak ada barang yang dipilih untuk disimpan fotonya. Seluruh foto barang akan dihapus permanen dari browser & database MySQL. Lanjutkan?')) {
-        return;
-      }
+  const confirmDeletePhoto = () => {
+    if (!photoToDelete) return;
+    const { item, photoIdx, isAll } = photoToDelete;
+    if (isAll) {
+      handleClearAllPhotosFromPreview(item);
     } else {
-      if (!window.confirm(`Simpan foto dari ${selectedKeepCodes.length} barang terpilih, dan HAPUS PERMANEN seluruh foto barang lainnya dari browser & database MySQL?`)) {
-        return;
-      }
+      handleDeletePhotoFromPreview(item, photoIdx);
     }
-
-    setIsPurgingPhotos(true);
-    try {
-      const res = await databaseBarangService.bulkDeletePhotos({ keepCodes: selectedKeepCodes });
-      setItems(databaseBarangService.getAll());
-      setIsManagePhotosModalOpen(false);
-      setFeedbackModal({
-        title: 'Pembersihan Foto Selesai',
-        message: `Foto dari ${res.deletedCount} barang telah dibersihkan secara permanen. Sekarang tersisa tepat ${selectedKeepCodes.length} barang berfoto di sistem dan MySQL. Foto tidak akan muncul kembali saat reload maupun push website baru.`
-      });
-    } catch (e: any) {
-      setFeedbackModal({
-        title: 'Gagal Membersihkan Foto',
-        message: e?.message || 'Terjadi kesalahan jaringan saat menghapus foto'
-      });
-    } finally {
-      setIsPurgingPhotos(false);
-    }
+    setPhotoToDelete(null);
+    setFeedbackModal({
+      title: 'Foto Berhasil Dihapus',
+      message: `Foto barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah terhapus.`
+    });
   };
 
   // Auto-calculate volM3 whenever panjang, lebar, tinggi change
@@ -1016,10 +983,10 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
     setIsFormModalOpen(false);
     setFeedbackModal({
-      title: persistedToMysql ? (editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan') : 'Data Tersimpan Lokal, MySQL Gagal',
+      title: persistedToMysql ? (editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan') : 'Data Tersimpan Lokal, Server Belum Terhubung',
       message: persistedToMysql
-        ? `Data "${saved.deskripsiBarang}" (${saved.noBarang}) telah masuk MySQL dengan ${dokumentasiUrls.length} foto dokumentasi.`
-        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di MySQL. Coba tombol Load Foto ke DB.`
+        ? `Data "${saved.deskripsiBarang}" (${saved.noBarang}) telah masuk database pusat dengan ${dokumentasiUrls.length} foto dokumentasi.`
+        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di database pusat. Coba tombol Load Foto ke DB.`
     });
   };
 
@@ -1713,19 +1680,10 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             onClick={handleRecoverLocalPhotos}
             disabled={syncStatus.isSyncing}
             className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
-            title="Kirim seluruh foto dari browser ini ke MySQL dengan cepat"
+            title="Kirim seluruh foto dari browser ini ke server database dengan cepat"
           >
             {syncStatus.isSyncing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
             <span>{syncStatus.isSyncing ? `Memuat (${syncStatus.progressPct}%)...` : 'Load Foto ke DB'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenManagePhotosModal}
-            className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-800 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-            title="Kelola & bersihkan foto berlebih, sisakan tepat 3 foto terpilih"
-          >
-            <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-            <span>Kelola Foto ({photoStats.withPhoto})</span>
           </button>
           <button
             type="button"
@@ -1926,17 +1884,6 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
               </span>
             )}
 
-            {fotoFilter === 'has_photo' && (
-              <button
-                type="button"
-                onClick={handleOpenManagePhotosModal}
-                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
-                title="Kelola barang berfoto dan hapus foto berlebih"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span>Sisakan 3 Foto Terpilih ({photoStats.withPhoto})</span>
-              </button>
-            )}
 
             {(searchQuery || unitFilter !== 'ALL' || volFilter !== 'ALL' || beratFilter !== 'ALL' || fotoFilter !== 'ALL' || sortBy !== 'default') && (
               <button
@@ -2092,19 +2039,6 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                     {photoList.length}
                                   </span>
                                 )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (window.confirm(`Hapus foto untuk ${item.noBarang}? Foto akan dihapus permanen dari browser dan database MySQL.`)) {
-                                    handleClearAllPhotosFromPreview(item);
-                                  }
-                                }}
-                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 transition cursor-pointer"
-                                title="Hapus Foto Barang Ini (Permanen)"
-                              >
-                                <ImageMinus className="w-3.5 h-3.5" />
                               </button>
                             </>
                           )}
@@ -2332,19 +2266,6 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                         {photoList.length}
                                       </span>
                                     )}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (window.confirm(`Hapus foto untuk ${item.noBarang}? Foto akan dihapus permanen dari browser dan database MySQL.`)) {
-                                        handleClearAllPhotosFromPreview(item);
-                                      }
-                                    }}
-                                    className="p-1 rounded-md bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 text-rose-600 dark:text-rose-400 transition cursor-pointer"
-                                    title="Hapus Foto Barang Ini (Permanen)"
-                                  >
-                                    <ImageMinus className="w-3.5 h-3.5" />
                                   </button>
                                 </>
                               )}
@@ -3026,7 +2947,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
         return (
           <div
-            className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
+            className="fixed inset-0 z-[1300] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
+            style={{ zIndex: 1300 }}
             onClick={() => {
               setPreviewDocItem(null);
               setActivePhotoIndex(0);
@@ -3170,10 +3092,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                           top: `${cropRect.y}%`,
                           width: `${cropRect.w}%`,
                           height: `${cropRect.h}%`,
-                          boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.68)'
+                          boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.68)',
+                          borderRadius: cropShape === 'circle' ? '9999px' : '0px'
                         }}
                         onPointerDown={e => startCropPointerDrag(e, 'move')}
-                        className="absolute border-2 border-amber-400 cursor-move z-20"
+                        className={`absolute border-2 border-amber-400 cursor-move z-20 ${cropShape === 'circle' ? 'rounded-full' : ''}`}
                       >
                         {/* Rule-of-Thirds Grid Lines */}
                         <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
@@ -3302,7 +3225,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                           onClick={() => {
                             handleResetZoom();
                             if (!isCropMode) {
-                              setCropRect({ x: 8, y: 8, w: 84, h: 84 });
+                              setCropRect({ x: 0, y: 0, w: 100, h: 100 });
+                              setCropShape('rect');
+                              setCropAspectRatio('free');
                               setIsCropMode(true);
                             } else {
                               setIsCropMode(false);
@@ -3345,7 +3270,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => handleDeletePhotoFromPreview(previewDocItem, safeIndex)}
+                              onClick={() => {
+                                setPhotoToDelete({
+                                  item: previewDocItem,
+                                  photoIdx: safeIndex,
+                                  isAll: false,
+                                  photoUrl: currentPhotoUrl
+                                });
+                              }}
                               className="px-2 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white shadow-md backdrop-blur-xs transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
                               title="Hapus foto ini secara permanen"
                             >
@@ -3355,7 +3287,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             {totalPhotos > 1 && (
                               <button
                                 type="button"
-                                onClick={() => handleClearAllPhotosFromPreview(previewDocItem)}
+                                onClick={() => {
+                                  setPhotoToDelete({
+                                    item: previewDocItem,
+                                    photoIdx: 0,
+                                    isAll: true,
+                                    photoUrl: currentPhotoUrl
+                                  });
+                                }}
                                 className="px-2 py-1.5 rounded-xl bg-rose-800/90 hover:bg-rose-700 text-white shadow-md backdrop-blur-xs transition cursor-pointer text-[10px] font-bold"
                                 title="Hapus semua foto untuk barang ini"
                               >
@@ -3414,74 +3353,128 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                   )}
                 </div>
 
-                {/* Panel Kontrol Crop Cepat & Simpan Hasil Crop (Muncul saat tombol Crop ditekan) */}
+                {/* Panel Kontrol Crop Interaktif & Variatif */}
                 {isCropMode && (
-                  <div className="p-3 rounded-2xl bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/35 space-y-2.5">
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/35 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[11px] font-extrabold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                        <Crop className="w-3.5 h-3.5" />
-                        <span>Pilih Area Kardus / Label (atau geser titik kuning pada gambar):</span>
-                      </span>
-                      <div className="flex flex-wrap items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-black text-amber-800 dark:text-amber-300 flex items-center gap-1 mr-1">
+                          <Crop className="w-3.5 h-3.5 text-amber-500" />
+                          <span>Nisbah / Bentuk:</span>
+                        </span>
                         <button
                           type="button"
-                          onClick={() => setCropRect({ x: 4, y: 2, w: 92, h: 34 })}
-                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                          onClick={() => {
+                            setCropShape('rect');
+                            setCropAspectRatio('free');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer border ${
+                            cropShape === 'rect' && cropAspectRatio === 'free'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-amber-500/30 hover:bg-amber-100'
+                          }`}
                         >
-                          Kardus Atas
+                          Bebas (Free)
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCropRect({ x: 4, y: 31, w: 92, h: 38 })}
-                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                          onClick={() => {
+                            setCropShape('rect');
+                            setCropAspectRatio('1:1');
+                            setCropRect(prev => ({ ...prev, w: Math.min(prev.w, prev.h), h: Math.min(prev.w, prev.h) }));
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer border ${
+                            cropShape === 'rect' && cropAspectRatio === '1:1'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-amber-500/30 hover:bg-amber-100'
+                          }`}
                         >
-                          Kardus Tengah
+                          1:1 Persegi
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCropRect({ x: 4, y: 60, w: 92, h: 38 })}
-                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                          onClick={() => {
+                            setCropShape('rect');
+                            setCropAspectRatio('4:3');
+                            setCropRect(prev => ({ ...prev, w: Math.min(90, Math.round(prev.h * 1.33)), h: prev.h }));
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer border ${
+                            cropShape === 'rect' && cropAspectRatio === '4:3'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-amber-500/30 hover:bg-amber-100'
+                          }`}
                         >
-                          Kardus Bawah
+                          4:3 Lanskap
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCropRect({ x: 12, y: 12, w: 76, h: 76 })}
-                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 border border-amber-500/30 text-[10px] font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                          onClick={() => {
+                            setCropShape('rect');
+                            setCropAspectRatio('16:9');
+                            setCropRect(prev => ({ ...prev, w: Math.min(96, Math.round(prev.h * 1.77)), h: prev.h }));
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer border ${
+                            cropShape === 'rect' && cropAspectRatio === '16:9'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-amber-500/30 hover:bg-amber-100'
+                          }`}
                         >
-                          Fokus Tengah
+                          16:9 Wide
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCropShape('circle');
+                            setCropAspectRatio('1:1');
+                            setCropRect(prev => ({ ...prev, w: Math.min(prev.w, prev.h), h: Math.min(prev.w, prev.h) }));
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer border flex items-center gap-1 ${
+                            cropShape === 'circle'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-amber-500/30 hover:bg-amber-100'
+                          }`}
+                        >
+                          <span>⭕ Lingkaran / Oval</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCropRect({ x: 0, y: 0, w: 100, h: 100 })}
+                          className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 text-[10px] font-bold transition cursor-pointer ml-1"
+                          title="Reset area crop ke ukuran penuh 100%"
+                        >
+                          Full 100%
                         </button>
                       </div>
-                    </div>
 
-                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t border-amber-500/20">
-                      <button
-                        type="button"
-                        onClick={() => setIsCropMode(false)}
-                        className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
-                      >
-                        Batal
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isApplyingCrop}
-                        onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, true)}
-                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer disabled:opacity-50"
-                        title="Simpan potongan sebagai foto tambahan tanpa menghapus foto asli"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Simpan Jadi Foto Baru</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isApplyingCrop}
-                        onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, false)}
-                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
-                        title="Terapkan hasil crop pada foto ini"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>{isApplyingCrop ? 'Menyimpan...' : 'Terapkan Crop'}</span>
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsCropMode(false)}
+                          className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 transition cursor-pointer"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isApplyingCrop}
+                          onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, true)}
+                          className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer disabled:opacity-50"
+                          title="Simpan potongan sebagai foto tambahan tanpa menghapus foto asli"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Simpan Jadi Foto Baru</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isApplyingCrop}
+                          onClick={() => handleApplyCropInPreview(previewDocItem, safeIndex, false)}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
+                          title="Terapkan hasil crop pada foto ini"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isApplyingCrop ? 'Menyimpan...' : 'Terapkan Crop'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -3577,7 +3570,10 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           : dokumentasiUrls;
 
         return (
-          <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+          <div
+            className="fixed inset-0 z-[1500] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+            style={{ zIndex: 1500 }}
+          >
             <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
               {/* Camera Header */}
               <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between gap-2">
@@ -3928,11 +3924,12 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       {/* Custom Delete Confirmation Modal (Menggantikan window.confirm browser bawaan) */}
       {itemToDelete && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 z-[1600] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          style={{ zIndex: 1600 }}
           onClick={() => setItemToDelete(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl my-auto"
             onClick={e => e.stopPropagation()}
           >
             {/* Top Accent Header */}
@@ -4011,224 +4008,109 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Modal Kelola & Bersihkan Foto Berlebih (Sisakan Sisa 3 Foto Terpilih) */}
-      {isManagePhotosModalOpen && (() => {
-        const itemsWithPhotos = items.filter(i => {
-          const urls = Array.isArray(i.dokumentasiUrls) ? i.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml')) : [];
-          return urls.length > 0 || (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml'));
-        });
-        const q = managePhotoSearch.trim().toLowerCase();
-        const displayList = q
-          ? itemsWithPhotos.filter(i =>
-              (i.noBarang || '').toLowerCase().includes(q) ||
-              (i.deskripsiBarang || '').toLowerCase().includes(q)
-            )
-          : itemsWithPhotos;
-        const purgeCount = Math.max(0, itemsWithPhotos.length - selectedKeepCodes.length);
-
-        return (
+      {/* Custom Delete Confirmation Modal for Photo (Menggantikan window.confirm browser) */}
+      {photoToDelete && (
+        <div
+          className="fixed inset-0 z-[1600] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          style={{ zIndex: 1600 }}
+          onClick={() => setPhotoToDelete(null)}
+        >
           <div
-            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in"
-            onClick={() => !isPurgingPhotos && setIsManagePhotosModalOpen(false)}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl my-auto"
+            onClick={e => e.stopPropagation()}
           >
-            <div
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900 px-6 py-4 flex items-center justify-between text-white shrink-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-                    <Trash2 className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-blue-200">
-                      Pembersihan Foto Barang
-                    </div>
-                    <h4 className="text-sm sm:text-base font-black tracking-tight text-white">
-                      Kelola Foto Aktif &amp; Sisakan Foto Terpilih
-                    </h4>
-                  </div>
+            {/* Top Accent Header */}
+            <div className="bg-gradient-to-r from-rose-600 via-rose-600 to-red-600 px-6 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5 text-white" />
                 </div>
-                <button
-                  type="button"
-                  disabled={isPurgingPhotos}
-                  onClick={() => setIsManagePhotosModalOpen(false)}
-                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer disabled:opacity-50"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-rose-100">
+                    Konfirmasi Hapus Foto
+                  </div>
+                  <h4 className="text-sm font-black tracking-tight text-white">
+                    {photoToDelete.isAll ? 'Hapus Semua Foto Barang' : 'Hapus Foto Barang'}
+                  </h4>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setPhotoToDelete(null)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-              {/* Instructions and Controls */}
-              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Tandai barang yang fotonya <strong>tetap ingin disimpan</strong> (misal: tepat 3 barang). Seluruh foto dari barang lainnya akan <strong>dihapus permanen</strong> dari browser (IndexedDB &amp; LocalStorage) serta database MySQL, sehingga tidak akan muncul kembali saat reload atau push website baru.
-                </p>
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed">
+                Apakah Anda yakin ingin menghapus gambar <span className="text-rose-600 dark:text-rose-400 font-black">{photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang || photoToDelete.item.noBarang}</span>?
+              </p>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isPurgingPhotos}
-                      onClick={handleSelectFirst3Photos}
-                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Pilih 3 Barang Pertama</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isPurgingPhotos}
-                      onClick={() => setSelectedKeepCodes(itemsWithPhotos.map(i => i.noBarang.trim().toUpperCase()))}
-                      className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
-                    >
-                      Pilih Semua
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isPurgingPhotos}
-                      onClick={() => setSelectedKeepCodes([])}
-                      className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
-                    >
-                      Batal Pilih
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs font-bold">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-mono">
-                      Disimpan: {selectedKeepCodes.length}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700 font-mono">
-                      Dihapus: {purgeCount}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={managePhotoSearch}
-                    onChange={e => setManagePhotoSearch(e.target.value)}
-                    placeholder="Cari kode atau nama barang berfoto..."
-                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 flex gap-3.5 items-center">
+                {photoToDelete.photoUrl && !photoToDelete.photoUrl.startsWith('data:image/svg+xml') ? (
+                  <img
+                    src={photoToDelete.photoUrl}
+                    alt={photoToDelete.item.noBarang}
+                    className="w-16 h-16 rounded-xl object-cover border border-rose-300 dark:border-rose-700 shrink-0 bg-white dark:bg-slate-800"
                   />
-                </div>
-              </div>
-
-              {/* List of Photo Items */}
-              <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 dark:divide-slate-800/80">
-                {displayList.length > 0 ? (
-                  displayList.map(item => {
-                    const cleanCode = item.noBarang.trim().toUpperCase();
-                    const isKept = selectedKeepCodes.includes(cleanCode);
-                    const thumb = databaseBarangService.getItemThumbnail(item);
-                    const photoCount = (item.dokumentasiUrls?.length || 0) || (item.dokumentasiUrl ? 1 : 0);
-
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => !isPurgingPhotos && handleToggleKeepCode(cleanCode)}
-                        className={`py-2 px-2.5 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition ${
-                          isKept
-                            ? 'bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40 opacity-70 hover:opacity-100'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={isKept}
-                            onChange={() => {}}
-                            disabled={isPurgingPhotos}
-                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
-                          />
-                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 shrink-0 flex items-center justify-center">
-                            <img src={thumb} alt={item.noBarang} className="w-full h-full object-cover" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono font-black text-xs text-blue-700 dark:text-blue-400">
-                                {item.noBarang}
-                              </span>
-                              <span className="text-[10px] text-slate-500 font-mono">
-                                ({photoCount} foto)
-                              </span>
-                            </div>
-                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                              {item.deskripsiBarang || item.keteranganBarang}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          {isKept ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-extrabold text-[10px]">
-                              <Check className="w-3 h-3" />
-                              <span>Tetap Disimpan</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-300 font-extrabold text-[10px]">
-                              <Trash2 className="w-3 h-3" />
-                              <span>Akan Dihapus</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
                 ) : (
-                  <div className="py-12 text-center text-slate-400 text-xs">
-                    Tidak ditemukan barang berfoto yang sesuai pencarian.
+                  <div className="w-16 h-16 rounded-xl bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center shrink-0 text-rose-500 font-bold text-xs">
+                    Foto
                   </div>
                 )}
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-mono text-[11px] font-black">
+                      {photoToDelete.item.noBarang}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      Satuan: {photoToDelete.item.unit1 || photoToDelete.item.satuan || 'Pcs'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+                    {photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang}
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                    Dimensi: {photoToDelete.item.panjangCm || 0}&times;{photoToDelete.item.lebarCm || 0}&times;{photoToDelete.item.tinggiCm || 0} cm
+                  </div>
+                </div>
               </div>
 
-              {/* Footer */}
-              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5 pt-2">
                 <button
                   type="button"
-                  disabled={isPurgingPhotos}
-                  onClick={() => setIsManagePhotosModalOpen(false)}
-                  className="py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  onClick={() => setPhotoToDelete(null)}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
                 >
-                  Tutup
+                  Batal
                 </button>
                 <button
                   type="button"
-                  disabled={isPurgingPhotos}
-                  onClick={handleExecuteBulkPurgePhotos}
-                  className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  autoFocus
+                  onClick={confirmDeletePhoto}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
-                  {isPurgingPhotos ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Sedang Membersihkan MySQL &amp; Browser...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>
-                        Hapus Permanen {purgeCount} Foto (Sisakan {selectedKeepCodes.length})
-                      </span>
-                    </>
-                  )}
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Ya, Hapus Foto</span>
                 </button>
               </div>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* Modern Feedback Notification Modal */}
       {feedbackModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 z-[1700] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          style={{ zIndex: 1700 }}
           onClick={() => setFeedbackModal(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl my-auto"
             onClick={e => e.stopPropagation()}
           >
             <div

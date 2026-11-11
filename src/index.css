@@ -589,17 +589,49 @@ div.fixed.inset-0.z-50,
 div.fixed.inset-0.z-\[70\],
 div.fixed.inset-0.z-\[1300\],
 div.fixed.inset-0.z-\[1400\] {
-  z-index: 1300 !important;
   overflow-y: auto !important;
   align-items: flex-start !important;
   padding-top: 1rem !important;
   padding-bottom: 1rem !important;
 }
 
+div.fixed.inset-0.z-\[1500\],
+div.fixed.inset-0.z-\[1600\],
+div.fixed.inset-0.z-\[1700\] {
+  overflow-y: auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 1rem !important;
+}
+
+div.fixed.inset-0.z-50,
+div.fixed.inset-0.z-\[1300\] {
+  z-index: 1300 !important;
+}
+
+div.fixed.inset-0.z-\[1400\] {
+  z-index: 1400 !important;
+}
+
+div.fixed.inset-0.z-\[1500\] {
+  z-index: 1500 !important;
+}
+
+div.fixed.inset-0.z-\[1600\] {
+  z-index: 1600 !important;
+}
+
+div.fixed.inset-0.z-\[1700\] {
+  z-index: 1700 !important;
+}
+
 div.fixed.inset-0.z-50 > div,
 div.fixed.inset-0.z-\[70\] > div,
 div.fixed.inset-0.z-\[1300\] > div,
-div.fixed.inset-0.z-\[1400\] > div {
+div.fixed.inset-0.z-\[1400\] > div,
+div.fixed.inset-0.z-\[1500\] > div,
+div.fixed.inset-0.z-\[1600\] > div,
+div.fixed.inset-0.z-\[1700\] > div {
   margin-top: auto !important;
   margin-bottom: auto !important;
 }
