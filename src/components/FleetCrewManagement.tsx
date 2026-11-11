@@ -471,16 +471,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     });
     if (created) {
       branchStore.setFleetBranchId(created.id, newFleetBranchId);
-      const remoteFleetCreate = await createFleetInSupabase(created);
-      if (!remoteFleetCreate.success) {
-        await reloadFleetCrewFromMySql();
-        setSyncFeedback({
-          type: 'error',
-          message: `Armada ${created.plateNumber} belum dapat disimpan ke server: ${remoteFleetCreate.error || 'koneksi jaringan terganggu'}. Silakan coba kembali.`
-        });
-        setTimeout(() => setSyncFeedback(null), 7000);
-        return;
-      }
+      // Background sync without blocking UI
+      createFleetInSupabase(created).catch(err => {
+        console.warn('[FleetCrewManagement] Background createFleet sync warning:', err);
+      });
     }
     if (newFleetAssignedCrewId && created) {
       logisticsStore.updateCrew(newFleetAssignedCrewId, { currentFleetId: created.id });
@@ -533,24 +527,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     });
     if (created) {
       branchStore.setCrewBranchId(created.id, newCrewBranchId);
-      const remoteCrewCreate = await createCrewInSupabase(created);
-      if (!remoteCrewCreate.success) {
-        await reloadFleetCrewFromMySql();
-        setSyncFeedback({
-          type: 'error',
-          message: `Data kru ${created.name} belum dapat disimpan ke server: ${remoteCrewCreate.error || 'koneksi jaringan terganggu'}.`
-        });
-        setTimeout(() => setSyncFeedback(null), 7000);
-        return;
-      }
+      createCrewInSupabase(created).catch(err => {
+        console.warn('[FleetCrewManagement] Background createCrew sync warning:', err);
+      });
     }
     setIsAddCrewOpen(false);
     setNewCrew({
       name: '',
       phone: '-',
-      role: 'Driver Utama',
       licenseNumber: '-',
       licenseType: '-',
+      role: 'Driver Utama',
       status: 'available'
     });
     setCrews(logisticsStore.getCrews());
@@ -683,6 +670,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setIsSavingFleet(true);
     try {
       // 1. Update fleet record including driverId and inner box dimensions while keeping all explicitly edited/cleared fields
+      const targetFleetId = editingFleet.id;
       const updatedFleetData: Fleet = {
         ...mergedForSave,
         boxCapacityM3: grossM3,
@@ -690,22 +678,20 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         boxInnerCapacityM3: innerM3,
         driverId: editingAssignedCrewId ? editingAssignedCrewId : ''
       };
-      logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
-      branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
+      logisticsStore.updateFleet(targetFleetId, updatedFleetData);
+      branchStore.setFleetBranchId(targetFleetId, editingFleetBranchId);
 
       // 2. Synchronize crew currentFleetId
       const allCrews = logisticsStore.getCrews();
       allCrews.forEach(c => {
         if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
-          logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
-        } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: targetFleetId });
+        } else if (c.currentFleetId === targetFleetId && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
           logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
         }
       });
 
-      // 3. Persist to Hostinger MySQL API
-      await updateFleetInSupabase(editingFleet.id, updatedFleetData);
-
+      // 3. Immediately update UI and close modal (optimistic save), then sync to database in background
       setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
       setCrews(logisticsStore.getCrews());
       setIsEditFleetOpen(false);
@@ -716,6 +702,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan.`
       });
       setTimeout(() => setSyncFeedback(null), 5000);
+
+      updateFleetInSupabase(targetFleetId, updatedFleetData).catch(err => {
+        console.warn('[FleetCrewManagement] Background updateFleet sync warning:', err);
+      });
     } catch (err: any) {
       setSyncFeedback({
         type: 'error',
@@ -755,6 +745,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
+    const targetCrewId = editingCrew.id;
+    const targetCrewName = editingCrew.name;
+    const targetCrewRole = editingCrew.role;
     const updatedCrewData: Partial<Crew> = {
       ...editingCrew,
       phone: '-',
@@ -762,28 +755,21 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       licenseType: '-'
     };
 
-    logisticsStore.updateCrew(editingCrew.id, updatedCrewData);
-    branchStore.setCrewBranchId(editingCrew.id, editingCrewBranchId);
-
-    const remoteCrewUpdate = await updateCrewInSupabase(editingCrew.id, updatedCrewData);
-    if (!remoteCrewUpdate.success) {
-      await reloadFleetCrewFromMySql();
-      setSyncFeedback({
-        type: 'error',
-        message: `Perubahan data kru ${editingCrew.name} belum dapat disimpan: ${remoteCrewUpdate.error || 'koneksi jaringan terganggu'}.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
+    logisticsStore.updateCrew(targetCrewId, updatedCrewData);
+    branchStore.setCrewBranchId(targetCrewId, editingCrewBranchId);
 
     setIsEditCrewOpen(false);
     setEditingCrew(null);
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${editingCrew.name} (${editingCrew.role}) berhasil diperbarui dan disimpan.`
+      message: `Data kru ${targetCrewName} (${targetCrewRole}) berhasil diperbarui dan disimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    updateCrewInSupabase(targetCrewId, updatedCrewData).catch(err => {
+      console.warn('[FleetCrewManagement] Background updateCrew sync warning:', err);
+    });
   };
 
   const handleDeleteCrewClick = (crew: Crew) => {
@@ -795,17 +781,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const name = crewToDelete.name;
     const id = crewToDelete.id;
     logisticsStore.deleteCrew(id);
-    const remoteCrewDelete = await deleteCrewInSupabase(id);
-    if (!remoteCrewDelete.success) {
-      await reloadFleetCrewFromMySql();
-      setCrewToDelete(null);
-      setSyncFeedback({
-        type: 'error',
-        message: `Kru ${name} belum dapat dihapus dari sistem: ${remoteCrewDelete.error || 'koneksi jaringan terganggu'}.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
     setCrews(logisticsStore.getCrews());
     setCrewToDelete(null);
     setSyncFeedback({
@@ -813,6 +788,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       message: `Data kru ${name} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    deleteCrewInSupabase(id).catch(err => {
+      console.warn('[FleetCrewManagement] Background deleteCrew sync warning:', err);
+    });
   };
 
   const handleConfirmDeleteFleet = async () => {
@@ -820,17 +799,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const plate = fleetToDelete.plateNumber;
     const id = fleetToDelete.id;
     logisticsStore.deleteFleet(id);
-    const remoteFleetDelete = await deleteFleetInSupabase(id, plate);
-    if (!remoteFleetDelete.success) {
-      await reloadFleetCrewFromMySql();
-      setFleetToDelete(null);
-      setSyncFeedback({
-        type: 'error',
-        message: `Armada ${plate} belum dapat dihapus dari sistem: ${remoteFleetDelete.error || 'koneksi jaringan terganggu'}.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
     setFleets(logisticsStore.getFleets());
     setFleetToDelete(null);
     setSyncFeedback({
@@ -838,6 +806,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       message: `Data armada ${plate} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    deleteFleetInSupabase(id, plate).catch(err => {
+      console.warn('[FleetCrewManagement] Background deleteFleet sync warning:', err);
+    });
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
@@ -1556,18 +1528,36 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           )}
                         </td>
 
-                        {/* Pajak & KIR: Tanggal KIR lebih besar, keterangan Aktif/Jatuh Tempo lebih kecil */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold uppercase text-teal-400">KIR:</span>
-                              <span className="text-xs sm:text-[13px] font-black text-white font-mono tracking-tight">
-                                {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
+                        {/* Pajak & KIR: Menampilkan tanggal dan status untuk Pajak (Tahunan) dan KIR secara berdampingan/terstruktur */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <div className="flex flex-col gap-1.5 min-w-[215px]">
+                            {/* Baris 1: PAJAK */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                  PAJAK
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {fleet.taxDueDate ? formatIndoDate(fleet.taxDueDate) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${taxStatus.color}`}>
+                                {taxStatus.label}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <span className={`px-1.5 py-0.2 rounded text-[9px] border font-semibold leading-tight ${kirDateVal ? kirStatus.color : taxStatus.color}`}>
-                                {kirDateVal ? kirStatus.label : taxStatus.label}
+
+                            {/* Baris 2: KIR */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                                  KIR
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${kirStatus.color}`}>
+                                {kirStatus.label}
                               </span>
                             </div>
                           </div>

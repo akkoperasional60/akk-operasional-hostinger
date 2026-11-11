@@ -472,7 +472,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               tab: 'warehouse_scanner',
               label: 'Database Barang',
               icon: <Database className="w-4 h-4 text-emerald-500" />,
-              badge: <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">m³ & Kg</span>,
               description: 'Nomor barang, dimensi, kubikasi & dokumentasi'
             }
           ]
@@ -482,7 +481,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           items: [
             {
               tab: 'warehouse_dashboard',
-              label: 'Ringkasan Gudang (WMS)',
+              label: 'Ringkasan Gudang',
               icon: <Building2 className="w-4 h-4 text-blue-500" />,
               description: 'Statistik okupansi ruang dan kapasitas'
             },
@@ -549,9 +548,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'sales_schedules',
-              label: 'Jadwal Admin & Produksi',
+              label: 'Jadwal & Penugasan Admin',
               icon: <Calendar className="w-4 h-4 text-indigo-500" />,
-              description: 'Sinkronisasi pesanan kirim dengan pabrik'
+              description: 'Jadwal penugasan harian admin penjualan'
             },
             {
               tab: 'sales_loading_duration',
@@ -1104,15 +1103,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                   {activeCategory.badge}
                 </div>
 
-                {/* Vertical Grouped List of Items (Simple Dropdown) */}
-                <div className="space-y-2">
+                {/* Vertical List of Items (Clean Menu Labels Only) */}
+                <div className="space-y-0.5">
                   {activeCategory.groups.map((group, groupIdx) => (
                     <div key={groupIdx} className="space-y-0.5">
-                      {group.groupTitle && (
-                        <div className="px-2.5 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {group.groupTitle}
-                        </div>
-                      )}
                       {group.items.map((item) => {
                         const isItemActive =
                           currentTab === item.tab ||
@@ -1123,29 +1117,19 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                             key={item.tab}
                             type="button"
                             onClick={() => handleTabClick(item.tab)}
-                            className={`w-full flex items-start gap-2.5 px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
+                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
                               isItemActive
                                 ? 'bg-blue-600 text-white font-semibold shadow-xs'
                                 : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
                             }`}
                           >
-                            <span className={`mt-0.5 shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
+                            <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
                               {item.icon}
                             </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs truncate font-medium">
-                                  {item.label}
-                                </span>
-                                {item.badge}
-                              </div>
-                              {item.description && (
-                                <div className={`text-[10px] leading-tight truncate mt-0.5 ${
-                                  isItemActive ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'
-                                }`}>
-                                  {item.description}
-                                </div>
-                              )}
+                            <div className="min-w-0 flex-1 flex items-center justify-between gap-1">
+                              <span className="text-xs truncate font-medium">
+                                {item.label}
+                              </span>
                             </div>
                           </button>
                         );
@@ -1245,14 +1229,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                     </button>
 
                     {isCatExpanded && (
-                      <div className="p-2 space-y-2 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+                      <div className="p-2 space-y-1 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
                         {cat.groups.map((group, gIdx) => (
-                          <div key={gIdx} className="space-y-1">
-                            {group.groupTitle && (
-                              <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                                {group.groupTitle}
-                              </div>
-                            )}
+                          <div key={gIdx} className="space-y-0.5">
                             {group.items.map((item) => {
                               const isCur = currentTab === item.tab;
                               return (
@@ -1269,7 +1248,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                                     <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
                                     <span>{item.label}</span>
                                   </div>
-                                  {item.badge}
                                 </button>
                               );
                             })}

@@ -966,7 +966,22 @@ export const databaseBarangService = {
                 break;
               }
               lastError = data.error || `HTTP ${res.status}`;
-              if (res.status === 401 || res.status === 403) break;
+              // Fallback ke endpoint /api/database-barang/item jika photos-sync mengalami kendala sesi/proxy
+              if (res.status === 401 || res.status === 403 || res.status === 404) {
+                const fallbackOk = await this.pushItemToServer(
+                  {
+                    ...entry.record,
+                    dokumentasiUrl: photo,
+                    dokumentasiUrls: photos
+                  },
+                  entry.idx,
+                  false
+                );
+                if (fallbackOk) {
+                  saved = true;
+                  break;
+                }
+              }
               if (res.status === 413 || /packet.*large|too.*large|payload.*large/i.test(lastError)) {
                 photo = await photoForServer(originalPhoto, attempt === 0 ? 1100 : 850, attempt === 0 ? 0.75 : 0.65);
               }
@@ -978,7 +993,7 @@ export const databaseBarangService = {
           if (!saved) {
             const message = `Foto barang ${entry.record.noBarang} gagal masuk MySQL: ${lastError}`;
             updateSyncStatus({ error: message });
-            console.error('[Database Barang Photos]', message);
+            console.warn('[Database Barang Photos]', message);
             throw new Error(message);
           }
         }

@@ -8,15 +8,19 @@ import {
   Calendar,
   Trash2,
   X,
-  Timer
+  Timer,
+  ChevronDown,
+  Search,
+  Check,
+  Sparkles
 } from 'lucide-react';
 import {
   SalesHeaderFilter,
   SalesTopTab
 } from './SalesHeaderFilter';
 import { logisticsStore } from '../../services/store';
-import { Fleet, Crew } from '../../types';
-import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
+import { Fleet, Crew, Schedule } from '../../types';
+import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../../utils/areaNormalizer';
 
 interface LoadingDurationTabProps {
   onNavigateSubTab?: (sub: 'dashboard' | 'activities' | 'schedules' | 'loading_duration' | 'skill_matrix' | 'jobdesk') => void;
@@ -45,6 +49,15 @@ const DAY_OPTIONS = [
   'Sabtu',
   'Minggu'
 ];
+
+const DAY_NAMES_FROM_JS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+function getDayNameFromDateStr(dateStr?: string): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return DAY_NAMES_FROM_JS[d.getDay()] || null;
+}
 
 function calculateDuration(startTime: string, endTime: string): {
   diffMinutes: number;
@@ -80,16 +93,19 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
   const [selectedMonth, setSelectedMonth] = useState('Agustus');
   const [selectedYear, setSelectedYear] = useState('2026');
 
-  // Subscribe to Data Armada Terpadu & Kru Pengiriman from logisticsStore
+  // Subscribe to Data Armada Terpadu, Kru Pengiriman, & Jadwal Penugasan from logisticsStore
   const [fleets, setFleets] = useState<Fleet[]>(() => logisticsStore.getFleets());
   const [crews, setCrews] = useState<Crew[]>(() => logisticsStore.getCrews());
+  const [schedules, setSchedules] = useState<Schedule[]>(() => logisticsStore.getSchedules());
 
   useEffect(() => {
     setFleets(logisticsStore.getFleets());
     setCrews(logisticsStore.getCrews());
+    setSchedules(logisticsStore.getSchedules());
     const unsub = logisticsStore.subscribe(() => {
       setFleets([...logisticsStore.getFleets()]);
       setCrews([...logisticsStore.getCrews()]);
+      setSchedules([...logisticsStore.getSchedules()]);
     });
     return unsub;
   }, []);
@@ -97,9 +113,86 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
   const fleetOptions = useMemo(() => {
     return fleets.map(f => ({
       id: f.id,
+      initialCode: f.initialCode || 'UNIT',
+      plateNumber: f.plateNumber,
+      vehicleType: f.vehicleType,
+      brand: f.brand || 'Standar',
+      boxCapacityM3: f.boxCapacityM3 || 5.5,
       label: formatFleetOptionLabel(f)
     }));
   }, [fleets]);
+
+  // Build Area Kirim options synced directly from Jadwal & Penugasan (plus Official Areas)
+  const areaScheduleOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        areaName: string;
+        isScheduled: boolean;
+        fleetDisplay?: string;
+        fleetCode?: string;
+        plateNumber?: string;
+        dayName?: string;
+        scheduleDate?: string;
+        crews?: string[];
+      }
+    >();
+
+    // Sort schedules newest first so latest assignment wins
+    const sortedSchedules = [...schedules].sort((a, b) =>
+      (b.departureDate || '').localeCompare(a.departureDate || '')
+    );
+
+    for (const sch of sortedSchedules) {
+      const rawArea = (sch.areaName || sch.store?.city || sch.store?.storeName || '').trim();
+      if (!rawArea) continue;
+      const normalized = standardizeAreaName(rawArea).toUpperCase();
+      if (!normalized || normalized === '-') continue;
+
+      if (!map.has(normalized)) {
+        const schPlate = sch.fleet?.plateNumber;
+        const matchedFleet =
+          fleets.find(
+            f =>
+              f.id === sch.fleetId ||
+              (schPlate && f.plateNumber.toUpperCase() === schPlate.toUpperCase())
+          ) || sch.fleet;
+        const dayStr = getDayNameFromDateStr(sch.departureDate) || undefined;
+        const driverObj = sch.crew || crews.find(c => c.id === sch.crewId);
+        const helperObj = sch.crewHelper || crews.find(c => c.id === sch.crewHelperId);
+        const assignedCrews = [driverObj?.name, helperObj?.name]
+          .map(c => (c || '').trim())
+          .filter(c => c && c !== '-');
+
+        map.set(normalized, {
+          areaName: normalized,
+          isScheduled: true,
+          fleetDisplay: matchedFleet ? formatFleetOptionLabel(matchedFleet) : undefined,
+          fleetCode: matchedFleet?.initialCode || undefined,
+          plateNumber: matchedFleet?.plateNumber || undefined,
+          dayName: dayStr,
+          scheduleDate: sch.departureDate,
+          crews: assignedCrews.length > 0 ? assignedCrews : undefined
+        });
+      }
+    }
+
+    // Also include all OFFICIAL_DESTINATION_AREAS from Jadwal & Penugasan
+    for (const officialArea of OFFICIAL_DESTINATION_AREAS) {
+      const upper = officialArea.trim().toUpperCase();
+      if (upper && !map.has(upper)) {
+        map.set(upper, {
+          areaName: upper,
+          isScheduled: false
+        });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isScheduled !== b.isScheduled) return a.isScheduled ? -1 : 1;
+      return a.areaName.localeCompare(b.areaName, 'id');
+    });
+  }, [schedules, fleets, crews]);
 
   const crewNamesList = useMemo(() => {
     const names = crews.map(c => (c.name || '').trim()).filter(Boolean);
@@ -174,6 +267,11 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
   const [selectedHelpingCrews, setSelectedHelpingCrews] = useState<string[]>([]);
   const [customCrewInput, setCustomCrewInput] = useState('');
 
+  // Custom Dropdown State inside Modal Input Sesi Muat Armada Baru
+  const [openModalDropdown, setOpenModalDropdown] = useState<null | 'day' | 'area' | 'fleet'>(null);
+  const [areaSearchQuery, setAreaSearchQuery] = useState('');
+  const [fleetSearchQuery, setFleetSearchQuery] = useState('');
+
   useEffect(() => {
     if (!newFleetDisplay && fleetOptions.length > 0) {
       setNewFleetDisplay(fleetOptions[0].label);
@@ -210,14 +308,42 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
     setCustomCrewInput('');
   };
 
+  const handleSelectAreaFromSchedule = (areaItem: {
+    areaName: string;
+    fleetDisplay?: string;
+    dayName?: string;
+    crews?: string[];
+  }) => {
+    setNewAreaName(areaItem.areaName);
+    if (areaItem.fleetDisplay) {
+      setNewFleetDisplay(areaItem.fleetDisplay);
+    }
+    if (areaItem.dayName) {
+      setNewDayName(areaItem.dayName);
+    }
+    if (areaItem.crews && areaItem.crews.length > 0) {
+      setSelectedHelpingCrews(areaItem.crews);
+    }
+    setOpenModalDropdown(null);
+    setAreaSearchQuery('');
+  };
+
   const openInputModal = () => {
-    setNewDayName('Senin');
-    setNewAreaName('DENPASAR 1');
-    setNewFleetDisplay(fleetOptions[0]?.label || '');
+    const firstScheduled = areaScheduleOptions[0];
+    setNewDayName(firstScheduled?.dayName || 'Senin');
+    setNewAreaName(firstScheduled?.areaName || 'DENPASAR 1');
+    setNewFleetDisplay(firstScheduled?.fleetDisplay || fleetOptions[0]?.label || '');
     setNewStartTime('08:00');
     setNewEndTime('09:30');
-    setSelectedHelpingCrews(crewNamesList.slice(0, 2));
+    setSelectedHelpingCrews(
+      firstScheduled?.crews && firstScheduled.crews.length > 0
+        ? firstScheduled.crews
+        : crewNamesList.slice(0, 2)
+    );
     setCustomCrewInput('');
+    setOpenModalDropdown(null);
+    setAreaSearchQuery('');
+    setFleetSearchQuery('');
     setIsAddModalOpen(true);
   };
 
@@ -245,6 +371,7 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
     setFleetRecords(updated);
     localStorage.setItem('akk_loading_fleets_v2', JSON.stringify(updated));
     setIsAddModalOpen(false);
+    setOpenModalDropdown(null);
   };
 
   const handleDeleteRecord = (id: string) => {
@@ -255,7 +382,7 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header & Unified Filter */}
+      {/* Header & Unified Filter (Tanpa Filter Admin sesuai permintaan) */}
       <SalesHeaderFilter
         title="Pemantauan Durasi Muat Armada"
         subtitle="Pantau waktu mulai hingga selesai muat armada, area tujuan kirim, serta kru yang membantu proses muat."
@@ -271,6 +398,7 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
         pencapaianPercent={100}
         periodeLabel={`${selectedMonth.slice(0, 3)} ${selectedYear}`}
         adminOptions={adminOptions}
+        hideAdminFilter={true}
       />
 
       {/* Main Card: Pemantauan Durasi Muat */}
@@ -285,7 +413,7 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
                 Pemantauan Durasi Muat (SLA)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Terintegrasi dengan Data Armada Terpadu ({fleets.length} unit kendaraan aktif)
+                Terintegrasi dengan Jadwal &amp; Penugasan serta Data Armada Terpadu ({fleets.length} unit kendaraan aktif)
               </p>
             </div>
           </div>
@@ -401,10 +529,10 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
         </div>
       </div>
 
-      {/* Modal Input Muat - Redesigned to match exact Pemantauan Durasi Muat columns */}
+      {/* Modal Input Muat - Redesigned with Custom Interactive Dropdowns synced with Jadwal & Penugasan */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
@@ -415,77 +543,301 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
                     Input Sesi Muat Armada Baru
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Formulir terintegrasi dengan kolom Pemantauan Durasi Muat &amp; Data Armada Terpadu
+                    Area kirim &amp; armada tersinkronisasi dengan Jadwal &amp; Penugasan
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                onClick={() => {
+                  setIsAddModalOpen(false);
+                  setOpenModalDropdown(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleAddFleet} className="space-y-4 text-xs">
-              {/* Row 1: Hari & Nama Area Kirim */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
+              {/* Row 1: Hari Muat & Nama Area Kirim (Custom Dropdowns) */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                {/* Hari Muat Custom Dropdown (4 cols) */}
+                <div className="sm:col-span-4 relative">
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
                     Hari Muat *
                   </label>
-                  <select
-                    value={newDayName}
-                    onChange={e => setNewDayName(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-semibold"
+                  <button
+                    type="button"
+                    onClick={() => setOpenModalDropdown(openModalDropdown === 'day' ? null : 'day')}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 rounded-xl text-slate-900 dark:text-white font-bold flex items-center justify-between gap-2 transition cursor-pointer"
                   >
-                    {DAY_OPTIONS.map(day => (
-                      <option key={day} value={day}>
-                        {day}
-                      </option>
-                    ))}
-                  </select>
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                      <span>{newDayName}</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openModalDropdown === 'day' ? 'rotate-180 text-indigo-500' : ''}`} />
+                  </button>
+
+                  {openModalDropdown === 'day' && (
+                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+                      {DAY_OPTIONS.map(day => {
+                        const isSel = newDayName === day;
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => {
+                              setNewDayName(day);
+                              setOpenModalDropdown(null);
+                            }}
+                            className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                              isSel
+                                ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                            }`}
+                          >
+                            <span>{day}</span>
+                            {isSel && <Check className="w-3.5 h-3.5 text-indigo-500" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                    Nama Area Kirim *
+                {/* Nama Area Kirim (Mengikuti Area Jadwal & Penugasan) Custom Dropdown (8 cols) */}
+                <div className="sm:col-span-8 relative">
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1 flex items-center justify-between">
+                    <span>Nama Area Kirim (Area Jadwal) *</span>
+                    <span className="text-[10px] font-semibold text-indigo-500 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      Sinkron Jadwal
+                    </span>
                   </label>
-                  <input
-                    type="text"
-                    required
-                    list="official-area-kirim-list"
-                    placeholder="Pilih atau ketik area kirim..."
-                    value={newAreaName}
-                    onChange={e => setNewAreaName(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-semibold"
-                  />
-                  <datalist id="official-area-kirim-list">
-                    {OFFICIAL_DESTINATION_AREAS.map(area => (
-                      <option key={area} value={area} />
-                    ))}
-                  </datalist>
+                  {(() => {
+                    const currentAreaMeta = areaScheduleOptions.find(
+                      a => a.areaName.toUpperCase() === newAreaName.toUpperCase()
+                    );
+                    const filteredAreaList = areaScheduleOptions.filter(a => {
+                      const q = areaSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        a.areaName.toLowerCase().includes(q) ||
+                        (a.plateNumber || '').toLowerCase().includes(q) ||
+                        (a.fleetCode || '').toLowerCase().includes(q)
+                      );
+                    });
+
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenModalDropdown(openModalDropdown === 'area' ? null : 'area')}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 rounded-xl text-slate-900 dark:text-white font-bold flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="p-1 rounded-md bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
+                              <MapPin className="w-3.5 h-3.5" />
+                            </span>
+                            <span className="truncate font-extrabold">{newAreaName || 'Pilih Area Kirim'}</span>
+                            {currentAreaMeta?.isScheduled && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                                Terjadwal
+                              </span>
+                            )}
+                          </div>
+                          <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openModalDropdown === 'area' ? 'rotate-180 text-indigo-500' : ''}`} />
+                        </button>
+
+                        {openModalDropdown === 'area' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                            <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/90">
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  placeholder="Cari atau ketik nama area jadwal..."
+                                  value={areaSearchQuery}
+                                  onChange={(e) => setAreaSearchQuery(e.target.value)}
+                                  className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              {areaSearchQuery.trim().length > 0 &&
+                                !filteredAreaList.some(
+                                  a => a.areaName.toLowerCase() === areaSearchQuery.trim().toLowerCase()
+                                ) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNewAreaName(areaSearchQuery.trim().toUpperCase());
+                                      setOpenModalDropdown(null);
+                                      setAreaSearchQuery('');
+                                    }}
+                                    className="mt-1.5 w-full px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    <span>Gunakan Area "{areaSearchQuery.trim().toUpperCase()}"</span>
+                                  </button>
+                                )}
+                            </div>
+
+                            <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/70">
+                              {filteredAreaList.map(item => {
+                                const isSel = item.areaName.toUpperCase() === newAreaName.toUpperCase();
+                                return (
+                                  <button
+                                    key={item.areaName}
+                                    type="button"
+                                    onClick={() => handleSelectAreaFromSchedule(item)}
+                                    className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                      isSel
+                                        ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-900 dark:text-white'
+                                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                        <span className="font-bold text-xs truncate">{item.areaName}</span>
+                                        {item.isScheduled && (
+                                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                            Jadwal Aktif
+                                          </span>
+                                        )}
+                                      </div>
+                                      {item.plateNumber && (
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 pl-5 flex items-center gap-1.5">
+                                          <span>Armada Jadwal:</span>
+                                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-300">
+                                            {item.fleetCode ? `[${item.fleetCode}] ` : ''}{item.plateNumber}
+                                          </span>
+                                          {item.dayName && <span>&bull; {item.dayName}</span>}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {isSel && <Check className="w-4 h-4 text-indigo-500 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
-              {/* Row 2: Armada (Dropdown dari Data Armada Terpadu) */}
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Armada (Data Armada Terpadu) *
+              {/* Row 2: Armada (Custom Interactive Dropdown dari Data Armada Terpadu) */}
+              <div className="relative">
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1 flex items-center justify-between">
+                  <span>Armada (Data Armada Terpadu) *</span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                    {fleetOptions.length} Unit Tersedia
+                  </span>
                 </label>
-                <select
-                  value={newFleetDisplay}
-                  onChange={e => setNewFleetDisplay(e.target.value)}
-                  required
-                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-bold"
-                >
-                  {fleetOptions.map(f => (
-                    <option key={f.id} value={f.label}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
+                {(() => {
+                  const selectedFleetItem =
+                    fleetOptions.find(f => f.label === newFleetDisplay) || fleetOptions[0];
+                  const filteredFleetsForModal = fleetOptions.filter(f => {
+                    const q = fleetSearchQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      f.label.toLowerCase().includes(q) ||
+                      f.plateNumber.toLowerCase().includes(q) ||
+                      f.initialCode.toLowerCase().includes(q) ||
+                      f.vehicleType.toLowerCase().includes(q) ||
+                      f.brand.toLowerCase().includes(q)
+                    );
+                  });
+
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setOpenModalDropdown(openModalDropdown === 'fleet' ? null : 'fleet')}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                      >
+                        {selectedFleetItem ? (
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 font-mono text-[11px] font-black shrink-0">
+                              {selectedFleetItem.initialCode}
+                            </span>
+                            <span className="font-mono font-black text-slate-900 dark:text-white text-xs shrink-0">
+                              {selectedFleetItem.plateNumber}
+                            </span>
+                            <span className="text-slate-500 dark:text-slate-400 text-[11px] truncate">
+                              — {selectedFleetItem.vehicleType} ({selectedFleetItem.boxCapacityM3} m³)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-bold text-slate-900 dark:text-white">{newFleetDisplay || 'Pilih Armada'}</span>
+                        )}
+                        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openModalDropdown === 'fleet' ? 'rotate-180 text-indigo-500' : ''}`} />
+                      </button>
+
+                      {openModalDropdown === 'fleet' && (
+                        <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                          <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/90">
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                placeholder="Cari plat nomor, kode inisial (N1/NL1), atau tipe..."
+                                value={fleetSearchQuery}
+                                onChange={(e) => setFleetSearchQuery(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/70">
+                            {filteredFleetsForModal.map(f => {
+                              const isSel = f.label === newFleetDisplay;
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewFleetDisplay(f.label);
+                                    setOpenModalDropdown(null);
+                                    setFleetSearchQuery('');
+                                  }}
+                                  className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSel
+                                      ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-900 dark:text-white'
+                                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-black shrink-0">
+                                      {f.initialCode}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="font-mono font-bold text-xs text-slate-900 dark:text-white">
+                                        {f.plateNumber}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                        {f.vehicleType} &bull; {f.brand}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30 font-mono text-[10px] font-bold">
+                                      {f.boxCapacityM3} m³
+                                    </span>
+                                    {isSel && <Check className="w-4 h-4 text-indigo-500" />}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Row 3: Jam Muat (Mulai Jam - Sampai Jam) & Kalkulasi Durasi Otomatis */}
@@ -572,7 +924,10 @@ export const LoadingDurationTab: React.FC<LoadingDurationTabProps> = ({
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setOpenModalDropdown(null);
+                  }}
                   className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-semibold cursor-pointer"
                 >
                   Batal

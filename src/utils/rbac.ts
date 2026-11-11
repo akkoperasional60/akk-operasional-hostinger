@@ -482,8 +482,8 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
     borderClass: 'border-emerald-500/30',
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     subMenus: [
-      { id: 'warehouse_scanner', name: 'Database Barang (m³ & Kg)' },
-      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang (WMS)' },
+      { id: 'warehouse_scanner', name: 'Database Barang' },
+      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang' },
       { id: 'warehouse_inventory', name: 'Master SKU & Stok Bin' },
       { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
       { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
@@ -494,13 +494,13 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'sales_admin',
     name: 'Admin Penjualan',
-    description: 'Aktivitas harian admin, jadwal produksi, durasi muat, pengeluaran & scan barang muat, matriks skill, dan data KPI penjualan.',
+    description: 'Aktivitas harian admin, jadwal & penugasan admin, durasi muat, pengeluaran & scan barang muat, matriks skill, dan data KPI penjualan.',
     borderClass: 'border-indigo-500/30',
     iconBgClass: 'bg-indigo-500/15 text-indigo-400',
     subMenus: [
       { id: 'sales_dashboard', name: 'Dashboard Sales Hub' },
       { id: 'sales_activities', name: 'Checklist Aktivitas Harian' },
-      { id: 'sales_schedules', name: 'Jadwal Admin & Produksi' },
+      { id: 'sales_schedules', name: 'Jadwal & Penugasan Admin' },
       { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
       { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
       { id: 'sales_form_kirim', name: 'Form Kirim (Integrasi Finance & Portal Driver)' },

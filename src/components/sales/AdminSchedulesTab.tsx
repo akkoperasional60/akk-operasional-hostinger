@@ -1,20 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar,
-  Save,
-  RotateCcw,
-  Printer,
-  FileSpreadsheet,
   Plus,
-  Trash2,
   ChevronDown,
   Check,
   UserCheck,
-  Clock,
   ShieldCheck,
   X,
   ClipboardList,
-  Sparkles
+  MapPin,
+  Briefcase,
+  Building2,
+  Search,
+  UserX,
+  AlertCircle
 } from 'lucide-react';
 import {
   SalesHeaderFilter,
@@ -22,38 +21,54 @@ import {
   MONTH_OPTIONS,
   useSalesAdminUsers
 } from './SalesHeaderFilter';
+import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../../utils/areaNormalizer';
+import { branchStore } from '../../services/branchStore';
+import { logisticsStore } from '../../services/store';
 
 interface AdminSchedulesTabProps {
   onNavigateSubTab?: (sub: 'dashboard' | 'activities' | 'schedules' | 'loading_duration' | 'skill_matrix' | 'jobdesk') => void;
   adminOptions: string[];
 }
 
+export type AdminAttendanceStatus = 'hadir' | 'ijin' | 'sakit';
+
 export interface AdminDailyScheduleItem {
   id: string;
   date: string; // YYYY-MM-DD
   adminName: string;
+  branchId?: string; // 'cab-banyuwangi' (Nusantara) | 'cab-sidoarjo' (Sidoarjo)
   duties: string[];
+  additionalDuties?: string[];
   shiftTime: string;
   isBackupAcc: boolean;
   notes: string;
+  attendanceStatus?: AdminAttendanceStatus;
+  absenceReason?: string;
 }
 
-const DUTY_OPTIONS = [
-  'Cek Eceran',
-  'Cek Faktur Kuning',
-  'Cek Faktur Toko',
-  'Cek Surat Jalan Toko',
-  'Input Retur Toko',
+// Jobdesk Tambahan sesuai permintaan
+export const ADDITIONAL_JOBDESK_OPTIONS = [
+  'Ekspor Argo',
+  'Ekspor Transaksi',
   'HP Telkomsel',
   'HP XL',
-  'Muat Kelilingan',
-  'Muat Toko',
-  'Muat AKS',
-  'Data Rekap',
-  'Revisi Faktur Toko',
-  'Back Up ACC',
-  'Piket Pagi'
+  'NX',
+  'Retur',
+  'BT'
 ];
+
+const LS_ADMIN_BRANCH_MAP_KEY = 'akk_sales_admin_branch_map_v1';
+
+function loadAdminBranchMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LS_ADMIN_BRANCH_MAP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {}
+  return {};
+}
 
 const DAY_NAMES_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -96,37 +111,49 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
       id: 'sch-1',
       date: '2026-08-10',
       adminName: a0,
-      duties: ['Cek Eceran', 'HP Telkomsel', 'Input Retur Toko'],
+      branchId: 'cab-banyuwangi',
+      duties: ['Muncar Pasar', 'Muncar Pinggir', 'HP Telkomsel'],
+      additionalDuties: ['HP Telkomsel', 'Ekspor Transaksi'],
       shiftTime: '08:00 - 16:00',
       isBackupAcc: true,
-      notes: 'Fokus validasi faktur pagi & antrian toko retail'
+      notes: 'Fokus validasi faktur area Muncar & Ekspor Transaksi',
+      attendanceStatus: 'hadir'
     },
     {
       id: 'sch-2',
       date: '2026-08-10',
       adminName: a1,
-      duties: ['Cek Faktur Toko', 'Muat Toko'],
+      branchId: 'cab-banyuwangi',
+      duties: ['Rogojampi Retail', 'Genteng Retail', 'Retur'],
+      additionalDuties: ['Retur'],
       shiftTime: '08:00 - 16:00',
       isBackupAcc: false,
-      notes: 'Koordinasi surat jalan area Rogojampi & Genteng'
+      notes: 'Koordinasi surat jalan area Rogojampi & Genteng',
+      attendanceStatus: 'hadir'
     },
     {
       id: 'sch-3',
       date: '2026-08-11',
       adminName: a1,
-      duties: ['Cek Faktur Kuning', 'Data Rekap'],
+      branchId: 'cab-banyuwangi',
+      duties: ['Denpasar 1', 'Singaraja', 'Ekspor Argo'],
+      additionalDuties: ['Ekspor Argo'],
       shiftTime: '08:00 - 16:00',
       isBackupAcc: true,
-      notes: 'Rekapitulasi PO masuk mingguan'
+      notes: 'Rekapitulasi PO masuk area Bali',
+      attendanceStatus: 'hadir'
     },
     {
       id: 'sch-4',
       date: '2026-08-12',
       adminName: a2,
-      duties: ['Muat Kelilingan', 'Cek Surat Jalan Toko'],
+      branchId: 'cab-banyuwangi',
+      duties: ['Jember Kota', 'Situbondo', 'BT'],
+      additionalDuties: ['BT'],
       shiftTime: '08:00 - 16:00',
       isBackupAcc: true,
-      notes: 'Monitoring pemberangkatan armada pagi'
+      notes: 'Monitoring pemberangkatan armada pagi',
+      attendanceStatus: 'hadir'
     }
   ];
 }
@@ -143,11 +170,73 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     return names.length > 0 ? Array.from(new Set(names)) : ['ADMIN PENJUALAN'];
   }, [salesAdminUsers]);
 
+  // Admin -> Branch mapping ('cab-banyuwangi' = Nusantara, 'cab-sidoarjo' = Sidoarjo)
+  const [adminBranchMap, setAdminBranchMap] = useState<Record<string, string>>(() => loadAdminBranchMap());
+
+  const getAdminBranchId = (adminName: string): string => {
+    const key = (adminName || '').trim().toUpperCase();
+    if (adminBranchMap[key]) return adminBranchMap[key];
+    const matchedUser = salesAdminUsers.find(
+      u => (u.fullName || '').trim().toUpperCase() === key
+    );
+    if (matchedUser) {
+      const fromCrewStore = branchStore.getCrewBranchId(matchedUser.id, matchedUser.fullName);
+      if (fromCrewStore) return fromCrewStore;
+    }
+    return 'cab-banyuwangi';
+  };
+
+  const setAdminBranchId = (adminName: string, branchId: string) => {
+    const key = (adminName || '').trim().toUpperCase();
+    setAdminBranchMap(prev => {
+      const next = { ...prev, [key]: branchId };
+      try {
+        localStorage.setItem(LS_ADMIN_BRANCH_MAP_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    const matchedUser = salesAdminUsers.find(
+      u => (u.fullName || '').trim().toUpperCase() === key
+    );
+    if (matchedUser) {
+      branchStore.setCrewBranchId(matchedUser.id, branchId, matchedUser.fullName);
+    }
+  };
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() =>
+    branchStore.getSelectedOriginBranchId()
+  );
+
+  useEffect(() => {
+    const unsub = branchStore.subscribe(() => {
+      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
+    });
+    return unsub;
+  }, []);
+
+  const handleBranchFilterChange = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    branchStore.setActiveBranchId(branchId);
+  };
+
+  // Synchronized Nama Area Kirim from Driver/Helper Jadwal & Penugasan
+  const synchronizedDeliveryAreas = useMemo(() => {
+    const areaSet = new Set<string>(OFFICIAL_DESTINATION_AREAS);
+    const liveSchedules = logisticsStore.getSchedules();
+    liveSchedules.forEach(s => {
+      const raw = s.areaName || s.store?.city || '';
+      if (raw) {
+        const std = standardizeAreaName(raw);
+        if (std && std !== '-') areaSet.add(std);
+      }
+    });
+    return Array.from(areaSet);
+  }, []);
+
   const [selectedAdmin, setSelectedAdmin] = useState('SEMUA ADMIN');
   const [selectedMonth, setSelectedMonth] = useState('Agustus');
   const [selectedYear, setSelectedYear] = useState('2026');
   const [saveToast, setSaveToast] = useState<string | null>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
 
   const monthIndex = Math.max(0, MONTH_OPTIONS.indexOf(selectedMonth));
   const yearNum = Number(selectedYear) || 2026;
@@ -185,33 +274,60 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   // Manual Schedule Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [manualDate, setManualDate] = useState(selectedDateIso);
+  const [manualBranchId, setManualBranchId] = useState<string>('cab-banyuwangi');
   const [manualAdmin, setManualAdmin] = useState(() => salesAdminNames[0] || '');
-  const [manualDuties, setManualDuties] = useState<string[]>(['Cek Eceran']);
+  const [isManualAdminDropdownOpen, setIsManualAdminDropdownOpen] = useState(false);
+  const [manualAttendanceStatus, setManualAttendanceStatus] = useState<AdminAttendanceStatus>('hadir');
+  const [manualAbsenceReason, setManualAbsenceReason] = useState('');
+  const [manualAreaDuties, setManualAreaDuties] = useState<string[]>(['Muncar Pasar']);
+  const [manualAdditionalDuties, setManualAdditionalDuties] = useState<string[]>(['HP Telkomsel']);
+  const [areaSearchQuery, setAreaSearchQuery] = useState('');
   const [customDutyInput, setCustomDutyInput] = useState('');
-  const [manualStartTime, setManualStartTime] = useState('08:00');
-  const [manualEndTime, setManualEndTime] = useState('16:00');
   const [manualIsBackupAcc, setManualIsBackupAcc] = useState(false);
-  const [manualNotes, setManualNotes] = useState('');
+
+  // Custom dropdown state in table rows
+  const [openRowAddMenuId, setOpenRowAddMenuId] = useState<string | null>(null);
+
+  // Admins available inside the Manual Modal filtered by manualBranchId
+  const modalBranchAdmins = useMemo(() => {
+    return salesAdminNames.filter(name => getAdminBranchId(name) === manualBranchId);
+  }, [salesAdminNames, manualBranchId, adminBranchMap]);
 
   useEffect(() => {
-    if (salesAdminNames.length > 0 && !salesAdminNames.includes(manualAdmin)) {
+    if (modalBranchAdmins.length > 0 && !modalBranchAdmins.includes(manualAdmin)) {
+      setManualAdmin(modalBranchAdmins[0]);
+    } else if (modalBranchAdmins.length === 0 && salesAdminNames.length > 0 && !manualAdmin) {
       setManualAdmin(salesAdminNames[0]);
     }
-  }, [salesAdminNames, manualAdmin]);
+  }, [modalBranchAdmins, salesAdminNames, manualAdmin]);
+
+  const filteredAreaOptionsForModal = useMemo(() => {
+    return synchronizedDeliveryAreas.filter(area => {
+      if (areaSearchQuery.trim()) {
+        return area.toLowerCase().includes(areaSearchQuery.trim().toLowerCase());
+      }
+      return true;
+    });
+  }, [synchronizedDeliveryAreas, areaSearchQuery]);
 
   const openManualModalForDate = (dateIso?: string) => {
+    const effBranch = selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
     setManualDate(dateIso || selectedDateIso);
+    setManualBranchId(effBranch);
+    const branchAdmins = salesAdminNames.filter(n => getAdminBranchId(n) === effBranch);
     setManualAdmin(
       selectedAdmin !== 'SEMUA ADMIN'
         ? selectedAdmin
-        : salesAdminNames[0] || 'ADMIN PENJUALAN'
+        : branchAdmins[0] || salesAdminNames[0] || 'ADMIN PENJUALAN'
     );
-    setManualDuties(['Cek Eceran']);
+    setIsManualAdminDropdownOpen(false);
+    setManualAttendanceStatus('hadir');
+    setManualAbsenceReason('');
+    setManualAreaDuties(['Muncar Pasar']);
+    setManualAdditionalDuties(['HP Telkomsel']);
+    setAreaSearchQuery('');
     setCustomDutyInput('');
-    setManualStartTime('08:00');
-    setManualEndTime('16:00');
     setManualIsBackupAcc(false);
-    setManualNotes('');
     setIsManualModalOpen(true);
   };
 
@@ -223,8 +339,13 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     }
   };
 
-  // Filtered schedules for the selected month/year and selectedAdmin
+  // Filtered schedules for the selected month/year, selectedAdmin, and selectedBranchId
   const monthPrefix = `${yearNum}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+  const getScheduleEffectiveBranchId = (item: AdminDailyScheduleItem): string => {
+    if (item.branchId) return item.branchId;
+    return getAdminBranchId(item.adminName);
+  };
 
   const filteredMonthSchedules = useMemo(() => {
     return schedules.filter(item => {
@@ -232,9 +353,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       const matchAdmin =
         selectedAdmin === 'SEMUA ADMIN' ||
         item.adminName.toUpperCase() === selectedAdmin.toUpperCase();
-      return matchMonth && matchAdmin;
+      const itemBranch = getScheduleEffectiveBranchId(item);
+      const matchBranch = selectedBranchId === 'ALL' || itemBranch === selectedBranchId;
+      return matchMonth && matchAdmin && matchBranch;
     });
-  }, [schedules, monthPrefix, selectedAdmin]);
+  }, [schedules, monthPrefix, selectedAdmin, selectedBranchId, adminBranchMap]);
 
   const schedulesByDate = useMemo(() => {
     const map: Record<string, AdminDailyScheduleItem[]> = {};
@@ -251,43 +374,43 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       const matchAdmin =
         selectedAdmin === 'SEMUA ADMIN' ||
         item.adminName.toUpperCase() === selectedAdmin.toUpperCase();
-      return matchDate && matchAdmin;
+      const itemBranch = getScheduleEffectiveBranchId(item);
+      const matchBranch = selectedBranchId === 'ALL' || itemBranch === selectedBranchId;
+      return matchDate && matchAdmin && matchBranch;
     });
-  }, [schedules, selectedDateIso, selectedAdmin]);
+  }, [schedules, selectedDateIso, selectedAdmin, selectedBranchId, adminBranchMap]);
 
-  const backupAccOnSelectedDate = useMemo(() => {
-    const found = schedules.find(s => s.date === selectedDateIso && s.isBackupAcc);
-    return found?.adminName || '';
-  }, [schedules, selectedDateIso]);
-
-  const handleSetBackupAccForDate = (dateIso: string, adminName: string) => {
+  const handleToggleBackupAccItem = (scheduleId: string) => {
     setSchedules(prev => {
-      const existingForDate = prev.filter(s => s.date === dateIso);
-      const updated = prev.map(s => {
-        if (s.date !== dateIso) return s;
-        return {
-          ...s,
-          isBackupAcc: adminName !== '' && s.adminName.toUpperCase() === adminName.toUpperCase()
-        };
-      });
+      const target = prev.find(s => s.id === scheduleId);
+      if (!target) return prev;
+      const targetBranch = getScheduleEffectiveBranchId(target);
+      const nextState = !target.isBackupAcc;
 
-      // If the selected admin doesn't have a row on this date yet, create one automatically
-      if (
-        adminName &&
-        !existingForDate.some(s => s.adminName.toUpperCase() === adminName.toUpperCase())
-      ) {
-        updated.push({
-          id: 'sch-' + Math.random().toString(36).substring(2, 8),
-          date: dateIso,
-          adminName,
-          duties: ['Back Up ACC'],
-          shiftTime: '08:00 - 16:00',
-          isBackupAcc: true,
-          notes: 'Penugasan Back Up ACC Harian'
-        });
-      }
-      return updated;
+      return prev.map(s => {
+        if (s.date !== target.date) return s;
+        if (s.id === scheduleId) {
+          return { ...s, isBackupAcc: nextState };
+        }
+        if (nextState && getScheduleEffectiveBranchId(s) === targetBranch) {
+          return { ...s, isBackupAcc: false };
+        }
+        return s;
+      });
     });
+  };
+
+  const handleUpdateRowAttendance = (scheduleId: string, nextStatus: AdminAttendanceStatus) => {
+    setSchedules(prev =>
+      prev.map(item => {
+        if (item.id !== scheduleId) return item;
+        return {
+          ...item,
+          attendanceStatus: nextStatus,
+          isBackupAcc: nextStatus === 'hadir' ? item.isBackupAcc : false
+        };
+      })
+    );
   };
 
   const handleAddDutyToSchedule = (scheduleId: string, duty: string) => {
@@ -296,7 +419,16 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       prev.map(item => {
         if (item.id !== scheduleId) return item;
         if (item.duties.includes(duty)) return item;
-        return { ...item, duties: [...item.duties, duty] };
+        const isAddJobdesk = ADDITIONAL_JOBDESK_OPTIONS.includes(duty);
+        const nextAdd = isAddJobdesk
+          ? Array.from(new Set([...(item.additionalDuties || []), duty]))
+          : item.additionalDuties;
+        return {
+          ...item,
+          attendanceStatus: 'hadir',
+          duties: [...item.duties, duty],
+          additionalDuties: nextAdd
+        };
       })
     );
   };
@@ -305,26 +437,32 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setSchedules(prev =>
       prev.map(item => {
         if (item.id !== scheduleId) return item;
-        return { ...item, duties: item.duties.filter(d => d !== dutyToRemove) };
+        return {
+          ...item,
+          duties: item.duties.filter(d => d !== dutyToRemove),
+          additionalDuties: (item.additionalDuties || []).filter(d => d !== dutyToRemove)
+        };
       })
     );
   };
 
-  const handleDeleteScheduleItem = (scheduleId: string) => {
-    setSchedules(prev => prev.filter(item => item.id !== scheduleId));
+  const handleToggleManualAreaDuty = (areaName: string) => {
+    setManualAreaDuties(prev =>
+      prev.includes(areaName) ? prev.filter(d => d !== areaName) : [...prev, areaName]
+    );
   };
 
-  const handleToggleManualDuty = (duty: string) => {
-    setManualDuties(prev =>
-      prev.includes(duty) ? prev.filter(d => d !== duty) : [...prev, duty]
+  const handleToggleManualAdditionalDuty = (jobdesk: string) => {
+    setManualAdditionalDuties(prev =>
+      prev.includes(jobdesk) ? prev.filter(d => d !== jobdesk) : [...prev, jobdesk]
     );
   };
 
   const handleAddCustomDuty = () => {
     const trimmed = customDutyInput.trim();
     if (!trimmed) return;
-    if (!manualDuties.includes(trimmed)) {
-      setManualDuties(prev => [...prev, trimmed]);
+    if (!manualAreaDuties.includes(trimmed) && !manualAdditionalDuties.includes(trimmed)) {
+      setManualAdditionalDuties(prev => [...prev, trimmed]);
     }
     setCustomDutyInput('');
   };
@@ -333,14 +471,25 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     e.preventDefault();
     if (!manualAdmin || !manualDate) return;
 
-    const finalDuties = manualDuties.length > 0 ? manualDuties : ['Tugas Operasional Admin'];
-    const shiftTime = `${manualStartTime} - ${manualEndTime}`;
+    setAdminBranchId(manualAdmin, manualBranchId);
+
+    const isAbsent = manualAttendanceStatus === 'ijin' || manualAttendanceStatus === 'sakit';
+    const combinedDuties = isAbsent
+      ? []
+      : Array.from(new Set([...manualAreaDuties, ...manualAdditionalDuties]));
+    const finalDuties = isAbsent
+      ? []
+      : combinedDuties.length > 0
+      ? combinedDuties
+      : ['Muncar Pasar'];
 
     setSchedules(prev => {
       let next = [...prev];
-      if (manualIsBackupAcc) {
+      if (!isAbsent && manualIsBackupAcc) {
         next = next.map(item =>
-          item.date === manualDate ? { ...item, isBackupAcc: false } : item
+          item.date === manualDate && getScheduleEffectiveBranchId(item) === manualBranchId
+            ? { ...item, isBackupAcc: false }
+            : item
         );
       }
 
@@ -352,23 +501,34 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
       if (existingIdx >= 0) {
         const existing = next[existingIdx];
-        const mergedDuties = Array.from(new Set([...existing.duties, ...finalDuties]));
+        const mergedDuties = isAbsent
+          ? []
+          : Array.from(new Set([...existing.duties, ...finalDuties]));
+        const mergedAdditional = isAbsent
+          ? []
+          : Array.from(new Set([...(existing.additionalDuties || []), ...manualAdditionalDuties]));
         next[existingIdx] = {
           ...existing,
+          branchId: manualBranchId,
           duties: mergedDuties,
-          shiftTime,
-          isBackupAcc: manualIsBackupAcc || existing.isBackupAcc,
-          notes: manualNotes || existing.notes
+          additionalDuties: mergedAdditional,
+          isBackupAcc: isAbsent ? false : manualIsBackupAcc || existing.isBackupAcc,
+          attendanceStatus: manualAttendanceStatus,
+          absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
         };
       } else {
         next.push({
           id: 'sch-' + Math.random().toString(36).substring(2, 9),
           date: manualDate,
           adminName: manualAdmin,
+          branchId: manualBranchId,
           duties: finalDuties,
-          shiftTime,
-          isBackupAcc: manualIsBackupAcc,
-          notes: manualNotes || 'Jadwal kerja harian admin penjualan'
+          additionalDuties: isAbsent ? [] : manualAdditionalDuties,
+          shiftTime: '08:00 - 16:00',
+          isBackupAcc: isAbsent ? false : manualIsBackupAcc,
+          notes: '',
+          attendanceStatus: manualAttendanceStatus,
+          absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
         });
       }
 
@@ -377,43 +537,44 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
     setSelectedDateIso(manualDate);
     setIsManualModalOpen(false);
-    setSaveToast(`Jadwal manual untuk ${manualAdmin} pada ${formatReadableDateId(manualDate)} berhasil ditambahkan!`);
+    const statusLabel =
+      manualAttendanceStatus === 'ijin'
+        ? 'Status Ijin'
+        : manualAttendanceStatus === 'sakit'
+        ? 'Status Sakit'
+        : 'Jadwal Kerja';
+    setSaveToast(
+      `${statusLabel} untuk ${manualAdmin} pada ${formatReadableDateId(manualDate)} berhasil disimpan!`
+    );
     setTimeout(() => setSaveToast(null), 3000);
-  };
-
-  const handleSaveAll = () => {
-    localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(schedules));
-    setSaveToast('Seluruh perubahan jadwal kalender dan Back Up ACC berhasil disimpan!');
-    setTimeout(() => setSaveToast(null), 2500);
-  };
-
-  const handleConfirmReset = () => {
-    const initial = createInitialSchedules(salesAdminNames);
-    setSchedules(initial);
-    localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(initial));
-    setConfirmReset(false);
-    setSaveToast('Jadwal berhasil direset ke konfigurasi awal.');
-    setTimeout(() => setSaveToast(null), 2500);
   };
 
   const handleExportExcel = () => {
     const csvRows: string[] = [];
-    csvRows.push(`JADWAL KALENDER & PENUGASAN ADMIN PENJUALAN - PERIODE ${selectedMonth.toUpperCase()} ${selectedYear}`);
-    csvRows.push(['NO', 'TANGGAL', 'HARI', 'NAMA ADMIN', 'JAM KERJA', 'BACK UP ACC', 'JOBDESK / TUGAS', 'CATATAN'].join(','));
+    csvRows.push(`JADWAL & PENUGASAN ADMIN PENJUALAN - PERIODE ${selectedMonth.toUpperCase()} ${selectedYear}`);
+    csvRows.push(['NO', 'TANGGAL', 'HARI', 'NAMA ADMIN', 'CABANG', 'STATUS KEHADIRAN', 'STATUS BACK UP ACC', 'RINCIAN JADWAL (AREA KIRIM) & JOBDESK TAMBAHAN'].join(','));
 
     filteredMonthSchedules
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((item, idx) => {
+        const brId = getScheduleEffectiveBranchId(item);
+        const brName = brId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara';
+        const attStatus =
+          item.attendanceStatus === 'ijin'
+            ? `IJIN${item.absenceReason ? ` (${item.absenceReason})` : ''}`
+            : item.attendanceStatus === 'sakit'
+            ? `SAKIT${item.absenceReason ? ` (${item.absenceReason})` : ''}`
+            : 'HADIR';
         const row = [
           idx + 1,
           item.date,
           getDayNameFromIso(item.date),
           `"${item.adminName}"`,
-          `"${item.shiftTime}"`,
+          `"${brName}"`,
+          `"${attStatus}"`,
           item.isBackupAcc ? 'YA (BACK UP ACC)' : 'TIDAK',
-          `"${item.duties.join('; ')}"`,
-          `"${(item.notes || '').replace(/"/g, '""')}"`
+          `"${item.duties.join('; ')}"`
         ];
         csvRows.push(row.join(','));
       });
@@ -422,7 +583,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `jadwal_kalender_admin_${selectedMonth}_${selectedYear}.csv`);
+    link.setAttribute('download', `jadwal_penugasan_admin_penjualan_${selectedMonth}_${selectedYear}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -448,10 +609,10 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Unified Header Filter */}
+      {/* Unified Header Filter: Judul "Jadwal & Penugasan Admin Penjualan" + Fitur Cabang + Ekspor to Excel */}
       <SalesHeaderFilter
-        title="Jadwal Kalender & Penugasan Admin Penjualan"
-        subtitle="Kelola jadwal kerja bulanan, penugasan jobdesk harian, dan Back Up ACC dengan tampilan kalender interaktif."
+        title="Jadwal & Penugasan Admin Penjualan"
+        subtitle="Kelola jadwal kerja bulanan, rincian jadwal area kirim, jobdesk tambahan harian, dan pemilahan Admin Cabang Nusantara & Sidoarjo."
         activeTab="jadwal_admin"
         onTabChange={handleTopTabChange}
         selectedAdmin={selectedAdmin}
@@ -464,84 +625,50 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         pencapaianPercent={100}
         periodeLabel={`${selectedMonth.slice(0, 3)} ${selectedYear}`}
         adminOptions={adminOptions}
+        hideAdminFilter={true}
+        hideStatsCards={true}
+        showBranchFilter={true}
+        selectedBranchId={selectedBranchId}
+        onBranchChange={handleBranchFilterChange}
+        onExportExcel={handleExportExcel}
       />
 
-      {/* TOP SECTION: INTERACTIVE MONTHLY CALENDAR (Like Jadwal & Penugasan Armada) */}
+      {/* TOP SECTION: INTERACTIVE MONTHLY CALENDAR */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-5">
-        {/* Calendar Header & Action Buttons */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+        {/* Calendar Header & Action Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Kalender Penugasan Admin &amp; Back Up ACC ({selectedMonth} {selectedYear})
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Klik tanggal pada kalender untuk melihat rincian jadwal di bagian bawah atau tambahkan jadwal manual.
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Kalender Jadwal &amp; Penugasan Admin Penjualan ({selectedMonth} {selectedYear})
+                </h2>
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  ·{' '}
+                  {selectedBranchId === 'cab-banyuwangi'
+                    ? 'Cabang Nusantara'
+                    : selectedBranchId === 'cab-sidoarjo'
+                    ? 'Cabang Sidoarjo'
+                    : 'Semua Cabang'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Klik tanggal pada kalender untuk melihat rincian jadwal area kirim &amp; jobdesk tambahan di bagian bawah.
               </p>
             </div>
           </div>
 
-          {/* Action Toolbar */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Action Toolbar: Buat Jadwal Manual */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => openManualModalForDate(selectedDateIso)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               <span>Buat Jadwal Manual</span>
-            </button>
-
-            <button
-              onClick={handleSaveAll}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Simpan</span>
-            </button>
-
-            {confirmReset ? (
-              <div className="flex items-center gap-1 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 px-2.5 py-1 rounded-xl">
-                <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">Yakin reset?</span>
-                <button
-                  onClick={handleConfirmReset}
-                  className="px-2 py-0.5 bg-rose-600 text-white rounded text-[10px] font-bold cursor-pointer"
-                >
-                  Ya
-                </button>
-                <button
-                  onClick={() => setConfirmReset(false)}
-                  className="px-2 py-0.5 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
-                >
-                  Batal
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmReset(true)}
-                className="flex items-center gap-1 px-3 py-2 border border-rose-200 dark:border-rose-800/70 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-xs font-semibold transition cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-1 px-3 py-2 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Cetak</span>
-            </button>
-
-            <button
-              onClick={handleExportExcel}
-              className="flex items-center gap-1 px-3 py-2 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Excel</span>
             </button>
           </div>
         </div>
@@ -559,7 +686,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           </div>
         )}
 
-        {/* 7-Column Calendar Grid (Modeled after Jadwal & Penugasan Armada) */}
+        {/* 7-Column Calendar Grid */}
         <div>
           <div className="grid grid-cols-7 gap-2 mb-2">
             {['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'].map((dayLabel, idx) => (
@@ -589,7 +716,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
               const daySchedules = schedulesByDate[cell.isoDate] || [];
               const isSelected = selectedDateIso === cell.isoDate;
-              const backupItem = daySchedules.find(s => s.isBackupAcc);
+              const backupItem = daySchedules.find(s => s.isBackupAcc && s.attendanceStatus !== 'ijin' && s.attendanceStatus !== 'sakit');
               const isSunday = index % 7 === 0;
 
               return (
@@ -604,7 +731,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                       : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200/70 dark:border-slate-800/70 hover:border-slate-300'
                   }`}
                 >
-                  {/* Top row: Date number + count badge */}
+                  {/* Top row: Date number + count */}
                   <div className="flex items-center justify-between gap-1">
                     <span
                       className={`text-xs font-extrabold font-mono tabular-nums w-6 h-6 rounded-lg flex items-center justify-center ${
@@ -625,22 +752,34 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                     )}
                   </div>
 
-                  {/* Middle preview: Assigned admins & Back Up ACC */}
+                  {/* Middle preview: Assigned admins & Back Up ACC / Ijin / Sakit */}
                   <div className="mt-1.5 space-y-1 overflow-hidden">
                     {backupItem && (
-                      <div className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100/90 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 truncate">
-                        ACC: {backupItem.adminName}
+                      <div className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100/90 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 truncate">
+                        Back Up ACC: {backupItem.adminName}
                       </div>
                     )}
-                    {daySchedules.slice(0, 2).map(s => (
-                      <div
-                        key={s.id}
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 truncate"
-                      >
-                        <strong className="text-indigo-700 dark:text-indigo-300">{s.adminName}:</strong>{' '}
-                        {s.duties[0] || 'Tugas'}
-                      </div>
-                    ))}
+                    {daySchedules.slice(0, 2).map(s => {
+                      const isIjin = s.attendanceStatus === 'ijin';
+                      const isSakit = s.attendanceStatus === 'sakit';
+                      return (
+                        <div
+                          key={s.id}
+                          className={`text-[10px] font-medium px-1.5 py-0.5 rounded truncate ${
+                            isIjin
+                              ? 'bg-amber-100/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-300'
+                              : isSakit
+                              ? 'bg-rose-100/80 dark:bg-rose-950/50 text-rose-900 dark:text-rose-300'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <strong className={isIjin ? 'text-amber-800 dark:text-amber-200' : isSakit ? 'text-rose-800 dark:text-rose-200' : 'text-indigo-700 dark:text-indigo-300'}>
+                            {s.adminName}:
+                          </strong>{' '}
+                          {isIjin ? 'Ijin' : isSakit ? 'Sakit' : s.duties[0] || 'Tugas'}
+                        </div>
+                      );
+                    })}
                     {daySchedules.length > 2 && (
                       <div className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 pl-1">
                         +{daySchedules.length - 2} jadwal lainnya
@@ -656,8 +795,8 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
       {/* BOTTOM SECTION: RINCIAN JADWAL & PENUGASAN ADMIN PADA TANGGAL TERPILIH */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-        {/* Rincian Header Banner */}
-        <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        {/* Rincian Header Banner (Clean without Back Up ACC dropdown & Tambah Jadwal button - Item 7) */}
+        <div className="bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
               <ClipboardList className="w-4 h-4" />
@@ -665,188 +804,348 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                  Rincian Jadwal &amp; Tugas Admin — {formatReadableDateId(selectedDateIso)}
+                  Rincian Jadwal &amp; Penugasan Admin — {formatReadableDateId(selectedDateIso)}
                 </h3>
-                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 font-mono tabular-nums">
-                  {selectedDateSchedules.length} Penugasan
+                <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 font-mono tabular-nums">
+                  · {selectedDateSchedules.length} Penugasan
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Daftar rincian admin penjualan yang bertugas beserta jobdesk harian dan status Back Up ACC pada tanggal terpilih.
+                Daftar rincian admin penjualan beserta rincian jadwal (area kirim), jobdesk tambahan, status Back Up ACC, dan kehadiran pada tanggal terpilih.
               </p>
             </div>
           </div>
-
-          {/* Right Controls: Back Up ACC Selector for Selected Date + Add Manual Button */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                Back Up ACC:
-              </span>
-              <select
-                value={backupAccOnSelectedDate}
-                onChange={e => handleSetBackupAccForDate(selectedDateIso, e.target.value)}
-                className="text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-transparent focus:outline-hidden cursor-pointer"
-              >
-                <option value="">-- Pilih Admin ACC --</option>
-                {salesAdminNames.map(name => (
-                  <option key={name} value={name} className="text-slate-900 bg-white">
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              onClick={() => openManualModalForDate(selectedDateIso)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah Jadwal di Tanggal Ini</span>
-            </button>
-          </div>
         </div>
 
-        {/* Rincian Table */}
+        {/* Rincian Table (Refined UI/UX: NO | NAMA ADMIN | RINCIAN JADWAL (AREA KIRIM), JOBDESK TAMBAHAN & STATUS BACK UP) */}
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="bg-slate-50/70 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider font-extrabold">
-                <th className="py-3 px-4 w-12 text-center">NO</th>
-                <th className="py-3 px-4">NAMA ADMIN (ADM. PENJUALAN)</th>
-                <th className="py-3 px-4">RINCIAN TUGAS / JOBDESK HARIAN</th>
-                <th className="py-3 px-4">JAM KERJA / SHIFT</th>
-                <th className="py-3 px-4">STATUS BACK UP ACC</th>
-                <th className="py-3 px-4">CATATAN</th>
-                <th className="py-3 px-4 text-center w-20">AKSI</th>
+                <th className="py-3.5 px-5 w-14 text-center">NO</th>
+                <th className="py-3.5 px-5 w-64">NAMA ADMIN</th>
+                <th className="py-3.5 px-5">RINCIAN JADWAL (AREA KIRIM) &amp; JOBDESK TAMBAHAN</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {selectedDateSchedules.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 px-4 text-center">
+                  <td colSpan={3} className="py-10 px-5 text-center">
                     <div className="max-w-sm mx-auto space-y-2">
                       <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Belum ada jadwal admin pada tanggal {formatReadableDateId(selectedDateIso)}.
+                        Belum ada jadwal admin pada tanggal {formatReadableDateId(selectedDateIso)}
+                        {selectedBranchId !== 'ALL'
+                          ? ` untuk Cabang ${selectedBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}`
+                          : ''}.
                       </p>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Klik tombol <strong>Buat Jadwal Manual</strong> untuk menambahkan penugasan admin penjualan pada tanggal ini.
+                        Gunakan tombol <strong>Buat Jadwal Manual</strong> di bagian atas kalender untuk menambahkan penugasan admin penjualan.
                       </p>
-                      <button
-                        onClick={() => openManualModalForDate(selectedDateIso)}
-                        className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Buat Jadwal Manual</span>
-                      </button>
                     </div>
                   </td>
                 </tr>
               ) : (
-                selectedDateSchedules.map((item, idx) => (
-                  <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition align-top">
-                    <td className="py-3.5 px-4 text-center font-bold text-slate-500 font-mono tabular-nums">
-                      {idx + 1}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center justify-center shrink-0">
-                          {item.adminName.slice(0, 2)}
-                        </div>
-                        <div>
-                          <span className="font-extrabold text-slate-900 dark:text-white block">
-                            {item.adminName}
-                          </span>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                            Role: Adm. Penjualan
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 min-w-64">
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {item.duties.map(duty => (
-                          <span
-                            key={duty}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800/60"
+                selectedDateSchedules.map((item, idx) => {
+                  const attStatus: AdminAttendanceStatus = item.attendanceStatus || 'hadir';
+                  const isIjin = attStatus === 'ijin';
+                  const isSakit = attStatus === 'sakit';
+                  const isAbsent = isIjin || isSakit;
+
+                  const areaDutiesList = item.duties.filter(
+                    d => !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC'
+                  );
+                  const jobdeskDutiesList = Array.from(
+                    new Set([
+                      ...item.duties.filter(d => ADDITIONAL_JOBDESK_OPTIONS.includes(d)),
+                      ...(item.additionalDuties || [])
+                    ])
+                  );
+
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition align-top">
+                      <td className="py-4 px-5 text-center font-bold text-slate-500 font-mono tabular-nums">
+                        {idx + 1}
+                      </td>
+
+                      {/* Kolom NAMA ADMIN (Tanpa Cabang - Item 6) */}
+                      <td className="py-4 px-5">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-9 h-9 rounded-xl font-extrabold text-xs flex items-center justify-center shrink-0 ${
+                              isIjin
+                                ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300'
+                                : isSakit
+                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300'
+                                : 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300'
+                            }`}
                           >
-                            <span>{duty}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveDutyFromSchedule(item.id, duty)}
-                              className="text-indigo-400 hover:text-rose-600 transition cursor-pointer"
+                            {item.adminName.slice(0, 2)}
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm block">
+                              {item.adminName}
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Adm. Penjualan
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Kolom Gabungan: RINCIAN JADWAL (AREA KIRIM), JOBDESK TAMBAHAN & STATUS BACK UP / KEHADIRAN (Item 5) */}
+                      <td className="py-4 px-5">
+                        <div className="space-y-3">
+                          {/* Baris Status Kehadiran & Status Back Up ACC terintegrasi */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 dark:border-slate-800/80">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* Status Kehadiran Selector (Hadir / Ijin / Sakit) */}
+                              <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800/90 p-0.5 rounded-lg border border-slate-200/80 dark:border-slate-700">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateRowAttendance(item.id, 'hadir')}
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+                                    attStatus === 'hadir'
+                                      ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+                                  }`}
+                                >
+                                  Hadir Kerja
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateRowAttendance(item.id, 'ijin')}
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+                                    isIjin
+                                      ? 'bg-amber-500 text-white shadow-2xs'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-amber-600'
+                                  }`}
+                                >
+                                  Ijin
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateRowAttendance(item.id, 'sakit')}
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+                                    isSakit
+                                      ? 'bg-rose-600 text-white shadow-2xs'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-rose-600'
+                                  }`}
+                                >
+                                  Sakit
+                                </button>
+                              </div>
+
+                              {/* Status Back Up ACC dijadikan satu dengan Rincian Jadwal & Jobdesk Tambahan */}
+                              {!isAbsent && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBackupAccItem(item.id)}
+                                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                    item.isBackupAcc
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-emerald-400 hover:text-emerald-700'
+                                  }`}
+                                >
+                                  {item.isBackupAcc ? (
+                                    <>
+                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                      <span>Status: Back Up ACC Aktif</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                      <span>Jadikan Back Up ACC</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Popover Tambah Rincian Area / Jobdesk Tambahan */}
+                            {!isAbsent && (
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenRowAddMenuId(prev => (prev === item.id ? null : item.id))
+                                  }
+                                  className="py-1 px-3 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg text-[11px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 cursor-pointer transition"
+                                >
+                                  <span>Tambah Area / Jobdesk</span>
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+
+                                {openRowAddMenuId === item.id && (
+                                  <div className="absolute right-0 z-40 mt-1.5 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl p-3 space-y-2.5 max-h-64 overflow-y-auto">
+                                    <div>
+                                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 block px-1 mb-1">
+                                        Jobdesk Tambahan
+                                      </span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {ADDITIONAL_JOBDESK_OPTIONS.map(jb => {
+                                          const active = jobdeskDutiesList.includes(jb);
+                                          return (
+                                            <button
+                                              key={jb}
+                                              type="button"
+                                              onClick={() => {
+                                                if (active) {
+                                                  handleRemoveDutyFromSchedule(item.id, jb);
+                                                } else {
+                                                  handleAddDutyToSchedule(item.id, jb);
+                                                }
+                                              }}
+                                              className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                                                active
+                                                  ? 'bg-amber-600 text-white border-amber-600'
+                                                  : 'bg-amber-50/70 hover:bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                                              }`}
+                                            >
+                                              {jb}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block px-1 mb-1">
+                                        Rincian Jadwal (Nama Area Kirim)
+                                      </span>
+                                      <div className="space-y-0.5">
+                                        {synchronizedDeliveryAreas.map(area => {
+                                          const active = areaDutiesList.includes(area);
+                                          return (
+                                            <button
+                                              key={area}
+                                              type="button"
+                                              onClick={() => {
+                                                if (active) {
+                                                  handleRemoveDutyFromSchedule(item.id, area);
+                                                } else {
+                                                  handleAddDutyToSchedule(item.id, area);
+                                                }
+                                              }}
+                                              className={`w-full px-2.5 py-1.5 rounded-lg text-left text-[11px] font-semibold flex items-center justify-between cursor-pointer ${
+                                                active
+                                                  ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
+                                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                              }`}
+                                            >
+                                              <span>{area}</span>
+                                              {active && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Konten Rincian: Jika Ijin/Sakit vs Hadir Kerja */}
+                          {isAbsent ? (
+                            <div
+                              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border ${
+                                isIjin
+                                  ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/70 text-amber-900 dark:text-amber-200'
+                                  : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/70 text-rose-900 dark:text-rose-200'
+                              }`}
                             >
-                              &times;
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                      <div className="relative max-w-xs">
-                        <select
-                          defaultValue=""
-                          onChange={e => {
-                            handleAddDutyToSchedule(item.id, e.target.value);
-                            e.target.value = '';
-                          }}
-                          className="w-full py-1 pl-2.5 pr-6 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-[11px] font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
-                        >
-                          <option value="">+ Tambah Tugas Jobdesk...</option>
-                          {DUTY_OPTIONS.map(opt => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1.5 font-mono tabular-nums text-slate-700 dark:text-slate-300 font-semibold bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-md">
-                        <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                        {item.shiftTime}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {item.isBackupAcc ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>Back Up ACC Aktif</span>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleSetBackupAccForDate(item.date, item.adminName)}
-                          className="text-[11px] font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 underline cursor-pointer"
-                        >
-                          Jadikan Back Up ACC
-                        </button>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400 max-w-xs">
-                      {item.notes || '-'}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteScheduleItem(item.id)}
-                        title="Hapus Jadwal Ini"
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                              <UserX className="w-4 h-4 shrink-0" />
+                              <div>
+                                <span className="font-bold block">
+                                  Admin Tidak Masuk Kerja — Status: {isIjin ? 'IJIN' : 'SAKIT'}
+                                </span>
+                                {item.absenceReason && (
+                                  <span className="text-[11px] opacity-85">
+                                    Keterangan: {item.absenceReason}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {/* Grup 1: Rincian Jadwal (Area Kirim) */}
+                              <div className="bg-slate-50/70 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3">
+                                <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-2">
+                                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Rincian Jadwal — Area Kirim ({areaDutiesList.length})</span>
+                                </div>
+                                {areaDutiesList.length === 0 ? (
+                                  <span className="text-[11px] text-slate-400 italic">
+                                    Belum ada area kirim dipilih
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {areaDutiesList.map(duty => (
+                                      <span
+                                        key={duty}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white dark:bg-slate-900 text-indigo-900 dark:text-indigo-200 border border-indigo-200/80 dark:border-indigo-800/60"
+                                      >
+                                        <span>{duty}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveDutyFromSchedule(item.id, duty)}
+                                          className="text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                        >
+                                          &times;
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Grup 2: Jobdesk Tambahan */}
+                              <div className="bg-amber-50/30 dark:bg-slate-950/60 border border-amber-200/70 dark:border-slate-800 rounded-xl p-3">
+                                <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-2">
+                                  <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Jobdesk Tambahan ({jobdeskDutiesList.length})</span>
+                                </div>
+                                {jobdeskDutiesList.length === 0 ? (
+                                  <span className="text-[11px] text-slate-400 italic">
+                                    Tidak ada jobdesk tambahan
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {jobdeskDutiesList.map(jb => (
+                                      <span
+                                        key={jb}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 text-amber-900 dark:text-amber-300 border border-amber-200/90 dark:border-amber-800/60"
+                                      >
+                                        <span>{jb}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveDutyFromSchedule(item.id, jb)}
+                                          className="text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                        >
+                                          &times;
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* MODAL BUAT JADWAL MANUAL */}
+      {/* MODAL BUAT JADWAL MANUAL ADMIN PENJUALAN */}
       {isManualModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
@@ -857,20 +1156,75 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                     Buat Jadwal Manual Admin Penjualan
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Tambahkan penugasan harian admin ke dalam kalender operasional
+                    Atur penugasan harian admin, pilih lebih dari satu area kirim &amp; jobdesk tambahan, atau catat status tidak masuk kerja (Ijin / Sakit).
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsManualModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleSaveManualSchedule} className="space-y-4 text-xs">
+              {/* Row 1: Pilih Cabang Admin */}
+              <div>
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1.5">
+                  Pilih Cabang Admin Penjualan *
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualBranchId('cab-banyuwangi');
+                      const nusAdmins = salesAdminNames.filter(n => getAdminBranchId(n) === 'cab-banyuwangi');
+                      if (nusAdmins.length > 0) setManualAdmin(nusAdmins[0]);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      manualBranchId === 'cab-banyuwangi'
+                        ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-500 text-emerald-900 dark:text-emerald-200 ring-1 ring-emerald-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className={`w-4 h-4 ${manualBranchId === 'cab-banyuwangi' ? 'text-emerald-600' : 'text-slate-400'}`} />
+                      <div>
+                        <span className="font-extrabold block">Cabang Nusantara</span>
+                        <span className="text-[10px] text-slate-500">Gudang Nusantara (Banyuwangi)</span>
+                      </div>
+                    </div>
+                    {manualBranchId === 'cab-banyuwangi' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualBranchId('cab-sidoarjo');
+                      const sdaAdmins = salesAdminNames.filter(n => getAdminBranchId(n) === 'cab-sidoarjo');
+                      if (sdaAdmins.length > 0) setManualAdmin(sdaAdmins[0]);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      manualBranchId === 'cab-sidoarjo'
+                        ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 text-blue-900 dark:text-blue-200 ring-1 ring-blue-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className={`w-4 h-4 ${manualBranchId === 'cab-sidoarjo' ? 'text-blue-600' : 'text-slate-400'}`} />
+                      <div>
+                        <span className="font-extrabold block">Cabang Sidoarjo</span>
+                        <span className="text-[10px] text-slate-500">Gudang Sidoarjo</span>
+                      </div>
+                    </div>
+                    {manualBranchId === 'cab-sidoarjo' && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 2: Tanggal Jadwal & Custom Dropdown Pilih Admin */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
@@ -885,125 +1239,250 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                   />
                 </div>
 
-                <div>
+                <div className="relative">
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
                     Pilih Admin (Adm. Penjualan) *
                   </label>
-                  <select
-                    value={manualAdmin}
-                    onChange={e => setManualAdmin(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-bold"
-                  >
-                    {salesAdminNames.map(name => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Shift / Jam Kerja */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                    Jam Mulai Kerja
-                  </label>
-                  <input
-                    type="time"
-                    value={manualStartTime}
-                    onChange={e => setManualStartTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                    Jam Selesai Kerja
-                  </label>
-                  <input
-                    type="time"
-                    value={manualEndTime}
-                    onChange={e => setManualEndTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono tabular-nums"
-                  />
-                </div>
-              </div>
-
-              {/* Pilih Tugas / Jobdesk */}
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1.5">
-                  Pilih Rincian Tugas / Jobdesk ({manualDuties.length} dipilih)
-                </label>
-                <div className="flex flex-wrap gap-1.5 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl max-h-40 overflow-y-auto">
-                  {DUTY_OPTIONS.map(duty => {
-                    const active = manualDuties.includes(duty);
-                    return (
-                      <button
-                        key={duty}
-                        type="button"
-                        onClick={() => handleToggleManualDuty(duty)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
-                          active
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-indigo-400'
-                        }`}
-                      >
-                        {active ? `✓ ${duty}` : `+ ${duty}`}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Custom Jobdesk Input */}
-                <div className="flex items-center gap-2 mt-2">
-                  <input
-                    type="text"
-                    placeholder="Tambah tugas manual lainnya..."
-                    value={customDutyInput}
-                    onChange={e => setCustomDutyInput(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
-                  />
                   <button
                     type="button"
-                    onClick={handleAddCustomDuty}
-                    className="px-3 py-2 bg-slate-800 dark:bg-slate-700 text-white rounded-xl font-semibold hover:bg-slate-700 cursor-pointer"
+                    onClick={() => setIsManualAdminDropdownOpen(prev => !prev)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-bold flex items-center justify-between gap-2 cursor-pointer transition"
                   >
-                    Tambah Tugas
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-extrabold text-[10px] flex items-center justify-center shrink-0">
+                        {(manualAdmin || 'AD').slice(0, 2)}
+                      </span>
+                      <span className="truncate">{manualAdmin || 'Pilih Admin'}</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isManualAdminDropdownOpen ? 'rotate-180 text-indigo-500' : ''}`} />
+                  </button>
+
+                  {isManualAdminDropdownOpen && (
+                    <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {salesAdminNames.map(name => {
+                        const isSel = manualAdmin === name;
+                        const currentBr = getAdminBranchId(name);
+                        const isCurrentBranch = currentBr === manualBranchId;
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => {
+                              setManualAdmin(name);
+                              setIsManualAdminDropdownOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                              isSel
+                                ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[10px] flex items-center justify-center shrink-0">
+                                {name.slice(0, 2)}
+                              </span>
+                              <div className="truncate">
+                                <span className="block truncate">{name}</span>
+                                <span className={`text-[10px] font-semibold ${
+                                  isCurrentBranch ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'
+                                }`}>
+                                  Cabang {currentBr === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
+                                </span>
+                              </div>
+                            </div>
+                            {isSel && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 3: Desain Status Kehadiran Admin (Hadir Kerja / Tidak Masuk Kerja: Ijin / Sakit - Item 4) */}
+              <div className="space-y-2">
+                <label className="block text-slate-700 dark:text-slate-300 font-bold">
+                  Status Kehadiran Admin Penjualan
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setManualAttendanceStatus('hadir')}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      manualAttendanceStatus === 'hadir'
+                        ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-500 text-emerald-900 dark:text-emerald-200 ring-1 ring-emerald-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-extrabold block">Hadir Kerja</span>
+                      <span className="text-[10px] text-slate-500">Aktif Bertugas</span>
+                    </div>
+                    {manualAttendanceStatus === 'hadir' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManualAttendanceStatus('ijin')}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      manualAttendanceStatus === 'ijin'
+                        ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-500 text-amber-900 dark:text-amber-200 ring-1 ring-amber-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-amber-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-extrabold block">Tidak Masuk (Ijin)</span>
+                      <span className="text-[10px] text-slate-500">Ijin Keperluan / Cuti</span>
+                    </div>
+                    {manualAttendanceStatus === 'ijin' && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManualAttendanceStatus('sakit')}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      manualAttendanceStatus === 'sakit'
+                        ? 'bg-rose-50/90 dark:bg-rose-950/40 border-rose-500 text-rose-900 dark:text-rose-200 ring-1 ring-rose-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-rose-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-extrabold block">Tidak Masuk (Sakit)</span>
+                      <span className="text-[10px] text-slate-500">Istirahat Medis</span>
+                    </div>
+                    {manualAttendanceStatus === 'sakit' && <Check className="w-4 h-4 text-rose-600 shrink-0" />}
                   </button>
                 </div>
+
+                {(manualAttendanceStatus === 'ijin' || manualAttendanceStatus === 'sakit') && (
+                  <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-slate-950 border border-amber-200 dark:border-slate-800 space-y-2 mt-2">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>
+                        Keterangan Admin Tidak Masuk Kerja ({manualAttendanceStatus === 'ijin' ? 'Ijin' : 'Sakit'})
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={`Masukkan keterangan ${manualAttendanceStatus === 'ijin' ? 'ijin' : 'sakit'} (opsional)...`}
+                      value={manualAbsenceReason}
+                      onChange={e => setManualAbsenceReason(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Toggle Back Up ACC */}
-              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={manualIsBackupAcc}
-                  onChange={e => setManualIsBackupAcc(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
-                />
-                <div>
-                  <span className="font-bold text-emerald-900 dark:text-emerald-200 block">
-                    Tetapkan sebagai Admin Back Up ACC pada tanggal ini
-                  </span>
-                  <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
-                    Admin ini akan ditandai sebagai penanggung jawab Back Up ACC di kalender.
-                  </span>
-                </div>
-              </label>
+              {/* SECTION 1 & 2: Pilih Rincian Jadwal & Jobdesk Tambahan (Bisa pilih lebih dari satu, tanpa tanda + dan tanpa filter tab area - Item 4) */}
+              {manualAttendanceStatus === 'hadir' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-slate-700 dark:text-slate-300 font-bold flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Pilih Rincian Jadwal — Nama Area Kirim ({manualAreaDuties.length} dipilih, bisa pilih lebih dari satu)</span>
+                      </label>
+                    </div>
 
-              {/* Catatan */}
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Catatan Penugasan
-                </label>
-                <input
-                  type="text"
-                  placeholder="Catatan tambahan shift atau fokus area..."
-                  value={manualNotes}
-                  onChange={e => setManualNotes(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
-                />
-              </div>
+                    {/* Search Area Kirim */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Cari nama area kirim (contoh: Muncar, Genteng, Jember, Denpasar)..."
+                        value={areaSearchQuery}
+                        onChange={e => setAreaSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl max-h-44 overflow-y-auto">
+                      {filteredAreaOptionsForModal.map(areaName => {
+                        const active = manualAreaDuties.includes(areaName);
+                        return (
+                          <button
+                            key={areaName}
+                            type="button"
+                            onClick={() => handleToggleManualAreaDuty(areaName)}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                              active
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+                            }`}
+                          >
+                            {active && <Check className="w-3 h-3 shrink-0" />}
+                            <span>{areaName}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* SECTION 2: Pilih Jobdesk Tambahan (Tanpa tanda +, multi-select) */}
+                  <div className="space-y-1.5">
+                    <label className="text-slate-700 dark:text-slate-300 font-bold flex items-center gap-1.5">
+                      <Briefcase className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>Pilih Jobdesk Tambahan ({manualAdditionalDuties.length} dipilih, bisa pilih lebih dari satu)</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 p-3 bg-amber-50/40 dark:bg-slate-950 border border-amber-200/70 dark:border-slate-800 rounded-xl">
+                      {ADDITIONAL_JOBDESK_OPTIONS.map(jobdesk => {
+                        const active = manualAdditionalDuties.includes(jobdesk);
+                        return (
+                          <button
+                            key={jobdesk}
+                            type="button"
+                            onClick={() => handleToggleManualAdditionalDuty(jobdesk)}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                              active
+                                ? 'bg-amber-600 text-white shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-amber-400'
+                            }`}
+                          >
+                            {active && <Check className="w-3 h-3 shrink-0" />}
+                            <span>{jobdesk}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Jobdesk Input */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="text"
+                        placeholder="Tambah jobdesk tambahan lainnya..."
+                        value={customDutyInput}
+                        onChange={e => setCustomDutyInput(e.target.value)}
+                        className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomDuty}
+                        className="px-3 py-2 bg-slate-800 dark:bg-slate-700 text-white rounded-xl font-semibold hover:bg-slate-700 cursor-pointer"
+                      >
+                        Tambah Jobdesk
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Toggle Back Up ACC */}
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={manualIsBackupAcc}
+                      onChange={e => setManualIsBackupAcc(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
+                    />
+                    <div>
+                      <span className="font-bold text-emerald-900 dark:text-emerald-200 block">
+                        Tetapkan sebagai Admin Back Up ACC pada tanggal ini
+                      </span>
+                      <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                        Status Back Up ACC akan ditampilkan bersama rincian jadwal &amp; jobdesk tambahan admin ini.
+                      </span>
+                    </div>
+                  </label>
+                </>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button

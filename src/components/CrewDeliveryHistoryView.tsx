@@ -13,7 +13,9 @@ import {
   Eye,
   LayoutGrid,
   ListFilter,
-  Calendar
+  Calendar,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { Crew, CrewDeliveryHistory, AreaApprovalRequest, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
@@ -78,6 +80,11 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [areaQuickFilter, setAreaQuickFilter] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<'area_stats' | 'fleet_stats' | 'kanvas_lkt'>('area_stats');
+
+  // Custom Filter Dropdown State
+  const [openFilterDropdown, setOpenFilterDropdown] = useState<null | 'month' | 'year' | 'crew' | 'branch' | 'fleet'>(null);
+  const [crewFilterSearch, setCrewFilterSearch] = useState<string>('');
+  const [fleetFilterSearch, setFleetFilterSearch] = useState<string>('');
 
   // Toggle Switches States
   const [isFilterSidebarOpen, setIsFilterSidebarOpen] = useState<boolean>(true);
@@ -939,88 +946,346 @@ export const CrewDeliveryHistoryView: React.FC = () => {
               {/* Kolom 2: Periode & Personel Kru */}
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
+                  {/* Bulan Custom Dropdown */}
+                  <div className="space-y-1 relative">
                     <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
-                    <select
-                      value={selectedMonth}
-                      onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                    <button
+                      type="button"
+                      onClick={() => setOpenFilterDropdown(openFilterDropdown === 'month' ? null : 'month')}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
                     >
-                      <option value={-1}>Semua Bulan</option>
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <option key={'month-' + i} value={i}>
-                          {new Date(0, i).toLocaleString('id-ID', { month: 'long' })}
-                        </option>
-                      ))}
-                    </select>
+                      <span className="truncate">
+                        {selectedMonth === -1
+                          ? 'Semua Bulan'
+                          : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'long' })}
+                      </span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'month' ? 'rotate-180 text-blue-400' : ''}`} />
+                    </button>
+                    {openFilterDropdown === 'month' && (
+                      <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMonth(-1);
+                            setOpenFilterDropdown(null);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                            selectedMonth === -1 ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                          }`}
+                        >
+                          <span>Semua Bulan</span>
+                          {selectedMonth === -1 && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                        </button>
+                        {Array.from({ length: 12 }).map((_, i) => {
+                          const mName = new Date(0, i).toLocaleString('id-ID', { month: 'long' });
+                          const isSel = selectedMonth === i;
+                          return (
+                            <button
+                              key={'month-' + i}
+                              type="button"
+                              onClick={() => {
+                                setSelectedMonth(i);
+                                setOpenFilterDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                                isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                              }`}
+                            >
+                              <span>{mName}</span>
+                              {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="space-y-1">
+                  {/* Tahun Custom Dropdown */}
+                  <div className="space-y-1 relative">
                     <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
-                    <select
-                      value={selectedYear}
-                      onChange={(e) => setSelectedYear(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                    <button
+                      type="button"
+                      onClick={() => setOpenFilterDropdown(openFilterDropdown === 'year' ? null : 'year')}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-mono font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
                     >
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <option key={'year-' + i} value={2024 + i}>
-                          {2024 + i}
-                        </option>
-                      ))}
-                    </select>
+                      <span>{selectedYear}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'year' ? 'rotate-180 text-blue-400' : ''}`} />
+                    </button>
+                    {openFilterDropdown === 'year' && (
+                      <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
+                        {Array.from({ length: 5 }).map((_, i) => {
+                          const yr = 2024 + i;
+                          const isSel = selectedYear === yr;
+                          return (
+                            <button
+                              key={'year-' + i}
+                              type="button"
+                              onClick={() => {
+                                setSelectedYear(yr);
+                                setOpenFilterDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs font-mono font-bold flex items-center justify-between transition cursor-pointer ${
+                                isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                              }`}
+                            >
+                              <span>{yr}</span>
+                              {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                {/* Pilih Personel Kru Custom Dropdown */}
+                <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
-                  <select
-                    value={selectedCrewId}
-                    onChange={(e) => setSelectedCrewId(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="all">Semua Pengemudi ({crews.length})</option>
-                    {crews.map(cr => (
-                      <option key={cr.id} value={cr.id}>
-                        {cr.name}
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const activeCrewObj = crews.find(cr => cr.id === selectedCrewId);
+                    const filteredCrewList = crews.filter(cr => {
+                      const q = crewFilterSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return cr.name.toLowerCase().includes(q) || (cr.role || '').toLowerCase().includes(q);
+                    });
+
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'crew' ? null : 'crew')}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span className="truncate">
+                              {activeCrewObj ? activeCrewObj.name : `Semua Pengemudi (${crews.length})`}
+                            </span>
+                          </div>
+                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'crew' ? 'rotate-180 text-blue-400' : ''}`} />
+                        </button>
+
+                        {openFilterDropdown === 'crew' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  placeholder="Cari nama personel kru..."
+                                  value={crewFilterSearch}
+                                  onChange={(e) => setCrewFilterSearch(e.target.value)}
+                                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCrewId('all');
+                                  setOpenFilterDropdown(null);
+                                  setCrewFilterSearch('');
+                                }}
+                                className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                  selectedCrewId === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                }`}
+                              >
+                                <span>Semua Pengemudi ({crews.length})</span>
+                                {selectedCrewId === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                              </button>
+                              {filteredCrewList.map(cr => {
+                                const isSel = selectedCrewId === cr.id;
+                                return (
+                                  <button
+                                    key={cr.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCrewId(cr.id);
+                                      setOpenFilterDropdown(null);
+                                      setCrewFilterSearch('');
+                                    }}
+                                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                      isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="font-bold truncate">{cr.name}</div>
+                                      <div className="text-[10px] text-slate-400 truncate">{cr.role || 'Kru Armada'}</div>
+                                    </div>
+                                    {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
               {/* Kolom 3: Filter Cabang & Armada */}
               <div className="space-y-2.5">
-                <div className="space-y-1">
+                {/* Pilih Cabang Custom Dropdown */}
+                <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Cabang</label>
-                  <select
-                    value={selectedBranchId}
-                    onChange={(e) => {
-                      setSelectedBranchId(e.target.value);
-                      branchStore.setSelectedOriginBranchId(e.target.value);
-                    }}
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="ALL">Semua Cabang</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>Cabang {b.name}</option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const activeBranchObj = branches.find(b => b.id === selectedBranchId);
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'branch' ? null : 'branch')}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-xs font-bold text-emerald-400 flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <span className="truncate">
+                            {selectedBranchId === 'ALL' || !activeBranchObj ? 'Semua Cabang' : `Cabang ${activeBranchObj.name}`}
+                          </span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'branch' ? 'rotate-180 text-emerald-400' : ''}`} />
+                        </button>
+
+                        {openFilterDropdown === 'branch' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedBranchId('ALL');
+                                branchStore.setSelectedOriginBranchId('ALL');
+                                setOpenFilterDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                selectedBranchId === 'ALL' ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
+                              }`}
+                            >
+                              <span>Semua Cabang</span>
+                              {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                            </button>
+                            {branches.map(b => {
+                              const isSel = selectedBranchId === b.id;
+                              return (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedBranchId(b.id);
+                                    branchStore.setSelectedOriginBranchId(b.id);
+                                    setOpenFilterDropdown(null);
+                                  }}
+                                  className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                    isSel ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <span>Cabang {b.name}</span>
+                                  {isSel && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
-                <div className="space-y-1">
+                {/* Pilih Armada Custom Dropdown */}
+                <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
-                  <select
-                    value={selectedFleetFilter}
-                    onChange={(e) => setSelectedFleetFilter(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="all">Semua Armada ({fleets.length})</option>
-                    {fleets.map(fl => (
-                      <option key={fl.id} value={fl.initialCode || fl.plateNumber}>
-                        Armada {fl.initialCode ? `${fl.initialCode} · ${fl.plateNumber}` : fl.plateNumber} ({fl.vehicleType})
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const activeFleetObj = fleets.find(fl => (fl.initialCode || fl.plateNumber) === selectedFleetFilter);
+                    const filteredFleetList = fleets.filter(fl => {
+                      const q = fleetFilterSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        fl.plateNumber.toLowerCase().includes(q) ||
+                        (fl.initialCode || '').toLowerCase().includes(q) ||
+                        fl.vehicleType.toLowerCase().includes(q)
+                      );
+                    });
+
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'fleet' ? null : 'fleet')}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">
+                              {activeFleetObj
+                                ? `${activeFleetObj.initialCode ? `[${activeFleetObj.initialCode}] ` : ''}${activeFleetObj.plateNumber}`
+                                : `Semua Armada (${fleets.length})`}
+                            </span>
+                          </div>
+                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'fleet' ? 'rotate-180 text-blue-400' : ''}`} />
+                        </button>
+
+                        {openFilterDropdown === 'fleet' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  placeholder="Cari plat atau inisial armada..."
+                                  value={fleetFilterSearch}
+                                  onChange={(e) => setFleetFilterSearch(e.target.value)}
+                                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedFleetFilter('all');
+                                  setOpenFilterDropdown(null);
+                                  setFleetFilterSearch('');
+                                }}
+                                className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                  selectedFleetFilter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                }`}
+                              >
+                                <span>Semua Armada ({fleets.length})</span>
+                                {selectedFleetFilter === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                              </button>
+                              {filteredFleetList.map(fl => {
+                                const valKey = fl.initialCode || fl.plateNumber;
+                                const isSel = selectedFleetFilter === valKey;
+                                return (
+                                  <button
+                                    key={fl.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedFleetFilter(valKey);
+                                      setOpenFilterDropdown(null);
+                                      setFleetFilterSearch('');
+                                    }}
+                                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                      isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                                        {fl.initialCode || 'UNIT'}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="font-mono font-bold text-white truncate">{fl.plateNumber}</div>
+                                        <div className="text-[10px] text-slate-400 truncate">{fl.vehicleType}</div>
+                                      </div>
+                                    </div>
+                                    {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">

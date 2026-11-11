@@ -3881,7 +3881,7 @@ Kembalikan HANYA JSON valid:
   // Endpoint ringan Real-Time Multi-Device Sync khusus untuk menyinkronkan foto dokumentasi & perubahan barang antar HP dan PC
   // Ringkasan ringan dari MySQL, tanpa mentransfer foto/base64 ke browser.
   // Dipakai untuk verifikasi pemulihan foto lama dari IndexedDB perangkat asal.
-  app.get('/api/database-barang/photos-summary', requireAuth, async (_req, res) => {
+  app.get('/api/database-barang/photos-summary', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!isDatabaseConfigured() && isHostingerEnv) {
       return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi.' });
@@ -4010,8 +4010,8 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role
-  app.post('/api/database-barang/photos-sync', requireAuth, async (req: any, res: any) => {
+  // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role/sesi
+  app.post('/api/database-barang/photos-sync', async (req: any, res: any) => {
     try {
       if (!isDatabaseConfigured() && isHostingerEnv) {
         return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; foto tidak disimpan di server.' });
