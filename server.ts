@@ -2155,9 +2155,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const deletedPlateSet = new Set((deletedState.plates || []).map(x => String(x).replace(/\s+/g, '').toUpperCase()));
       const mapped = mysqlFleets
         .map(f => {
+          const parsedJson = parseJsonColumn(f.payload_json) || {};
           const rawLastMaint = f.last_maintenance instanceof Date
             ? f.last_maintenance.toISOString().slice(0, 10)
-            : (f.last_maintenance ? String(f.last_maintenance).slice(0, 10) : '');
+            : (f.last_maintenance
+                ? String(f.last_maintenance).slice(0, 10)
+                : (parsedJson.lastMaintenance || parsedJson.kirExpiryDate || ''));
           return mergePayload(f.payload_json, {
             id: f.id,
             plateNumber: f.plate_number,
@@ -2169,7 +2172,8 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             fuelLevelPercent: Number(f.fuel_level_percent ?? 100),
             odometerKm: Number(f.odometer_km || 0),
             year: Number(f.year || 0),
-            lastMaintenance: rawLastMaint
+            lastMaintenance: rawLastMaint,
+            kirExpiryDate: rawLastMaint
           });
         })
         .filter(f => {
@@ -2204,12 +2208,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const id = String(f.id || `flt-${Date.now()}`).trim();
     const plateNumber = String(f.plateNumber).trim().toUpperCase();
     const cleanPlate = plateNumber.replace(/\s+/g, '').toUpperCase();
-    const lastMaintDate = toMysqlDateOnly(f.lastMaintenance);
+    const lastMaintDate = toMysqlDateOnly(f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate);
     const fullPayload = {
       ...f,
       id,
       plateNumber,
-      lastMaintenance: lastMaintDate || ''
+      lastMaintenance: lastMaintDate || '',
+      kirExpiryDate: lastMaintDate || ''
     };
     inMemoryFleetsFallback[id] = fullPayload;
 
@@ -2277,6 +2282,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           const parsedJson = typeof row.payload_json === 'string'
             ? JSON.parse(row.payload_json || '{}')
             : (row.payload_json || {});
+          const dbLastMaint = row.last_maintenance instanceof Date
+            ? row.last_maintenance.toISOString().slice(0, 10)
+            : (row.last_maintenance ? String(row.last_maintenance).slice(0, 10) : '');
           existingPayload = {
             id: row.id,
             plateNumber: row.plate_number,
@@ -2288,10 +2296,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             fuelLevelPercent: Number(row.fuel_level_percent ?? 100),
             odometerKm: Number(row.odometer_km || 0),
             year: Number(row.year || new Date().getFullYear()),
-            lastMaintenance: row.last_maintenance instanceof Date
-              ? row.last_maintenance.toISOString().slice(0, 10)
-              : (row.last_maintenance ? String(row.last_maintenance).slice(0, 10) : ''),
-            ...parsedJson
+            ...parsedJson,
+            lastMaintenance: dbLastMaint || parsedJson.lastMaintenance || parsedJson.kirExpiryDate || '',
+            kirExpiryDate: dbLastMaint || parsedJson.lastMaintenance || parsedJson.kirExpiryDate || ''
           };
         }
       } catch {}
@@ -2305,10 +2312,14 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       merged.plateNumber = plateNumber;
 
       const hasExplicitLastMaint = Object.prototype.hasOwnProperty.call(f, 'lastMaintenance');
+      const hasExplicitKirExpiry = Object.prototype.hasOwnProperty.call(f, 'kirExpiryDate');
       const lastMaintDate = hasExplicitLastMaint
         ? toMysqlDateOnly(f.lastMaintenance)
-        : toMysqlDateOnly(merged.lastMaintenance);
+        : hasExplicitKirExpiry
+        ? toMysqlDateOnly(f.kirExpiryDate)
+        : toMysqlDateOnly(merged.lastMaintenance || merged.kirExpiryDate);
       merged.lastMaintenance = lastMaintDate || '';
+      merged.kirExpiryDate = lastMaintDate || '';
 
       inMemoryFleetsFallback[id] = merged;
 

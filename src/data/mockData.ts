@@ -222,7 +222,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-23',
     taxDueDate: '2027-06-25',
     stnkExpiryDate: '2029-06-25',
-    kirExpiryDate: '2026-10-18'
+    kirExpiryDate: '2026-12-23'
   },
   {
     id: 'flt-02',
@@ -248,7 +248,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-02-05',
     taxDueDate: '2027-08-03',
     stnkExpiryDate: '2031-08-03',
-    kirExpiryDate: '2027-01-20'
+    kirExpiryDate: '2027-02-05'
   },
   {
     id: 'flt-03',
@@ -274,7 +274,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-01-29',
     taxDueDate: '2027-08-03',
     stnkExpiryDate: '2027-08-03',
-    kirExpiryDate: '2026-10-05'
+    kirExpiryDate: '2027-01-29'
   },
   {
     id: 'flt-04',
@@ -297,7 +297,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     kirDocUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=800&q=80',
     kirDocFileName: 'LEGALITAS_KIR_P9677VB.jpg',
     kirDocUploadedAt: '2026-10-04T09:40:00Z',
-    lastMaintenance: '2026-11-27',
+    lastMaintenance: '2026-11-28',
     taxDueDate: '2027-05-17',
     stnkExpiryDate: '2029-05-27',
     kirExpiryDate: '2026-11-28'
@@ -320,7 +320,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     boxDimensions: '3.1 x 1.7 x 1.7 m',
     boxInnerMultiplierPercent: 90,
     boxInnerCapacityM3: 8.1,
-    lastMaintenance: '2026-08-11',
+    lastMaintenance: '2026-10-12',
     taxDueDate: '2026-10-07',
     stnkExpiryDate: '2026-10-07',
     kirExpiryDate: '2026-10-12'
@@ -349,7 +349,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-01',
     taxDueDate: '2027-01-16',
     stnkExpiryDate: '2030-01-16',
-    kirExpiryDate: '2026-09-20'
+    kirExpiryDate: '2026-12-01'
   },
   {
     id: 'flt-07',
@@ -370,7 +370,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-02-20',
     taxDueDate: '2027-02-18',
     stnkExpiryDate: '2027-02-18',
-    kirExpiryDate: '2026-10-22'
+    kirExpiryDate: '2027-02-20'
   },
   {
     id: 'flt-08',
@@ -388,7 +388,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     engineCc: '4009 CC',
     boxCapacityM3: 17.5,
     boxDimensions: '4.3 x 2.0 x 2.0 m',
-    lastMaintenance: '2026-11-24',
+    lastMaintenance: '2027-02-15',
     taxDueDate: '2027-07-04',
     stnkExpiryDate: '2028-07-04',
     kirExpiryDate: '2027-02-15'
@@ -412,7 +412,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-10-23',
     taxDueDate: '2026-11-11',
     stnkExpiryDate: '2030-11-11',
-    kirExpiryDate: '2026-10-10'
+    kirExpiryDate: '2026-10-23'
   },
   {
     id: 'flt-10',
@@ -433,7 +433,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-23',
     taxDueDate: '2027-05-17',
     stnkExpiryDate: '2028-05-17',
-    kirExpiryDate: '2026-12-14'
+    kirExpiryDate: '2026-12-23'
   },
   {
     id: 'flt-11',
@@ -451,7 +451,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     engineCc: '4778 CC',
     boxCapacityM3: 18.0,
     boxDimensions: '4.4 x 2.0 x 2.0 m',
-    lastMaintenance: '2026-12-02',
+    lastMaintenance: '2027-03-10',
     taxDueDate: '2027-05-20',
     stnkExpiryDate: '2029-05-20',
     kirExpiryDate: '2027-03-10'
@@ -475,7 +475,7 @@ export const INITIAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-11-19',
     taxDueDate: '2026-10-06',
     stnkExpiryDate: '2027-10-06',
-    kirExpiryDate: '2026-10-08'
+    kirExpiryDate: '2026-11-19'
   }
 ];
 

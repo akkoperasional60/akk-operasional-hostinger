@@ -1057,11 +1057,21 @@ class LogisticsStore {
           boxDimensions = '3.5 x 1.8 x 1.8 m';
         }
       }
+      // Sinkronkan kirExpiryDate dengan lastMaintenance agar tanggal jatuh tempo KIR di tabel selalu sesuai dengan tanggal yang diinput/disimpan
+      const unifiedKir = f.lastMaintenance !== undefined && f.lastMaintenance !== ''
+        ? f.lastMaintenance
+        : (f.kirExpiryDate || '');
+      if (f.kirExpiryDate !== unifiedKir || f.lastMaintenance !== unifiedKir) {
+        changed = true;
+      }
+
       if (changed) {
         updatedFleets = true;
         return {
           ...f,
           initialCode,
+          lastMaintenance: unifiedKir,
+          kirExpiryDate: unifiedKir,
           taxDueDate,
           stnkExpiryDate,
           boxCapacityM3,
@@ -1814,10 +1824,18 @@ class LogisticsStore {
       boxDimensions: pickExplicitStr(f.boxDimensions, localRef?.boxDimensions, canonical?.boxDimensions),
       boxInnerMultiplierPercent,
       boxInnerCapacityM3,
-      lastMaintenance: pickExplicitStr(f.lastMaintenance, localRef?.lastMaintenance, canonical?.lastMaintenance),
+      lastMaintenance: pickExplicitStr(
+        f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate,
+        localRef?.lastMaintenance ?? localRef?.kirExpiryDate,
+        canonical?.lastMaintenance ?? canonical?.kirExpiryDate
+      ),
       taxDueDate: pickExplicitStr(f.taxDueDate, localRef?.taxDueDate, canonical?.taxDueDate),
       stnkExpiryDate: pickExplicitStr(f.stnkExpiryDate, localRef?.stnkExpiryDate, canonical?.stnkExpiryDate),
-      kirExpiryDate: pickExplicitStr(f.kirExpiryDate, localRef?.kirExpiryDate, canonical?.kirExpiryDate),
+      kirExpiryDate: pickExplicitStr(
+        f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate,
+        localRef?.lastMaintenance ?? localRef?.kirExpiryDate,
+        canonical?.lastMaintenance ?? canonical?.kirExpiryDate
+      ),
       kirDocUrl: pickExplicitStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
       kirDocFileName: pickExplicitStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
       kirDocUploadedAt: pickExplicitStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),

@@ -466,6 +466,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
     const created = logisticsStore.addFleet({
       ...newFleet,
+      kirExpiryDate: newFleet.lastMaintenance,
       driverId: newFleetAssignedCrewId || undefined
     });
     if (created) {
@@ -475,7 +476,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         await reloadFleetCrewFromMySql();
         setSyncFeedback({
           type: 'error',
-          message: `Armada ${created.plateNumber} belum tersimpan ke Hostinger MySQL: ${remoteFleetCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+          message: `Armada ${created.plateNumber} belum dapat disimpan ke server: ${remoteFleetCreate.error || 'koneksi jaringan terganggu'}. Silakan coba kembali.`
         });
         setTimeout(() => setSyncFeedback(null), 7000);
         return;
@@ -505,7 +506,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Armada baru ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Armada baru ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil didaftarkan dan disimpan ke dalam sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -537,7 +538,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         await reloadFleetCrewFromMySql();
         setSyncFeedback({
           type: 'error',
-          message: `Kru ${created.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+          message: `Data kru ${created.name} belum dapat disimpan ke server: ${remoteCrewCreate.error || 'koneksi jaringan terganggu'}.`
         });
         setTimeout(() => setSyncFeedback(null), 7000);
         return;
@@ -555,7 +556,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${created.name} (${created.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Data kru ${created.name} (${created.role}) berhasil ditambahkan dan tersimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -601,6 +602,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       return defaultVal;
     };
 
+    const unifiedKirDate = pickExplicitOrCanon(
+      fleet.lastMaintenance || fleet.kirExpiryDate,
+      existingInStore?.lastMaintenance || existingInStore?.kirExpiryDate,
+      canonical?.lastMaintenance || canonical?.kirExpiryDate,
+      ''
+    );
+
     setEditingFleet({
       ...(canonical || ({} as Fleet)),
       ...(existingInStore || ({} as Fleet)),
@@ -609,10 +617,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       brand,
       engineCc: pickStr(fleet.engineCc, existingInStore?.engineCc, canonical?.engineCc) || '2477 CC',
       year: fleet.year || existingInStore?.year || canonical?.year || 2020,
-      lastMaintenance: pickExplicitOrCanon(fleet.lastMaintenance, existingInStore?.lastMaintenance, canonical?.lastMaintenance, ''),
+      lastMaintenance: unifiedKirDate,
       taxDueDate: pickExplicitOrCanon(fleet.taxDueDate, existingInStore?.taxDueDate, canonical?.taxDueDate, getDefaultTaxDate()),
       stnkExpiryDate: pickExplicitOrCanon(fleet.stnkExpiryDate, existingInStore?.stnkExpiryDate, canonical?.stnkExpiryDate, getDefaultStnkDate()),
-      kirExpiryDate: pickExplicitOrCanon(fleet.kirExpiryDate, existingInStore?.kirExpiryDate, canonical?.kirExpiryDate, ''),
+      kirExpiryDate: unifiedKirDate,
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
@@ -631,6 +639,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
     const existingFleet = fleets.find(f => f.id === editingFleet.id);
     const canonical = resolveCanonicalFleetMeta(editingFleet) || resolveCanonicalFleetMeta(existingFleet);
+    const unifiedKirForSave =
+      editingFleet.lastMaintenance !== undefined
+        ? editingFleet.lastMaintenance
+        : editingFleet.kirExpiryDate !== undefined
+        ? editingFleet.kirExpiryDate
+        : (existingFleet?.lastMaintenance ?? existingFleet?.kirExpiryDate ?? '');
+
     const mergedForSave: Fleet = {
       ...(canonical || ({} as Fleet)),
       ...(existingFleet || ({} as Fleet)),
@@ -641,10 +656,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       brand: editingFleet.brand !== undefined ? editingFleet.brand : (existingFleet?.brand || canonical?.brand || 'Mitsubishi L300'),
       engineCc: editingFleet.engineCc !== undefined ? editingFleet.engineCc : (existingFleet?.engineCc || canonical?.engineCc || '2477 CC'),
       year: editingFleet.year || existingFleet?.year || canonical?.year || 2020,
-      lastMaintenance: editingFleet.lastMaintenance !== undefined ? editingFleet.lastMaintenance : (existingFleet?.lastMaintenance ?? ''),
+      lastMaintenance: unifiedKirForSave,
       taxDueDate: editingFleet.taxDueDate !== undefined ? editingFleet.taxDueDate : (existingFleet?.taxDueDate ?? ''),
       stnkExpiryDate: editingFleet.stnkExpiryDate !== undefined ? editingFleet.stnkExpiryDate : (existingFleet?.stnkExpiryDate ?? ''),
-      kirExpiryDate: editingFleet.kirExpiryDate !== undefined ? editingFleet.kirExpiryDate : (existingFleet?.kirExpiryDate ?? ''),
+      kirExpiryDate: unifiedKirForSave,
       kirDocUrl: editingFleet.kirDocUrl !== undefined ? editingFleet.kirDocUrl : (existingFleet?.kirDocUrl ?? ''),
       kirDocFileName: editingFleet.kirDocFileName !== undefined ? editingFleet.kirDocFileName : (existingFleet?.kirDocFileName ?? '')
     };
@@ -755,7 +770,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       await reloadFleetCrewFromMySql();
       setSyncFeedback({
         type: 'error',
-        message: `Perubahan kru ${editingCrew.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewUpdate.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+        message: `Perubahan data kru ${editingCrew.name} belum dapat disimpan: ${remoteCrewUpdate.error || 'koneksi jaringan terganggu'}.`
       });
       setTimeout(() => setSyncFeedback(null), 7000);
       return;
@@ -766,7 +781,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${editingCrew.name} (${editingCrew.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Data kru ${editingCrew.name} (${editingCrew.role}) berhasil diperbarui dan disimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -786,7 +801,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       setCrewToDelete(null);
       setSyncFeedback({
         type: 'error',
-        message: `Kru ${name} belum terhapus dari Hostinger MySQL: ${remoteCrewDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+        message: `Kru ${name} belum dapat dihapus dari sistem: ${remoteCrewDelete.error || 'koneksi jaringan terganggu'}.`
       });
       setTimeout(() => setSyncFeedback(null), 7000);
       return;
@@ -795,7 +810,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrewToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${name} berhasil dihapus dari database Hostinger MySQL.`
+      message: `Data kru ${name} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -811,7 +826,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       setFleetToDelete(null);
       setSyncFeedback({
         type: 'error',
-        message: `Armada ${plate} belum terhapus dari Hostinger MySQL: ${remoteFleetDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+        message: `Armada ${plate} belum dapat dihapus dari sistem: ${remoteFleetDelete.error || 'koneksi jaringan terganggu'}.`
       });
       setTimeout(() => setSyncFeedback(null), 7000);
       return;
@@ -820,7 +835,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data armada ${plate} berhasil dihapus dari database Hostinger MySQL.`
+      message: `Data armada ${plate} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -1238,55 +1253,96 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )}
       </div>
 
-      {/* Pop-Up Modal Notifikasi "Data Berhasil Disimpan ke Hostinger MySQL" */}
+      {/* Modal Notifikasi Konfirmasi Penyimpanan Data (Desain Modern Tanpa Keterangan MySQL) */}
       {syncFeedback && (
         <div
-          className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
           onClick={() => setSyncFeedback(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3.5 animate-in zoom-in-95 duration-150"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Top Accent Bar */}
             <div
-              className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center border shadow-xs ${
+              className={`h-1.5 w-full ${
                 syncFeedback.type === 'success'
-                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
-                  : 'bg-rose-500/15 border-rose-500/30 text-rose-500'
+                  ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500'
+                  : 'bg-gradient-to-r from-rose-500 to-amber-500'
               }`}
-            >
-              {syncFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-7 h-7" />
-              ) : (
-                <AlertCircle className="w-7 h-7" />
-              )}
-            </div>
+            />
 
-            {syncFeedback.type === 'success' && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>✓ Tersimpan di Hostinger MySQL</span>
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3.5">
+                <div
+                  className={`w-11 h-11 rounded-xl shrink-0 flex items-center justify-center border ${
+                    syncFeedback.type === 'success'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {syncFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : (
+                    <AlertCircle className="w-6 h-6" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-[10px] font-extrabold uppercase tracking-wider ${
+                        syncFeedback.type === 'success'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {syncFeedback.type === 'success'
+                        ? 'Manajemen Armada & Kru Terpadu'
+                        : 'Peringatan Validasi Data'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSyncFeedback(null)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5 rounded-lg transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
+                    {syncFeedback.type === 'success'
+                      ? 'Perubahan Data Berhasil Disimpan'
+                      : 'Periksa Kembali Data Anda'}
+                  </h3>
+                </div>
               </div>
-            )}
 
-            <div>
-              <h3 className="text-base font-black text-slate-900 dark:text-white">
-                {syncFeedback.type === 'success' ? 'Data Berhasil Disimpan ke Hostinger MySQL' : 'Pemberitahuan Sistem'}
-              </h3>
-              <div className="bg-slate-100 dark:bg-slate-800/80 rounded-xl p-3 border border-slate-200 dark:border-slate-700/60 text-xs text-slate-700 dark:text-slate-200 mt-2 leading-relaxed text-left">
-                {syncFeedback.message}
+              <div className="bg-slate-50 dark:bg-slate-800/70 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-700/70 text-xs text-slate-700 dark:text-slate-200 leading-relaxed flex items-start gap-2.5">
+                <Truck
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    syncFeedback.type === 'success'
+                      ? 'text-teal-600 dark:text-teal-400'
+                      : 'text-rose-500'
+                  }`}
+                />
+                <span>{syncFeedback.message}</span>
               </div>
-            </div>
 
-            <div className="pt-1">
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setSyncFeedback(null)}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs transition cursor-pointer shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-400 active:scale-98"
-              >
-                Oke, Mengerti
-              </button>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setSyncFeedback(null)}
+                  className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs text-white transition cursor-pointer shadow-sm flex items-center justify-center gap-1.5 active:scale-98 ${
+                    syncFeedback.type === 'success'
+                      ? 'bg-slate-900 dark:bg-emerald-600 hover:bg-slate-800 dark:hover:bg-emerald-500'
+                      : 'bg-rose-600 hover:bg-rose-500'
+                  }`}
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Selesai &amp; Tutup</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1411,7 +1467,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   filteredFleets.map((fleet, index) => {
                     const assignedCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
                     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-                    const kirDateVal = fleet.kirExpiryDate || fleet.lastMaintenance;
+                    const kirDateVal = fleet.lastMaintenance || fleet.kirExpiryDate;
                     const kirStatus = getExpiryStatus(kirDateVal);
                     const taxStatus = getExpiryStatus(fleet.taxDueDate);
 
@@ -2869,13 +2925,28 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">Tanggal Terakhir Servis / Uji KIR</label>
+                  <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                    <span>Tanggal Terakhir Servis / Uji KIR</span>
+                    <span className="text-[10px] text-teal-400 font-medium">Jatuh Tempo KIR</span>
+                  </label>
                   <input
                     type="date"
-                    value={editingFleet.lastMaintenance || ''}
-                    onChange={(e) => setEditingFleet({ ...editingFleet, lastMaintenance: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    value={editingFleet.lastMaintenance || editingFleet.kirExpiryDate || ''}
+                    onChange={(e) =>
+                      setEditingFleet({
+                        ...editingFleet,
+                        lastMaintenance: e.target.value,
+                        kirExpiryDate: e.target.value
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
                   />
+                  {(editingFleet.lastMaintenance || editingFleet.kirExpiryDate) && (
+                    <div className="text-[10px] text-teal-400 mt-1 font-medium flex items-center justify-between">
+                      <span>{formatIndoDate(editingFleet.lastMaintenance || editingFleet.kirExpiryDate)}</span>
+                      <span>{getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).label}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

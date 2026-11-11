@@ -147,7 +147,12 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
       (boxCap && mult ? Number((boxCap * (mult / 100)).toFixed(2)) : undefined)
   );
 
-  let rawLastMaint = explicitStrOrFallback(row.lastMaintenance, row.last_maintenance, effFallback?.lastMaintenance, canonical?.lastMaintenance);
+  let rawLastMaint = explicitStrOrFallback(
+    row.lastMaintenance ?? row.kirExpiryDate,
+    row.last_maintenance ?? row.kir_expiry_date,
+    effFallback?.lastMaintenance ?? effFallback?.kirExpiryDate,
+    canonical?.lastMaintenance ?? canonical?.kirExpiryDate
+  );
   if (rawLastMaint && rawLastMaint.includes('T')) {
     rawLastMaint = rawLastMaint.slice(0, 10);
   }
@@ -180,7 +185,7 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     kirDocUploadedAt: explicitStrOrFallback(row.kirDocUploadedAt, row.kir_doc_uploaded_at, effFallback?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
     taxDueDate: explicitStrOrFallback(row.taxDueDate, row.tax_due_date, effFallback?.taxDueDate, canonical?.taxDueDate),
     stnkExpiryDate: explicitStrOrFallback(row.stnkExpiryDate, row.stnk_expiry_date, effFallback?.stnkExpiryDate, canonical?.stnkExpiryDate),
-    kirExpiryDate: explicitStrOrFallback(row.kirExpiryDate, row.kir_expiry_date, effFallback?.kirExpiryDate, canonical?.kirExpiryDate)
+    kirExpiryDate: rawLastMaint
   } as Fleet;
 }
 
