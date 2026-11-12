@@ -41,6 +41,41 @@ Informasi Utama PT AKK Logistics:
 Jawablah pertanyaan pengguna secara langsung, spesifik, padat, dan solutif berdasarkan konteks database MySQL aktif. Jangan mengarang plat nomor atau nama personel yang tidak ada di konteks database.
 `;
 
+const DATA_DIR = path.join(process.cwd(), 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+}
+const APP_STATE_FILE = path.join(DATA_DIR, 'server_app_state.json');
+
+export function readPersistentAppState(key: string): any | null {
+  try {
+    if (fs.existsSync(APP_STATE_FILE)) {
+      const content = fs.readFileSync(APP_STATE_FILE, 'utf-8');
+      const json = JSON.parse(content);
+      if (key in json) return json[key];
+    }
+  } catch (e) {
+    console.warn(`[AppState Read Warning]`, e);
+  }
+  return null;
+}
+
+export function writePersistentAppState(key: string, value: any): void {
+  try {
+    let json: Record<string, any> = {};
+    if (fs.existsSync(APP_STATE_FILE)) {
+      try {
+        json = JSON.parse(fs.readFileSync(APP_STATE_FILE, 'utf-8'));
+      } catch {}
+    }
+    json[key] = value;
+    json[`${key}_updated_at`] = new Date().toISOString();
+    fs.writeFileSync(APP_STATE_FILE, JSON.stringify(json, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn(`[AppState Write Warning]`, e);
+  }
+}
+
 async function buildLiveOperationalContext(): Promise<{ fleetContext: string; crewContext: string }> {
   if (!isDatabaseConfigured()) {
     return {
@@ -1659,6 +1694,8 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         weeks: Array.isArray(weeks) ? weeks : []
       };
 
+      writePersistentAppState('schedules_payload', payload);
+
       await mysqlQuery(
         `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
          ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
@@ -1686,11 +1723,29 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   app.get("/api/schedules/persisted", requireAuth, async (req: any, res) => {
     try {
-      const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return res.json({ success: true, exists: false, source: 'hostinger_mysql', schedules: [], weeks: [], count: 0 });
+      let raw: any = null;
+      let source = 'hostinger_mysql';
+      try {
+        const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          raw = rows[0].state_json;
+        }
+      } catch (dbErr) {
+        // DB offline, lanjut ke disk
       }
-      const raw = rows[0].state_json;
+
+      if (!raw) {
+        const diskData = readPersistentAppState('schedules_payload');
+        if (diskData && typeof diskData === 'object') {
+          raw = diskData;
+          source = 'disk_database';
+        }
+      }
+
+      if (!raw) {
+        return res.json({ success: true, exists: false, source: 'none', schedules: [], weeks: [], count: 0 });
+      }
+
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const role = String(req.authUser?.role || '');
       let schedules = Array.isArray(data?.schedules) ? data.schedules : [];
@@ -3698,27 +3753,43 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state)
+  // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state & Disk Fallback)
   let inMemoryAdminCalendarSchedules: any[] = [];
 
   app.get('/api/admin-schedules', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
+      // 1. Cek MySQL jika database terkonfigurasi
       if (isDatabaseConfigured()) {
-        const rows = await mysqlQuery<any[]>(
-          "SELECT state_json, updated_at FROM app_state WHERE state_key = 'admin_calendar_schedules_payload' LIMIT 1"
-        );
-        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            inMemoryAdminCalendarSchedules = parsed;
-            return res.json({ success: true, schedules: parsed, count: parsed.length, source: 'hostinger_mysql' });
+        try {
+          const rows = await mysqlQuery<any[]>(
+            "SELECT state_json, updated_at FROM app_state WHERE state_key = 'admin_calendar_schedules_payload' LIMIT 1"
+          );
+          if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json !== undefined && rows[0]?.state_json !== null) {
+            const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+            if (Array.isArray(parsed)) {
+              inMemoryAdminCalendarSchedules = parsed;
+              writePersistentAppState('admin_calendar_schedules_payload', parsed);
+              return res.json({ success: true, schedules: parsed, count: parsed.length, source: 'hostinger_mysql' });
+            }
           }
+        } catch (dbErr: any) {
+          // DB offline / circuit breaker: lanjut ke disk storage
         }
       }
+
+      // 2. Fallback disk storage (persisten permanen di server meskipun MySQL offline/container restart)
+      const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
+      if (Array.isArray(diskSaved)) {
+        inMemoryAdminCalendarSchedules = diskSaved;
+        return res.json({ success: true, schedules: diskSaved, count: diskSaved.length, source: 'disk_database' });
+      }
+
       return res.json({ success: true, schedules: inMemoryAdminCalendarSchedules, count: inMemoryAdminCalendarSchedules.length, source: 'in_memory' });
     } catch (err: any) {
-      return res.json({ success: false, schedules: inMemoryAdminCalendarSchedules, error: err?.message });
+      const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
+      const fallback = Array.isArray(diskSaved) ? diskSaved : inMemoryAdminCalendarSchedules;
+      return res.json({ success: true, schedules: fallback, count: fallback.length, source: 'disk_fallback' });
     }
   });
 
@@ -3729,18 +3800,32 @@ Kembalikan HANYA JSON valid:
         return res.status(400).json({ success: false, error: 'Expected schedules array' });
       }
       inMemoryAdminCalendarSchedules = incoming;
+      // Simpan ke disk storage permanen segera
+      writePersistentAppState('admin_calendar_schedules_payload', incoming);
+
+      let mysqlSaved = false;
       if (isDatabaseConfigured()) {
-        await mysqlQuery(
-          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
-           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-          [JSON.stringify(incoming)]
-        );
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(incoming)]
+          );
+          mysqlSaved = true;
+        } catch (dbErr: any) {
+          console.warn('[Hostinger MySQL Sync Warning for Admin Schedules]', dbErr?.message);
+        }
       }
+
+      const msg = incoming.length === 0
+        ? 'Jadwal admin berhasil dikosongkan & disimpan ke database'
+        : `${incoming.length} jadwal admin berhasil disimpan permanen ke database`;
+
       return res.json({
         success: true,
         count: incoming.length,
-        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'in_memory',
-        message: `${incoming.length} jadwal admin berhasil disimpan permanen ke database Hostinger MySQL`
+        source: mysqlSaved ? 'hostinger_mysql' : 'disk_database',
+        message: msg
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });

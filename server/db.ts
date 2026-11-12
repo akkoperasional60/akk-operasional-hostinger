@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let pool: mysql.Pool | null = null;
+let circuitOpenUntil = 0;
+let consecutiveFailures = 0;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 20000; // 20 detik cooldown jika koneksi MySQL gagal
 
 export function isDatabaseConfigured(): boolean {
   return Boolean(
@@ -11,6 +14,10 @@ export function isDatabaseConfigured(): boolean {
     String(process.env.DB_USER || '').trim() &&
     String(process.env.DB_PASSWORD || '').trim()
   );
+}
+
+export function isCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil;
 }
 
 function assertDatabaseConfig(): void {
@@ -42,7 +49,7 @@ export function getDbPool(): mysql.Pool {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: 10000,
+    connectTimeout: 2500, // Cepat fail (2.5 detik) agar tidak menggantung reload browser
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
     charset: 'utf8mb4'
@@ -53,9 +60,30 @@ export function getDbPool(): mysql.Pool {
 }
 
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
-  const p = getDbPool();
-  const [rows] = await p.execute(sql, params);
-  return rows as T;
+  if (isCircuitOpen()) {
+    throw new Error('MySQL offline (circuit breaker active, using instant local cache)');
+  }
+
+  try {
+    const p = getDbPool();
+    const [rows] = await p.execute(sql, params);
+    // Berhasil terkoneksi: reset failure counter
+    consecutiveFailures = 0;
+    circuitOpenUntil = 0;
+    return rows as T;
+  } catch (err: any) {
+    consecutiveFailures++;
+    const isConnErr = err?.code === 'ECONNREFUSED' || 
+                      err?.code === 'ETIMEDOUT' || 
+                      err?.code === 'ENOTFOUND' || 
+                      err?.code === 'EHOSTUNREACH' ||
+                      err?.message?.includes('connect');
+    if (isConnErr || consecutiveFailures >= 2) {
+      circuitOpenUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+      console.warn(`⚠️ [Hostinger MySQL] Koneksi gagal (${err?.message || err?.code}). Circuit breaker aktif ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s.`);
+    }
+    throw err;
+  }
 }
 
 export async function testConnection(): Promise<{ success: boolean; configured: boolean; message: string }> {
@@ -71,6 +99,8 @@ export async function testConnection(): Promise<{ success: boolean; configured: 
     const connection = await p.getConnection();
     await connection.ping();
     connection.release();
+    consecutiveFailures = 0;
+    circuitOpenUntil = 0;
     const host = process.env.DB_HOST || 'localhost';
     const port = Number(process.env.DB_PORT) || 3306;
     return {

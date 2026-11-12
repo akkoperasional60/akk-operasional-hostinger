@@ -298,10 +298,15 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
   const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
     try {
+      const isInitialized = localStorage.getItem('akk_admin_calendar_initialized_v1') === 'true';
       const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
+          if (parsed.length === 0) {
+            // User sudah sengaja mengosongkan jadwal: jangan buat template dummy lagi
+            return [];
+          }
           const valid = parsed
             .filter((item: any) => item && typeof item === 'object')
             .map((item: any, idx: number): AdminDailyScheduleItem => {
@@ -372,23 +377,30 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             });
             return Array.from(dedupedMap.values());
           }
+          if (isInitialized) {
+            return [];
+          }
         }
       }
     } catch (e) {
       console.error(e);
     }
+    try {
+      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
+    } catch {}
     return createInitialSchedules(salesAdminNames);
   });
 
-  // Load and hydrate admin schedules from Hostinger MySQL database app_state
+  // Load and hydrate admin schedules from Hostinger MySQL database / server persistent disk
   useEffect(() => {
     fetch('/api/admin-schedules')
       .then(r => r.json())
       .then(res => {
-        if (res.success && Array.isArray(res.schedules) && res.schedules.length > 0) {
+        if (res && res.success && Array.isArray(res.schedules)) {
           setSchedules(res.schedules);
           try {
             localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(res.schedules));
+            localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
           } catch {}
         }
       })
@@ -398,10 +410,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   useEffect(() => {
     try {
       localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(schedules));
+      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
     } catch {}
 
-    // Auto-sync ke Hostinger MySQL database app_state
-    if (schedules && schedules.length > 0) {
+    // Auto-sync ke Hostinger MySQL database app_state & server disk (kirim baik ada isi maupun array kosong [])
+    if (Array.isArray(schedules)) {
       fetch('/api/admin-schedules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
