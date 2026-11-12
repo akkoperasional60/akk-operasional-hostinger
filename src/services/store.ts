@@ -112,6 +112,7 @@ import {
   FUEL_TARGET_RATIOS
 } from '../data/fuelMockData';
 import { canAccess, canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
+import { branchStore, UserBranchPermissionEntry } from './branchStore';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
 import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
@@ -1934,37 +1935,92 @@ class LogisticsStore {
 
   /**
    * Mengecek apakah akun pengguna merupakan Kru Pengiriman aktif (Driver / Helper)
-   * berdasarkan Role DAN Hak Akses (permissions) di Manajemen User.
-   * Jika role telah diubah (misal ke Gudang / warehouse_admin, Sales, HR, dll) ATAU
-   * seluruh akses Logistik & Pengiriman dicabut (0 AKSES), maka BUKAN lagi kru pengiriman.
+   * yang memiliki hak akses ke Portal Driver Mobile (driver_portal / portal_driver),
+   * termasuk akun dengan role Gudang (warehouse_admin) seperti Teguh Baskoro yang
+   * diberikan akses ke Portal Driver Mobile di Manajemen User, serta memisahkan
+   * secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
    */
-  public isActiveDeliveryCrewUser(u: UserProfile | null | undefined): boolean {
+  public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
     if (!u) return false;
     if (u.status !== 'approved') return false;
-    if (u.role !== 'driver' && u.role !== 'crew_helper') return false;
-
-    if (u.permissions?.modules?.logistics && u.permissions.modules.logistics.enabled === false) {
-      const subMenus = u.permissions.modules.logistics.subMenus || {};
-      const hasAnyLogisticsSub = Object.values(subMenus).some(v => v === 'full_access' || v === 'read_only');
-      if (!hasAnyLogisticsSub) return false;
+    // Akun struktural kantor / supervisor logistik bukan kru lapangan (supir/helper)
+    if (
+      u.role === 'super_admin' ||
+      u.role === 'spv_logistik' ||
+      u.role === 'operasional' ||
+      u.role === 'pengiriman' ||
+      u.role === 'dispatcher'
+    ) {
+      return false;
     }
 
-    if (u.permissions?.branchPermissions && Object.keys(u.permissions.branchPermissions).length > 0) {
-      const branchEntries = Object.values(u.permissions.branchPermissions);
-      const anyBranchHasLogistics = branchEntries.some(b => {
-        if (!b?.enabled) return false;
-        const logMod = b.modules?.logistics;
-        if (!logMod?.enabled) return false;
-        return Object.values(logMod.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
-      });
-      if (!anyBranchHasLogistics) return false;
+    const branchPerms = branchStore.getUserBranchPermissions(
+      u.id,
+      u.role,
+      u.permissions?.modules,
+      u.permissions?.branchPermissions
+    );
+
+    const hasBranchPortalDriverAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
+      if (!bEntry || !bEntry.enabled) return false;
+      const logMod = bEntry.modules?.logistics;
+      if (!logMod || !logMod.enabled) return false;
+      const subs = logMod.subMenus || {};
+      const dpVal = subs.driver_portal ?? subs.portal_driver;
+      if (dpVal === 'full_access' || dpVal === 'read_only') {
+        return true;
+      }
+      if ((u.role === 'driver' || u.role === 'crew_helper') && dpVal === undefined) {
+        return Object.values(subs).some(v => v === 'full_access' || v === 'read_only');
+      }
+      return false;
+    };
+
+    if (targetBranchId && targetBranchId !== 'ALL') {
+      return hasBranchPortalDriverAccess(branchPerms[targetBranchId]);
     }
 
-    return true;
+    return Object.values(branchPerms).some(bEntry => hasBranchPortalDriverAccess(bEntry));
+  }
+
+  public getCrewUserPrimaryBranchId(u: UserProfile): string {
+    const branchPerms = branchStore.getUserBranchPermissions(
+      u.id,
+      u.role,
+      u.permissions?.modules,
+      u.permissions?.branchPermissions
+    );
+    const sdaEntry = branchPerms['cab-sidoarjo'];
+    const bwiEntry = branchPerms['cab-banyuwangi'];
+    const sdaEnabled = Boolean(sdaEntry?.enabled);
+    const bwiEnabled = Boolean(bwiEntry?.enabled);
+
+    if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
+    if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
+
+    const sdaHasDp = Boolean(
+      sdaEnabled &&
+        sdaEntry?.modules?.logistics?.enabled &&
+        (sdaEntry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
+          sdaEntry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
+          sdaEntry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
+          sdaEntry.modules.logistics.subMenus?.portal_driver === 'read_only')
+    );
+    const bwiHasDp = Boolean(
+      bwiEnabled &&
+        bwiEntry?.modules?.logistics?.enabled &&
+        (bwiEntry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
+          bwiEntry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
+          bwiEntry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
+          bwiEntry.modules.logistics.subMenus?.portal_driver === 'read_only')
+    );
+
+    if (sdaHasDp && !bwiHasDp) return 'cab-sidoarjo';
+    return 'cab-banyuwangi';
   }
 
   /**
-   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (role: driver / crew_helper)
+   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (semua akun aktif yang memiliki akses Portal Driver Mobile)
    * tanpa memicu efek samping penyimpanan atau notifikasi listener.
    */
   private computeSyncedCrews(): Crew[] {
@@ -1989,11 +2045,15 @@ class LogisticsStore {
       const refCrew = existingInStore || existingInInitial;
 
       const crewId = refCrew?.id || `crw-${u.id}`;
-      const crewRole: Crew['role'] = u.role === 'crew_helper'
-        ? 'Kernet / Helper'
-        : (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama');
+      const crewRole: Crew['role'] = u.role === 'driver'
+        ? (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama')
+        : 'Kernet / Helper';
 
       const crewStatus: Crew['status'] = existingInStore?.status === 'on-duty' ? 'on-duty' : 'available';
+
+      const primaryBranchId = this.getCrewUserPrimaryBranchId(u);
+      branchStore.syncCrewBranchIdSilent(crewId, primaryBranchId, cleanName);
+      branchStore.syncCrewBranchIdSilent(u.id, primaryBranchId, cleanName);
 
       const crewItem: Crew = {
         id: crewId,
@@ -2001,7 +2061,7 @@ class LogisticsStore {
         phone: u.phone && u.phone !== '-' ? u.phone : (refCrew?.phone || ''),
         role: crewRole,
         licenseNumber: refCrew?.licenseNumber || '',
-        licenseType: u.role === 'crew_helper' ? 'SIM A' : (refCrew?.licenseType || 'SIM B1 Umum'),
+        licenseType: u.role === 'driver' ? (refCrew?.licenseType || 'SIM B1 Umum') : 'SIM A',
         status: crewStatus,
         currentFleetId: existingInStore?.currentFleetId || refCrew?.currentFleetId || undefined,
         tripsCompleted: refCrew?.tripsCompleted ?? 0,
@@ -2013,8 +2073,7 @@ class LogisticsStore {
     }
 
     // Hanya pertahankan kru dari this.crews yang BELUM memiliki akun di this.users.
-    // Jika kru memiliki akun di this.users (termasuk variasi ejaan seperti Rifaldi Aminulloh / Aminullah)
-    // namun akun tersebut bukan lagi kru pengiriman aktif (misal sudah diubah ke Gudang / warehouse_admin),
+    // Jika kru memiliki akun di this.users namun akun tersebut tidak lagi memiliki akses Portal Driver Mobile,
     // maka JANGAN pernah dimasukkan kembali ke syncedCrews!
     for (const c of (this.crews || [])) {
       if (!c || !c.name) continue;
@@ -2029,7 +2088,7 @@ class LogisticsStore {
         u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, cleanName)
       );
       if (matchedUserInStore) {
-        // Sudah diproses di loop pertama jika aktif, atau sengaja dikecualikan karena role/aksesnya bukan kru lagi
+        // Sudah diproses di loop pertama jika aktif, atau sengaja dikecualikan karena tidak punya akses Portal Driver Mobile
         continue;
       }
 
@@ -2041,7 +2100,7 @@ class LogisticsStore {
   }
 
   /**
-   * Sinkronisasi 2 arah antara Manajemen User (role: driver / crew_helper) dan daftar Kru Jadwal Penugasan
+   * Sinkronisasi 2 arah antara Manajemen User (akun dengan akses Portal Driver Mobile) dan daftar Kru Jadwal Penugasan
    */
   public syncUsersWithCrews(): Crew[] {
     const syncedCrews = this.computeSyncedCrews();
@@ -2062,28 +2121,34 @@ class LogisticsStore {
     return this.cachedCrews;
   }
 
-  public getDriverCrews(): Crew[] {
+  public getDriverCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const drivers = all.filter(c => {
       const linkedUser = this.users.find(
         u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return this.isActiveDeliveryCrewUser(linkedUser) && linkedUser.role === 'driver';
+        return this.isActiveDeliveryCrewUser(linkedUser, branchId) && linkedUser.role !== 'crew_helper';
+      }
+      if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+        return false;
       }
       return !(c.role || '').toLowerCase().includes('helper') && !(c.role || '').toLowerCase().includes('kernet');
     });
     return drivers;
   }
 
-  public getHelperCrews(): Crew[] {
+  public getHelperCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const helpers = all.filter(c => {
       const linkedUser = this.users.find(
         u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return this.isActiveDeliveryCrewUser(linkedUser);
+        return this.isActiveDeliveryCrewUser(linkedUser, branchId);
+      }
+      if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+        return false;
       }
       return true;
     });

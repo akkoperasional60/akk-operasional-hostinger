@@ -9,6 +9,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
 import { UserProfile } from '../../types';
 import { canAccess } from '../../utils/rbac';
 
@@ -37,13 +38,32 @@ export interface SalesHeaderFilterProps {
   onExportExcel?: () => void;
 }
 
-export function isSalesAdminUser(u: UserProfile): boolean {
+export function isSalesAdminUser(u: UserProfile, targetBranchId?: string): boolean {
   if (!u || u.status !== 'approved') return false;
   const deptClean = (u.department || '').trim().toLowerCase();
   const deptMatch = deptClean === 'adm. penjualan' || deptClean === 'admin penjualan';
   if (u.role === 'super_admin') {
     return deptMatch;
   }
+
+  const branchPerms = branchStore.getUserBranchPermissions(
+    u.id,
+    u.role,
+    u.permissions?.modules,
+    u.permissions?.branchPermissions
+  );
+
+  if (targetBranchId && targetBranchId !== 'ALL') {
+    const bEntry = branchPerms[targetBranchId];
+    if (!bEntry || !bEntry.enabled) return false;
+    const salesMod = bEntry.modules?.sales_admin;
+    if (salesMod && salesMod.enabled) {
+      const hasSub = Object.values(salesMod.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
+      if (hasSub) return true;
+    }
+    return u.role === 'sales_admin' && bEntry.enabled && (!salesMod || salesMod.enabled !== false);
+  }
+
   const hasSalesAccess = canAccess(u, 'sales_admin');
   if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
     return false;
@@ -51,7 +71,7 @@ export function isSalesAdminUser(u: UserProfile): boolean {
   return u.role === 'sales_admin' || hasSalesAccess;
 }
 
-export function useSalesAdminUsers(): UserProfile[] {
+export function useSalesAdminUsers(targetBranchId?: string): UserProfile[] {
   const [users, setUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
 
   useEffect(() => {
@@ -68,12 +88,12 @@ export function useSalesAdminUsers(): UserProfile[] {
   }, []);
 
   return useMemo(() => {
-    return users.filter(isSalesAdminUser);
-  }, [users]);
+    return users.filter(u => isSalesAdminUser(u, targetBranchId));
+  }, [users, targetBranchId]);
 }
 
-export function useSalesAdminOptions(): string[] {
-  const salesUsers = useSalesAdminUsers();
+export function useSalesAdminOptions(targetBranchId?: string): string[] {
+  const salesUsers = useSalesAdminUsers(targetBranchId);
   return useMemo(() => {
     const names = Array.from(
       new Set(
@@ -106,7 +126,6 @@ export const MONTH_OPTIONS = [
 export const YEAR_OPTIONS = ['2025', '2026', '2027'];
 
 export const SALES_BRANCH_OPTIONS = [
-  { id: 'ALL', name: 'Semua Cabang', badge: 'Nusantara & Sidoarjo' },
   { id: 'cab-banyuwangi', name: 'Nusantara', badge: 'Gudang Nusantara' },
   { id: 'cab-sidoarjo', name: 'Sidoarjo', badge: 'Gudang Sidoarjo' }
 ];
@@ -126,13 +145,14 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
   adminOptions,
   hideAdminFilter = false,
   hideStatsCards = false,
-  selectedBranchId = 'ALL',
+  selectedBranchId = 'cab-banyuwangi',
   onBranchChange,
   showBranchFilter = false,
   onExportExcel
 }) => {
-  const liveSalesAdminOptions = useSalesAdminOptions();
-  const salesAdminUsers = useSalesAdminUsers();
+  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
+  const liveSalesAdminOptions = useSalesAdminOptions(effectiveBranchId);
+  const salesAdminUsers = useSalesAdminUsers(effectiveBranchId);
   const [openMenu, setOpenMenu] = useState<null | 'admin' | 'month' | 'year' | 'branch'>(null);
 
   const optionsToRender = useMemo(() => {
@@ -153,7 +173,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
 
   const displayPeriod = periodeLabel || `${selectedMonth.slice(0, 3)} ${selectedYear}`;
   const activeBranchMeta =
-    SALES_BRANCH_OPTIONS.find(b => b.id === selectedBranchId) || SALES_BRANCH_OPTIONS[0];
+    SALES_BRANCH_OPTIONS.find(b => b.id === effectiveBranchId) || SALES_BRANCH_OPTIONS[0];
 
   return (
     <div className="space-y-4">

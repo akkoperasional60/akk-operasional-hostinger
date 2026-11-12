@@ -1230,12 +1230,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [armadaFilter, setArmadaFilter] = useState<string>('all');
   const [crewDriverFilter, setCrewDriverFilter] = useState<string>('all');
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    const id = branchStore.getSelectedOriginBranchId();
+    return id && id !== 'ALL' ? id : 'cab-banyuwangi';
+  });
 
   useEffect(() => {
     const unsub = branchStore.subscribe(() => {
       setBranches(branchStore.getActiveBranches());
-      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
+      const id = branchStore.getSelectedOriginBranchId();
+      setSelectedBranchId(id && id !== 'ALL' ? id : 'cab-banyuwangi');
     });
     return unsub;
   }, []);
@@ -1299,11 +1303,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const currentUserProfile = logisticsStore.getCurrentUser();
   const canEditSchedules = canEdit(currentUserProfile, 'schedules');
 
-  const getIntegratedDrivers = () => {
+  const effectiveActiveBranchId = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
+
+  const getIntegratedDrivers = (targetBranchId?: string) => {
+    const branchFilter = targetBranchId && targetBranchId !== 'ALL' ? targetBranchId : effectiveActiveBranchId;
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeDriverAndHelperUsers = allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter))
       .sort((a, b) => {
         if (a.role === 'driver' && b.role !== 'driver') return -1;
         if (a.role !== 'driver' && b.role === 'driver') return 1;
@@ -1334,25 +1341,32 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const matchedUser = allUsers.find(
         u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, clean)
       );
-      if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) return;
+      if (matchedUser) {
+        if (!logisticsStore.isActiveDeliveryCrewUser(matchedUser, branchFilter)) return;
+      } else {
+        if (branchStore.getCrewBranchId(c.id, c.name) !== branchFilter) return;
+      }
       names.add(lower);
       result.push({ id: c.id, name: clean, hasAccount: true });
     });
     return result;
   };
 
-  const getIntegratedHelpers = () => {
+  const getIntegratedHelpers = (targetBranchId?: string) => {
+    const branchFilter = targetBranchId && targetBranchId !== 'ALL' ? targetBranchId : effectiveActiveBranchId;
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeHelperAndDriverUsers = allUsers.filter(u =>
-      logisticsStore.isActiveDeliveryCrewUser(u)
+      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter)
     );
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
-    // Utamakan role crew_helper terlebih dahulu kemudian role driver (kondisional)
+    // Utamakan role crew_helper / non-driver yang punya akses Portal Driver Mobile terlebih dahulu kemudian role driver
     const sorted = [...activeHelperAndDriverUsers].sort((a, b) => {
-      if (a.role === 'crew_helper' && b.role !== 'crew_helper') return -1;
-      if (a.role !== 'crew_helper' && b.role === 'crew_helper') return 1;
+      const aIsHelper = a.role !== 'driver';
+      const bIsHelper = b.role !== 'driver';
+      if (aIsHelper && !bIsHelper) return -1;
+      if (!aIsHelper && bIsHelper) return 1;
       return (a.fullName || '').localeCompare(b.fullName || '');
     });
     sorted.forEach(u => {
@@ -1362,7 +1376,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         result.push({ id: u.id, name: clean, hasAccount: true });
       }
     });
-    // Tambahkan kru dari tabel crews jika belum ada di daftar dan bukan akun non-kru
+    // Tambahkan kru dari tabel crews jika belum ada di daftar dan sesuai cabang aktif
     const sortedCrews = [...allCrews].sort((a, b) => {
       const aHelper = String(a.role || '').toLowerCase().includes('helper') || String(a.role || '').toLowerCase().includes('kernet');
       const bHelper = String(b.role || '').toLowerCase().includes('helper') || String(b.role || '').toLowerCase().includes('kernet');
@@ -1379,7 +1393,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const matchedUser = allUsers.find(
         u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, clean)
       );
-      if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) return;
+      if (matchedUser) {
+        if (!logisticsStore.isActiveDeliveryCrewUser(matchedUser, branchFilter)) return;
+      } else {
+        if (branchStore.getCrewBranchId(c.id, c.name) !== branchFilter) return;
+      }
       names.add(lower);
       result.push({ id: c.id, name: clean, hasAccount: true });
     });
@@ -1650,17 +1668,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       });
     };
 
-    // 1. Approved Driver & Helper accounts in Portal (filtered by selectedBranchId & active delivery crew RBAC)
+    // 1. Approved Driver & Helper accounts in Portal (strictly separated by effectiveActiveBranchId: Sidoarjo vs Nusantara)
     const allUsers = logisticsStore.getUsers();
     allUsers
-      .filter(u => {
-        if (!logisticsStore.isActiveDeliveryCrewUser(u)) return false;
-        if (selectedBranchId !== 'ALL') {
-          const crewBranchId = branchStore.getCrewBranchId(u.id, u.fullName);
-          if (crewBranchId !== selectedBranchId) return false;
-        }
-        return true;
-      })
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId))
       .forEach(u => {
         addCandidateToPool(
           u.id,
@@ -1672,7 +1683,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         );
       });
 
-    // 2. Active Crews from Master Crew Database (filtered by selectedBranchId & excluding any non-crew user accounts)
+    // 2. Active Crews from Master Crew Database (strictly separated by effectiveActiveBranchId)
     const allCrews = logisticsStore.getCrews();
     allCrews
       .filter(c => {
@@ -1680,14 +1691,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         const matchedUser = allUsers.find(
           u => `crw-${u.id}` === c.id || isSameCrewPerson(u.fullName, c.name)
         );
-        if (matchedUser && !logisticsStore.isActiveDeliveryCrewUser(matchedUser)) {
-          return false;
+        if (matchedUser) {
+          return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveActiveBranchId);
         }
-        if (selectedBranchId !== 'ALL') {
-          const crewBranchId = branchStore.getCrewBranchId(c.id, c.name);
-          if (crewBranchId !== selectedBranchId) return false;
-        }
-        return true;
+        return branchStore.getCrewBranchId(c.id, c.name) === effectiveActiveBranchId;
       })
       .forEach(c => {
         const isHelper = (c.role || '').toLowerCase().includes('helper') || (c.role || '').toLowerCase().includes('kernet');
@@ -1701,7 +1708,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         );
       });
 
-    // 3. Also ensure any crew name present in dayObj.pengiriman is part of the total pool
+    // 3. Also ensure any crew name present in dayObj.pengiriman for this branch is part of the total pool
     const rawPengirimanList = dayObj?.pengiriman || [];
     const storeSchedulesForDay = logisticsStore.getSchedules();
 
@@ -1753,18 +1760,32 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       };
     });
 
+    const isCrewNameAllowedInBranch = (crewName: string): boolean => {
+      const clean = (crewName || '').trim();
+      if (!clean || clean === '-') return false;
+      const matchedUser = allUsers.find(u => isSameCrewPerson(u.fullName, clean));
+      if (matchedUser) {
+        return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveActiveBranchId);
+      }
+      return branchStore.getCrewBranchId(clean, clean) === effectiveActiveBranchId;
+    };
+
     pengirimanList.forEach((p, idx) => {
-      if (p.driver && p.driver !== '-') {
+      if (p.driver && p.driver !== '-' && isCrewNameAllowedInBranch(p.driver)) {
         addCandidateToPool(`sched-drv-${idx}`, p.driver, 'Driver', '-', 'SIM B1/B2 Umum', true);
       }
       if (p.helper && p.helper !== '-') {
         p.helper.split(/[,&/]+/).forEach((h, hIdx) => {
-          addCandidateToPool(`sched-hlp1-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+          if (isCrewNameAllowedInBranch(h.trim())) {
+            addCandidateToPool(`sched-hlp1-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+          }
         });
       }
       if (p.helper2 && p.helper2 !== '-') {
         p.helper2.split(/[,&/]+/).forEach((h, hIdx) => {
-          addCandidateToPool(`sched-hlp2-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+          if (isCrewNameAllowedInBranch(h.trim())) {
+            addCandidateToPool(`sched-hlp2-${idx}-${hIdx}`, h.trim(), 'Helper', '-', 'SIM A', true);
+          }
         });
       }
     });
@@ -3235,20 +3256,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     if (selectedWeekNum !== 'all') {
       result = result.filter(w => w.weekNumber === selectedWeekNum);
     }
-    if (selectedBranchId !== 'ALL') {
+    if (effectiveActiveBranchId) {
+      const allUsers = logisticsStore.getUsers();
       result = result.map(w => ({
         ...w,
         days: w.days.map(d => ({
           ...d,
           pengiriman: d.pengiriman.filter(p => {
-            const bId = p.branchId || branchStore.getScheduleBranchId(p.id || '', p.area, p.armada);
-            return bId === selectedBranchId;
+            if (p.branchId && p.branchId !== 'ALL') {
+              return p.branchId === effectiveActiveBranchId;
+            }
+            const drvUser = allUsers.find(u => logisticsStore.isSameCrewPersonName(u.fullName, p.driver || ''));
+            if (drvUser && logisticsStore.isActiveDeliveryCrewUser(drvUser)) {
+              return logisticsStore.isActiveDeliveryCrewUser(drvUser, effectiveActiveBranchId);
+            }
+            const bId = branchStore.getScheduleBranchId(p.id || '', p.area, p.armada);
+            return bId === effectiveActiveBranchId;
           })
-        })).filter(d => d.pengiriman.length > 0)
-      })).filter(w => w.days.length > 0);
+        }))
+      }));
     }
     return result;
-  }, [weeks, selectedWeekNum, selectedBranchId, selectedMonth, selectedYear]);
+  }, [weeks, selectedWeekNum, effectiveActiveBranchId, selectedMonth, selectedYear]);
 
   // Persist snapshot of Kru Free / Stand By Gudang for the selected calendar date to localStorage
   useEffect(() => {
@@ -3629,9 +3658,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       });
     });
 
+    const allUsers = logisticsStore.getUsers();
     const branchCrewCount = officialCrewsList.filter(c => {
-      if (selectedBranchId === 'ALL') return true;
-      return branchStore.getCrewBranchId(c.id, c.name) === selectedBranchId;
+      const matchedUser = allUsers.find(
+        u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, c.name)
+      );
+      if (matchedUser) {
+        return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveActiveBranchId);
+      }
+      return branchStore.getCrewBranchId(c.id, c.name) === effectiveActiveBranchId;
     }).length;
 
     return { 
@@ -3646,7 +3681,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       totalUniqueAreas: uniqueAreasSet.size,
       branchCrewCount
     };
-  }, [filteredWeeks, officialCrewsList, selectedBranchId]);
+  }, [filteredWeeks, officialCrewsList, effectiveActiveBranchId]);
 
   // Handle Export to Excel .xlsx
   const handleExportXLSX = () => {
@@ -4383,11 +4418,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               ))}
             </select>
 
-            {/* Cabang Filter */}
+            {/* Cabang Filter (Terpisah Tegas: Nusantara vs Sidoarjo) */}
             <div className="flex items-center gap-1 pl-1 border-l border-slate-200 dark:border-slate-800">
               <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
               <select
-                value={selectedBranchId}
+                value={effectiveActiveBranchId}
                 onChange={(e) => {
                   const bId = e.target.value;
                   setSelectedBranchId(bId);
@@ -4395,9 +4430,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }}
                 className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-blue-500 cursor-pointer"
               >
-                <option value="ALL">Semua Cabang</option>
                 {branches.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
+                  <option key={b.id} value={b.id}>Cabang {b.name}</option>
                 ))}
               </select>
             </div>

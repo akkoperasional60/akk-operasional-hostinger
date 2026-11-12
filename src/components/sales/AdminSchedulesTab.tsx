@@ -177,7 +177,21 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   onNavigateSubTab,
   adminOptions
 }) => {
-  const salesAdminUsers = useSalesAdminUsers();
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    const id = branchStore.getSelectedOriginBranchId();
+    return id && id !== 'ALL' ? id : 'cab-banyuwangi';
+  });
+
+  useEffect(() => {
+    const unsub = branchStore.subscribe(() => {
+      const id = branchStore.getSelectedOriginBranchId();
+      setSelectedBranchId(id && id !== 'ALL' ? id : 'cab-banyuwangi');
+    });
+    return unsub;
+  }, []);
+
+  const allSalesAdminUsers = useSalesAdminUsers();
+  const salesAdminUsers = useSalesAdminUsers(selectedBranchId);
   const salesAdminNames = useMemo(() => {
     const names = salesAdminUsers
       .map(u => (u.fullName || '').trim().toUpperCase())
@@ -190,10 +204,22 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
   const getAdminBranchId = (adminName: string): string => {
     const key = (adminName || '').trim().toUpperCase();
-    if (adminBranchMap[key]) return adminBranchMap[key];
-    const matchedUser = salesAdminUsers.find(
+    const matchedUser = allSalesAdminUsers.find(
       u => (u.fullName || '').trim().toUpperCase() === key
     );
+    if (matchedUser) {
+      const perms = branchStore.getUserBranchPermissions(
+        matchedUser.id,
+        matchedUser.role,
+        matchedUser.permissions?.modules,
+        matchedUser.permissions?.branchPermissions
+      );
+      const sdaEnabled = Boolean(perms['cab-sidoarjo']?.enabled);
+      const bwiEnabled = Boolean(perms['cab-banyuwangi']?.enabled);
+      if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
+      if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
+    }
+    if (adminBranchMap[key] && adminBranchMap[key] !== 'ALL') return adminBranchMap[key];
     if (matchedUser) {
       const fromCrewStore = branchStore.getCrewBranchId(matchedUser.id, matchedUser.fullName);
       if (fromCrewStore) return fromCrewStore;
@@ -210,24 +236,13 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       } catch {}
       return next;
     });
-    const matchedUser = salesAdminUsers.find(
+    const matchedUser = allSalesAdminUsers.find(
       u => (u.fullName || '').trim().toUpperCase() === key
     );
     if (matchedUser) {
       branchStore.setCrewBranchId(matchedUser.id, branchId, matchedUser.fullName);
     }
   };
-
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(() =>
-    branchStore.getSelectedOriginBranchId()
-  );
-
-  useEffect(() => {
-    const unsub = branchStore.subscribe(() => {
-      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
-    });
-    return unsub;
-  }, []);
 
   const handleBranchFilterChange = (branchId: string) => {
     setSelectedBranchId(branchId);

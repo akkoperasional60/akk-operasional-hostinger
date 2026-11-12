@@ -960,8 +960,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     : crews.filter(c => getCrewIntegratedStatus(c).isActive);
 
   const filteredCrews = visibleCrewsForRole.filter(c => {
-    const crewBranch = branchStore.getCrewBranch(c.id, c.name);
-    const matchesBranch = selectedBranchId === 'ALL' || crewBranch.id === selectedBranchId;
+    const effectiveBranch = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
+    const allUsers = logisticsStore.getUsers();
+    const matchedUser = allUsers.find(
+      u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, c.name)
+    );
+    const matchesBranch = matchedUser
+      ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveBranch)
+      : branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch;
     const { isActive } = getCrewIntegratedStatus(c);
     const matchesStatus =
       crewFilter === 'all' ||
@@ -1010,7 +1016,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   }`}
                 >
                   <Users className="w-3.5 h-3.5" />
-                  <span>Daftar Kru ({visibleCrewsForRole.length})</span>
+                  <span>Daftar Kru ({filteredCrews.length})</span>
                 </button>
                 <button
                   type="button"
@@ -1077,16 +1083,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
                     <select
-                      value={selectedBranchId}
+                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
                       onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
                       className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
                     >
-                      <option value="ALL">Semua Cabang ({fleets.length} Unit)</option>
                       {branches.map((b) => {
                         const count = fleets.filter(fl => branchStore.getFleetBranch(fl.id).id === b.id).length;
                         return (
                           <option key={b.id} value={b.id}>
-                            {b.name} ({count} Unit)
+                            Cabang {b.name} ({count} Unit)
                           </option>
                         );
                       })}
@@ -1130,16 +1135,23 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
                     <select
-                      value={selectedBranchId}
+                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
                       onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
                       className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
                     >
-                      <option value="ALL">Semua Cabang ({visibleCrewsForRole.length} Kru)</option>
                       {branches.map((b) => {
-                        const count = visibleCrewsForRole.filter(cr => branchStore.getCrewBranch(cr.id, cr.name).id === b.id).length;
+                        const allUsers = logisticsStore.getUsers();
+                        const count = visibleCrewsForRole.filter(cr => {
+                          const matchedUser = allUsers.find(
+                            u => `crw-${u.id}` === cr.id || logisticsStore.isSameCrewPersonName(u.fullName, cr.name)
+                          );
+                          return matchedUser
+                            ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, b.id)
+                            : branchStore.getCrewBranch(cr.id, cr.name).id === b.id;
+                        }).length;
                         return (
                           <option key={b.id} value={b.id}>
-                            {b.name} ({count} Kru)
+                            Cabang {b.name} ({count} Kru)
                           </option>
                         );
                       })}

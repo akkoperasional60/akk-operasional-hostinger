@@ -1091,7 +1091,9 @@ async function startServer() {
       }
       let targetUserId = id;
       let resolvedRole = String(data.role || 'unassigned');
+      let resolvedStatus = String(data.status || 'approved');
       let resolvedFullName = cleanInputName;
+      let resolvedPermissionsJson: any = data.permissions !== undefined ? JSON.stringify(data.permissions) : null;
 
       if (!Array.isArray(existing) || existing.length === 0) {
         if (!cleanInputEmail && !cleanInputName) {
@@ -1100,9 +1102,11 @@ async function startServer() {
         const insertStatus = allowedStatuses.has(String(data.status)) ? String(data.status) : 'approved';
         const insertRole = allowedRoles.has(String(data.role)) ? String(data.role) : 'unassigned';
         resolvedRole = insertRole;
+        resolvedStatus = insertStatus;
         resolvedFullName = cleanInputName || cleanInputEmail.split('@')[0] || 'Pengguna';
         const fallbackEmail = cleanInputEmail || `${resolvedFullName.toLowerCase().replace(/[^a-z0-9]/g, '')}@gmail.com`;
         const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : null;
+        resolvedPermissionsJson = permissionsJson;
         await mysqlQuery(
           `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, permissions_json, approved_at, approved_by, notes, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
@@ -1127,10 +1131,12 @@ async function startServer() {
         const nextStatus = data.status ?? u.status;
         const nextRole = data.role ?? u.role;
         resolvedRole = String(nextRole);
+        resolvedStatus = String(nextStatus);
         resolvedFullName = String(data.fullName ?? data.name ?? u.full_name).trim();
         const approvedAt = nextStatus === 'approved' ? (u.approved_at || new Date()) : u.approved_at;
         const approvedBy = nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by;
         const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : u.permissions_json;
+        resolvedPermissionsJson = permissionsJson;
         await mysqlQuery(
           `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, permissions_json=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
           [
@@ -1149,9 +1155,32 @@ async function startServer() {
         );
       }
 
-      // Jika role akun bukan lagi driver / crew_helper (misal diubah ke Gudang / warehouse_admin, Sales, dll),
-      // hapus entri kru lama di tabel crews agar tidak pernah muncul lagi di jadwal pengiriman / stand by.
-      if (resolvedRole !== 'driver' && resolvedRole !== 'crew_helper') {
+      // Hapus entri kru lama di tabel crews HANYA jika akun tidak lagi memiliki akses Portal Driver Mobile
+      const hasPortalDriver = (() => {
+        if (resolvedStatus !== 'approved') return false;
+        if (['super_admin', 'spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(resolvedRole)) return false;
+        let parsedPerms: any = null;
+        try {
+          parsedPerms = typeof resolvedPermissionsJson === 'string' ? JSON.parse(resolvedPermissionsJson) : resolvedPermissionsJson;
+        } catch {}
+        if (parsedPerms?.branchPermissions && Object.keys(parsedPerms.branchPermissions).length > 0) {
+          return Object.values(parsedPerms.branchPermissions).some((b: any) => {
+            if (!b?.enabled || !b?.modules?.logistics?.enabled) return false;
+            const subs = b.modules.logistics.subMenus || {};
+            const dp = subs.driver_portal ?? subs.portal_driver;
+            return dp === 'full_access' || dp === 'read_only';
+          });
+        }
+        if (parsedPerms?.modules?.logistics) {
+          if (!parsedPerms.modules.logistics.enabled) return false;
+          const subs = parsedPerms.modules.logistics.subMenus || {};
+          const dp = subs.driver_portal ?? subs.portal_driver;
+          if (dp === 'full_access' || dp === 'read_only') return true;
+        }
+        return resolvedRole === 'driver' || resolvedRole === 'crew_helper';
+      })();
+
+      if (!hasPortalDriver) {
         const lowerFull = resolvedFullName.toLowerCase();
         const altNameUllah = lowerFull.replace(/\bulloh\b/g, 'ullah');
         const altNameUlloh = lowerFull.replace(/\bullah\b/g, 'ulloh');
@@ -2537,19 +2566,45 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // REST API for Crews - Hostinger MySQL is the single source of truth (merged with approved driver/crew_helper accounts in users table)
+  // REST API for Crews - Hostinger MySQL is the single source of truth (merged with approved accounts that have Portal Driver Mobile access)
   app.get("/api/crews", requireAuth, async (_req, res) => {
     try {
-      const [mysqlCrews, mysqlCrewUsers] = await Promise.all([
+      const [mysqlCrews, mysqlApprovedUsers] = await Promise.all([
         mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC"),
-        mysqlQuery<any[]>("SELECT id, full_name, phone, role, status FROM users WHERE role IN ('driver', 'crew_helper') AND status = 'approved' ORDER BY full_name ASC").catch(() => [])
+        mysqlQuery<any[]>("SELECT id, full_name, phone, role, status, permissions_json FROM users WHERE status = 'approved' ORDER BY full_name ASC").catch(() => [])
       ]);
+      const isUserCrewActive = (u: any): boolean => {
+        const r = String(u.role || '');
+        if (['super_admin', 'spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(r)) return false;
+        let parsedPerms: any = null;
+        try {
+          parsedPerms = typeof u.permissions_json === 'string' ? JSON.parse(u.permissions_json) : u.permissions_json;
+        } catch {}
+        if (parsedPerms?.branchPermissions && Object.keys(parsedPerms.branchPermissions).length > 0) {
+          return Object.values(parsedPerms.branchPermissions).some((b: any) => {
+            if (!b?.enabled || !b?.modules?.logistics?.enabled) return false;
+            const subs = b.modules.logistics.subMenus || {};
+            const dp = subs.driver_portal ?? subs.portal_driver;
+            return dp === 'full_access' || dp === 'read_only';
+          });
+        }
+        if (parsedPerms?.modules?.logistics) {
+          if (!parsedPerms.modules.logistics.enabled) return false;
+          const subs = parsedPerms.modules.logistics.subMenus || {};
+          const dp = subs.driver_portal ?? subs.portal_driver;
+          if (dp === 'full_access' || dp === 'read_only') return true;
+          if (dp === 'none') return false;
+        }
+        return r === 'driver' || r === 'crew_helper';
+      };
+
       const mapped = mysqlCrews.map(c => mergePayload(c.payload_json, {
         id: c.id, name: c.name, phone: c.phone, role: c.role, licenseNumber: c.license_number,
         licenseType: c.license_type, status: c.status, tripsCompleted: Number(c.trips_completed || 0), rating: Number(c.rating || 5)
       }));
       const seenNames = new Set(mapped.map((c: any) => String(c.name || '').trim().toLowerCase()).filter(Boolean));
-      for (const u of mysqlCrewUsers) {
+      for (const u of mysqlApprovedUsers) {
+        if (!isUserCrewActive(u)) continue;
         const cleanName = String(u.full_name || '').trim();
         if (!cleanName) continue;
         const lower = cleanName.toLowerCase();
@@ -2559,9 +2614,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           id: `crw-${u.id}`,
           name: cleanName,
           phone: u.phone || '-',
-          role: u.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
+          role: u.role === 'driver' ? 'Driver Utama' : 'Kernet / Helper',
           licenseNumber: '-',
-          licenseType: u.role === 'crew_helper' ? 'SIM A' : 'SIM B1 Umum',
+          licenseType: u.role === 'driver' ? 'SIM B1 Umum' : 'SIM A',
           status: 'available',
           tripsCompleted: 0,
           rating: 5
