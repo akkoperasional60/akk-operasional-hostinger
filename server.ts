@@ -3698,6 +3698,54 @@ Kembalikan HANYA JSON valid:
     }
   });
 
+  // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state)
+  let inMemoryAdminCalendarSchedules: any[] = [];
+
+  app.get('/api/admin-schedules', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json, updated_at FROM app_state WHERE state_key = 'admin_calendar_schedules_payload' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            inMemoryAdminCalendarSchedules = parsed;
+            return res.json({ success: true, schedules: parsed, count: parsed.length, source: 'hostinger_mysql' });
+          }
+        }
+      }
+      return res.json({ success: true, schedules: inMemoryAdminCalendarSchedules, count: inMemoryAdminCalendarSchedules.length, source: 'in_memory' });
+    } catch (err: any) {
+      return res.json({ success: false, schedules: inMemoryAdminCalendarSchedules, error: err?.message });
+    }
+  });
+
+  app.post('/api/admin-schedules', express.json({ limit: '25mb' }), async (req, res) => {
+    try {
+      const incoming = req.body?.schedules;
+      if (!Array.isArray(incoming)) {
+        return res.status(400).json({ success: false, error: 'Expected schedules array' });
+      }
+      inMemoryAdminCalendarSchedules = incoming;
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(incoming)]
+        );
+      }
+      return res.json({
+        success: true,
+        count: incoming.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'in_memory',
+        message: `${incoming.length} jadwal admin berhasil disimpan permanen ke database Hostinger MySQL`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
 
   // 📥 Server-side Spreadsheet Template Download Endpoint
   app.get('/api/download-schedule-template', (req, res) => {
@@ -4338,13 +4386,12 @@ Kembalikan HANYA JSON valid:
       }
 
       if (!mysqlAvailable && !isHostingerEnv && updatedCount > 0) {
-        try {
-          await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ photoItems: incomingPhotoItems })
-          });
-        } catch {}
+        void fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ photoItems: incomingPhotoItems }),
+          signal: AbortSignal.timeout(1500)
+        }).catch(() => {});
       }
 
       return res.json({
@@ -4757,13 +4804,13 @@ Kembalikan HANYA JSON valid:
         }
       }
       if (!savedToMysql && !isHostingerEnv) {
-        try {
-          await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/item`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ item: rec, replacePhotos })
-          });
-        } catch {}
+        // Asynchronous fire-and-forget dengan timeout singkat agar respon ke user instan
+        void fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item: rec, replacePhotos }),
+          signal: AbortSignal.timeout(1500)
+        }).catch(() => {});
       }
 
       return res.json({ success: true, item: rec });

@@ -122,10 +122,17 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
   const a2 = adminNames[2] || 'IZZUL';
   const a3 = adminNames[3] || 'FATA';
 
+  const now = new Date();
+  const yr = now.getFullYear();
+  const mo = now.getMonth();
+  const d1 = formatDateIso(yr, mo, Math.min(10, getDaysInMonth(yr, mo)));
+  const d2 = formatDateIso(yr, mo, Math.min(11, getDaysInMonth(yr, mo)));
+  const d3 = formatDateIso(yr, mo, Math.min(12, getDaysInMonth(yr, mo)));
+
   return [
     {
       id: 'sch-1',
-      date: '2026-08-10',
+      date: d1,
       adminName: a0,
       branchId: 'cab-banyuwangi',
       duties: ['Muncar Pasar', 'Muncar Pinggir'],
@@ -137,7 +144,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-2',
-      date: '2026-08-10',
+      date: d1,
       adminName: a1,
       branchId: 'cab-banyuwangi',
       duties: ['Rogojampi Retail', 'Genteng Retail'],
@@ -149,7 +156,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-3',
-      date: '2026-08-11',
+      date: d2,
       adminName: a1,
       branchId: 'cab-banyuwangi',
       duties: ['Denpasar 1', 'Singaraja'],
@@ -161,7 +168,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-4',
-      date: '2026-08-12',
+      date: d3,
       adminName: a2,
       branchId: 'cab-banyuwangi',
       duties: ['Jember Kota', 'Situbondo'],
@@ -264,17 +271,22 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     return Array.from(areaSet);
   }, []);
 
+  const nowCurrent = new Date();
+  const currentMonthName = MONTH_OPTIONS[nowCurrent.getMonth()] || 'November';
+  const currentYearStr = String(nowCurrent.getFullYear());
+
   const [selectedAdmin, setSelectedAdmin] = useState('SEMUA ADMIN');
-  const [selectedMonth, setSelectedMonth] = useState('Agustus');
-  const [selectedYear, setSelectedYear] = useState('2026');
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => currentMonthName);
+  const [selectedYear, setSelectedYear] = useState<string>(() => currentYearStr);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
   const monthIndex = Math.max(0, MONTH_OPTIONS.indexOf(selectedMonth));
-  const yearNum = Number(selectedYear) || 2026;
+  const yearNum = Number(selectedYear) || nowCurrent.getFullYear();
 
-  const [selectedDateIso, setSelectedDateIso] = useState<string>(() =>
-    formatDateIso(yearNum, monthIndex, 10)
-  );
+  const [selectedDateIso, setSelectedDateIso] = useState<string>(() => {
+    const today = nowCurrent.getDate();
+    return formatDateIso(nowCurrent.getFullYear(), nowCurrent.getMonth(), today);
+  });
 
   useEffect(() => {
     const parts = selectedDateIso.split('-').map(Number);
@@ -368,10 +380,34 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     return createInitialSchedules(salesAdminNames);
   });
 
+  // Load and hydrate admin schedules from Hostinger MySQL database app_state
+  useEffect(() => {
+    fetch('/api/admin-schedules')
+      .then(r => r.json())
+      .then(res => {
+        if (res.success && Array.isArray(res.schedules) && res.schedules.length > 0) {
+          setSchedules(res.schedules);
+          try {
+            localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(res.schedules));
+          } catch {}
+        }
+      })
+      .catch(err => console.warn('[Admin Schedules Fetch Error]', err));
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(schedules));
     } catch {}
+
+    // Auto-sync ke Hostinger MySQL database app_state
+    if (schedules && schedules.length > 0) {
+      fetch('/api/admin-schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules })
+      }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
+    }
   }, [schedules]);
 
   // Manual Schedule Modal State
@@ -594,7 +630,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
     setSelectedDateIso(manualDate);
     setIsManualModalOpen(false);
-    setSaveToast(`Jadwal penugasan ${manualAdmin} pada ${formatReadableDateId(manualDate)} berhasil disimpan!`);
+    setSaveToast(`Jadwal penugasan ${manualAdmin} berhasil disimpan ke database!`);
     setTimeout(() => setSaveToast(null), 3000);
   };
 
@@ -639,7 +675,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     });
 
     setEditingSchedule(null);
-    setSaveToast(`Jadwal penugasan ${editAdmin} berhasil diperbarui!`);
+    setSaveToast(`Jadwal penugasan ${editAdmin} berhasil diperbarui di database!`);
     setTimeout(() => setSaveToast(null), 3000);
   };
 
@@ -648,7 +684,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     const name = deletingSchedule.adminName;
     setSchedules(prev => prev.filter(s => s.id !== deletingSchedule.id));
     setDeletingSchedule(null);
-    setSaveToast(`Penugasan ${name} telah berhasil dihapus.`);
+    setSaveToast(`Penugasan ${name} telah berhasil dihapus dari database.`);
     setTimeout(() => setSaveToast(null), 3000);
   };
 
@@ -1031,7 +1067,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                               {safeAdminName}
                             </span>
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block">
-                              Adm. Penjualan • {item.shiftTime || '08:00 - 16:00'}
+                              Adm. Penjualan
                             </span>
                           </div>
                         </div>

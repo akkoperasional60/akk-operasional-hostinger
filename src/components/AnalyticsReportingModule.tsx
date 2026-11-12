@@ -42,7 +42,8 @@ import {
   Fuel,
   ShieldCheck,
   Check,
-  X
+  X,
+  LayoutGrid
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { logisticsStore } from '../services/store';
@@ -52,6 +53,8 @@ import {
   AnalyticsSummaryReport,
   RouteEvaluationSummary
 } from '../services/trackingLogService';
+import { LogisticsWidgetsDashboard } from './LogisticsWidgetsDashboard';
+import { NavTab } from './Sidebar';
 
 function getInitials(name: string): string {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
@@ -60,7 +63,11 @@ function getInitials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-export const AnalyticsReportingModule: React.FC = () => {
+interface AnalyticsReportingModuleProps {
+  onNavigate?: (tab: NavTab) => void;
+}
+
+export const AnalyticsReportingModule: React.FC<AnalyticsReportingModuleProps> = ({ onNavigate }) => {
   const [fleets, setFleets] = useState(logisticsStore.getFleets());
   const [crews, setCrews] = useState(logisticsStore.getCrews());
   const [users, setUsers] = useState(logisticsStore.getUsers());
@@ -83,8 +90,8 @@ export const AnalyticsReportingModule: React.FC = () => {
   const fleetDropdownRef = useRef<HTMLDivElement>(null);
   const crewDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Active View Tab (Tanpa Telemetri tracking_logs)
-  const [activeTab, setActiveTab] = useState<'overview' | 'fleet_crew' | 'routes'>('overview');
+  // Active View Tab: Default to Unified Widgets Dashboard
+  const [activeTab, setActiveTab] = useState<'widgets_dashboard' | 'overview' | 'fleet_crew' | 'routes'>('widgets_dashboard');
   const [selectedRouteDetail, setSelectedRouteDetail] = useState<RouteEvaluationSummary | null>(null);
   const [exportSuccessToast, setExportSuccessToast] = useState<string | null>(null);
 
@@ -469,8 +476,20 @@ export const AnalyticsReportingModule: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation Tabs (3 Tab Utama Tanpa Telemetri tracking_logs) */}
+        {/* Navigation Tabs (4 Tab Utama: Dashboard Terpadu Semua Sub-Menu + Analitik Mendalam) */}
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-3.5 border-t border-slate-200 dark:border-slate-800/80">
+          <button
+            onClick={() => setActiveTab('widgets_dashboard')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${
+              activeTab === 'widgets_dashboard'
+                ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md shadow-amber-500/25'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-slate-700 hover:text-amber-700 dark:hover:text-white hover:border-amber-400 dark:hover:border-slate-600 shadow-2xs'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span>Dashboard Terpadu (Sub-Menu)</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('overview')}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${
@@ -509,15 +528,23 @@ export const AnalyticsReportingModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Panel: Rentang Disimpelkan, Custom Dropdown UI/UX Armada & Kru, Tanpa Status Pengiriman */}
-      <div className="relative z-30 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-3">
-        {/* Baris 1: Rentang Waktu Simpel + Pencarian */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
-              <Calendar className="w-3.5 h-3.5 text-amber-400" />
-              RENTANG:
-            </span>
+      {/* TAB 0: WIDGETS DASHBOARD (Semua Sub-Menu Logistik & Fitur Ubah Widget) */}
+      {activeTab === 'widgets_dashboard' && (
+        <LogisticsWidgetsDashboard onNavigate={onNavigate} />
+      )}
+
+      {/* FILTER PANEL & 4 KARTU METRIK UTAMA (Khusus Tab Analitik Mendalam) */}
+      {activeTab !== 'widgets_dashboard' && (
+        <>
+          {/* Filter Panel: Rentang Disimpelkan, Custom Dropdown UI/UX Armada & Kru, Tanpa Status Pengiriman */}
+          <div className="relative z-30 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-3">
+            {/* Baris 1: Rentang Waktu Simpel + Pencarian */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  RENTANG:
+                </span>
             {(
               [
                 { id: 'all', label: 'Semua' },
@@ -918,6 +945,8 @@ export const AnalyticsReportingModule: React.FC = () => {
           </div>
         </div>
       </div>
+    </>
+  )}
 
       {/* TAB 1: OVERVIEW & CHARTS */}
       {activeTab === 'overview' && (

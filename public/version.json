@@ -1,9 +1,9 @@
 {
-  "versionCode": 10032,
-  "versionName": "1.0.32",
-  "updatedAt": "2026-11-12T10:12:00.000000",
+  "versionCode": 10033,
+  "versionName": "1.0.33",
+  "updatedAt": "2026-11-12T13:26:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V44: Fitur Rolling Kru Kiriman Antar Jadwal Hari Ini (Tukar Rute / Gantikan Kru) di Portal Driver, Tabel 6 Kolom Rincian Jadwal & Penugasan Admin Penjualan + Jobdesk Bantu Muat Kelilingan, Auto-Recovery ErrorBoundary, serta Pemulihan Otomatis Status Jadwal Hari Berjalan."
+  "releaseNotes": "Update V45: Dashboard Terpadu Sub-Menu Logistik & Kustomisasi Widget (LogisticsWidgetsDashboard), Rincian Kinerja & Rumus Ketepatan Kiriman Bulanan di Portal Driver, Persistensi Jadwal Admin Penjualan ke Database MySQL Hostinger (/api/admin-schedules), serta Optimasi Kecepatan Simpan Database Barang."
 }

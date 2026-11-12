@@ -261,9 +261,6 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                   Filter Cabang Admin Penjualan
                 </label>
-                <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                  Nusantara / Sidoarjo
-                </span>
               </div>
               <button
                 type="button"
@@ -409,17 +406,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
           {/* KPI Summary Cards Right Side + Ekspor to Excel */}
           {hideStatsCards ? (
             <div className={showBranchFilter ? 'lg:col-span-4' : 'lg:col-span-4'}>
-              <div className="flex items-center gap-2.5">
-                <div className="flex-1 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/60 rounded-xl px-3.5 py-2.5 flex items-center justify-between min-w-0">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400 truncate">
-                    <Calendar className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">Periode Aktif</span>
-                  </div>
-                  <span className="text-xs sm:text-sm font-extrabold text-indigo-900 dark:text-indigo-200 font-mono tabular-nums whitespace-nowrap ml-2">
-                    {displayPeriod}
-                  </span>
-                </div>
-
+              <div className="flex items-center justify-end">
                 {onExportExcel && (
                   <button
                     type="button"

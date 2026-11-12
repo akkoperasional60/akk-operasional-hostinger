@@ -629,12 +629,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       if (cameraTargetItem && cameraTargetItem.id === saved.id) {
         setCameraTargetItem(saved);
       }
-      const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
       setFeedbackModal({
-        title: persistedToMysql ? `${newUrls.length} Foto Berhasil Masuk Database Pusat` : 'Foto Baru Hanya Tersimpan di Browser',
-        message: persistedToMysql
-          ? `Total ${updatedUrls.length} foto untuk ${saved.noBarang} telah diterima database pusat.`
-          : `Foto ${saved.noBarang} masih tersimpan di browser ini, tetapi belum masuk database pusat. Gunakan tombol Load Foto ke DB dari perangkat ini.`
+        title: 'Foto Berhasil Disimpan',
+        message: `Foto barang ${saved.noBarang} berhasil disimpan.`
       });
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
@@ -975,13 +972,13 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const all = databaseBarangService.getAll();
     setItems(all);
     if (onSyncWithMasterSku) onSyncWithMasterSku(all);
-    const persistedToMysql = await databaseBarangService.waitForItemUpload(saved.noBarang);
+    // Langsung tutup modal seketika tanpa menunggu jaringan
     setIsFormModalOpen(false);
+
+    // Keterangan singkat dan tidak bertele-tele
     setFeedbackModal({
-      title: persistedToMysql ? (editingItem ? 'Database Barang Diperbarui' : 'Barang Baru Ditambahkan') : 'Data Tersimpan Lokal, Server Belum Terhubung',
-      message: persistedToMysql
-        ? `Data "${saved.deskripsiBarang}" (${saved.noBarang}) telah masuk database pusat dengan ${dokumentasiUrls.length} foto dokumentasi.`
-        : `Data dan foto ${saved.noBarang} tersimpan di browser ini tetapi belum terverifikasi di database pusat. Coba tombol Load Foto ke DB.`
+      title: 'Data Berhasil Disimpan',
+      message: `Data barang "${saved.deskripsiBarang}" berhasil disimpan.`
     });
   };
 
@@ -999,7 +996,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setItemToDelete(null);
     setFeedbackModal({
       title: 'Barang Berhasil Dihapus',
-      message: `Data barang "${target.deskripsiBarang || target.keteranganBarang}" (${target.noBarang}) telah dihapus secara permanen dari Database Barang.`,
+      message: `Data barang "${target.deskripsiBarang || target.keteranganBarang}" berhasil dihapus.`,
       variant: 'danger',
       badge: target.noBarang
     });

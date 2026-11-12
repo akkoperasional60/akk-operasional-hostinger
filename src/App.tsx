@@ -514,7 +514,7 @@ export default function App() {
           )}
 
           {(currentTab === 'operational_dashboard' || currentTab === 'analytics_reports') && (
-            <AnalyticsReportingModule />
+            <AnalyticsReportingModule onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
           )}
 
           {currentTab === 'driver_reports' && (

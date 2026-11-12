@@ -63,7 +63,8 @@ import {
   Moon,
   Bell,
   Zap,
-  XCircle
+  XCircle,
+  Info
 } from 'lucide-react';
 import {
   Schedule,
@@ -1382,6 +1383,29 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     portalActiveReplacedRef.current = portalActiveReplacedScheduleId;
   }, [portalActiveReplacedScheduleId]);
 
+  // Validasi agar ID jadwal aktif yang tersimpan tidak merembes ke akun driver/helper lain
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('akk_portal_active_schedule_id');
+      if (saved) {
+        const sch = logisticsStore.getSchedules().find(s => s.id === saved);
+        const accName = (portalDisplayName || currentUser?.fullName || '').trim().toLowerCase();
+        if (sch && accName) {
+          const isAssigned =
+            (sch.backupCrewName && sch.backupCrewName.toLowerCase().includes(accName)) ||
+            (sch.crew?.name && sch.crew.name.toLowerCase().includes(accName)) ||
+            (sch.crewHelper?.name && sch.crewHelper.name.toLowerCase().includes(accName)) ||
+            (sch.crewHelper2?.name && sch.crewHelper2.name.toLowerCase().includes(accName));
+          if (!isAssigned) {
+            localStorage.removeItem('akk_portal_active_schedule_id');
+            setPortalActiveReplacedScheduleId('');
+            portalActiveReplacedRef.current = '';
+          }
+        }
+      }
+    } catch {}
+  }, [currentUser?.id, currentUser?.fullName, portalDisplayName]);
+
   const isScheduleMatchingTargetDate = (s: Schedule, targetIso: string): boolean => {
     const depIso = (s.departureDate || '').slice(0, 10);
     const retIso = (s.returnDate || s.deliveryDate || '').slice(0, 10);
@@ -1700,13 +1724,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
   };
 
-  // Cek apakah role akun saat ini adalah SPV Logistik atau Super Admin (bisa melihat semua jadwal & menghapus jadwal)
+  // Cek apakah role akun saat ini adalah Super Admin (khusus hak akses melihat semua jadwal & manajemen portal)
   const canManageAllPortalSchedules = useMemo(() => {
     const r1 = String(currentUser?.role || '').toLowerCase();
     const r2 = String(syncedUserRoleInfo.rawRole || '').toLowerCase();
     return (
-      ['super_admin', 'spv_logistik', 'admin'].includes(r1) ||
-      ['super_admin', 'spv_logistik', 'admin'].includes(r2)
+      ['super_admin'].includes(r1) ||
+      ['super_admin'].includes(r2)
     );
   }, [currentUser?.role, syncedUserRoleInfo.rawRole]);
 
@@ -1903,7 +1927,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           (latestUser?.fullName && u.fullName.toLowerCase() === latestUser.fullName.toLowerCase())
       );
       const effectiveRole = String(matchedUserInStore?.role || latestUser?.role || '').toLowerCase();
-      const isManagerPortal = ['super_admin', 'spv_logistik', 'admin'].includes(effectiveRole);
+      const isManagerPortal = ['super_admin'].includes(effectiveRole);
       const activeSpvFilter = spvCrewFilterRef.current;
 
       const activeBranch = effectivePortalBranchRef.current;
@@ -1938,9 +1962,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         ).trim();
         const accountId = latestActiveCrew?.id || latestUser?.id || selectedDriverId;
         targetList = branchFilteredSchedules.filter(s =>
-          s.id === activeReplacedId ||
-          (Boolean(s.backupCrewName) && isScheduleMatchingTargetDate(s, todayIsoLocal)) ||
-          isScheduleAssignedToPerson(s, accountName, accountId, latestCrews)
+          (activeReplacedId && s.id === activeReplacedId && (isScheduleAssignedToPerson(s, accountName, accountId, latestCrews) || (s.backupCrewName && doesCrewNameMatch(s.backupCrewName, accountName)))) ||
+          isScheduleAssignedToPerson(s, accountName, accountId, latestCrews) ||
+          (Boolean(s.backupTargetName) && doesCrewNameMatch(s.backupTargetName, accountName))
         );
       }
 
@@ -2180,13 +2204,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     let primaryActive: Schedule | null = null;
 
-    // 0. Prioritas tertinggi: jadwal yang baru saja disimpan/digantikan/di-rolling pada Portal Driver hari ini
+    const currentAccName = (
+      portalDisplayName ||
+      currentUser?.fullName ||
+      currentDriver?.name ||
+      ''
+    ).trim();
+    const currentAccId = currentDriver?.id || currentUser?.id || selectedDriverId;
+
+    // 0. Prioritas tertinggi: jadwal yang baru saja disimpan/digantikan/di-rolling oleh kru ini pada hari ini
     const explicitPortalSelected = portalActiveReplacedScheduleId
-      ? nonDelivered.find(d => d.id === portalActiveReplacedScheduleId)
+      ? nonDelivered.find(
+          d =>
+            d.id === portalActiveReplacedScheduleId &&
+            (isScheduleAssignedToPerson(d, currentAccName, currentAccId, crews) ||
+             (d.backupCrewName && doesCrewNameMatch(d.backupCrewName, currentAccName)))
+        )
       : undefined;
 
-    // 1. Prioritas berikutnya: jadwal yang sedang digantikan (Back Up / Menggantikan) pada hari ini
-    const backupAssigned = nonDelivered.find(d => Boolean(d.backupCrewName) && isScheduleMatchingTargetDate(d, targetIso));
+    // 1. Prioritas berikutnya: jadwal yang sedang digantikan (Back Up / Menggantikan) oleh kru ini pada hari ini
+    const backupAssigned = nonDelivered.find(
+      d =>
+        Boolean(d.backupCrewName) &&
+        doesCrewNameMatch(d.backupCrewName, currentAccName) &&
+        isScheduleMatchingTargetDate(d, targetIso)
+    );
 
     // 2. Prioritas perjalanan aktif
     const inProgress = nonDelivered.find(
@@ -2416,6 +2458,116 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return filteredDeliveries.slice(startIdx, startIdx + ITEMS_PER_PAGE);
   }, [filteredDeliveries, currentPage]);
 
+  // Modal Rincian Ketepatan & Riwayat Kiriman Bulanan
+  const [isPerformanceDetailModalOpen, setIsPerformanceDetailModalOpen] = useState(false);
+
+  // Statistik Performa Bulanan & History Kiriman Driver / Helper:
+  // Menghitung berapa kali mengirim dalam sebulan dan ketepatan kehadiran kirim:
+  // (Jadwal di mana kru tetap mengirim sendiri vs digantikan kru lain karena berhalangan)
+  const monthlyCrewStats = useMemo(() => {
+    const allStoreSchedules = logisticsStore.getSchedules();
+    const now = new Date();
+    const refDate = dateFilterStart ? new Date(dateFilterStart) : now;
+    const activeMonth = isNaN(refDate.getTime()) ? now.getMonth() : refDate.getMonth();
+    const activeYear = isNaN(refDate.getTime()) ? now.getFullYear() : refDate.getFullYear();
+
+    const targetPersonName = (
+      canManageAllPortalSchedules && spvCrewFilter !== 'all'
+        ? spvCrewFilter
+        : portalDisplayName || currentUser?.fullName || currentDriver?.name || ''
+    ).trim();
+
+    const targetCrewId = currentDriver?.id || currentUser?.id || selectedDriverId;
+
+    // Saring semua jadwal pada bulan dan tahun aktif
+    const monthSchedules = allStoreSchedules.filter(s => {
+      const d = s.departureDate ? new Date(s.departureDate) : (s.createdAt ? new Date(s.createdAt) : null);
+      if (!d || isNaN(d.getTime())) return false;
+      return d.getMonth() === activeMonth && d.getFullYear() === activeYear;
+    });
+
+    // Ambil juga record dari crewHistory di store
+    const allCrewHistory = logisticsStore.getCrewDeliveryHistory();
+    const monthHistoryRecords = allCrewHistory.filter(h => {
+      const d = h.completionDate ? new Date(h.completionDate) : null;
+      if (!d || isNaN(d.getTime())) return false;
+      if (d.getMonth() !== activeMonth || d.getFullYear() !== activeYear) return false;
+      return (
+        (targetPersonName && doesCrewNameMatch(h.crewName, targetPersonName)) ||
+        (targetCrewId && h.crewId === targetCrewId)
+      );
+    });
+
+    let jadwalCount = 0;          // Total jadwal awal kru ini di bulan berjalan
+    let tetapMengirimCount = 0;    // Jadwal di mana kru ini tetap mengirim sendiri (tidak digantikan)
+    let digantikanCount = 0;       // Jadwal di mana kru ini digantikan oleh orang lain (berhalangan)
+    let menggantikanCount = 0;     // Jadwal di mana kru ini menggantikan orang lain (sebagai backup)
+    let terkirimSelesaiCount = 0;  // Kiriman yang berstatus delivered
+
+    monthSchedules.forEach(s => {
+      const isDrv = s.crew && doesCrewNameMatch(s.crew.name, targetPersonName);
+      const isHlp1 = s.crewHelper && doesCrewNameMatch(s.crewHelper.name, targetPersonName);
+      const isHlp2 = s.crewHelper2 && doesCrewNameMatch(s.crewHelper2.name, targetPersonName);
+      const isTargetReplaced = Boolean(s.backupTargetName) && doesCrewNameMatch(s.backupTargetName, targetPersonName);
+      const isScheduled = isDrv || isHlp1 || isHlp2 || isTargetReplaced;
+
+      const isBackup = Boolean(s.backupCrewName) && doesCrewNameMatch(s.backupCrewName, targetPersonName);
+
+      if (isScheduled) {
+        jadwalCount++;
+        if (s.backupCrewName && !isBackup) {
+          // Kru ini dijadwalkan, namun digantikan orang lain
+          digantikanCount++;
+        } else {
+          // Kru ini tetap mengirim sendiri
+          tetapMengirimCount++;
+          if (s.status === 'delivered') {
+            terkirimSelesaiCount++;
+          }
+        }
+      } else if (isBackup) {
+        // Bertindak sebagai backup menggantikan rute lain
+        menggantikanCount++;
+        if (s.status === 'delivered') {
+          terkirimSelesaiCount++;
+        }
+      }
+    });
+
+    // Total kiriman yang dijalankan oleh kru ini (tetap mengirim + menggantikan orang lain + history tambahan jika ada)
+    const historyDeliveredExtra = Math.max(0, monthHistoryRecords.length - terkirimSelesaiCount);
+    const totalTerkirimBulanIni = tetapMengirimCount + menggantikanCount + historyDeliveredExtra;
+
+    // Perhitungan ketepatan sesuai instruksi user:
+    // "ketepatan ini dihitung ketika driver / helper ini dijadwalkan mengirim tapi ada yang tetap mengirim atau digantikan dengan orang lain. jadi perhitungannya (terkirim - jadwal) / jadwal * 100%"
+    // Yaitu persentase jadwal yang tetap berhasil dikirimkan oleh kru bersangkutan tanpa dialihkan ke orang lain:
+    // (Jadwal - Digantikan) / Jadwal * 100% atau TetapMengirim / Jadwal * 100%
+    let ketepatanPct = 100;
+    if (jadwalCount > 0) {
+      const successfulTrips = Math.max(0, jadwalCount - digantikanCount);
+      ketepatanPct = Math.min(100, Math.max(0, Math.round((successfulTrips / jadwalCount) * 1000) / 10));
+    } else if (totalTerkirimBulanIni > 0) {
+      ketepatanPct = 100;
+    }
+
+    const MONTH_LABELS = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+
+    return {
+      activeMonthName: MONTH_LABELS[activeMonth] || 'Bulan Ini',
+      activeYear,
+      jadwalCount,
+      tetapMengirimCount,
+      digantikanCount,
+      menggantikanCount,
+      totalTerkirimBulanIni,
+      terkirimSelesaiCount,
+      ketepatanPct
+    };
+  }, [deliveries, dateFilterStart, portalDisplayName, currentUser, currentDriver, selectedDriverId, canManageAllPortalSchedules, spvCrewFilter]);
+
   // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin & Terpisah per Cabang)
   const standbyPortalInfo = useMemo(() => {
     // 1. Cek apakah ada snapshot langsung dari Jadwal & Penugasan Admin
@@ -2616,14 +2768,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     const activeBackupSchedule =
       (portalActiveReplacedScheduleId
-        ? daySchedules.find(s => s.id === portalActiveReplacedScheduleId && Boolean(s.backupCrewName))
+        ? daySchedules.find(
+            s =>
+              s.id === portalActiveReplacedScheduleId &&
+              Boolean(s.backupCrewName) &&
+              Boolean(activeCrewFilterName) &&
+              matchSamePerson(s.backupCrewName, activeCrewFilterName)
+          )
         : undefined) ||
       daySchedules.find(
         s =>
-          s.backupCrewName &&
-          (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
+          Boolean(s.backupCrewName) &&
+          Boolean(activeCrewFilterName) &&
+          matchSamePerson(s.backupCrewName, activeCrewFilterName)
       ) ||
-      daySchedules.find(s => Boolean(s.backupCrewName)) ||
       null;
 
     const activeDateLabel =
@@ -2728,10 +2886,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Handler di Portal Driver untuk Kru Free / Stand By menggantikan kru kiriman area lain yang berhalangan hadir pada Hari H
   const handleConfirmStandbyReplaceFromPortal = () => {
     const standbyName =
-      (standbyPortalInfo.isCurrentPortalUserFreeStandby
-        ? standbyPortalInfo.activeCrewFilterName
-        : standbyReplaceForm.standbyCrewName || standbyPortalInfo.freeStandbyCrews[0]?.name) ||
-      portalDisplayName;
+      portalDisplayName ||
+      (currentUser?.fullName || '').trim() ||
+      (standbyPortalInfo.isCurrentPortalUserFreeStandby ? standbyPortalInfo.activeCrewFilterName : '') ||
+      standbyReplaceForm.standbyCrewName ||
+      standbyPortalInfo.freeStandbyCrews[0]?.name ||
+      'Driver AKK';
 
     if (!standbyName) return;
 
@@ -2997,10 +3157,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Handler untuk kru Free / Stand By membatalkan penggantian (Tidak Jadi Ganti)
   const handleCancelStandbyReplaceFromPortal = () => {
     const standbyName =
-      (standbyPortalInfo.isCurrentPortalUserFreeStandby
-        ? standbyPortalInfo.activeCrewFilterName
-        : standbyReplaceForm.standbyCrewName || standbyPortalInfo.freeStandbyCrews[0]?.name) ||
-      portalDisplayName;
+      portalDisplayName ||
+      (currentUser?.fullName || '').trim() ||
+      (standbyPortalInfo.isCurrentPortalUserFreeStandby ? standbyPortalInfo.activeCrewFilterName : '') ||
+      standbyReplaceForm.standbyCrewName ||
+      standbyPortalInfo.freeStandbyCrews[0]?.name ||
+      'Driver AKK';
 
     if (!standbyName) return;
 
@@ -4510,28 +4672,41 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 )}
               </div>
 
-              {/* Current Shift's Performance Metrics Summary (Neu-Pressed Grid) */}
+              {/* Current Shift & Monthly History Performance Metrics */}
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div 
                   onClick={() => setActiveTab('active')}
                   className="neu-pressed p-2.5 rounded-xl cursor-pointer hover:border-blue-500/40 transition"
+                  title="Tugas pengiriman aktif saat ini"
                 >
                   <div className="text-lg font-black text-blue-400 tabular-nums">{activeDeliveries.length}</div>
                   <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">Tugas Aktif</div>
                 </div>
                 <div 
-                  onClick={() => setActiveTab('delivered')}
-                  className="neu-pressed p-2.5 rounded-xl cursor-pointer hover:border-emerald-500/40 transition"
+                  onClick={() => setIsPerformanceDetailModalOpen(true)}
+                  className="neu-pressed p-2.5 rounded-xl cursor-pointer hover:border-emerald-500/40 transition group"
+                  title="Total kiriman yang dijalankan dalam sebulan (klik untuk rincian)"
                 >
-                  <div className="text-lg font-black text-emerald-400 tabular-nums">{deliveredDeliveries.length} / {activeDeliveries.length + scheduledDeliveries.length + deliveredDeliveries.length}</div>
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">Terkirim</div>
+                  <div className="text-lg font-black text-emerald-400 tabular-nums">
+                    {monthlyCrewStats.totalTerkirimBulanIni} / {monthlyCrewStats.jadwalCount}
+                  </div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-0.5 flex items-center justify-center gap-1">
+                    <span>Terkirim</span>
+                    <Info className="w-2.5 h-2.5 text-emerald-400 opacity-60 group-hover:opacity-100" />
+                  </div>
                 </div>
                 <div 
-                  onClick={() => setActiveTab('scheduled')}
-                  className="neu-pressed p-2.5 rounded-xl cursor-pointer hover:border-amber-500/40 transition"
+                  onClick={() => setIsPerformanceDetailModalOpen(true)}
+                  className="neu-pressed p-2.5 rounded-xl cursor-pointer hover:border-amber-500/40 transition group"
+                  title="Ketepatan kehadiran & pelaksanaan jadwal kirim (klik untuk rincian)"
                 >
-                  <div className="text-lg font-black text-amber-400 tabular-nums">98.5%</div>
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">Ketepatan</div>
+                  <div className="text-lg font-black text-amber-400 tabular-nums">
+                    {monthlyCrewStats.ketepatanPct.toFixed(1)}%
+                  </div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-0.5 flex items-center justify-center gap-1">
+                    <span>Ketepatan</span>
+                    <Info className="w-2.5 h-2.5 text-amber-400 opacity-60 group-hover:opacity-100" />
+                  </div>
                 </div>
               </div>
 
@@ -4694,8 +4869,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             {/* PANEL JADWAL FREE • STAND BY GUDANG DC (Ditempatkan DI ATAS Tampilan Jadwal agar Mudah Diakses) */}
             {(standbyPortalInfo.isCurrentPortalUserFreeStandby ||
               Boolean(standbyPortalInfo.activeBackupSchedule) ||
-              canManageAllPortalSchedules ||
-              standbyPortalInfo.freeStandbyCrews.length > 0) && (
+              canManageAllPortalSchedules) && (
               <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/70 rounded-2xl p-4 shadow-md space-y-3.5">
                 <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -4817,115 +4991,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   </div>
                 )}
 
-                {/* Form Pilih Kru Stand By, Posisi & Rute Area Kirim (UI/UX Dropdown Interaktif) */}
+                {/* Form Pilih Posisi & Rute Area Kirim (Hanya Posisi Kru yang Digantikan & Rute Tujuan) */}
                 {(!standbyPortalInfo.activeBackupSchedule || standbyReplaceForm.isOpen) && (
                   <div className="space-y-3 text-xs">
-                    {/* 1. Pilih Personel Kru Stand By Pengganti (Menampilkan SEMUA Kru Stand By: Driver maupun Helper) */}
-                    {!standbyPortalInfo.isCurrentPortalUserFreeStandby &&
-                      standbyPortalInfo.freeStandbyCrews.length > 0 && (
-                        <div className="relative">
-                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                            Pilih Personel Kru Stand By Pengganti (Driver &amp; Helper)
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setStandbyReplaceForm(prev => ({
-                                ...prev,
-                                isCrewDropdownOpen: !prev.isCrewDropdownOpen,
-                                isRouteDropdownOpen: false
-                              }))
-                            }
-                            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 hover:border-amber-500 text-left transition cursor-pointer"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-black text-[11px] shrink-0">
-                                {(
-                                  standbyReplaceForm.standbyCrewName ||
-                                  standbyPortalInfo.freeStandbyCrews[0]?.name ||
-                                  'K'
-                                )
-                                  .charAt(0)
-                                  .toUpperCase()}
-                              </span>
-                              <span className="font-black text-slate-900 dark:text-white truncate">
-                                {standbyReplaceForm.standbyCrewName ||
-                                  standbyPortalInfo.freeStandbyCrews[0]?.name ||
-                                  portalDisplayName}
-                              </span>
-                              {(() => {
-                                const cObj = standbyPortalInfo.freeStandbyCrews.find(
-                                  c =>
-                                    c.name ===
-                                    (standbyReplaceForm.standbyCrewName ||
-                                      standbyPortalInfo.freeStandbyCrews[0]?.name)
-                                );
-                                return cObj ? (
-                                  <span
-                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
-                                      cObj.role === 'Driver'
-                                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
-                                        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                                    }`}
-                                  >
-                                    {cObj.role} Stand By
-                                  </span>
-                                ) : null;
-                              })()}
-                            </div>
-                            <ChevronDown
-                              className={`w-4 h-4 text-slate-400 transition-transform ${
-                                standbyReplaceForm.isCrewDropdownOpen ? 'rotate-180 text-amber-500' : ''
-                              }`}
-                            />
-                          </button>
-
-                          {standbyReplaceForm.isCrewDropdownOpen && (
-                            <div className="mt-1.5 rounded-xl bg-white dark:bg-slate-950 border-2 border-amber-500/50 shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 z-30 relative">
-                              {standbyPortalInfo.freeStandbyCrews.map(fc => {
-                                const activeCrewName =
-                                  standbyReplaceForm.standbyCrewName ||
-                                  standbyPortalInfo.freeStandbyCrews[0]?.name;
-                                const isSel = fc.name === activeCrewName;
-                                return (
-                                  <button
-                                    key={fc.id}
-                                    type="button"
-                                    onClick={() =>
-                                      setStandbyReplaceForm(prev => ({
-                                        ...prev,
-                                        standbyCrewName: fc.name,
-                                        isCrewDropdownOpen: false
-                                      }))
-                                    }
-                                    className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                      isSel
-                                        ? 'bg-amber-500/15 text-slate-900 dark:text-white font-black'
-                                        : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span
-                                        className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
-                                          fc.role === 'Driver'
-                                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
-                                            : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                                        }`}
-                                      >
-                                        {fc.role}
-                                      </span>
-                                      <span className="truncate text-xs font-bold">{fc.name}</span>
-                                    </div>
-                                    {isSel && <Check className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                    {/* 2. Pilih Posisi Kru yang Digantikan (Driver Stand By bebas menggantikan Helper maupun Driver) */}
+                    {/* Posisi Kru yang Digantikan (Driver Stand By bebas menggantikan Helper maupun Driver) */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">
@@ -8890,6 +8959,147 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         );
       })()}
+      {/* MODAL 13: Rincian Riwayat Kiriman & Rumus Ketepatan Bulanan */}
+      {isPerformanceDetailModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setIsPerformanceDetailModalOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <Gauge className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                    Rincian Kinerja &amp; Riwayat Kiriman
+                  </h3>
+                  <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                    Periode: {monthlyCrewStats.activeMonthName} {monthlyCrewStats.activeYear} • {portalDisplayName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPerformanceDetailModalOpen(false)}
+                className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scorecard Bulanan */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                  Total Terkirim / Jadwal
+                </span>
+                <span className="text-2xl font-black text-emerald-500 dark:text-emerald-400 tabular-nums block mt-1">
+                  {monthlyCrewStats.totalTerkirimBulanIni} <span className="text-sm font-semibold text-slate-400">/ {monthlyCrewStats.jadwalCount}</span>
+                </span>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-0.5 block">
+                  Telah mengirim dalam sebulan
+                </span>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                  Ketepatan Kirim
+                </span>
+                <span className="text-2xl font-black text-amber-500 dark:text-amber-400 tabular-nums block mt-1">
+                  {monthlyCrewStats.ketepatanPct.toFixed(1)}%
+                </span>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-0.5 block">
+                  Tingkat realisasi jadwal
+                </span>
+              </div>
+            </div>
+
+            {/* Breakdown Rincian Jadwal & Rolling */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+              <span className="text-[11px] font-black uppercase text-slate-700 dark:text-slate-300 block pb-1 border-b border-slate-200 dark:border-slate-800">
+                Rincian Jadwal Kiriman ({monthlyCrewStats.activeMonthName} {monthlyCrewStats.activeYear}):
+              </span>
+
+              <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                  Total Jadwal Dijadwalkan Mengirim:
+                </span>
+                <strong className="text-slate-900 dark:text-white font-mono">
+                  {monthlyCrewStats.jadwalCount} kali
+                </strong>
+              </div>
+
+              <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  Tetap Mengirim Sesuai Jadwal:
+                </span>
+                <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
+                  {monthlyCrewStats.tetapMengirimCount} kali
+                </strong>
+              </div>
+
+              <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  Digantikan Kru Lain (Izin / Sakit / Berhalangan):
+                </span>
+                <strong className="text-rose-600 dark:text-rose-400 font-mono">
+                  {monthlyCrewStats.digantikanCount} kali
+                </strong>
+              </div>
+
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                  Menggantikan Kru Rute Lain (Rolling Cadangan):
+                </span>
+                <strong className="text-amber-600 dark:text-amber-400 font-mono">
+                  {monthlyCrewStats.menggantikanCount} kali
+                </strong>
+              </div>
+            </div>
+
+            {/* Kotak Penjelasan Rumus Ketepatan */}
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] space-y-1.5 text-amber-900 dark:text-amber-200">
+              <div className="flex items-center gap-1.5 font-black uppercase text-[10px] text-amber-700 dark:text-amber-300">
+                <Info className="w-3.5 h-3.5" />
+                <span>Rumus Perhitungan Ketepatan:</span>
+              </div>
+              <p className="font-mono text-xs font-bold text-amber-800 dark:text-amber-300 bg-amber-500/20 px-2 py-1.5 rounded-xl text-center">
+                Ketepatan = (Terkirim Tetap Mengirim / Jadwal) × 100%
+              </p>
+              <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                Dihitung dari jadwal mengirim yang tetap dijalankan tanpa digantikan orang lain:
+                <br />
+                {monthlyCrewStats.jadwalCount > 0 ? (
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    (({monthlyCrewStats.jadwalCount} - {monthlyCrewStats.digantikanCount}) / {monthlyCrewStats.jadwalCount}) × 100% = <strong>{monthlyCrewStats.ketepatanPct.toFixed(1)}%</strong>
+                  </span>
+                ) : (
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    Belum ada jadwal penugasan kirim pada bulan ini.
+                  </span>
+                )}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsPerformanceDetailModalOpen(false)}
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer text-center"
+            >
+              Tutup Rincian
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
