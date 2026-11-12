@@ -705,19 +705,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       setItems(databaseBarangService.getAll());
       if (result.localPhotoSkuCount === 0) {
         setFeedbackModal({
-          title: 'Foto Lokal Tidak Ditemukan',
-          message: `Browser ini tidak menyimpan foto lama. Server database saat ini memiliki ${result.afterPhotoSkuCount} barang berfoto. Buka website dari HP/PC dan browser ASAL tempat foto pernah diunggah, lalu jalankan Load Foto ke DB di sana.`
+          title: 'Load Foto ke DB Selesai',
+          message: `Total foto berhasil terupload: 0, gagal: 0.`
         });
         return;
       }
       setFeedbackModal({
-        title: result.failedSkuCount > 0 ? 'Sebagian Foto Belum Berhasil Dikirim' : 'Load Foto ke DB Selesai',
-        message: `Ditemukan ${result.localPhotoSkuCount} barang berfoto pada browser ini. ` +
-          `Upload berhasil ${result.succeededSkuCount}, gagal ${result.failedSkuCount}. ` +
-          `Barang berfoto di database pusat: ${result.beforePhotoSkuCount} menjadi ${result.afterPhotoSkuCount}. ` +
-          (result.failedSkuCount ? `Contoh SKU gagal: ${result.failedCodes.slice(0, 5).join(', ')}. ` : '') +
-          (result.afterPhotoSkuCount === result.beforePhotoSkuCount ? `Jika jumlah belum bertambah, coba perangkat/browser ASAL tempat foto lama disimpan. ` : '') +
-          `Foto asli di browser tidak dihapus. Periksa lagi di database.`
+        title: 'Load Foto ke DB Selesai',
+        message: `Total foto berhasil terupload: ${result.succeededSkuCount}, gagal: ${result.failedSkuCount}.`
       });
     } catch (err: any) {
       setFeedbackModal({

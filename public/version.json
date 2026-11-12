@@ -1,9 +1,9 @@
 {
-  "versionCode": 10031,
-  "versionName": "1.0.31",
-  "updatedAt": "2026-11-12T07:22:00.000000",
+  "versionCode": 10032,
+  "versionName": "1.0.32",
+  "updatedAt": "2026-11-12T10:12:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V43: Pemisahan Tegas Cabang Nusantara & Sidoarjo pada Jadwal Pengiriman, Kru Stand By, Data Armada & Kru, serta Jadwal Admin Penjualan; ditambah Sinkronisasi Kru Berdasarkan Hak Akses Portal Driver Mobile (driver_portal) Lintas Role di Manajemen User."
+  "releaseNotes": "Update V44: Fitur Rolling Kru Kiriman Antar Jadwal Hari Ini (Tukar Rute / Gantikan Kru) di Portal Driver, Tabel 6 Kolom Rincian Jadwal & Penugasan Admin Penjualan + Jobdesk Bantu Muat Kelilingan, Auto-Recovery ErrorBoundary, serta Pemulihan Otomatis Status Jadwal Hari Berjalan."
 }

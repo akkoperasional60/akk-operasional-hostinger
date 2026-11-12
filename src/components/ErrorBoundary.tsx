@@ -10,6 +10,35 @@ interface State {
   error?: Error;
 }
 
+const CACHE_KEYS_TO_PURGE_ON_ERROR = [
+  'akk_admin_calendar_schedules_v1',
+  'akk_sales_admin_branch_map_v1',
+  'akk_admin_schedules_v1',
+  'akk_daily_checklist_v1',
+  'akk_task_status_v1',
+  'akk_master_jobdesk_v2',
+  'akk_checklist_history',
+  'akk_loading_fleets_v2',
+  'akk_fines_data_v2',
+  'akk_user_branch_permissions_v1',
+  'akk_entity_branch_assignments_v1',
+  'akk_multi_store_branches_v1',
+  'akk_active_origin_branch_v1',
+  'akk_simulasi_weeks_v2',
+  'akk_notifications_v1',
+  'akk_system_activities_v1'
+];
+
+function purgeCorruptedCacheKeys() {
+  try {
+    CACHE_KEYS_TO_PURGE_ON_ERROR.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+      } catch {}
+    });
+  } catch {}
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false
@@ -21,14 +50,23 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught React Error:', error, errorInfo);
+    purgeCorruptedCacheKeys();
+
+    // Auto-recover once per 15 seconds so stale browser localStorage never traps the user
+    try {
+      const now = Date.now();
+      const lastRecover = Number(sessionStorage.getItem('akk_auto_recover_ts') || '0');
+      if (!lastRecover || now - lastRecover > 15000) {
+        sessionStorage.setItem('akk_auto_recover_ts', String(now));
+        this.setState({ hasError: false, error: undefined });
+      }
+    } catch {}
   }
 
   private handleReset = () => {
+    purgeCorruptedCacheKeys();
     try {
-      // Clear non-essential cached keys that might cause storage/render issues
-      ['akk_simulasi_weeks_v2', 'akk_notifications_v1', 'akk_system_activities_v1'].forEach(k => {
-        try { localStorage.removeItem(k); } catch {}
-      });
+      sessionStorage.removeItem('akk_auto_recover_ts');
     } catch {}
     this.setState({ hasError: false, error: undefined });
     window.location.reload();

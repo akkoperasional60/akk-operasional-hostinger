@@ -168,7 +168,8 @@ async function startServer() {
     const candidateNames = [
       schedule.crew?.name, schedule.crewName, schedule.crew_name,
       schedule.crewHelper?.name, schedule.crewHelperName, schedule.crew_helper_name,
-      schedule.crewHelper2?.name, schedule.crewHelper2Name, schedule.crew_helper2_name
+      schedule.crewHelper2?.name, schedule.crewHelper2Name, schedule.crew_helper2_name,
+      schedule.backupCrewName, schedule.backup_crew_name
     ].map(normalizeIdentity).filter(Boolean);
 
     if (userId && candidateIds.some((id: string) => {
@@ -176,7 +177,7 @@ async function startServer() {
       return id === userId || (strippedUserId.length >= 3 && stripped === strippedUserId);
     })) return true;
 
-    return Boolean(userName && candidateNames.includes(userName));
+    return Boolean(userName && candidateNames.some((n: string) => n === userName || n.includes(userName) || userName.includes(n)));
   };
 
   const toMysqlDateTime = (value: any, fallback?: Date): string => {
@@ -500,8 +501,8 @@ async function startServer() {
   );
   const requireScheduleWrite = requireModuleWrite(
     'logistics',
-    ['schedules', 'rencana_rute'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin']
+    ['schedules', 'rencana_rute', 'driver_portal', 'portal_driver'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'driver', 'crew_helper', 'warehouse_admin']
   );
   const requireScheduleStatusWrite = requireModuleWrite(
     'logistics',
@@ -1693,14 +1694,30 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const role = String(req.authUser?.role || '');
       let schedules = Array.isArray(data?.schedules) ? data.schedules : [];
-
-      // Driver/helper tanpa hak akses menu Jadwal & Rute hanya menerima jadwal yang ditugaskan kepadanya.
-      if (role === 'driver' || role === 'crew_helper') {
-        const scheduleMenuAccess = resolveServerSubMenuAccess(req.authUser, 'logistics', ['schedules', 'operational_dashboard', 'rencana_rute']);
-        if (scheduleMenuAccess !== 'full_access' && scheduleMenuAccess !== 'read_only') {
-          schedules = schedules.filter((sch: any) => isScheduleAssignedToAuthUser(sch, req.authUser));
+      let sanitized = false;
+      schedules = schedules.map((sch: any) => {
+        const depIso = String(sch?.departureDate || '').slice(0, 10);
+        if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl) {
+          sanitized = true;
+          return {
+            ...sch,
+            status: 'scheduled',
+            isChecklistBypassed: false,
+            actualArrival: undefined
+          };
         }
+        return sch;
+      });
+      if (sanitized) {
+        const nextPayload = { ...data, schedules, updatedAt: new Date().toISOString() };
+        mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['schedules_payload', JSON.stringify(nextPayload)]
+        ).catch(() => {});
       }
+
+      // Seluruh jadwal dikirim utuh agar Portal Driver dapat menampilkan rute hari berjalan untuk fitur Stand By / Rolling Kru Kiriman tanpa menghapus jadwal kru lain di browser.
 
       return res.json({
         success: true,
@@ -2169,13 +2186,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
       const role = String((req as any).authUser?.role || '');
       if (role === 'driver' || role === 'crew_helper') {
-        const scheduleWriteAccess = resolveServerSubMenuAccess((req as any).authUser, 'logistics', ['schedules', 'rencana_rute']);
+        const scheduleWriteAccess = resolveServerSubMenuAccess((req as any).authUser, 'logistics', ['schedules', 'rencana_rute', 'driver_portal', 'portal_driver']);
         if (scheduleWriteAccess !== 'full_access') {
           const target = schedules.find((sch: any) =>
             sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)
           );
-          if (!target || !isScheduleAssignedToAuthUser(target, (req as any).authUser)) {
-            return res.status(403).json({ success: false, error: 'Jadwal ini bukan penugasan akun driver/helper yang sedang login' });
+          if (!target) {
+            return res.status(404).json({ success: false, error: 'Jadwal tidak ditemukan' });
           }
         }
       }

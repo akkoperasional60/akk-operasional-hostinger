@@ -97,6 +97,8 @@ import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareModal';
 import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../utils/areaNormalizer';
 import { formKirimStore, FormKirimRecord } from '../services/formKirimStore';
+import { branchStore } from '../services/branchStore';
+import { getScheduleCalendarDateObj } from '../data/adminSchedule';
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -1323,10 +1325,83 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     spvCrewFilterRef.current = spvCrewFilter;
   }, [spvCrewFilter]);
 
-  // State & Handler Fitur Perubahan Urgent (Rolling Pagi) sebelum Gate-Out / setelah Check-In
+  // Pembagian Cabang Portal Driver langsung sesuai hak akses pada Manajemen User (tanpa switcher manual)
+  const [globalOriginBranchId, setGlobalOriginBranchId] = useState<string>(() => {
+    const id = branchStore.getSelectedOriginBranchId();
+    return id && id !== 'ALL' ? id : 'cab-banyuwangi';
+  });
+  useEffect(() => {
+    const unsub = branchStore.subscribe(() => {
+      const id = branchStore.getSelectedOriginBranchId();
+      if (id && id !== 'ALL') setGlobalOriginBranchId(id);
+    });
+    return unsub;
+  }, []);
+
+  const effectivePortalBranchId = useMemo(() => {
+    const allUsers = logisticsStore.getUsers();
+    if (spvCrewFilter && spvCrewFilter !== 'all') {
+      const matchedCrewUser = allUsers.find(u =>
+        logisticsStore.isSameCrewPersonName(u.fullName || '', spvCrewFilter)
+      );
+      if (matchedCrewUser) {
+        return logisticsStore.getCrewUserPrimaryBranchId(matchedCrewUser);
+      }
+      return branchStore.getCrewBranchId(spvCrewFilter, spvCrewFilter);
+    }
+
+    const u = currentUser || logisticsStore.getCurrentUser();
+    if (!u || u.id === 'guest' || u.role === 'super_admin') {
+      return globalOriginBranchId || 'cab-banyuwangi';
+    }
+
+    const sdaAccess = logisticsStore.isActiveDeliveryCrewUser(u, 'cab-sidoarjo') || branchStore.canUserAccessBranch(u, 'cab-sidoarjo');
+    const bwiAccess = logisticsStore.isActiveDeliveryCrewUser(u, 'cab-banyuwangi') || branchStore.canUserAccessBranch(u, 'cab-banyuwangi');
+
+    if (sdaAccess && !bwiAccess) return 'cab-sidoarjo';
+    if (bwiAccess && !sdaAccess) return 'cab-banyuwangi';
+
+    return logisticsStore.getCrewUserPrimaryBranchId(u);
+  }, [currentUser, spvCrewFilter, globalOriginBranchId]);
+
+  const effectivePortalBranchRef = useRef<string>(effectivePortalBranchId);
+  useEffect(() => {
+    effectivePortalBranchRef.current = effectivePortalBranchId;
+  }, [effectivePortalBranchId]);
+
+  // ID jadwal yang baru saja digantikan / di-rolling di portal hari ini agar kartu bawah ('Aktif (1)') langsung berubah sesuai area barunya
+  const [portalActiveReplacedScheduleId, setPortalActiveReplacedScheduleId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('akk_portal_active_schedule_id') || '';
+    } catch {
+      return '';
+    }
+  });
+  const portalActiveReplacedRef = useRef<string>(portalActiveReplacedScheduleId);
+  useEffect(() => {
+    portalActiveReplacedRef.current = portalActiveReplacedScheduleId;
+  }, [portalActiveReplacedScheduleId]);
+
+  const isScheduleMatchingTargetDate = (s: Schedule, targetIso: string): boolean => {
+    const depIso = (s.departureDate || '').slice(0, 10);
+    const retIso = (s.returnDate || s.deliveryDate || '').slice(0, 10);
+    if (depIso === targetIso || retIso === targetIso) return true;
+    const calObj = getScheduleCalendarDateObj(s);
+    if (calObj && !isNaN(calObj.getTime())) {
+      const calIso = `${calObj.getFullYear()}-${String(calObj.getMonth() + 1).padStart(2, '0')}-${String(calObj.getDate()).padStart(2, '0')}`;
+      if (calIso === targetIso) return true;
+    }
+    return false;
+  };
+
+  // State & Handler Fitur Perubahan Urgent (Rolling Pagi — Rolling Kru Kiriman Antar Jadwal Hari Ini)
   const [urgentRollingModal, setUrgentRollingModal] = useState<{
     isOpen: boolean;
     delivery: Schedule | null;
+    sourcePosition: 'driver' | 'helper' | 'helper2';
+    targetScheduleId: string;
+    targetPosition: 'driver' | 'helper' | 'helper2';
+    rollingMode: 'swap' | 'replace';
     driverId: string;
     helper1Id: string;
     helper2Id: string;
@@ -1336,12 +1411,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }>({
     isOpen: false,
     delivery: null,
+    sourcePosition: 'helper',
+    targetScheduleId: '',
+    targetPosition: 'helper',
+    rollingMode: 'swap',
     driverId: '',
     helper1Id: '',
     helper2Id: '',
     fleetId: '',
     areaName: '',
-    reason: 'Rolling pagi mendadak sebelum keberangkatan dari gudang'
+    reason: 'Rolling kru kiriman pagi sebelum keberangkatan dari gudang'
   });
 
   const handleOpenUrgentRollingModal = (delivery: Schedule) => {
@@ -1360,23 +1439,211 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       (delivery.fleet?.plateNumber ? fleets.find(f => normPlate(f.plateNumber) === normPlate(delivery.fleet?.plateNumber)) : undefined) ||
       assignedFleet;
 
+    const myName = (portalDisplayName || currentUser?.fullName || currentDriver?.name || '').trim();
+    let defaultSourcePos: 'driver' | 'helper' | 'helper2' = 'driver';
+    if (delivery.crewHelper?.name && matchSamePerson(delivery.crewHelper.name, myName)) {
+      defaultSourcePos = 'helper';
+    } else if (delivery.crewHelper2?.name && matchSamePerson(delivery.crewHelper2.name, myName)) {
+      defaultSourcePos = 'helper2';
+    } else if (delivery.crew?.name && matchSamePerson(delivery.crew.name, myName)) {
+      defaultSourcePos = 'driver';
+    } else if (isUserHelperRole && delivery.crewHelper?.name) {
+      defaultSourcePos = 'helper';
+    }
+
+    const nowLocal = new Date();
+    const todayLocalIso = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const targetIso = dateFilterStart || (delivery.departureDate || '').slice(0, 10) || todayLocalIso;
+    const otherSchedulesToday = logisticsStore.getSchedules().filter(s => {
+      if (s.id === delivery.id) return false;
+      if (!isScheduleMatchingTargetDate(s, targetIso)) return false;
+      const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+      return sBranch === effectivePortalBranchId;
+    });
+
     setUrgentRollingModal({
       isOpen: true,
       delivery,
+      sourcePosition: defaultSourcePos,
+      targetScheduleId: otherSchedulesToday[0]?.id || '',
+      targetPosition: defaultSourcePos,
+      rollingMode: 'swap',
       driverId: matchedDriver?.id || delivery.crewId || '',
       helper1Id: matchedHelper1?.id || delivery.crewHelperId || '',
       helper2Id: matchedHelper2?.id || delivery.crewHelper2Id || '',
       fleetId: matchedFleet?.id || delivery.fleetId || '',
       areaName: delivery.areaName || delivery.store?.storeName || '',
-      reason: 'Rolling pagi mendadak sebelum keberangkatan dari gudang'
+      reason: 'Rolling kru kiriman pagi sebelum keberangkatan dari gudang'
     });
   };
 
   const handleSaveUrgentRolling = () => {
-    const targetDelivery = urgentRollingModal.delivery;
-    if (!targetDelivery) return;
+    const sourceDelivery = urgentRollingModal.delivery;
+    if (!sourceDelivery) return;
 
-    const newDriver = crews.find(c => c.id === urgentRollingModal.driverId) || targetDelivery.crew;
+    const allSchedules = logisticsStore.getSchedules();
+    const allCrews = logisticsStore.getCrews();
+    const targetSchedule = urgentRollingModal.targetScheduleId
+      ? allSchedules.find(s => s.id === urgentRollingModal.targetScheduleId)
+      : undefined;
+
+    const cleanReason = (urgentRollingModal.reason || 'Rolling kru kiriman pagi').trim();
+    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+    // Jika ada jadwal tujuan (User A yang terjadwal kirim menggantikan / rolling dengan User B yang terjadwal kirim hari ini)
+    if (targetSchedule) {
+      const sourceArea = sourceDelivery.areaName || sourceDelivery.store?.storeName || 'Rute Asal';
+      const targetArea = targetSchedule.areaName || targetSchedule.store?.storeName || 'Rute Tujuan';
+
+      const getCrewNameAtPos = (sch: Schedule, pos: 'driver' | 'helper' | 'helper2'): string => {
+        if (pos === 'driver') return sch.crew?.name || 'Driver Utama';
+        if (pos === 'helper') return sch.crewHelper?.name || 'Helper 1';
+        return sch.crewHelper2?.name || 'Helper 2';
+      };
+
+      const crewAName = getCrewNameAtPos(sourceDelivery, urgentRollingModal.sourcePosition);
+      const crewBName = getCrewNameAtPos(targetSchedule, urgentRollingModal.targetPosition);
+
+      const crewAObj = allCrews.find(c => matchSamePerson(c.name, crewAName)) || {
+        id: `crw-roll-a-${Date.now()}`,
+        name: crewAName,
+        phone: '-',
+        role: urgentRollingModal.targetPosition === 'driver' ? 'Driver Utama' : 'Kernet / Helper',
+        licenseNumber: '-',
+        licenseType: urgentRollingModal.targetPosition === 'driver' ? 'SIM B2 Umum' : 'SIM A',
+        status: 'on-duty' as const,
+        tripsCompleted: 50,
+        rating: 4.8
+      };
+
+      const crewBObj = allCrews.find(c => matchSamePerson(c.name, crewBName)) || {
+        id: `crw-roll-b-${Date.now()}`,
+        name: crewBName,
+        phone: '-',
+        role: urgentRollingModal.sourcePosition === 'driver' ? 'Driver Utama' : 'Kernet / Helper',
+        licenseNumber: '-',
+        licenseType: urgentRollingModal.sourcePosition === 'driver' ? 'SIM B2 Umum' : 'SIM A',
+        status: 'on-duty' as const,
+        tripsCompleted: 50,
+        rating: 4.8
+      };
+
+      const posLabelA = urgentRollingModal.sourcePosition === 'driver' ? 'Driver Utama' : urgentRollingModal.sourcePosition === 'helper' ? 'Helper 1' : 'Helper 2';
+      const posLabelB = urgentRollingModal.targetPosition === 'driver' ? 'Driver Utama' : urgentRollingModal.targetPosition === 'helper' ? 'Helper 1' : 'Helper 2';
+
+      // 1. Update Jadwal Tujuan (Schedule B): Kru A menggantikan Kru B
+      const targetPatch: Partial<Schedule> = {
+        backupCrewId: crewAObj.id,
+        backupCrewName: crewAObj.name,
+        backupPosition: urgentRollingModal.targetPosition,
+        backupTargetName: crewBName,
+        notes: `${(targetSchedule.notes || '').replace(/\s*•?\s*\[(?:PORTAL DRIVER|STAND BY|ROLLING KRU KIRIMAN)[^\]]*]/gi, '')} • [ROLLING KRU KIRIMAN HARI H (${timeStr} WIB): ${crewAName} (${posLabelA} Rute ${sourceArea}) menggantikan ${posLabelB} ${crewBName} di rute ${targetArea} — ${cleanReason}]`.trim(),
+        isManuallyEdited: true
+      };
+      logisticsStore.updateSchedule(targetSchedule.id, targetPatch);
+
+      // 2. Jika mode Tukar / Rolling Posisi (Kru A <-> Kru B), update juga Jadwal Asal (Schedule A): Kru B menggantikan Kru A
+      if (urgentRollingModal.rollingMode === 'swap' && crewBName && crewBName !== '-') {
+        const sourcePatch: Partial<Schedule> = {
+          backupCrewId: crewBObj.id,
+          backupCrewName: crewBObj.name,
+          backupPosition: urgentRollingModal.sourcePosition,
+          backupTargetName: crewAName,
+          notes: `${(sourceDelivery.notes || '').replace(/\s*•?\s*\[(?:PORTAL DRIVER|STAND BY|ROLLING KRU KIRIMAN)[^\]]*]/gi, '')} • [ROLLING KRU KIRIMAN HARI H (${timeStr} WIB): ${crewBName} (${posLabelB} Rute ${targetArea}) menggantikan ${posLabelA} ${crewAName} di rute ${sourceArea} — ${cleanReason}]`.trim(),
+          isManuallyEdited: true
+        };
+        logisticsStore.updateSchedule(sourceDelivery.id, sourcePatch);
+      }
+
+      // 3. Sinkronkan ke cache minggu Admin & snapshot agar langsung muncul di Jadwal & Penugasan Armada
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
+            const rawWeeks = localStorage.getItem(k);
+            if (!rawWeeks) continue;
+            const parsedWeeks = JSON.parse(rawWeeks);
+            if (Array.isArray(parsedWeeks)) {
+              const updatedWeeks = parsedWeeks.map((w: any) => ({
+                ...w,
+                days: Array.isArray(w.days)
+                  ? w.days.map((d: any) => ({
+                      ...d,
+                      pengiriman: Array.isArray(d.pengiriman)
+                        ? d.pengiriman.map((p: any) => {
+                            if (p.id === targetSchedule.id || (p.area === targetSchedule.areaName && d.dateString === standbyPortalInfo.dateString)) {
+                              return {
+                                ...p,
+                                backupCrewId: crewAObj.id,
+                                backupCrewName: crewAObj.name,
+                                backupPosition: urgentRollingModal.targetPosition,
+                                backupTargetName: crewBName
+                              };
+                            }
+                            if (
+                              urgentRollingModal.rollingMode === 'swap' &&
+                              (p.id === sourceDelivery.id || (p.area === sourceDelivery.areaName && d.dateString === standbyPortalInfo.dateString))
+                            ) {
+                              return {
+                                ...p,
+                                backupCrewId: crewBObj.id,
+                                backupCrewName: crewBObj.name,
+                                backupPosition: urgentRollingModal.sourcePosition,
+                                backupTargetName: crewAName
+                              };
+                            }
+                            return p;
+                          })
+                        : d.pengiriman
+                    }))
+                  : w.days
+              }));
+              localStorage.setItem(k, JSON.stringify(updatedWeeks));
+            }
+          }
+        }
+      } catch {}
+
+      // 4. Arahkan kartu aktif di bawah langsung ke Rute Tujuan (targetSchedule.id) tempat Kru A menggantikan
+      try {
+        localStorage.setItem('akk_portal_active_schedule_id', targetSchedule.id);
+      } catch {}
+      portalActiveReplacedRef.current = targetSchedule.id;
+      setPortalActiveReplacedScheduleId(targetSchedule.id);
+
+      logisticsStore.syncSchedulesToCrewHistory();
+      logisticsStore.addScheduleChangeLog({
+        fileName: `Portal Driver — Rolling Kru Kiriman (${standbyPortalInfo.dateString})`,
+        actionType: 'manual_edit',
+        summary: `Rolling Kru Kiriman: ${crewAName} (${sourceArea}) menggantikan ${posLabelB} ${crewBName} di rute ${targetArea}`,
+        rowCount: urgentRollingModal.rollingMode === 'swap' ? 2 : 1,
+        changes: [
+          `Kru Rolling: ${crewAName} (Rute Asal: ${sourceArea}) -> Menggantikan ${posLabelB} ${crewBName} di Rute Tujuan: ${targetArea}`,
+          ...(urgentRollingModal.rollingMode === 'swap'
+            ? [`Tukar Posisi: ${crewBName} mengisi posisi ${posLabelA} di Rute ${sourceArea}`]
+            : []),
+          `Alasan: ${cleanReason}`
+        ]
+      });
+
+      driverWaybillService.getWaybillForSchedule({ ...targetSchedule, ...targetPatch });
+      setWaybillRefreshTick(t => t + 1);
+      setStandbySyncTick(t => t + 1);
+      window.dispatchEvent(new CustomEvent('akk-portal-schedule-updated'));
+      loadDeliveries(true);
+      setActiveTab('active');
+      setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }));
+
+      addNotification(
+        'delivery',
+        '✅ Rolling Kru Kiriman Tersimpan',
+        `${crewAName} kini menggantikan ${posLabelB} ${crewBName} untuk mengirim ke area ${targetArea}${urgentRollingModal.rollingMode === 'swap' ? ` (Bertukar rute dengan ${sourceArea})` : ''}.`
+      );
+      return;
+    }
+
+    // Fallback apabila user mengedit langsung pada jadwal yang sama
+    const newDriver = crews.find(c => c.id === urgentRollingModal.driverId) || sourceDelivery.crew;
     const newHelper1 = urgentRollingModal.helper1Id
       ? crews.find(c => c.id === urgentRollingModal.helper1Id)
       : undefined;
@@ -1386,7 +1653,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const fleetPool = fleets.length > 0 ? fleets : INITIAL_FLEETS;
     const newFleetRaw =
       fleetPool.find(f => f.id === urgentRollingModal.fleetId) ||
-      targetDelivery.fleet ||
+      sourceDelivery.fleet ||
       assignedFleet;
     const canonicalMeta = resolveCanonicalFleetMeta(newFleetRaw);
     const newFleet = newFleetRaw
@@ -1397,32 +1664,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         }
       : undefined;
 
-    const cleanArea = (urgentRollingModal.areaName || targetDelivery.areaName || targetDelivery.store?.storeName || '').trim();
-    const cleanReason = (urgentRollingModal.reason || 'Rolling pagi mendadak').trim();
+    const cleanArea = (urgentRollingModal.areaName || sourceDelivery.areaName || sourceDelivery.store?.storeName || '').trim();
     const actorName = portalDisplayName || currentDriver?.name || activeShift?.driverName || 'Kru / Admin';
-    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     const rollingNote = `[ROLLING URGENT PAGI ${timeStr} WIB oleh ${actorName}: ${cleanReason}]`;
 
     const updatedSchedule: Schedule = {
-      ...targetDelivery,
-      crewId: newDriver?.id || urgentRollingModal.driverId || targetDelivery.crewId,
+      ...sourceDelivery,
+      crewId: newDriver?.id || urgentRollingModal.driverId || sourceDelivery.crewId,
       crew: newDriver,
       crewHelperId: newHelper1?.id || '',
       crewHelper: newHelper1,
       crewHelper2Id: newHelper2?.id || '',
       crewHelper2: newHelper2,
-      fleetId: newFleet?.id || urgentRollingModal.fleetId || targetDelivery.fleetId,
+      fleetId: newFleet?.id || urgentRollingModal.fleetId || sourceDelivery.fleetId,
       fleet: newFleet,
-      areaName: cleanArea || targetDelivery.areaName,
-      notes: targetDelivery.notes
-        ? `${targetDelivery.notes.replace(/\[ROLLING URGENT PAGI[^\]]*\]\s*/g, '').trim()} ${rollingNote}`.trim()
-        : rollingNote
+      areaName: cleanArea || sourceDelivery.areaName,
+      notes: sourceDelivery.notes
+        ? `${sourceDelivery.notes.replace(/\[ROLLING URGENT PAGI[^\]]*\]\s*/g, '').trim()} ${rollingNote}`.trim()
+        : rollingNote,
+      isManuallyEdited: true
     };
 
-    logisticsStore.batchSyncSchedules([], [{ id: updatedSchedule.id, data: updatedSchedule }]);
-    // Sinkronkan juga ke Surat Jalan (OutboundWaybill)
+    logisticsStore.updateSchedule(updatedSchedule.id, updatedSchedule);
     driverWaybillService.getWaybillForSchedule(updatedSchedule);
     setWaybillRefreshTick(t => t + 1);
+    window.dispatchEvent(new CustomEvent('akk-portal-schedule-updated'));
     loadDeliveries(true);
 
     setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }));
@@ -1430,7 +1696,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     addNotification(
       'delivery',
       'Perubahan Urgent (Rolling Pagi) Tersimpan',
-      `Jadwal ${cleanArea || targetDelivery.trackingNumber} berhasil diperbarui: Driver ${newDriver?.name || '-'}, Helper ${newHelper1?.name || 'Tanpa Helper'}, Armada ${newFleet?.plateNumber || '-'}${newFleet?.initialCode ? ` (${newFleet.initialCode})` : ''}.`
+      `Jadwal ${cleanArea || sourceDelivery.trackingNumber} berhasil diperbarui: Driver ${newDriver?.name || '-'}, Helper ${newHelper1?.name || 'Tanpa Helper'}, Armada ${newFleet?.plateNumber || '-'}${newFleet?.initialCode ? ` (${newFleet.initialCode})` : ''}.`
     );
   };
 
@@ -1640,19 +1906,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const isManagerPortal = ['super_admin', 'spv_logistik', 'admin'].includes(effectiveRole);
       const activeSpvFilter = spvCrewFilterRef.current;
 
+      const activeBranch = effectivePortalBranchRef.current;
+      const branchFilteredSchedules = localSchedules.filter(s => {
+        const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+        return sBranch === activeBranch;
+      });
+
+      const activeReplacedId = portalActiveReplacedRef.current;
+      const nowLoc = new Date();
+      const todayIsoLocal = `${nowLoc.getFullYear()}-${String(nowLoc.getMonth() + 1).padStart(2, '0')}-${String(nowLoc.getDate()).padStart(2, '0')}`;
+
       let targetList: Schedule[] = [];
 
       if (isManagerPortal) {
-        // Role SPV Logistik & Super Admin: Semua jadwal terbaca di portal (atau difilter sesuai pilihan kru)
+        // Role SPV Logistik & Super Admin: Semua jadwal cabang ini terbaca di portal (atau difilter sesuai pilihan kru)
         if (activeSpvFilter === 'all') {
-          targetList = localSchedules;
+          targetList = branchFilteredSchedules;
         } else {
-          targetList = localSchedules.filter(s =>
+          targetList = branchFilteredSchedules.filter(s =>
+            s.id === activeReplacedId ||
             isScheduleAssignedToPerson(s, activeSpvFilter, undefined, latestCrews)
           );
         }
       } else {
-        // Role Driver / Helper: HANYA jadwal milik akun yang sedang login (baik sebagai Driver, Helper, maupun Back Up / Menggantikan)
+        // Role Driver / Helper: Jadwal milik akun yang sedang login + jadwal yang sedang digantikan / di-rolling di portal hari ini
         const accountName = (
           latestUser?.fullName ||
           portalDisplayName ||
@@ -1660,7 +1937,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           ''
         ).trim();
         const accountId = latestActiveCrew?.id || latestUser?.id || selectedDriverId;
-        targetList = localSchedules.filter(s =>
+        targetList = branchFilteredSchedules.filter(s =>
+          s.id === activeReplacedId ||
+          (Boolean(s.backupCrewName) && isScheduleMatchingTargetDate(s, todayIsoLocal)) ||
           isScheduleAssignedToPerson(s, accountName, accountId, latestCrews)
         );
       }
@@ -1724,7 +2003,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   useEffect(() => {
     loadDeliveries();
-  }, [selectedDriverId, currentUser?.id, currentUser?.fullName, currentUser?.role, portalDisplayName, spvCrewFilter, canManageAllPortalSchedules]);
+  }, [selectedDriverId, currentUser?.id, currentUser?.fullName, currentUser?.role, portalDisplayName, spvCrewFilter, canManageAllPortalSchedules, effectivePortalBranchId, portalActiveReplacedScheduleId]);
 
   // React to store updates without stale closure
   useEffect(() => {
@@ -1861,22 +2140,39 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // - Untuk SPV Logistik & Super Admin (saat filter 'all'): tampilkan semua jadwal aktif/terjadwal agar semua jadwal kru terbaca.
   // - Untuk Driver / Helper: Jadwal Aktif menampilkan 1 jadwal utama hari ini / terdekat, sisanya di Daftar Jadwal.
   const { activeDeliveries, scheduledDeliveries, deliveredDeliveries } = useMemo(() => {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const delivered = deliveries.filter(d => d.status === 'delivered');
-    const nonDelivered = deliveries.filter(d => d.status !== 'delivered');
+    const nowLoc = new Date();
+    const todayIso = `${nowLoc.getFullYear()}-${String(nowLoc.getMonth() + 1).padStart(2, '0')}-${String(nowLoc.getDate()).padStart(2, '0')}`;
+    const targetIso = dateFilterStart || todayIso;
+    const hasCustomRange = Boolean(dateFilterStart || dateFilterEnd);
+
+    // Filter jadwal pada hari berjalan (targetIso) apabila user tidak sedang menggunakan filter rentang tanggal khusus
+    const sameDayOrCustomDeliveries = hasCustomRange
+      ? deliveries
+      : deliveries.filter(d => isScheduleMatchingTargetDate(d, targetIso) || ['in_transit', 'picked_up', 'delayed'].includes(d.status));
+
+    const delivered = sameDayOrCustomDeliveries.filter(d => d.status === 'delivered');
+    const nonDelivered = sameDayOrCustomDeliveries.filter(d => d.status !== 'delivered');
 
     if (canManageAllPortalSchedules && spvCrewFilter === 'all') {
       const inProgressOrToday = nonDelivered.filter(
         d =>
+          d.id === portalActiveReplacedScheduleId ||
+          Boolean(d.backupCrewName) ||
           ['picked_up', 'in_transit', 'delayed'].includes(d.status) ||
           Boolean(keluarArgoMap[d.id]) ||
-          (d.departureDate || '').slice(0, 10) === todayIso
+          isScheduleMatchingTargetDate(d, targetIso)
       );
-      const activeList = inProgressOrToday.length > 0 ? inProgressOrToday : nonDelivered;
-      const activeIds = new Set(activeList.map(d => d.id));
+      const sortedActive = [...(inProgressOrToday.length > 0 ? inProgressOrToday : nonDelivered)].sort((a, b) => {
+        if (a.id === portalActiveReplacedScheduleId && b.id !== portalActiveReplacedScheduleId) return -1;
+        if (b.id === portalActiveReplacedScheduleId && a.id !== portalActiveReplacedScheduleId) return 1;
+        if (a.backupCrewName && !b.backupCrewName) return -1;
+        if (b.backupCrewName && !a.backupCrewName) return 1;
+        return 0;
+      });
+      const activeIds = new Set(sortedActive.map(d => d.id));
       const remainingScheduled = nonDelivered.filter(d => !activeIds.has(d.id));
       return {
-        activeDeliveries: activeList,
+        activeDeliveries: sortedActive,
         scheduledDeliveries: remainingScheduled,
         deliveredDeliveries: delivered
       };
@@ -1884,34 +2180,32 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     let primaryActive: Schedule | null = null;
 
-    // 1. Prioritas utama: jadwal yang sedang dalam perjalanan (Di Jalan) atau sudah klik Persiapan Keluar
+    // 0. Prioritas tertinggi: jadwal yang baru saja disimpan/digantikan/di-rolling pada Portal Driver hari ini
+    const explicitPortalSelected = portalActiveReplacedScheduleId
+      ? nonDelivered.find(d => d.id === portalActiveReplacedScheduleId)
+      : undefined;
+
+    // 1. Prioritas berikutnya: jadwal yang sedang digantikan (Back Up / Menggantikan) pada hari ini
+    const backupAssigned = nonDelivered.find(d => Boolean(d.backupCrewName) && isScheduleMatchingTargetDate(d, targetIso));
+
+    // 2. Prioritas perjalanan aktif
     const inProgress = nonDelivered.find(
       d => ['picked_up', 'in_transit', 'delayed'].includes(d.status) || Boolean(keluarArgoMap[d.id])
     );
-    // 1b. Prioritas berikutnya: jadwal yang sedang digantikan (Back Up / Menggantikan)
-    const backupAssigned = nonDelivered.find(d => Boolean(d.backupCrewName));
-    if (inProgress) {
-      primaryActive = inProgress;
+
+    if (explicitPortalSelected) {
+      primaryActive = explicitPortalSelected;
     } else if (backupAssigned) {
       primaryActive = backupAssigned;
+    } else if (inProgress) {
+      primaryActive = inProgress;
     } else {
-      // 2. Prioritas kedua: jadwal tepat tanggal hari ini
-      const exactToday = nonDelivered.find(d => (d.departureDate || '').slice(0, 10) === todayIso);
+      // 3. Jadwal tepat tanggal hari ini
+      const exactToday = nonDelivered.find(d => isScheduleMatchingTargetDate(d, targetIso));
       if (exactToday) {
         primaryActive = exactToday;
       } else if (nonDelivered.length > 0) {
-        // 3. Prioritas ketiga: 1 jadwal terdekat berikutnya (>= hari ini) atau 1 jadwal terbaru
-        const upcoming = nonDelivered
-          .filter(d => (d.departureDate || '').slice(0, 10) >= todayIso)
-          .sort((a, b) => (a.departureDate || '').localeCompare(b.departureDate || ''));
-        if (upcoming.length > 0) {
-          primaryActive = upcoming[0];
-        } else {
-          const sortedDesc = [...nonDelivered].sort((a, b) =>
-            (b.departureDate || '').localeCompare(a.departureDate || '')
-          );
-          primaryActive = sortedDesc[0];
-        }
+        primaryActive = nonDelivered[0];
       }
     }
 
@@ -1929,7 +2223,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       scheduledDeliveries: remainingScheduled,
       deliveredDeliveries: delivered
     };
-  }, [deliveries, keluarArgoMap, canManageAllPortalSchedules, spvCrewFilter]);
+  }, [deliveries, keluarArgoMap, canManageAllPortalSchedules, spvCrewFilter, portalActiveReplacedScheduleId, dateFilterStart, dateFilterEnd]);
 
   // 🧭 Deteksi Posisi Jobdesk Terjadwal (Driver vs Helper) untuk Jadwal Tertentu maupun Portal Utama
   const getScheduledJobdeskForDelivery = (delivery?: Schedule | null): 'driver' | 'helper' => {
@@ -2122,7 +2416,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return filteredDeliveries.slice(startIdx, startIdx + ITEMS_PER_PAGE);
   }, [filteredDeliveries, currentPage]);
 
-  // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin)
+  // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin & Terpisah per Cabang)
   const standbyPortalInfo = useMemo(() => {
     // 1. Cek apakah ada snapshot langsung dari Jadwal & Penugasan Admin
     let snapshot: any = null;
@@ -2131,7 +2425,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       if (raw) snapshot = JSON.parse(raw);
     } catch {}
 
-    // 2. Bangun total pool kru aktif (Driver & Helper)
+    // 2. Bangun total pool kru aktif (Driver & Helper) khusus sesuai cabang aktif (effectivePortalBranchId: Cabang Nusantara vs Cabang Sidoarjo)
     const pool: Array<{
       id: string;
       name: string;
@@ -2149,7 +2443,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     const allPortalUsers = logisticsStore.getUsers();
     allPortalUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectivePortalBranchId))
       .forEach(u => {
         addPoolMember(
           u.id,
@@ -2167,8 +2461,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         const matchedU = allPortalUsers.find(
           u => `crw-${u.id}` === c.id || matchSamePerson(u.fullName, c.name)
         );
-        if (matchedU && !logisticsStore.isActiveDeliveryCrewUser(matchedU)) return false;
-        return true;
+        if (matchedU) {
+          return logisticsStore.isActiveDeliveryCrewUser(matchedU, effectivePortalBranchId);
+        }
+        return branchStore.getCrewBranchId(c.id, c.name) === effectivePortalBranchId;
       })
       .forEach(c => {
         const isHelper = (c.role || '').toLowerCase().includes('helper') || (c.role || '').toLowerCase().includes('kernet');
@@ -2181,9 +2477,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         );
       });
 
-    // Pastikan kru yang sedang login selalu masuk ke dalam pool
+    // Pastikan kru yang sedang login masuk ke pool jika cabangnya sesuai
     const loggedInCrewName = (portalDisplayName || currentDriver?.name || currentUser?.fullName || '').trim();
-    if (loggedInCrewName) {
+    if (loggedInCrewName && (!currentUser || logisticsStore.isActiveDeliveryCrewUser(currentUser, effectivePortalBranchId))) {
       addPoolMember(
         currentDriver?.id || currentUser?.id || 'crew-self',
         loggedInCrewName,
@@ -2193,45 +2489,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       );
     }
 
-    // Tentukan daftar pengiriman pada tanggal aktif (menggunakan tanggal lokal WIB, bukan UTC)
+    // Tentukan daftar pengiriman pada tanggal aktif (menggunakan tanggal lokal WIB)
     const nowLocal = new Date();
     const todayLocalIso = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
     const targetDateIso = dateFilterStart || todayLocalIso;
 
     const allStoreSchedules = logisticsStore.getSchedules();
     let daySchedules = allStoreSchedules.filter(s => {
-      const depIso = (s.departureDate || '').slice(0, 10);
-      const retIso = (s.returnDate || s.deliveryDate || '').slice(0, 10);
-      return depIso === targetDateIso || retIso === targetDateIso;
+      if (!isScheduleMatchingTargetDate(s, targetDateIso)) return false;
+      const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+      return sBranch === effectivePortalBranchId;
     });
 
-    // Jika snapshot belum tersedia atau berbeda tanggal, coba baca dari cache kalender minggu admin (akk_admin_schedule_weeks_cache)
-    let adminDayPengiriman: any[] = [];
-    try {
-      const targetDayNum = Number(targetDateIso.slice(8, 10));
-      const rawWeeks = localStorage.getItem('akk_admin_schedule_weeks_cache');
-      if (rawWeeks) {
-        const parsedWeeks = JSON.parse(rawWeeks);
-        if (Array.isArray(parsedWeeks)) {
-          for (const w of parsedWeeks) {
-            const matchedDay = (w?.days || []).find((d: any) => Number(d?.dayNumber) === targetDayNum);
-            if (matchedDay && Array.isArray(matchedDay.pengiriman) && matchedDay.pengiriman.length > 0) {
-              adminDayPengiriman = matchedDay.pengiriman;
-              break;
-            }
-          }
-        }
-      }
-    } catch {}
-
+    // Jika snapshot sesuai dengan tanggal target & cabang, gunakan sebagai pelengkap
     const rawSnapPengiriman =
       Array.isArray(snapshot?.pengiriman) &&
       snapshot.pengiriman.length > 0 &&
-      (!snapshot.dateIso || snapshot.dateIso === targetDateIso || Number(snapshot.dayNumber) === Number(targetDateIso.slice(8, 10)))
-        ? snapshot.pengiriman
-        : adminDayPengiriman;
+      snapshot.dateIso === targetDateIso
+        ? snapshot.pengiriman.filter((p: any) => {
+            const pBranch = p.branchId || (p.id ? branchStore.getScheduleBranchId(p.id, p.target, p.armada) : 'cab-banyuwangi');
+            return pBranch === effectivePortalBranchId;
+          })
+        : [];
 
-    // Gunakan jadwal pada hari target (daySchedules atau rawSnapPengiriman)
+    // Gunakan jadwal pada hari target (daySchedules atau rawSnapPengiriman pada tanggal yang sama persis)
     const snapshotPengiriman: Array<{
       id?: string;
       driver: string;
@@ -2256,84 +2537,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         }))
       : rawSnapPengiriman;
 
-    // Jika daySchedules di store kosong namun ada snapshotPengiriman hari ini, bentuk daftar jadwal hari ini agar dropdown Rute Area di kartu Stand By selalu terisi
-    if (daySchedules.length === 0 && snapshotPengiriman.length > 0) {
-      const allFleets = logisticsStore.getFleets();
-      const allCrewsList = logisticsStore.getCrews();
-      daySchedules = snapshotPengiriman.map((p, idx) => {
-        const matchedFleet =
-          logisticsStore.findFleetByCodeOrPlate(p.armada, p.area) ||
-          (/muncar/i.test(p.area) ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined) ||
-          allFleets.find(f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')) ||
-          allFleets[0];
-        const matchedDrv = allCrewsList.find(c => matchSamePerson(c.name, p.driver)) || {
-          id: `drv-snap-${idx}`,
-          name: p.driver || '-',
-          phone: '-',
-          role: 'Driver Utama',
-          licenseNumber: '-',
-          licenseType: 'SIM B1/B2 Umum',
-          status: 'on-duty' as const,
-          tripsCompleted: 50,
-          rating: 4.8
-        };
-        const matchedHlp1 = p.helper && p.helper !== '-'
-          ? allCrewsList.find(c => matchSamePerson(c.name, p.helper)) || {
-              id: `hlp1-snap-${idx}`,
-              name: p.helper,
-              phone: '-',
-              role: 'Kernet / Helper',
-              licenseNumber: '-',
-              licenseType: 'SIM A',
-              status: 'on-duty' as const,
-              tripsCompleted: 40,
-              rating: 4.8
-            }
-          : undefined;
-        const matchedHlp2 = p.helper2 && p.helper2 !== '-'
-          ? allCrewsList.find(c => matchSamePerson(c.name, p.helper2)) || {
-              id: `hlp2-snap-${idx}`,
-              name: p.helper2,
-              phone: '-',
-              role: 'Kernet / Helper',
-              licenseNumber: '-',
-              licenseType: 'SIM A',
-              status: 'on-duty' as const,
-              tripsCompleted: 40,
-              rating: 4.8
-            }
-          : undefined;
-        return {
-          id: p.id || `SCH-SNAP-${targetDateIso}-${idx}`,
-          areaName: p.area || 'Area Kirim',
-          fleetId: matchedFleet?.id || 'flt-1',
-          fleet: matchedFleet,
-          crewId: matchedDrv.id,
-          crew: matchedDrv,
-          crewHelperId: matchedHlp1?.id,
-          crewHelper: matchedHlp1,
-          crewHelper2Id: matchedHlp2?.id,
-          crewHelper2: matchedHlp2,
-          backupCrewName: p.backupCrewName,
-          backupPosition: p.backupPosition,
-          backupTargetName: p.backupTargetName,
-          departureDate: `${targetDateIso}T07:30:00`,
-          returnDate: `${targetDateIso}T16:00:00`,
-          status: 'scheduled' as ShipmentStatus
-        } as Schedule;
-      });
-    }
-
-    snapshotPengiriman.forEach((p, idx) => {
-      if (p.driver && p.driver !== '-') addPoolMember(`snap-d-${idx}`, p.driver, 'Driver');
-      if (p.helper && p.helper !== '-') {
-        p.helper.split(/[,&/]+/).forEach((h, hIdx) => addPoolMember(`snap-h1-${idx}-${hIdx}`, h.trim(), 'Helper'));
-      }
-      if (p.helper2 && p.helper2 !== '-') {
-        p.helper2.split(/[,&/]+/).forEach((h, hIdx) => addPoolMember(`snap-h2-${idx}-${hIdx}`, h.trim(), 'Helper'));
-      }
-    });
-
     const scheduledNames: string[] = [];
     const freeStandbyCrews: Array<{
       id: string;
@@ -2343,11 +2546,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       licenseType: string;
     }> = [];
 
-    // Hanya cek jadwal pada HARI INI (targetDateIso) atau pengiriman yang sedang berjalan ('in_transit' | 'picked_up'), BUKAN histori 'delivered' masa lalu!
+    // Hanya cek jadwal pada HARI INI (targetDateIso)
     const activeTodayDeliveries = deliveries.filter(d => {
       if (d.status === 'delivered') return false;
-      const dDate = (d.departureDate || d.returnDate || d.deliveryDate || '').slice(0, 10);
-      return dDate === targetDateIso || ['in_transit', 'picked_up', 'delayed'].includes(d.status);
+      return isScheduleMatchingTargetDate(d, targetDateIso);
     });
 
     pool.forEach(member => {
@@ -2413,26 +2615,26 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
 
     const activeBackupSchedule =
+      (portalActiveReplacedScheduleId
+        ? daySchedules.find(s => s.id === portalActiveReplacedScheduleId && Boolean(s.backupCrewName))
+        : undefined) ||
       daySchedules.find(
         s =>
           s.backupCrewName &&
           (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
       ) ||
-      activeTodayDeliveries.find(
-        s =>
-          s.backupCrewName &&
-          (activeCrewFilterName ? matchSamePerson(s.backupCrewName, activeCrewFilterName) : true)
-      ) ||
+      daySchedules.find(s => Boolean(s.backupCrewName)) ||
       null;
 
     const activeDateLabel =
-      snapshot?.dayName && snapshot?.dateString
+      snapshot?.dayName && snapshot?.dateString && snapshot?.dateIso === targetDateIso
         ? `${snapshot.dayName}, ${snapshot.dateString}`
         : realtimeDayDateStr;
 
     return {
       activeDateLabel,
-      dateString: snapshot?.dateString || realtimeDayDateStr,
+      dateString: (snapshot?.dateIso === targetDateIso ? snapshot?.dateString : null) || realtimeDayDateStr,
+      targetDateIso,
       totalCrewCount: scheduledNames.length + freeStandbyCrews.length,
       scheduledCrewCount: scheduledNames.length,
       freeStandbyCount: freeStandbyCrews.length,
@@ -2448,16 +2650,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     crews,
     portalDisplayName,
     currentDriver?.name,
-    currentUser?.fullName,
+    currentUser,
     isUserHelperRole,
     spvCrewFilter,
     canManageAllPortalSchedules,
     dateFilterStart,
     realtimeDayDateStr,
-    standbySyncTick
+    standbySyncTick,
+    effectivePortalBranchId,
+    portalActiveReplacedScheduleId
   ]);
 
-  // Daftar Rute Area Kirim yang tersedia untuk dipilih kru Free / Stand By (Hari Ini + Jadwal Terdaftar + 37 Area Resmi)
+  // Daftar Rute Area Kirim yang tersedia untuk dipilih kru Free / Stand By: HANYA jadwal pada hari itu juga (targetDateIso) sesuai cabang!
   const standbyAvailableRouteOptions = useMemo(() => {
     const list: Array<{
       value: string;
@@ -2472,9 +2676,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       depDate?: string;
     }> = [];
 
-    const seenAreaKeys = new Set<string>();
-
-    // 1. Jadwal hari ini (daySchedules dari standbyPortalInfo)
+    // 1. Jadwal hari ini (daySchedules dari standbyPortalInfo pada targetDateIso & cabang aktif)
     standbyPortalInfo.daySchedules.forEach((sch, sIdx) => {
       const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
       const drv = sch.crew?.name || '-';
@@ -2482,7 +2684,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const hlp2 = sch.crewHelper2?.name || '-';
       const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
       const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
-      seenAreaKeys.add(area.toUpperCase().trim());
       list.push({
         value: sch.id,
         scheduleId: sch.id,
@@ -2493,11 +2694,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         helperName: hlp,
         helper2Name: hlp2,
         armadaName: arm,
-        depDate: (sch.departureDate || '').slice(0, 10)
+        depDate: standbyPortalInfo.targetDateIso
       });
     });
 
-    // 2. Jadwal snapshot hari ini jika ada yang belum masuk di list
+    // 2. Jadwal snapshot hari ini jika ada yang belum masuk di list (khusus hari yang sama)
     standbyPortalInfo.scheduledTrips.forEach((snap, sIdx) => {
       const area = snap.area || 'Area Kirim';
       const drv = snap.driver || '-';
@@ -2505,8 +2706,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const hlp2 = snap.helper2 || '-';
       const rawArm = snap.armada || '-';
       const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
-      if (!list.some(item => item.areaName.toLowerCase() === area.toLowerCase())) {
-        seenAreaKeys.add(area.toUpperCase().trim());
+      if (!list.some(item => (snap.id && item.scheduleId === snap.id) || item.areaName.toLowerCase() === area.toLowerCase())) {
         list.push({
           value: snap.id || `snap-trip-${sIdx}`,
           scheduleId: snap.id,
@@ -2516,57 +2716,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           driverName: drv,
           helperName: hlp,
           helper2Name: hlp2,
-          armadaName: arm
+          armadaName: arm,
+          depDate: standbyPortalInfo.targetDateIso
         });
       }
     });
 
-    // 3. Jadwal lain di store yang berstatus scheduled / in_transit di sistem
-    const allStoreSchedules = logisticsStore.getSchedules();
-    allStoreSchedules.forEach(sch => {
-      if (list.some(item => item.scheduleId === sch.id || item.value === sch.id)) return;
-      const area = sch.areaName || sch.store?.storeName || 'Area Kirim';
-      const drv = sch.crew?.name || '-';
-      const hlp = sch.crewHelper?.name || '-';
-      const hlp2 = sch.crewHelper2?.name || '-';
-      const rawArm = sch.fleet?.initialCode || sch.fleet?.plateNumber || '-';
-      const arm = /muncar/i.test(area) ? 'N4 / NS2' : (rawArm.includes('NS2') ? 'N4 / NS2' : rawArm);
-      const depDate = (sch.departureDate || '').slice(0, 10);
-      seenAreaKeys.add(area.toUpperCase().trim());
-      list.push({
-        value: sch.id,
-        scheduleId: sch.id,
-        label: `📅 ${area} (${depDate || 'Jadwal'}) (${arm}) — Driver: ${drv} • Helper 1: ${hlp}${hlp2 !== '-' ? ` • Helper 2: ${hlp2}` : ''}`,
-        group: 'terjadwal',
-        areaName: area,
-        driverName: drv,
-        helperName: hlp,
-        helper2Name: hlp2,
-        armadaName: arm,
-        depDate
-      });
-    });
-
-    // 4. Semua 37 area resmi (OFFICIAL_DESTINATION_AREAS) agar dropdown selalu lengkap dan dapat dipilih
-    OFFICIAL_DESTINATION_AREAS.forEach(areaName => {
-      const areaUpper = areaName.toUpperCase().trim();
-      if (seenAreaKeys.has(areaUpper)) return;
-      seenAreaKeys.add(areaUpper);
-      const defaultArm = /muncar/i.test(areaName) ? 'N4 / NS2' : 'Armada Box';
-      list.push({
-        value: `area:${areaName}`,
-        label: `🚚 ${areaName} (Rute Resmi AKK)`,
-        group: 'area_resmi',
-        areaName: areaName,
-        driverName: 'Driver Reguler',
-        helperName: 'Helper 1 Reguler',
-        helper2Name: '-',
-        armadaName: defaultArm
-      });
-    });
-
     return list;
-  }, [standbyPortalInfo.daySchedules, standbyPortalInfo.scheduledTrips, deliveries]);
+  }, [standbyPortalInfo.daySchedules, standbyPortalInfo.scheduledTrips, standbyPortalInfo.targetDateIso]);
 
   // Handler di Portal Driver untuk Kru Free / Stand By menggantikan kru kiriman area lain yang berhalangan hadir pada Hari H
   const handleConfirmStandbyReplaceFromPortal = () => {
@@ -2803,6 +2960,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     } catch {}
 
+    if (targetSch?.id) {
+      try {
+        localStorage.setItem('akk_portal_active_schedule_id', targetSch.id);
+      } catch {}
+      portalActiveReplacedRef.current = targetSch.id;
+      setPortalActiveReplacedScheduleId(targetSch.id);
+    }
+
     logisticsStore.syncSchedulesToCrewHistory();
     logisticsStore.addScheduleChangeLog({
       fileName: `Portal Driver — Penggantian Hari H (${standbyPortalInfo.dateString})`,
@@ -2824,6 +2989,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }));
     setStandbySyncTick(t => t + 1);
+    window.dispatchEvent(new CustomEvent('akk-portal-schedule-updated'));
     loadDeliveries(true);
     setActiveTab('active');
   };
@@ -2949,8 +3115,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       `${standbyName} tidak jadi menggantikan dan kembali ke status Stand By di Gudang.`
     );
 
+    try {
+      localStorage.removeItem('akk_portal_active_schedule_id');
+    } catch {}
+    portalActiveReplacedRef.current = '';
+    setPortalActiveReplacedScheduleId('');
+
     setStandbyReplaceForm(prev => ({ ...prev, isOpen: false }));
     setStandbySyncTick(t => t + 1);
+    window.dispatchEvent(new CustomEvent('akk-portal-schedule-updated'));
     loadDeliveries(true);
   };
 
@@ -4052,15 +4225,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         </div>
 
-        {/* Fitur Hari, Tanggal, dan Waktu Realtime di Tampilan Portal */}
-        <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
-          <div className="flex items-center gap-1.5 text-slate-200 font-semibold truncate">
-            <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="truncate">{realtimeDayDateStr}</span>
-          </div>
-          <div className="flex items-center gap-1.5 font-mono font-black text-amber-400 shrink-0 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30">
-            <Clock className="w-3 h-3 text-amber-400 animate-pulse" />
-            <span>{realtimeTimeStr}</span>
+        {/* Fitur Hari, Tanggal, Waktu Realtime & Pembagian Cabang (Sidoarjo vs Nusantara) di Tampilan Portal */}
+        <div className="mt-2.5 space-y-2">
+          <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+            <div className="flex items-center gap-1.5 text-slate-200 font-semibold truncate">
+              <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="truncate">{realtimeDayDateStr}</span>
+            </div>
+            <div className="flex items-center gap-1.5 font-mono font-black text-amber-400 shrink-0 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30">
+              <Clock className="w-3 h-3 text-amber-400 animate-pulse" />
+              <span>{realtimeTimeStr}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -5223,9 +5398,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     onChange={(e) => setSpvCrewFilter(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
-                    <option value="all">📋 Tampilkan Semua Jadwal Kru (Driver &amp; Helper)</option>
+                    <option value="all">📋 Tampilkan Semua Jadwal Kru ({effectivePortalBranchId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara'})</option>
                     {logisticsStore.getUsers()
-                      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
+                      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectivePortalBranchId))
                       .map(u => (
                         <option key={u.id} value={u.fullName}>
                           👤 Jadwal {u.fullName}
@@ -5431,8 +5606,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-2 text-xs">
                         {(() => {
                           const activeCardRole = getScheduledJobdeskForDelivery(delivery);
+                          const effectiveDriverDisplay =
+                            isBackupMode && delivery.backupPosition === 'driver' && delivery.backupCrewName
+                              ? delivery.backupCrewName
+                              : driverCrewName;
+                          const effectiveHelper1Display =
+                            isBackupMode && delivery.backupPosition === 'helper' && delivery.backupCrewName
+                              ? delivery.backupCrewName
+                              : helper1Name;
+                          const effectiveHelper2Display =
+                            isBackupMode && delivery.backupPosition === 'helper2' && delivery.backupCrewName
+                              ? delivery.backupCrewName
+                              : helper2Name;
+                          const showHelper2Box = hasHelper2 || (isBackupMode && delivery.backupPosition === 'helper2');
+
                           return (
-                            <div className={`grid ${hasHelper2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                            <div className={`grid ${showHelper2Box ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                               <div
                                 onClick={() => setJobdeskRoleOverride('driver')}
                                 title="Klik untuk melihat alur sebagai Driver Utama"
@@ -5446,8 +5635,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   <User className="w-3.5 h-3.5" />
                                 </div>
                                 <div className="min-w-0">
-                                  <span className="text-[10px] text-slate-400 block truncate">Driver Utama</span>
-                                  <strong className="text-white text-[11px] block truncate">{driverCrewName}</strong>
+                                  <span className="text-[10px] text-slate-400 block truncate">
+                                    Driver Utama {isBackupMode && delivery.backupPosition === 'driver' ? '• Pengganti' : ''}
+                                  </span>
+                                  <strong className="text-white text-[11px] block truncate">{effectiveDriverDisplay}</strong>
                                 </div>
                               </div>
 
@@ -5465,13 +5656,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 </div>
                                 <div className="min-w-0">
                                   <span className="text-[10px] text-slate-400 block truncate">
-                                    {hasHelper2 ? 'Helper 1' : 'Helper 1 / Kernet'}
+                                    {showHelper2Box ? 'Helper 1' : 'Helper 1 / Kernet'}{' '}
+                                    {isBackupMode && delivery.backupPosition === 'helper' ? '• Pengganti' : ''}
                                   </span>
-                                  <strong className="text-cyan-300 text-[11px] block truncate">{helper1Name}</strong>
+                                  <strong className="text-cyan-300 text-[11px] block truncate">{effectiveHelper1Display}</strong>
                                 </div>
                               </div>
 
-                              {hasHelper2 && (
+                              {showHelper2Box && (
                                 <div
                                   onClick={() => setJobdeskRoleOverride('helper')}
                                   title="Klik untuk melihat alur sebagai Helper 2"
@@ -5481,8 +5673,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                     <User className="w-3.5 h-3.5" />
                                   </div>
                                   <div className="min-w-0">
-                                    <span className="text-[10px] text-emerald-400/90 font-semibold block truncate">Helper 2</span>
-                                    <strong className="text-emerald-300 text-[11px] block truncate">{helper2Name}</strong>
+                                    <span className="text-[10px] text-emerald-400/90 font-semibold block truncate">
+                                      Helper 2 {isBackupMode && delivery.backupPosition === 'helper2' ? '• Pengganti' : ''}
+                                    </span>
+                                    <strong className="text-emerald-300 text-[11px] block truncate">{effectiveHelper2Display}</strong>
                                   </div>
                                 </div>
                               )}
@@ -8374,173 +8568,328 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         }}
       />
 
-      {/* MODAL 12: Perubahan Urgent (Rolling Pagi Sebelum Tim Pengiriman Keluar dari Gudang / Gate-Out) */}
-      {urgentRollingModal.isOpen && urgentRollingModal.delivery && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
-        >
+      {/* MODAL 12: Perubahan Urgent (Rolling Pagi — Rolling Kru Kiriman Antar Jadwal Hari Ini) */}
+      {urgentRollingModal.isOpen && urgentRollingModal.delivery && (() => {
+        const srcDel = urgentRollingModal.delivery;
+        const srcArea = srcDel.areaName || srcDel.store?.storeName || 'Rute Asal';
+        const srcArmada = srcDel.fleet?.initialCode || srcDel.fleet?.plateNumber || 'Armada';
+        const srcDriver = srcDel.crew?.name || '-';
+        const srcHelper1 = srcDel.crewHelper?.name || '-';
+        const srcHelper2 = srcDel.crewHelper2?.name || '-';
+
+        const activeCrewAName =
+          urgentRollingModal.sourcePosition === 'driver'
+            ? srcDriver
+            : urgentRollingModal.sourcePosition === 'helper'
+            ? srcHelper1
+            : srcHelper2;
+
+        const otherRoutesToday = standbyPortalInfo.daySchedules.filter(s => s.id !== srcDel.id);
+        const selectedTargetSch =
+          otherRoutesToday.find(s => s.id === urgentRollingModal.targetScheduleId) || otherRoutesToday[0];
+
+        const targetCrewBName = selectedTargetSch
+          ? urgentRollingModal.targetPosition === 'driver'
+            ? selectedTargetSch.crew?.name || '-'
+            : urgentRollingModal.targetPosition === 'helper'
+            ? selectedTargetSch.crewHelper?.name || '-'
+            : selectedTargetSch.crewHelper2?.name || '-'
+          : '-';
+
+        return (
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center shrink-0">
-                  <RefreshCw className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+            <div
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-5 space-y-3.5 shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center shrink-0">
+                    <ArrowRightLeft className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                      Perubahan Urgent (Rolling Kru Kiriman)
+                    </h3>
+                    <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                      Rolling Kru Antar Jadwal Kiriman Hari Ini ({standbyPortalInfo.dateString})
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
-                    Perubahan Urgent (Rolling Pagi)
-                  </h3>
-                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
-                    Rolling Mendadak Sebelum Keluar Gudang (Gate-Out)
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
-                className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 text-xs text-rose-900 dark:text-rose-200">
-              Gunakan fitur ini apabila terdapat <strong>rolling mendadak pada pagi hari</strong> (pergantian Driver, Helper, Armada, atau Rute Area Kirim) setelah Check-In atau tepat sebelum tim pengiriman Gate-Out dari gudang.
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Area Pengiriman / Rute Tujuan:
-                </label>
-                <input
-                  type="text"
-                  value={urgentRollingModal.areaName}
-                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, areaName: e.target.value }))}
-                  placeholder="Contoh: Situbondo / Denpasar 1 / Muncar"
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Driver Utama (Pengemudi):
-                </label>
-                <select
-                  value={urgentRollingModal.driverId}
-                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, driverId: e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                <button
+                  type="button"
+                  onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
+                  className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white transition cursor-pointer"
                 >
-                  <option value="">-- Pilih Driver Utama --</option>
-                  {crews.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.role ? `(${c.role})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 text-xs text-rose-900 dark:text-rose-200 leading-relaxed">
+                Gunakan fitur <strong>Rolling Kru Kiriman</strong> ketika <strong>Kru A (yang dijadwalkan kirim hari ini)</strong> menggantikan / bertukar posisi dengan <strong>Kru B (yang juga dijadwalkan kirim hari ini)</strong> pada rute area lain.
+              </div>
+
+              <div className="space-y-3 text-xs">
+                {/* 1. KRU A (Jadwal Asal yang Melakukan Rolling) */}
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      1. KRU A (JADWAL ASAL: {srcArea} • {srcArmada})
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'driver' as const, label: 'Driver Utama', name: srcDriver },
+                      { id: 'helper' as const, label: 'Helper 1', name: srcHelper1 },
+                      ...(srcHelper2 && srcHelper2 !== '-' ? [{ id: 'helper2' as const, label: 'Helper 2', name: srcHelper2 }] : [])
+                    ].map(pos => {
+                      const isSel = urgentRollingModal.sourcePosition === pos.id;
+                      return (
+                        <button
+                          key={pos.id}
+                          type="button"
+                          onClick={() => setUrgentRollingModal(prev => ({ ...prev, sourcePosition: pos.id }))}
+                          className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                            isSel
+                              ? 'bg-rose-600 text-white border-rose-500 font-black shadow-2xs'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-rose-400'
+                          }`}
+                        >
+                          <span className="text-[9px] uppercase tracking-wider block opacity-80">{pos.label}</span>
+                          <span className="text-[11px] font-bold truncate block mt-0.5">{pos.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. PILIH JADWAL & KRU B YANG DIGANTIKAN HARI INI */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
+                    2. Pilih Rute &amp; Kru B yang Digantikan Hari Ini ({standbyPortalInfo.targetDateIso})
+                  </label>
+
+                  {otherRoutesToday.length === 0 ? (
+                    <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs">
+                      Belum ada rute kiriman lain pada tanggal {standbyPortalInfo.targetDateIso} di cabang ini.
+                    </div>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
+                      {otherRoutesToday.map(routeSch => {
+                        const rArea = routeSch.areaName || routeSch.store?.storeName || 'Area Kirim';
+                        const rArm = routeSch.fleet?.initialCode || routeSch.fleet?.plateNumber || '-';
+                        const rDrv = routeSch.crew?.name || '-';
+                        const rHlp1 = routeSch.crewHelper?.name || '-';
+                        const rHlp2 = routeSch.crewHelper2?.name || '-';
+                        const isRouteSelected = (selectedTargetSch?.id || '') === routeSch.id;
+
+                        return (
+                          <div
+                            key={routeSch.id}
+                            className={`p-2.5 rounded-2xl border-2 transition ${
+                              isRouteSelected
+                                ? 'bg-rose-500/10 border-rose-500 dark:bg-rose-500/15'
+                                : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-400'
+                            }`}
+                          >
+                            <div
+                              onClick={() =>
+                                setUrgentRollingModal(prev => ({
+                                  ...prev,
+                                  targetScheduleId: routeSch.id
+                                }))
+                              }
+                              className="flex items-center justify-between gap-2 cursor-pointer mb-2"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black text-[10px] border border-amber-500/30">
+                                  {rArm}
+                                </span>
+                                <span className="font-black text-slate-900 dark:text-white text-xs truncate">
+                                  {rArea}
+                                </span>
+                              </div>
+                              {isRouteSelected && <Check className="w-4 h-4 text-rose-500 shrink-0" />}
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setUrgentRollingModal(prev => ({
+                                    ...prev,
+                                    targetScheduleId: routeSch.id,
+                                    targetPosition: 'driver'
+                                  }))
+                                }
+                                className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                  isRouteSelected && urgentRollingModal.targetPosition === 'driver'
+                                    ? 'bg-blue-600 text-white border-blue-500 font-black shadow-2xs'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-400'
+                                }`}
+                              >
+                                <span className="text-[9px] uppercase tracking-wider block opacity-80">Gantikan Driver</span>
+                                <span className="text-[10px] font-bold truncate block">{rDrv}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setUrgentRollingModal(prev => ({
+                                    ...prev,
+                                    targetScheduleId: routeSch.id,
+                                    targetPosition: 'helper'
+                                  }))
+                                }
+                                className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                  isRouteSelected && urgentRollingModal.targetPosition === 'helper'
+                                    ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-2xs'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-400'
+                                }`}
+                              >
+                                <span className="text-[9px] uppercase tracking-wider block opacity-80">Gantikan Helper 1</span>
+                                <span className="text-[10px] font-bold truncate block">{rHlp1}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setUrgentRollingModal(prev => ({
+                                    ...prev,
+                                    targetScheduleId: routeSch.id,
+                                    targetPosition: 'helper2'
+                                  }))
+                                }
+                                className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                                  isRouteSelected && urgentRollingModal.targetPosition === 'helper2'
+                                    ? 'bg-purple-600 text-white border-purple-500 font-black shadow-2xs'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-purple-400'
+                                }`}
+                              >
+                                <span className="text-[9px] uppercase tracking-wider block opacity-80">Gantikan Helper 2</span>
+                                <span className="text-[10px] font-bold truncate block">
+                                  {rHlp2 && rHlp2 !== '-' ? rHlp2 : 'Slot Helper 2'}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. MODE ROLLING KRU KIRIMAN */}
+                {selectedTargetSch && (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
+                      3. Jenis Rolling Kru Kiriman
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setUrgentRollingModal(prev => ({ ...prev, rollingMode: 'swap' }))}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                          urgentRollingModal.rollingMode === 'swap'
+                            ? 'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-300 font-black'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <div className="text-[11px] font-black">🔄 Tukar Rute (A ↔ B)</div>
+                        <div className="text-[10px] opacity-80 mt-0.5">
+                          {activeCrewAName} ↔ {targetCrewBName}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUrgentRollingModal(prev => ({ ...prev, rollingMode: 'replace' }))}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                          urgentRollingModal.rollingMode === 'replace'
+                            ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-300 font-black'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <div className="text-[11px] font-black">➡️ Gantikan Kru B</div>
+                        <div className="text-[10px] opacity-80 mt-0.5">
+                          {activeCrewAName} gantikan {targetCrewBName}
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Ringkasan Rolling */}
+                {selectedTargetSch && (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-800 dark:text-emerald-200 space-y-1">
+                    <div className="font-black text-emerald-700 dark:text-emerald-300">
+                      Ringkasan Perubahan Rolling Kru Kiriman:
+                    </div>
+                    <div>
+                      • <strong>{activeCrewAName}</strong> (dari {srcArea}) menggantikan{' '}
+                      <strong>
+                        {urgentRollingModal.targetPosition === 'driver'
+                          ? 'Driver Utama'
+                          : urgentRollingModal.targetPosition === 'helper'
+                          ? 'Helper 1'
+                          : 'Helper 2'}{' '}
+                        ({targetCrewBName})
+                      </strong>{' '}
+                      di rute <strong>{selectedTargetSch.areaName || selectedTargetSch.store?.storeName}</strong>.
+                    </div>
+                    {urgentRollingModal.rollingMode === 'swap' && targetCrewBName && targetCrewBName !== '-' && (
+                      <div>
+                        • <strong>{targetCrewBName}</strong> bertukar mengisi posisi{' '}
+                        <strong>
+                          {urgentRollingModal.sourcePosition === 'driver'
+                            ? 'Driver Utama'
+                            : urgentRollingModal.sourcePosition === 'helper'
+                            ? 'Helper 1'
+                            : 'Helper 2'}
+                        </strong>{' '}
+                        di rute <strong>{srcArea}</strong>.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Helper 1 / Kernet:
+                    Keterangan / Alasan Rolling Kru Kiriman:
                   </label>
-                  <select
-                    value={urgentRollingModal.helper1Id}
-                    onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, helper1Id: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
-                  >
-                    <option value="">-- Tanpa Helper 1 --</option>
-                    {crews
-                      .filter(c => c.id !== urgentRollingModal.driverId)
-                      .map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Helper 2 (Opsional):
-                  </label>
-                  <select
-                    value={urgentRollingModal.helper2Id}
-                    onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, helper2Id: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
-                  >
-                    <option value="">-- Tanpa Helper 2 --</option>
-                    {crews
-                      .filter(c => c.id !== urgentRollingModal.driverId && c.id !== urgentRollingModal.helper1Id)
-                      .map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={urgentRollingModal.reason}
+                    onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, reason: e.target.value }))}
+                    placeholder="Contoh: Rolling kru kiriman pagi sebelum keberangkatan..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Armada Pengiriman (Plat Nomor &amp; Inisial):
-                </label>
-                <select
-                  value={urgentRollingModal.fleetId}
-                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, fleetId: e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+              <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
+                  className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
                 >
-                  <option value="">-- Pilih Armada Truk --</option>
-                  {(fleets.length > 0 ? fleets : INITIAL_FLEETS).map(f => {
-                    const meta = resolveCanonicalFleetMeta(f);
-                    const initLabel = f.initialCode || meta?.initialCode || f.vehicleType || '';
-                    return (
-                      <option key={f.id} value={f.id}>
-                        {f.plateNumber} {initLabel ? `— ${initLabel}` : ''}
-                      </option>
-                    );
-                  })}
-                </select>
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveUrgentRolling}
+                  className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Simpan Rolling Kru</span>
+                </button>
               </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Keterangan / Alasan Rolling Pagi:
-                </label>
-                <input
-                  type="text"
-                  value={urgentRollingModal.reason}
-                  onChange={(e) => setUrgentRollingModal(prev => ({ ...prev, reason: e.target.value }))}
-                  placeholder="Contoh: Rolling kru pagi sebelum berangkat dari gudang..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setUrgentRollingModal(prev => ({ ...prev, isOpen: false, delivery: null }))}
-                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveUrgentRolling}
-                className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
-              >
-                <Check className="w-4 h-4" />
-                <span>Simpan Rolling Pagi</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

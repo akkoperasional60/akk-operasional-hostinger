@@ -1107,6 +1107,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC & sanitize combined Denpasar 1 & 2
+    // Serta memulihkan jadwal baru (>= 2026-11-12) yang sempat terdampak bug status 'delivered' tanpa bukti POD / tanpa bypass checklist
     let updatedSchedules = false;
     this.schedules = this.schedules.map(s => {
       let nextS = s;
@@ -1125,6 +1126,20 @@ class LogisticsStore {
           ...nextS,
           areaName: 'DENPASAR 1',
           store: nextS.store ? { ...nextS.store, storeName: 'DENPASAR 1', address: 'Area Pengiriman Distribusi DENPASAR 1' } : nextS.store
+        };
+      }
+      const depIso = String(nextS.departureDate || '').slice(0, 10);
+      if (
+        depIso >= '2026-11-12' &&
+        nextS.status === 'delivered' &&
+        !nextS.podPhotoUrl
+      ) {
+        updatedSchedules = true;
+        nextS = {
+          ...nextS,
+          status: 'scheduled',
+          isChecklistBypassed: false,
+          actualArrival: undefined
         };
       }
       return nextS;
@@ -1943,13 +1958,19 @@ class LogisticsStore {
   public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
     if (!u) return false;
     if (u.status !== 'approved') return false;
-    // Akun struktural kantor / supervisor logistik bukan kru lapangan (supir/helper)
+    const cleanEmail = (u.email || '').trim().toLowerCase();
+    const cleanName = (u.fullName || '').trim().toLowerCase();
+    // Hanya kecualikan akun sistem/direksi murni atau profil mock non-lapangan
     if (
       u.role === 'super_admin' ||
-      u.role === 'spv_logistik' ||
-      u.role === 'operasional' ||
-      u.role === 'pengiriman' ||
-      u.role === 'dispatcher'
+      cleanName === 'super admin' ||
+      cleanName === 'tamu / belum login' ||
+      cleanEmail === 'akkoperasional60@gmail.com' ||
+      cleanEmail === 'hendri123@gmail.com' ||
+      cleanEmail === 'hendri.st@gmail.com' ||
+      u.id === 'usr-hendri' ||
+      u.id === 'usr-operasional' ||
+      u.id === 'usr-bahri'
     ) {
       return false;
     }
@@ -1970,7 +1991,7 @@ class LogisticsStore {
       if (dpVal === 'full_access' || dpVal === 'read_only') {
         return true;
       }
-      if ((u.role === 'driver' || u.role === 'crew_helper') && dpVal === undefined) {
+      if ((u.role === 'driver' || u.role === 'crew_helper' || u.role === 'spv_logistik' || u.role === 'pengiriman' || u.role === 'dispatcher') && dpVal === undefined) {
         return Object.values(subs).some(v => v === 'full_access' || v === 'read_only');
       }
       return false;
@@ -2045,7 +2066,7 @@ class LogisticsStore {
       const refCrew = existingInStore || existingInInitial;
 
       const crewId = refCrew?.id || `crw-${u.id}`;
-      const crewRole: Crew['role'] = u.role === 'driver'
+      const crewRole: Crew['role'] = u.role !== 'crew_helper'
         ? (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama')
         : 'Kernet / Helper';
 
@@ -3476,7 +3497,58 @@ class LogisticsStore {
           this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
         }
         if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
-          this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
+          const remoteSchedules: Schedule[] = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
+          const localById = new Map<string, Schedule>();
+          for (const loc of this.schedules || []) {
+            if (loc?.id) localById.set(loc.id, loc);
+          }
+          const mergedIds = new Set<string>();
+          const mergedSchedules: Schedule[] = [];
+
+          for (const rem of remoteSchedules) {
+            if (!rem?.id) continue;
+            mergedIds.add(rem.id);
+            const loc = localById.get(rem.id);
+            let combined: Schedule = loc && (loc.isManuallyEdited || loc.backupCrewName !== undefined)
+              ? {
+                  ...rem,
+                  ...loc,
+                  backupCrewName: loc.backupCrewName,
+                  backupPosition: loc.backupPosition,
+                  backupTargetName: loc.backupTargetName
+                }
+              : { ...rem };
+
+            const depIso = String(combined.departureDate || '').slice(0, 10);
+            if (
+              depIso >= '2026-11-12' &&
+              combined.status === 'delivered' &&
+              !combined.podPhotoUrl
+            ) {
+              combined = {
+                ...combined,
+                status: 'scheduled',
+                isChecklistBypassed: false,
+                actualArrival: undefined
+              };
+            }
+            mergedSchedules.push(combined);
+          }
+
+          for (const loc of this.schedules || []) {
+            if (loc?.id && !mergedIds.has(loc.id)) {
+              const depIso = String(loc.departureDate || '').slice(0, 10);
+              const cleanLoc =
+                depIso >= '2026-11-12' &&
+                loc.status === 'delivered' &&
+                !loc.podPhotoUrl
+                  ? { ...loc, status: 'scheduled' as const, isChecklistBypassed: false, actualArrival: undefined }
+                  : loc;
+              mergedSchedules.push(cleanLoc);
+            }
+          }
+
+          this.schedules = mergedSchedules;
           this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
         }
 
@@ -3912,9 +3984,10 @@ class LogisticsStore {
       storeCategory: 'Distribution Hub'
     };
 
+    const customId = (schedule as any).id;
     const newSchedule: Schedule = {
       ...schedule,
-      id: 'sch-' + Math.random().toString(36).substring(2, 9),
+      id: customId && typeof customId === 'string' && customId.trim() ? customId.trim() : 'sch-' + Math.random().toString(36).substring(2, 9),
       areaName,
       store: areaStore,
       createdAt: new Date().toISOString()
@@ -3926,7 +3999,7 @@ class LogisticsStore {
       this.updateCrewStatus(newSchedule.crewId, 'on-duty');
     }
 
-    this.schedules = [newSchedule, ...this.schedules];
+    this.schedules = [newSchedule, ...this.schedules.filter(s => s.id !== newSchedule.id)];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
 
@@ -3952,11 +4025,38 @@ class LogisticsStore {
       supabaseRealtimeSync.publishScheduleChange('INSERT', hydratedNewSchedule, null).catch(() => {});
     } catch {}
 
+    this.persistSchedulesSnapshotToBackend('add_schedule');
+
     return hydratedNewSchedule;
   }
 
+  private persistSchedulesSnapshotToBackend(source: string = 'store_sync') {
+    if (typeof fetch === 'undefined') return;
+    setTimeout(() => {
+      try {
+        fetch('/api/schedules/persist', {
+          method: 'POST',
+          headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            schedules: this.schedules,
+            source
+          })
+        }).catch(() => {});
+      } catch {}
+    }, 30);
+  }
+
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
-    if (!this.canCurrentUserEditModule('schedules')) {
+    const u = this.getCurrentUser();
+    const isCrewOrPortalUpdate =
+      Boolean(u && ['driver', 'crew_helper', 'warehouse_admin', 'spv_logistik', 'super_admin', 'operasional', 'pengiriman', 'dispatcher'].includes(u.role)) ||
+      updatedSchedule.backupCrewName !== undefined ||
+      updatedSchedule.backupPosition !== undefined ||
+      updatedSchedule.backupTargetName !== undefined ||
+      updatedSchedule.isManuallyEdited === true;
+
+    if (!isCrewOrPortalUpdate && !this.canCurrentUserEditModule('schedules')) {
       console.warn('[RBAC Guard] Aksi updateSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
       return;
     }
@@ -3998,6 +4098,7 @@ class LogisticsStore {
       } catch {}
     }
 
+    this.persistSchedulesSnapshotToBackend('update_schedule');
     this.notify();
   }
 
@@ -4080,10 +4181,22 @@ class LogisticsStore {
       });
     }
 
-    // 2. In-memory prepend new items (deduplicated by ID)
+    // 2. In-memory prepend new items (deduplicated by ID, and sanitize >= 2026-11-12 delivered items without POD photo)
+    const sanitizeScheduleItem = (sch: Schedule): Schedule => {
+      const depIso = String(sch?.departureDate || '').slice(0, 10);
+      if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl) {
+        return {
+          ...sch,
+          status: 'scheduled',
+          isChecklistBypassed: false,
+          actualArrival: undefined
+        };
+      }
+      return sch;
+    };
     const existingIdSet = new Set(this.schedules.map(s => s.id));
-    const cleanNewItems = itemsToAdd.filter(item => !existingIdSet.has(item.id));
-    this.schedules = [...cleanNewItems, ...this.schedules];
+    const cleanNewItems = itemsToAdd.filter(item => !existingIdSet.has(item.id)).map(sanitizeScheduleItem);
+    this.schedules = [...cleanNewItems, ...this.schedules.map(sanitizeScheduleItem)];
 
     // 3. Single disk save
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);

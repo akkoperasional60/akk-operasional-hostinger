@@ -436,7 +436,7 @@ export default function App() {
                   {currentUser.fullName || 'Pengguna'}
                 </div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 capitalize truncate">
-                  {currentUser.role.replace('_', ' ')}
+                  {String(currentUser.role || 'unassigned').replace(/_/g, ' ')}
                 </div>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />

@@ -95,14 +95,28 @@ class BranchStoreService {
             .filter(
               (b: BranchRecord) =>
                 b &&
+                typeof b === 'object' &&
+                typeof b.id === 'string' &&
+                typeof b.name === 'string' &&
                 b.id !== 'cab-jember' &&
                 b.slug !== 'nx-jember' &&
                 (b.name || '').trim().toUpperCase() !== 'NX'
             )
-            .map((b: BranchRecord) => ({
+            .map((b: BranchRecord, idx: number) => ({
               ...b,
+              slug: b.slug || b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+              city: b.city || b.name,
+              sortOrder: typeof b.sortOrder === 'number' ? b.sortOrder : idx + 1,
+              isActive: b.isActive !== undefined ? Boolean(b.isActive) : true,
+              isFrontlineActive: b.isFrontlineActive !== undefined ? Boolean(b.isFrontlineActive) : true,
               warehouseName: (b.warehouseName || `Gudang ${b.name}`).replace(/Gudang Pusat\s*/gi, 'Gudang ')
             }));
+          // Always guarantee cab-sidoarjo and cab-banyuwangi exist
+          DEFAULT_BRANCHES.forEach(defBr => {
+            if (!cleaned.some(c => c.id === defBr.id)) {
+              cleaned.push({ ...defBr });
+            }
+          });
           this.branches = cleaned.length > 0 ? cleaned : [...DEFAULT_BRANCHES];
         } else {
           this.branches = [...DEFAULT_BRANCHES];
@@ -128,7 +142,8 @@ class BranchStoreService {
     try {
       const rawPerms = localStorage.getItem(LS_USER_BRANCH_PERMS_KEY);
       if (rawPerms) {
-        this.userBranchPerms = JSON.parse(rawPerms) || {};
+        const parsedPerms = JSON.parse(rawPerms);
+        this.userBranchPerms = parsedPerms && typeof parsedPerms === 'object' && !Array.isArray(parsedPerms) ? parsedPerms : {};
       }
     } catch {
       this.userBranchPerms = {};
@@ -139,10 +154,10 @@ class BranchStoreService {
       if (rawEntities) {
         const parsed = JSON.parse(rawEntities);
         this.entityBranches = {
-          schedules: parsed?.schedules || {},
-          fleets: parsed?.fleets || {},
-          crews: parsed?.crews || {},
-          inventory: parsed?.inventory || {}
+          schedules: parsed?.schedules && typeof parsed.schedules === 'object' ? parsed.schedules : {},
+          fleets: parsed?.fleets && typeof parsed.fleets === 'object' ? parsed.fleets : {},
+          crews: parsed?.crews && typeof parsed.crews === 'object' ? parsed.crews : {},
+          inventory: parsed?.inventory && typeof parsed.inventory === 'object' ? parsed.inventory : {}
         };
       }
     } catch {}
@@ -426,20 +441,26 @@ class BranchStoreService {
     existingUserModules?: UserPermissions['modules'],
     serverBranchPerms?: UserPermissions['branchPermissions']
   ): Record<string, UserBranchPermissionEntry> {
-    const hasServerBranchPerms = Boolean(serverBranchPerms && Object.keys(serverBranchPerms).length > 0);
-    const savedForUser = hasServerBranchPerms
+    const hasServerBranchPerms = Boolean(
+      serverBranchPerms && typeof serverBranchPerms === 'object' && Object.keys(serverBranchPerms).length > 0
+    );
+    const rawSaved = hasServerBranchPerms
       ? serverBranchPerms!
-      : (this.userBranchPerms[userId] || {});
+      : (this.userBranchPerms?.[userId] || {});
+    const savedForUser = rawSaved && typeof rawSaved === 'object' ? rawSaved : {};
     const result: Record<string, UserBranchPermissionEntry> = {};
     const roleDefaults = getDefaultPermissionsForRole(role);
 
     this.getBranches().forEach(branch => {
-      if (savedForUser[branch.id]) {
+      if (savedForUser[branch.id] && typeof savedForUser[branch.id] === 'object') {
         const cloned = JSON.parse(JSON.stringify(savedForUser[branch.id])) as UserBranchPermissionEntry;
+        if (!cloned.modules || typeof cloned.modules !== 'object') {
+          cloned.modules = {};
+        }
         const isBranchEnabled = Boolean(cloned.enabled);
         Object.keys(roleDefaults).forEach(modId => {
           const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
-          if (!cloned.modules[modId]) {
+          if (!cloned.modules[modId] || typeof cloned.modules[modId] !== 'object') {
             const sourceMod = isBranchEnabled ? (existingUserModules?.[modId] || roleDefaults[modId]) : undefined;
             const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
             modernKeys.forEach(subId => {

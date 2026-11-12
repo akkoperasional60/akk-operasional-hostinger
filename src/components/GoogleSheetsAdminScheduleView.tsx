@@ -1676,9 +1676,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         addCandidateToPool(
           u.id,
           u.fullName,
-          u.role === 'driver' ? 'Driver' : 'Helper',
+          u.role !== 'crew_helper' ? 'Driver' : 'Helper',
           u.phone || '-',
-          u.role === 'driver' ? 'SIM B2 Umum' : 'SIM A',
+          u.role !== 'crew_helper' ? 'SIM B2 Umum' : 'SIM A',
           true
         );
       });
@@ -1711,11 +1711,23 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     // 3. Also ensure any crew name present in dayObj.pengiriman for this branch is part of the total pool
     const rawPengirimanList = dayObj?.pengiriman || [];
     const storeSchedulesForDay = logisticsStore.getSchedules();
+    const dayMonthIdx = MONTH_NAMES.findIndex(m => (dayObj?.dateString || '').toLowerCase().includes(m.toLowerCase()));
+    const dayYearMatch = (dayObj?.dateString || '').match(/\b(20\d{2})\b/);
+    const targetDayYr = dayYearMatch ? Number(dayYearMatch[1]) : selectedYear;
+    const targetDayMo = dayMonthIdx >= 0 ? dayMonthIdx : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
+    const targetDayNum = dayObj?.dayNumber;
+
+    const isSameDaySchedule = (s: Schedule) => {
+      const d = getScheduleCalendarDateObj(s);
+      if (!d || isNaN(d.getTime())) return false;
+      return d.getFullYear() === targetDayYr && d.getMonth() === targetDayMo && d.getDate() === targetDayNum;
+    };
 
     // Normalize trips so legacy overwritten drivers (e.g. Zainal replacing Budiono) restore original driver to driver column and keep Zainal in backupCrewName
     const pengirimanList = rawPengirimanList.map(p => {
       const matchedSch = storeSchedulesForDay.find(s => {
         if (p.id && s.id === p.id) return true;
+        if (!isSameDaySchedule(s)) return false;
         return s.fleet?.initialCode === p.armada && s.areaName === standardizeAreaName(p.area);
       });
       let effectiveDriver = p.driver;
@@ -2472,8 +2484,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       setSelectedDayFilter(nextCalDate);
     }
 
-    // Subscribe to store updates (from manual edits in ScheduleManagement or modals)
-    const unsubscribe = logisticsStore.subscribe(() => {
+    // Subscribe to store updates (from manual edits in ScheduleManagement, Portal Driver, or modals)
+    const refreshWeeksFromStore = () => {
       setOfficialCrewsList(crewAutoMapper.getOfficialCrewList());
       setOfficialAreasList(areaAutoMapper.getOfficialAreaList());
       setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
@@ -2481,9 +2493,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const curSchedules = logisticsStore.getSchedules();
       const updatedWeeks = convertSchedulesToAdminWeeks(curSchedules, selectedYear, effectiveMonth);
       setWeeks(updatedWeeks);
-    });
+    };
 
-    return unsubscribe;
+    const unsubscribe = logisticsStore.subscribe(refreshWeeksFromStore);
+    window.addEventListener('akk-portal-schedule-updated', refreshWeeksFromStore);
+    window.addEventListener('storage', refreshWeeksFromStore);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('akk-portal-schedule-updated', refreshWeeksFromStore);
+      window.removeEventListener('storage', refreshWeeksFromStore);
+    };
   }, [selectedYear, selectedMonth]);
 
   // Listen for "+ Jadwal Baru" created in ScheduleManagement so it immediately reflects in Jadwal & Penugasan
@@ -2649,11 +2669,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       ) || crews.find(c => c.name.toLowerCase().includes(helper2Name.toLowerCase()))) : undefined;
 
       const isBali = stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI');
-      const newSchId = `sch-comb-${yr}${monthPadded}${dayPadded}-${armadaCode}-${Date.now().toString().slice(-4)}-${idx}`;
+      const uniqSuffix = `${Date.now().toString(36).slice(-4).toUpperCase()}${idx + 1}`;
+      const newSchId = `sch-comb-${yr}${monthPadded}${dayPadded}-${armadaCode}-${uniqSuffix}`;
 
       const newSch: Schedule = {
         id: newSchId,
-        trackingNumber: `PO-AKK-${yr}${monthPadded}${dayPadded}-${armadaCode}-${idx + 1}`,
+        trackingNumber: `PO-AKK-${yr}${monthPadded}${dayPadded}-${armadaCode}-${uniqSuffix}`,
         originName: 'Gudang Pusat AKK Banyuwangi DC',
         originCoords: [-8.1906, 114.3708],
         storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -4709,6 +4730,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 if (scheduleStatusFilter !== 'all') {
                   const matched = storeSchedules.find(s => {
                     if (p.id && s.id === p.id) return true;
+                    const sDate = getScheduleCalendarDateObj(s);
+                    const sameDay = Boolean(
+                      sDate &&
+                      !isNaN(sDate.getTime()) &&
+                      sDate.getDate() === activeDayObj.dayNumber &&
+                      (selectedMonth === -1 || sDate.getMonth() === selectedMonth) &&
+                      sDate.getFullYear() === selectedYear
+                    );
+                    if (!sameDay) return false;
                     if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
                     return false;
                   });
@@ -4853,8 +4883,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               const isBali = isAreaBaliSchedule(p.area);
                               const isLuarKota = isAreaLuarKotaSchedule(p.area);
 
+                              const activeDayMonthIdx = MONTH_NAMES.findIndex(m =>
+                                (activeDayObj.dateString || '').toLowerCase().includes(m.toLowerCase())
+                              );
+                              const targetDayMo = activeDayMonthIdx >= 0
+                                ? activeDayMonthIdx
+                                : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
+
                               const matchedSch = storeSchedules.find(s => {
                                 if (p.id && s.id === p.id) return true;
+                                const sDate = getScheduleCalendarDateObj(s);
+                                const sameDay = Boolean(
+                                  sDate &&
+                                  !isNaN(sDate.getTime()) &&
+                                  sDate.getDate() === activeDayObj.dayNumber &&
+                                  sDate.getMonth() === targetDayMo &&
+                                  sDate.getFullYear() === selectedYear
+                                );
+                                if (!sameDay) return false;
                                 if (s.fleet?.initialCode === p.armada && s.areaName === standardArea) return true;
                                 if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
                                 return false;
@@ -4879,7 +4925,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 ring: 'border-slate-300 dark:border-slate-700' 
                               };
 
-                              const currentStatus: ShipmentStatus = matchedSch?.status || 'scheduled';
+                              const isFutureOrTodayUnverified =
+                                selectedYear >= 2026 &&
+                                (selectedYear > 2026 || targetDayMo > 10 || (targetDayMo === 10 && activeDayObj.dayNumber >= 12)) &&
+                                matchedSch?.status === 'delivered' &&
+                                !matchedSch?.podPhotoUrl;
+
+                              const currentStatus: ShipmentStatus = isFutureOrTodayUnverified
+                                ? 'scheduled'
+                                : (matchedSch?.status || 'scheduled');
 
                               const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string; border: string }> = {
                                 scheduled: { label: 'Terjadwal', bg: 'bg-blue-50 dark:bg-blue-950/80', text: 'text-blue-700 dark:text-blue-300', border: 'border-blue-300 dark:border-blue-800' },
