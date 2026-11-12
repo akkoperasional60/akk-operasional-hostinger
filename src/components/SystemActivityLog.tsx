@@ -5,6 +5,10 @@ import { History, Search, Calendar, Filter, X, BarChart3, Download, FileText, Pr
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useToast } from '../context/ToastContext';
 
+// Escape HTML untuk jendela cetak (document.write) agar nama/detail dari pengguna tidak dieksekusi sebagai script.
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
 // Custom modern tooltip for the mini chart
 const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
@@ -235,11 +239,11 @@ export const SystemActivityLog: React.FC = () => {
               ${filteredActivities.map(a => `
                 <tr>
                   <td>${new Date(a.timestamp).toLocaleString('id-ID')}</td>
-                  <td>${a.userFullName}</td>
-                  <td>${a.department || '-'}</td>
-                  <td>${a.action}</td>
-                  <td>${a.target}</td>
-                  <td>${a.details}</td>
+                  <td>${escapeHtml(a.userFullName)}</td>
+                  <td>${escapeHtml(a.department || '-')}</td>
+                  <td>${escapeHtml(a.action)}</td>
+                  <td>${escapeHtml(a.target)}</td>
+                  <td>${escapeHtml(a.details)}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -312,14 +316,14 @@ export const SystemActivityLog: React.FC = () => {
             <tbody>
               ${filteredDeliveryHistory.map(h => `
                 <tr>
-                  <td>${h.id}</td>
-                  <td>${h.completionDate}</td>
-                  <td>${h.crewName}</td>
-                  <td>${h.vehiclePlate}</td>
-                  <td>${h.storeName}</td>
-                  <td>${h.area}</td>
-                  <td>${h.status}</td>
-                  <td>${h.cargoWeightTon} Ton</td>
+                  <td>${escapeHtml(h.id)}</td>
+                  <td>${escapeHtml(h.completionDate)}</td>
+                  <td>${escapeHtml(h.crewName)}</td>
+                  <td>${escapeHtml(h.vehiclePlate)}</td>
+                  <td>${escapeHtml(h.storeName)}</td>
+                  <td>${escapeHtml(h.area)}</td>
+                  <td>${escapeHtml(h.status)}</td>
+                  <td>${escapeHtml(h.cargoWeightTon)} Ton</td>
                 </tr>
               `).join('')}
             </tbody>

@@ -16,7 +16,8 @@ import {
   AlertCircle,
   Pencil,
   Trash2,
-  Edit3
+  Edit3,
+  Sparkles
 } from 'lucide-react';
 import {
   SalesHeaderFilter,
@@ -298,13 +299,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
 
   const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
     try {
-      const isInitialized = localStorage.getItem('akk_admin_calendar_initialized_v1') === 'true';
       const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           if (parsed.length === 0) {
-            // User sudah sengaja mengosongkan jadwal: jangan buat template dummy lagi
             return [];
           }
           const valid = parsed
@@ -354,7 +353,6 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
               };
             });
           if (valid.length > 0) {
-            // Gabungkan jika ada duplikat nama admin di tanggal yang sama agar rapi
             const dedupedMap = new Map<string, AdminDailyScheduleItem>();
             valid.forEach(item => {
               const key = `${item.date}__${item.adminName.toUpperCase()}`;
@@ -362,7 +360,6 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
               if (!prev) {
                 dedupedMap.set(key, item);
               } else {
-                // Utamakan jadwal yang hadir atau gabungkan tugasnya
                 const useNew = prev.attendanceStatus !== 'hadir' && item.attendanceStatus === 'hadir';
                 const base = useNew ? item : prev;
                 const mergedDuties = Array.from(new Set([...prev.duties, ...item.duties]));
@@ -377,18 +374,13 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             });
             return Array.from(dedupedMap.values());
           }
-          if (isInitialized) {
-            return [];
-          }
+          return [];
         }
       }
     } catch (e) {
       console.error(e);
     }
-    try {
-      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
-    } catch {}
-    return createInitialSchedules(salesAdminNames);
+    return [];
   });
 
   // Load and hydrate admin schedules from Hostinger MySQL database / server persistent disk
@@ -422,6 +414,30 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
     }
   }, [schedules]);
+
+  const handleClearAllSchedules = () => {
+    if (window.confirm('Yakin menghapus SEMUA jadwal & penugasan admin dari database?')) {
+      setSchedules([]);
+      try {
+        localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify([]));
+        localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
+      } catch {}
+      fetch('/api/admin-schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules: [] })
+      }).catch(() => {});
+      setSaveToast('Semua jadwal penugasan admin berhasil dihapus & dikosongkan.');
+      setTimeout(() => setSaveToast(null), 3000);
+    }
+  };
+
+  const handleLoadInitialTemplate = () => {
+    const template = createInitialSchedules(salesAdminNames);
+    setSchedules(template);
+    setSaveToast('Template penugasan contoh berhasil dimuat!');
+    setTimeout(() => setSaveToast(null), 3000);
+  };
 
   // Manual Schedule Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
@@ -813,13 +829,38 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={() => openManualModalForDate(selectedDateIso)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-2xs transition cursor-pointer whitespace-nowrap self-start sm:self-auto"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Buat Jadwal Manual</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            {schedules.length === 0 && (
+              <button
+                type="button"
+                onClick={handleLoadInitialTemplate}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Muat Template Contoh</span>
+              </button>
+            )}
+
+            {schedules.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAllSchedules}
+                className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Kosongkan Semua Jadwal</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => openManualModalForDate(selectedDateIso)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-2xs transition cursor-pointer whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Buat Jadwal Manual</span>
+            </button>
+          </div>
         </div>
 
         {/* Save Toast */}

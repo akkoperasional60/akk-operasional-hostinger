@@ -5,10 +5,17 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
-import sharp from "sharp";
 import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
 
 dotenv.config();
+
+// sharp (modul native) dimuat malas: bila gagal ter-install di Hostinger, server tetap bisa start
+// dan hanya fitur yang memakainya (visual matching / YOLO fallback) yang menurun.
+let sharpModulePromise: Promise<any> | null = null;
+const getSharp = (): Promise<any> => {
+  if (!sharpModulePromise) sharpModulePromise = import("sharp").then((m: any) => m.default ?? m);
+  return sharpModulePromise;
+};
 
 // Initialize Gemini Client if API key is present and not set to 'disabled'
 const rawGeminiKey = String(process.env.GEMINI_API_KEY || '').trim();
@@ -151,14 +158,38 @@ Silakan gunakan data pada Dashboard/Jadwal/Armada yang berasal dari Hostinger My
 async function startServer() {
   const app = express();
 
-  app.use(express.json({ limit: '35mb' }));
-  app.use(express.urlencoded({ limit: '35mb', extended: true }));
+  // Hostinger berada di belakang reverse proxy; trust proxy dipakai untuk req.ip / protocol yang benar.
+  app.disable('x-powered-by');
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
+  // Body parser bertingkat: request TANPA sesi valid dibatasi kecil (100 KB) agar tidak bisa
+  // dipakai membanjiri memori server. Payload besar (foto base64, impor jadwal) hanya untuk sesi login.
+  const jsonAnonymous = express.json({ limit: '100kb' });
+  const jsonAuthenticated = express.json({ limit: '35mb' });
+  const jsonAuthenticatedXL = express.json({ limit: '50mb' });
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/auth/')) return jsonAnonymous(req, res, next);
+    const hasSignedSession = Boolean(verifySessionToken(extractSessionTokenFromReq(req)));
+    if (!hasSignedSession) return jsonAnonymous(req, res, next);
+    if (req.path === '/api/schedules/persist' || req.path === '/api/validate-schedule-spreadsheet') {
+      return jsonAuthenticatedXL(req, res, next);
+    }
+    return jsonAuthenticated(req, res, next);
+  });
+  app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
   // Enterprise Security Headers Middleware (iFrame allowed for AI Studio preview)
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
+    // Pada Hostinger production: cegah clickjacking & paksa HTTPS. Preview AI Studio (K_SERVICE) tetap boleh di-iframe.
+    if (process.env.NODE_ENV === 'production' && !process.env.K_SERVICE) {
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+      res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+    }
     next();
   });
 
@@ -166,12 +197,19 @@ async function startServer() {
   app.get("/api/db-status", async (_req, res) => {
     const configured = isDatabaseConfigured();
     const testResult = configured ? await testMysqlConnection() : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
+    // Endpoint ini publik (dipakai banner status jaringan). Detail teknis hanya untuk Super Admin.
+    let isAdminViewer = false;
+    try {
+      const viewer = await getSessionUser(_req);
+      isAdminViewer = String(viewer?.role || '') === 'super_admin';
+    } catch { /* abaikan: tampilkan versi publik */ }
     res.status(200).json({
       dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
       configured,
-      hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
       success: testResult.success,
-      message: testResult.success ? 'Database Hostinger terhubung' : (testResult.message || 'Database Hostinger belum dapat diakses')
+      message: testResult.success
+        ? 'Database Hostinger terhubung'
+        : (isAdminViewer ? (testResult.message || 'Database Hostinger belum dapat diakses') : 'Database Hostinger belum dapat diakses')
     });
   });
 
@@ -282,15 +320,18 @@ async function startServer() {
     if (process.env.DB_PASSWORD || process.env.DB_USER || process.env.DB_NAME) {
       return crypto.createHash('sha256').update(`akk-db-fallback:${dbSeed}`).digest('hex');
     }
-    return crypto.createHash('sha256').update(`akk-default-prod-secret:${process.cwd()}`).digest('hex');
+    if (process.env.NODE_ENV === 'production' && !process.env.K_SERVICE) {
+      throw new Error('SESSION_SECRET wajib diisi (minimal 32 karakter acak) di Environment Variables Hostinger');
+    }
+    return crypto.createHash('sha256').update(`akk-dev-only-secret:${process.cwd()}`).digest('hex');
   };
   const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
   const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 
-  const createSessionToken = (userId: string): string => {
+  const createSessionToken = (userId: string, sid?: string): string => {
     const secret = getSessionSecret();
     if (!secret) throw new Error('SESSION_SECRET belum dikonfigurasi');
-    const payload = base64url(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS }));
+    const payload = base64url(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS, ...(sid ? { sid } : {}) }));
     return `${payload}.${signSession(payload, secret)}`;
   };
 
@@ -305,7 +346,7 @@ async function startServer() {
     return '';
   };
 
-  const verifySessionToken = (token: string): { uid: string } | null => {
+  const verifySessionToken = (token: string): { uid: string; sid?: string } | null => {
     const secret = getSessionSecret();
     if (!secret || !token || !token.includes('.')) return null;
     const [payload, signature] = token.split('.', 2);
@@ -316,11 +357,80 @@ async function startServer() {
     try {
       const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
       if (!decoded?.uid || Number(decoded.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
-      return { uid: String(decoded.uid) };
+      return {
+        uid: String(decoded.uid),
+        sid: typeof decoded.sid === 'string' && /^[a-f0-9]{48}$/.test(decoded.sid) ? decoded.sid : undefined
+      };
     } catch {
       return null;
     }
   };
+
+  // --- Sesi tersimpan di MySQL (tabel user_sessions): bisa dicabut per perangkat / semua perangkat ---
+  // Yang disimpan hanya hash SHA-256 dari ID sesi, bukan ID-nya.
+  const sessionHash = (sid: string): string => crypto.createHash('sha256').update(sid).digest('hex');
+  const sessionOkCache = new Map<string, number>(); // cache 20 detik agar tidak query tiap request
+  const SESSION_CACHE_MS = 20_000;
+
+  const issueSession = async (userId: string): Promise<string> => {
+    if (!isDatabaseConfigured()) return createSessionToken(userId);
+    const sid = crypto.randomBytes(24).toString('hex'); // 48 karakter hex
+    try {
+      await mysqlQuery(
+        `INSERT INTO user_sessions (session_hash, user_id, expires_at, last_seen_at)
+         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), NOW())`,
+        [sessionHash(sid), userId, SESSION_TTL_SECONDS]
+      );
+    } catch (err: any) {
+      // Jangan sampai login gagal total bila tabel sesi bermasalah: beri token tanpa sid (tanpa kemampuan cabut).
+      console.warn('[Session] Gagal menyimpan sesi ke MySQL, memakai token tanpa sid:', err?.message || err);
+      return createSessionToken(userId);
+    }
+    return createSessionToken(userId, sid);
+  };
+
+  const isSessionActive = async (sid: string, userId: string): Promise<boolean> => {
+    const key = `${sessionHash(sid)}:${userId}`;
+    const until = sessionOkCache.get(key);
+    if (until && until > Date.now()) return true;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        `SELECT 1 AS ok FROM user_sessions WHERE session_hash = ? AND user_id = ? AND expires_at > NOW() LIMIT 1`,
+        [sessionHash(sid), userId]
+      );
+      const ok = Array.isArray(rows) && rows.length > 0;
+      if (ok) {
+        if (sessionOkCache.size > 5000) sessionOkCache.clear();
+        sessionOkCache.set(key, Date.now() + SESSION_CACHE_MS);
+      }
+      return ok;
+    } catch (err: any) {
+      if (err?.code === 'ER_NO_SUCH_TABLE') {
+        console.warn('[Session] Tabel user_sessions belum ada; pengecekan sesi dilewati sementara.');
+        return true;
+      }
+      throw err;
+    }
+  };
+
+  const revokeSession = async (sid: string): Promise<void> => {
+    const h = sessionHash(sid);
+    for (const k of Array.from(sessionOkCache.keys())) if (k.startsWith(`${h}:`)) sessionOkCache.delete(k);
+    if (!isDatabaseConfigured()) return;
+    await mysqlQuery('DELETE FROM user_sessions WHERE session_hash = ?', [h]).catch(() => {});
+  };
+
+  const revokeUserSessions = async (userId: string): Promise<void> => {
+    for (const k of Array.from(sessionOkCache.keys())) if (k.endsWith(`:${userId}`)) sessionOkCache.delete(k);
+    if (!isDatabaseConfigured()) return;
+    await mysqlQuery('DELETE FROM user_sessions WHERE user_id = ?', [userId]).catch(() => {});
+  };
+
+  // Bersihkan sesi kedaluwarsa tiap jam.
+  setInterval(() => {
+    if (!isDatabaseConfigured()) return;
+    mysqlQuery('DELETE FROM user_sessions WHERE expires_at < NOW()').catch(() => {});
+  }, 60 * 60 * 1000).unref();
 
   const setSessionCookie = (res: any, token: string) => {
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
@@ -387,6 +497,8 @@ async function startServer() {
       if (!Array.isArray(rows) || rows.length === 0) return null;
       const u = rows[0];
       if (String(u.status || '') !== 'approved') return null;
+      // Token baru membawa sid: harus masih tercatat di user_sessions (belum di-logout/dicabut).
+      if (parsed.sid && !(await isSessionActive(parsed.sid, String(u.id)))) return null;
       return u;
     } catch (err: any) {
       if (process.env.K_SERVICE || process.env.NODE_ENV !== 'production') {
@@ -580,8 +692,10 @@ async function startServer() {
     return { valid, lat, lng };
   };
 
+  let schemaEnsured = false;
   const ensureDatabaseSchema = async (): Promise<void> => {
-    if (!isDatabaseConfigured()) return;
+    if (!isDatabaseConfigured() || schemaEnsured) return;
+    let schemaFailures = 0;
     const statements = [
       `CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -786,15 +900,27 @@ async function startServer() {
         updated_at VARCHAR(32) NULL,
         INDEX idx_wms_db_barang_order (order_index),
         INDEX idx_wms_db_barang_code (no_barang)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_sessions (
+        session_hash CHAR(64) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME NULL,
+        INDEX idx_user_sessions_user (user_id),
+        INDEX idx_user_sessions_expires (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
       try {
         await mysqlQuery(sql);
       } catch (err: any) {
+        schemaFailures += 1;
         console.warn('[Database Schema] Gagal memastikan tabel:', err?.message || err);
       }
     }
+    // Hanya dianggap beres bila semua statement sukses; kalau tidak, dicoba lagi pada panggilan berikutnya.
+    if (schemaFailures === 0) schemaEnsured = true;
   };
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
@@ -910,13 +1036,58 @@ async function startServer() {
     return res.json({ success: true, source: 'preview_session', sessionToken: token, user: publicUser(matchedUser) });
   };
 
+  // --- Pembatas percobaan login / registrasi (in-memory, cukup untuk 1 proses Node di Hostinger) ---
+  type AttemptBucket = { count: number; resetAt: number };
+  const authAttempts = new Map<string, AttemptBucket>();
+  const AUTH_WINDOW_MS = 15 * 60 * 1000;
+  const bucketOf = (key: string): AttemptBucket => {
+    const now = Date.now();
+    const existing = authAttempts.get(key);
+    if (existing && existing.resetAt > now) return existing;
+    const fresh = { count: 0, resetAt: now + AUTH_WINDOW_MS };
+    authAttempts.set(key, fresh);
+    return fresh;
+  };
+  const isLimited = (key: string, max: number): number => {
+    const b = authAttempts.get(key);
+    if (!b || b.resetAt <= Date.now()) return 0;
+    return b.count >= max ? Math.ceil((b.resetAt - Date.now()) / 1000) : 0;
+  };
+  const noteFailure = (key: string) => { bucketOf(key).count += 1; };
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, b] of authAttempts) if (b.resetAt <= now) authAttempts.delete(k);
+  }, 5 * 60 * 1000).unref();
+
+  const LOGIN_MAX_PER_ACCOUNT_IP = 10;   // gagal per KOMBINASI akun + IP / 15 menit (penebak tunggal)
+  const LOGIN_MAX_PER_ACCOUNT_ALL = 40;  // gagal per akun dari SEMUA IP / 15 menit (serangan terdistribusi)
+  const LOGIN_MAX_PER_IP = 100;     // gagal per IP / 15 menit
+  const REGISTER_MAX_PER_IP = 10;   // registrasi per IP / 15 menit
+  const genericDbError = (err: any): string =>
+    process.env.NODE_ENV === 'production' && !process.env.K_SERVICE
+      ? 'Layanan database sementara tidak tersedia. Silakan coba lagi beberapa saat atau hubungi administrator.'
+      : String(err?.message || err || 'Koneksi MySQL gagal');
+
   app.post('/api/auth/login', async (req, res) => {
     const { email, identifier, password } = req.body || {};
-    const loginIdentifier = String(identifier || email || '').trim().toLowerCase();
+    const loginIdentifier = String(identifier || email || '').trim().toLowerCase().slice(0, 191);
     if (!loginIdentifier || !password) {
       return res.status(400).json({ success: false, error: 'Email/username dan password wajib diisi' });
     }
-    const cleanPass = String(password);
+    const cleanPass = String(password).slice(0, 256);
+    const pairKey = `login:pair:${loginIdentifier}:${req.ip}`;
+    const accountKey = `login:acct:${loginIdentifier}`;
+    const ipKey = `login:ip:${req.ip}`;
+    const retryAfter = Math.max(
+      isLimited(pairKey, LOGIN_MAX_PER_ACCOUNT_IP),
+      isLimited(accountKey, LOGIN_MAX_PER_ACCOUNT_ALL),
+      isLimited(ipKey, LOGIN_MAX_PER_IP)
+    );
+    if (retryAfter > 0) {
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({ success: false, error: 'Terlalu banyak percobaan login gagal. Coba lagi dalam beberapa menit.' });
+    }
+    const failLogin = () => { noteFailure(pairKey); noteFailure(accountKey); noteFailure(ipKey); };
 
     if (!isDatabaseConfigured()) {
       return handlePreviewLogin(loginIdentifier, cleanPass, res);
@@ -928,8 +1099,9 @@ async function startServer() {
          FROM users
          WHERE LOWER(email) = ? OR LOWER(id) = ? OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ?
             OR LOWER(full_name) = ? OR LOWER(SUBSTRING_INDEX(full_name, ' ', 1)) = ?
+         ORDER BY CASE WHEN LOWER(email) = ? THEN 0 WHEN LOWER(id) = ? THEN 1 WHEN LOWER(SUBSTRING_INDEX(email, '@', 1)) = ? THEN 2 ELSE 3 END, created_at ASC
          LIMIT 1`;
-      const queryParams = [loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier];
+      const queryParams = [loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier];
 
       let mysqlUsers = await mysqlQuery<any[]>(queryUserSql, queryParams);
       if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
@@ -946,19 +1118,24 @@ async function startServer() {
             error: 'Database belum memiliki akun. Aktifkan BOOTSTRAP_ADMIN_* sementara di Hostinger untuk membuat Super Admin pertama.'
           });
         }
+        failLogin();
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
       const u = mysqlUsers[0];
+      if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
+        failLogin();
+        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
+      }
+      // Status akun baru diungkap SETELAH password benar (mencegah enumerasi akun).
       if (String(u.status || '') !== 'approved') {
         return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
       }
-      if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
-        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
-      }
+      authAttempts.delete(pairKey);
+      authAttempts.delete(accountKey);
       if (!String(u.password_hash || '').startsWith('scrypt$')) {
         await mysqlQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(cleanPass), u.id]);
       }
-      const token = createSessionToken(String(u.id));
+      const token = await issueSession(String(u.id));
       setSessionCookie(res, token);
       return res.json({ success: true, source: 'hostinger_mysql', sessionToken: token, user: publicUser(u) });
     } catch (err: any) {
@@ -970,17 +1147,24 @@ async function startServer() {
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
         success: false,
-        error: `Database Hostinger belum dapat diakses (${errMsg || 'Koneksi MySQL gagal'}). Periksa DB_NAME, DB_USER, dan DB_PASSWORD di Hostinger.`
+        error: `Database Hostinger belum dapat diakses (${genericDbError(err)}).`
       });
     }
   });
 
   app.post('/api/auth/register', async (req, res) => {
     const { fullName, email, phone, department, password } = req.body || {};
-    const cleanName = String(fullName || '').trim();
-    const cleanEmail = String(email || '').trim().toLowerCase();
-    const cleanPassword = String(password || '');
-    if (!cleanName || !cleanEmail || !cleanEmail.includes('@') || cleanPassword.length < 8) {
+    const cleanName = String(fullName || '').trim().slice(0, 255);
+    const cleanEmail = String(email || '').trim().toLowerCase().slice(0, 191);
+    const cleanPassword = String(password || '').slice(0, 256);
+    const registerKey = `register:ip:${req.ip}`;
+    const registerRetry = isLimited(registerKey, REGISTER_MAX_PER_IP);
+    if (registerRetry > 0) {
+      res.setHeader('Retry-After', String(registerRetry));
+      return res.status(429).json({ success: false, error: 'Terlalu banyak pendaftaran dari jaringan ini. Coba lagi nanti.' });
+    }
+    noteFailure(registerKey);
+    if (!cleanName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanPassword.length < 8) {
       return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
     }
     try {
@@ -1024,7 +1208,7 @@ async function startServer() {
         return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
       }
       const duplicate = String(err?.code || '').includes('DUP_ENTRY') || errMsg.toLowerCase().includes('duplicate');
-      return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal mendaftarkan akun') });
+      return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : genericDbError(err) });
     }
   });
 
@@ -1032,7 +1216,18 @@ async function startServer() {
     try {
       const user = await getSessionUser(req);
       if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
-      const refreshedToken = createSessionToken(String(user.id));
+      // Perpanjang sesi yang sama (tidak membuat baris baru tiap /me). Token lama tanpa sid dimigrasi ke sesi baru.
+      const currentToken = verifySessionToken(extractSessionTokenFromReq(req));
+      let refreshedToken: string;
+      if (currentToken?.sid && isDatabaseConfigured()) {
+        refreshedToken = createSessionToken(String(user.id), currentToken.sid);
+        void mysqlQuery(
+          `UPDATE user_sessions SET expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND), last_seen_at = NOW() WHERE session_hash = ?`,
+          [SESSION_TTL_SECONDS, sessionHash(currentToken.sid)]
+        ).catch(() => {});
+      } else {
+        refreshedToken = await issueSession(String(user.id));
+      }
       setSessionCookie(res, refreshedToken);
       return res.json({ success: true, backend: 'hostinger_mysql', sessionToken: refreshedToken, user: publicUser(user) });
     } catch (err: any) {
@@ -1040,9 +1235,18 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/logout', (_req, res) => {
+  app.post('/api/auth/logout', async (req, res) => {
+    const current = verifySessionToken(extractSessionTokenFromReq(req));
+    if (current?.sid) await revokeSession(current.sid);
     clearSessionCookie(res);
     res.json({ success: true, message: 'Logged out successfully' });
+  });
+
+  // Keluar dari SEMUA perangkat (mis. HP hilang / password dicurigai bocor).
+  app.post('/api/auth/logout-all', requireAuth, async (req: any, res) => {
+    await revokeUserSessions(String(req.authUser?.id || ''));
+    clearSessionCookie(res);
+    res.json({ success: true, message: 'Semua sesi perangkat telah dikeluarkan' });
   });
 
   // User Management is persisted in Hostinger MySQL; authenticated users can read sanitized user profiles for schedule/crew assignment.
@@ -1258,6 +1462,7 @@ async function startServer() {
     try {
       const result: any = await mysqlQuery('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hashPassword(password), req.params.id]);
       if (!Number(result?.affectedRows || 0)) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+      await revokeUserSessions(String(req.params.id)); // password diganti → semua perangkat user itu harus login ulang
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal reset password' });
@@ -1472,8 +1677,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
         "Accept": "text/csv,text/plain,*/*"
       };
-      if (req.headers.authorization) {
-        headers["Authorization"] = req.headers.authorization;
+      // Teruskan Authorization hanya bila itu token OAuth Google milik klien, BUKAN token sesi aplikasi kita.
+      const forwardedAuth = String(req.headers.authorization || '');
+      if (forwardedAuth && !verifySessionToken(forwardedAuth.replace(/^bearer\s+/i, '').trim())) {
+        headers["Authorization"] = forwardedAuth;
       }
 
       let sheetRes: Response | null = null;
@@ -2035,7 +2242,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
   });
 
-  app.delete("/api/driver-reports/:id", async (req: any, res) => {
+  app.delete("/api/driver-reports/:id", requireAnyRole('super_admin', 'admin'), async (req: any, res) => {
     try {
       const reportId = String(req.params.id || '').trim();
       if (!reportId) {
@@ -2068,7 +2275,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/schedules/:id/bypass-checklist", express.json(), async (req: any, res) => {
+  app.post("/api/schedules/:id/bypass-checklist", requireAnyRole('super_admin', 'admin'), async (req: any, res) => {
     try {
       const scheduleId = String(req.params.id || '').trim();
       const customNote = String(req.body?.note || '').trim().slice(0, 500);
@@ -2591,16 +2798,16 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     );
   };
 
-  app.get("/api/fleet-checklists", async (_req, res) => {
+  app.get("/api/fleet-checklists", requireAuth, async (_req, res) => {
     try {
       const list = await getPersistedChecklists();
-      return res.json({ success: true, count: list.length, data: list, checklists: list });
+      return res.json({ success: true, count: list.length, data: list });
     } catch (err: any) {
-      return res.json({ success: true, count: inMemoryFleetChecklists.length, data: inMemoryFleetChecklists, checklists: inMemoryFleetChecklists, warning: err?.message });
+      return res.json({ success: true, count: inMemoryFleetChecklists.length, data: inMemoryFleetChecklists, warning: err?.message });
     }
   });
 
-  app.post("/api/fleet-checklists", express.json({ limit: '15mb' }), async (req, res) => {
+  app.post("/api/fleet-checklists", requireAuth, async (req, res) => {
     const incoming = req.body?.checklist || req.body;
     if (!incoming || !incoming.id) {
       return res.status(400).json({ success: false, error: 'Data checklist tidak valid' });
@@ -2624,7 +2831,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.delete("/api/fleet-checklists/:id", async (req, res) => {
+  app.delete("/api/fleet-checklists/:id", requireAuth, async (req, res) => {
     const id = String(req.params.id || '').trim();
     try {
       const current = await getPersistedChecklists();
@@ -3596,9 +3803,9 @@ Kembalikan HANYA JSON valid:
     }
   };
 
-  app.post('/api/scan-muat', express.json({ limit: '20mb' }), handleVerifyMuatScan);
-  app.post('/wms-scanner/api/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
-  app.post('/api/wms-scanner/verify-item', express.json({ limit: '20mb' }), handleVerifyMuatScan);
+  app.post('/api/scan-muat', requireAuth, handleVerifyMuatScan);
+  app.post('/wms-scanner/api/verify-item', requireAuth, handleVerifyMuatScan);
+  app.post('/api/wms-scanner/verify-item', requireAuth, handleVerifyMuatScan);
 
   // 🔄 Cross-Device Two-Way Persistence for Sales RFID Invoices (PC / Web / HP Android)
   let inMemorySalesRfidInvoices: any[] = [];
@@ -3688,7 +3895,7 @@ Kembalikan HANYA JSON valid:
     return Array.from(mergedMap.values());
   };
 
-  app.get('/api/sales-rfid-invoices', async (_req, res) => {
+  app.get('/api/sales-rfid-invoices', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       if (isDatabaseConfigured()) {
@@ -3713,7 +3920,7 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  app.post('/api/sales-rfid-invoices', express.json({ limit: '35mb' }), async (req, res) => {
+  app.post('/api/sales-rfid-invoices', requireAuth, async (req, res) => {
     try {
       const invoices = req.body?.invoices;
       const replaceAll = Boolean(req.body?.replaceAll);
@@ -3756,7 +3963,7 @@ Kembalikan HANYA JSON valid:
   // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state & Disk Fallback)
   let inMemoryAdminCalendarSchedules: any[] = [];
 
-  app.get('/api/admin-schedules', async (_req, res) => {
+  app.get('/api/admin-schedules', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       // 1. Cek MySQL jika database terkonfigurasi
@@ -3793,7 +4000,7 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  app.post('/api/admin-schedules', express.json({ limit: '25mb' }), async (req, res) => {
+  app.post('/api/admin-schedules', requireAuth, async (req, res) => {
     try {
       const incoming = req.body?.schedules;
       if (!Array.isArray(incoming)) {
@@ -3953,7 +4160,11 @@ Kembalikan HANYA JSON valid:
 
   // Direct APK / file downloads route (serves directly from root path /akk-mobile-v1.apk, /downloads/:filename, /api/download-apk, etc.)
   const serveApkFile = (filename: string, res: express.Response) => {
-    const safeFilename = filename.endsWith('.apk') ? filename : `${filename}.apk`;
+    const baseName = path.basename(String(filename || ''));
+    if (!/^[A-Za-z0-9._-]{1,120}$/.test(baseName) || baseName.includes('..')) {
+      return res.status(400).send('Nama file tidak valid.');
+    }
+    const safeFilename = baseName.endsWith('.apk') ? baseName : `${baseName}.apk`;
     const candidates = [
       path.join(process.cwd(), 'public', safeFilename),
       path.join(process.cwd(), 'public', 'downloads', safeFilename),
@@ -4108,7 +4319,7 @@ Kembalikan HANYA JSON valid:
   const PRODUCTION_BRIDGE_ORIGIN = 'https://akkoperasional.com';
   const isHostingerEnv = process.env.NODE_ENV === 'production' && !process.env.K_SERVICE;
 
-  app.get('/api/database-barang', async (_req, res) => {
+  app.get('/api/database-barang', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let mysqlLoaded = false;
     if (isDatabaseConfigured()) {
@@ -4163,7 +4374,7 @@ Kembalikan HANYA JSON valid:
   // Endpoint ringan Real-Time Multi-Device Sync khusus untuk menyinkronkan foto dokumentasi & perubahan barang antar HP dan PC
   // Ringkasan ringan dari MySQL, tanpa mentransfer foto/base64 ke browser.
   // Dipakai untuk verifikasi pemulihan foto lama dari IndexedDB perangkat asal.
-  app.get('/api/database-barang/photos-summary', async (_req, res) => {
+  app.get('/api/database-barang/photos-summary', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!isDatabaseConfigured() && isHostingerEnv) {
       return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi.' });
@@ -4213,7 +4424,7 @@ Kembalikan HANYA JSON valid:
     return res.json({ success: true, totalSkuCount: memCodes.size, photoSkuCount: memPhotoCodes.size });
   });
 
-  app.get('/api/database-barang/photos-sync', async (_req, res) => {
+  app.get('/api/database-barang/photos-sync', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       let totalCount = memoryDatabaseBarang.length;
@@ -4305,7 +4516,7 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role/sesi
-  app.post('/api/database-barang/photos-sync', async (req: any, res: any) => {
+  app.post('/api/database-barang/photos-sync', requireAuth, async (req: any, res: any) => {
     try {
       if (!isDatabaseConfigured() && isHostingerEnv) {
         return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; foto tidak disimpan di server.' });
@@ -4492,7 +4703,7 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  app.post('/api/database-barang/sync', async (req: any, res: any) => {
+  app.post('/api/database-barang/sync', requireAuth, async (req: any, res: any) => {
     try {
       // Izinkan semua divisi operasional (Gudang, Sales/Penjualan, Admin) menyinkronkan dokumentasi foto & master barang antar device
       const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -4724,7 +4935,7 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  app.post('/api/database-barang/item', async (req: any, res: any) => {
+  app.post('/api/database-barang/item', requireAuth, async (req: any, res: any) => {
     try {
       if (!isDatabaseConfigured() && isHostingerEnv) {
         return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; data tidak dapat disimpan permanen.' });
@@ -4906,7 +5117,7 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint khusus untuk menghapus foto secara permanen agar tidak muncul kembali saat sinkronisasi / push website baru
-  app.post('/api/database-barang/delete-photo', async (req: any, res: any) => {
+  app.post('/api/database-barang/delete-photo', requireAuth, async (req: any, res: any) => {
     try {
       const { noBarang, photoUrl, clearAll, updatedUrls } = req.body || {};
       const code = String(noBarang || '').trim().toUpperCase();
@@ -4963,7 +5174,7 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint untuk membersihkan foto MySQL secara massal (hanya menyisakan SKU yang di-keep)
-  app.post('/api/database-barang/photos/bulk-delete', async (req: any, res: any) => {
+  app.post('/api/database-barang/photos/bulk-delete', requireAuth, async (req: any, res: any) => {
     try {
       const { codes, keepCodes } = req.body || {};
       let targetCodes: string[] = [];
@@ -5051,7 +5262,7 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  app.delete('/api/database-barang/:id', async (req: any, res: any) => {
+  app.delete('/api/database-barang/:id', requireAuth, async (req: any, res: any) => {
     try {
       const sessionUser = await getSessionUser(req);
       if (sessionUser && String(sessionUser.role || '').toLowerCase() !== 'super_admin') {
@@ -5212,7 +5423,7 @@ Kembalikan HANYA JSON valid:
   app.use('/models', express.static(path.join(process.cwd(), 'models')));
 
   // SPESIFIKASI 1: ENDPOINT EXPORT DATASET DI BACKEND (GET /api/yolo/export-dataset)
-  app.get('/api/yolo/export-dataset', async (req, res) => {
+  app.get('/api/yolo/export-dataset', requireAuth, async (req, res) => {
     try {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       const onlyWithPhotos = String(req.query.with_photos_only || '').toLowerCase() === 'true';
@@ -5368,7 +5579,7 @@ Kembalikan HANYA JSON valid:
   ): Promise<{ chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number } | null> => {
     try {
       const GRID = 16;
-      const { data } = await sharp(inputBuf)
+      const { data } = await (await getSharp())(inputBuf)
         .resize(GRID, GRID, { fit: 'cover' })
         .removeAlpha()
         .raw()
@@ -5436,7 +5647,26 @@ Kembalikan HANYA JSON valid:
     return Number((chromaSim * 0.5 + colorMeanSim * 0.35 + edgeSim * 0.15).toFixed(4));
   };
 
-  app.post('/api/yolo/detect-fallback', async (req: any, res: any) => {
+  // Inferensi YOLO di server berat (CPU/RAM). Batasi paralelisme agar proses Node tidak mati di shared hosting.
+  let activeServerInference = 0;
+  const MAX_SERVER_INFERENCE = Math.max(1, Number(process.env.YOLO_SERVER_MAX_CONCURRENCY || 1));
+  const limitServerInference = (_req: any, res: any, next: any) => {
+    if (activeServerInference >= MAX_SERVER_INFERENCE) {
+      res.setHeader('Retry-After', '3');
+      return res.status(503).json({
+        success: false,
+        error: 'Server sedang memproses scan lain. Coba lagi sesaat, atau gunakan deteksi langsung di perangkat.'
+      });
+    }
+    activeServerInference += 1;
+    let released = false;
+    const release = () => { if (!released) { released = true; activeServerInference -= 1; } };
+    res.on('finish', release);
+    res.on('close', release);
+    next();
+  };
+
+  app.post('/api/yolo/detect-fallback', requireAuth, limitServerInference, async (req: any, res: any) => {
     const tStart = Date.now();
     try {
       const rawBase64 = String(req.body?.image || req.body?.image_base64 || '').trim();
@@ -5481,7 +5711,7 @@ Kembalikan HANYA JSON valid:
       }
 
       const INPUT_SIZE = 640;
-      const { data: rawRgbBytes, info } = await sharp(imgBuffer)
+      const { data: rawRgbBytes, info } = await (await getSharp())(imgBuffer)
         .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill' })
         .removeAlpha()
         .raw()
@@ -5913,6 +6143,25 @@ Kembalikan HANYA JSON valid:
     });
   }
 
+  // Penangan error terakhir: jangan bocorkan stack trace; kembalikan JSON yang rapi.
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    const status = Number(err?.status || err?.statusCode || 500);
+    if (status === 413) {
+      // Request besar tanpa sesi valid dibatasi 100 KB oleh body parser. Jawab 401 (bukan 413) supaya klien
+      // (mis. antrean sinkronisasi offline sopir) tahu harus login ulang dan tidak membuang datanya.
+      const reqPath = String((_req as any).path || '');
+      const hasSession = Boolean(verifySessionToken(extractSessionTokenFromReq(_req)));
+      if (!hasSession && reqPath.startsWith('/api/') && !reqPath.startsWith('/api/auth/')) {
+        return res.status(401).json({ success: false, error: 'Sesi login tidak valid atau telah berakhir' });
+      }
+      return res.status(413).json({ success: false, error: 'Ukuran data terlalu besar' });
+    }
+    if (err?.type === 'entity.parse.failed') return res.status(400).json({ success: false, error: 'Format JSON tidak valid' });
+    console.error('[Unhandled Express Error]', err?.message || err);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: 'Terjadi kesalahan pada server' });
+  });
+
   listenOnPort(preferredPort);
 
   // Cek koneksi database, pastikan schema tabel tersedia, dan bootstrap Super Admin secara non-blocking
@@ -5951,5 +6200,15 @@ Kembalikan HANYA JSON valid:
   })();
 }
 
-startServer();
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+startServer().catch((err) => {
+  console.error('[Startup Fatal] Server gagal dijalankan:', err);
+  process.exit(1);
+});
 

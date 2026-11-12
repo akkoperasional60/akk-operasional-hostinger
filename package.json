@@ -45,7 +45,6 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "mysql2": "^3.24.6",
-    "onnxruntime-node": "^1.31.1",
     "onnxruntime-web": "^1.31.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -60,6 +59,9 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
     "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.31.1"
   },
   "packageManager": "npm@10.9.2"
 }
