@@ -424,9 +424,10 @@ const FleetCustomSelectDropdown: React.FC<{
   value: string;
   fleets: Fleet[];
   dateIso?: string;
+  excludeScheduleId?: string;
   onChange: (newValue: string) => void;
   accentColor?: 'blue' | 'emerald';
-}> = ({ label, value, fleets, dateIso, onChange, accentColor = 'blue' }) => {
+}> = ({ label, value, fleets, dateIso, excludeScheduleId, onChange, accentColor = 'blue' }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -452,7 +453,11 @@ const FleetCustomSelectDropdown: React.FC<{
 
   const selectedFleet = useMemo(() => {
     if (!value) return null;
-    return fleets.find(f => (f.initialCode || f.plateNumber) === value || f.plateNumber === value);
+    return (
+      fleets.find(f => (f.initialCode || f.plateNumber) === value || f.plateNumber === value) ||
+      logisticsStore.findFleetByCodeOrPlate(value) ||
+      null
+    );
   }, [fleets, value]);
 
   const filteredFleets = useMemo(() => {
@@ -475,7 +480,7 @@ const FleetCustomSelectDropdown: React.FC<{
     if (target) {
       const code = target.initialCode || target.plateNumber;
       const isCurrentValue = code === value || target.plateNumber === value;
-      const live = logisticsStore.getFleetLiveOperationalInfo(target, dateIso);
+      const live = logisticsStore.getFleetLiveOperationalInfo(target, dateIso, excludeScheduleId);
       if (live.canBeScheduled || isCurrentValue) {
         onChange(code);
         setIsOpen(false);
@@ -485,7 +490,7 @@ const FleetCustomSelectDropdown: React.FC<{
     const firstValid = filteredFleets.find(f => {
       const code = f.initialCode || f.plateNumber;
       const isCurrentValue = code === value || f.plateNumber === value;
-      const live = logisticsStore.getFleetLiveOperationalInfo(f, dateIso);
+      const live = logisticsStore.getFleetLiveOperationalInfo(f, dateIso, excludeScheduleId);
       return live.canBeScheduled || isCurrentValue;
     });
     if (firstValid) {
@@ -496,7 +501,7 @@ const FleetCustomSelectDropdown: React.FC<{
   };
 
   const liveInfo = selectedFleet
-    ? logisticsStore.getFleetLiveOperationalInfo(selectedFleet, dateIso)
+    ? logisticsStore.getFleetLiveOperationalInfo(selectedFleet, dateIso, excludeScheduleId)
     : null;
 
   const formattedFleetTitle = selectedFleet
@@ -573,6 +578,8 @@ const FleetCustomSelectDropdown: React.FC<{
             ? 'Sedang Proses Servis'
             : liveInfo?.effectiveStatus === 'on-duty'
             ? `Terjadwal: ${liveInfo.areaName || 'Kirim'}`
+            : liveInfo?.todayScheduledArea
+            ? `Terjadwal: ${liveInfo.todayScheduledArea}`
             : 'Siap Digunakan Kirim'}
         </span>
       </div>
@@ -628,14 +635,14 @@ const FleetCustomSelectDropdown: React.FC<{
                 const fleetCode = fleet.initialCode || fleet.plateNumber;
                 const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
                 const isHighlighted = idx === highlightedIndex;
-                const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso);
+                const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso, excludeScheduleId);
                 const isUnselectable = !live.canBeScheduled && !isSelected;
                 const isMaintenance = live.effectiveStatus === 'maintenance';
                 const optionLabel = `[${fleet.initialCode || fleet.plateNumber}] ${fleet.plateNumber} — ${
                   isMaintenance
                     ? 'Sedang Servis'
-                    : live.effectiveStatus === 'on-duty' && !isSelected
-                    ? `Terjadwal (${live.areaName || 'Kirim'})`
+                    : (live.effectiveStatus === 'on-duty' || !live.canBeScheduled) && !isSelected
+                    ? `Terjadwal (${live.areaName || live.todayScheduledArea || 'Kirim'})`
                     : live.statusLabel
                 }`;
 
@@ -1589,6 +1596,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     branchId: string;
     isNew?: boolean;
   } | null>(null);
+  const [editTripModalError, setEditTripModalError] = useState<string | null>(null);
+  const [manualScheduleFormError, setManualScheduleFormError] = useState<string | null>(null);
 
   const editingScheduledCrewMap = useMemo(() => {
     if (!editingTripModal) return new Map<string, { role: string; area: string }>();
@@ -2232,6 +2241,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     dateString: string,
     tripIndex: number
   ) => {
+    setEditTripModalError(null);
     const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
     const defaultDayIso = `${selectedYear}-${String(effectiveMo + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
     const tripBranch = p.branchId || (p.id ? branchStore.getScheduleBranchId(p.id, p.target, p.armada) : (branchStore.getSelectedOriginBranchId() !== 'ALL' ? branchStore.getSelectedOriginBranchId() : 'cab-banyuwangi'));
@@ -2257,6 +2267,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const handleOpenAddTripModal = (dayNumber: number, dateString: string) => {
+    setEditTripModalError(null);
     const defaultDriver = getIntegratedDrivers()[0]?.name || 'Budiono';
     const defaultHelper = getIntegratedHelpers()[0]?.name || 'Saifur Rizal';
     const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
@@ -2328,10 +2339,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         const estArrivalIso = `${year}-${monthPadded}-${dayPadded}T18:00:00.000Z`;
 
         d.pengiriman.forEach((p, pIdx) => {
-          const matchedFleet = fleets.find(f => 
-            f.initialCode?.toUpperCase() === p.armada.toUpperCase() ||
-            f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(p.armada.replace(/\s+/g, '').toUpperCase())
-          ) || fleets[pIdx % fleets.length] || fleets[0];
+          const matchedFleet =
+            logisticsStore.findFleetByCodeOrPlate(p.armada) ||
+            fleets.find(f =>
+              f.initialCode?.toUpperCase() === p.armada.toUpperCase() ||
+              f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(p.armada.replace(/\s+/g, '').toUpperCase())
+            ) ||
+            fleets[pIdx % fleets.length] ||
+            fleets[0];
 
           const matchedDriver = driverCrews.find(c => 
             c.name.toLowerCase().includes(p.driver.toLowerCase()) || 
@@ -2361,7 +2376,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               city: isBali ? 'Denpasar' : 'Banyuwangi',
               address: `Area Pengiriman ${areaStd}`,
               latitude: isBali ? -8.6705 : -8.219,
-              longitude: isBali ? 115.2126 : 114.369,
+              longitude: isBali ? -115.2126 : 114.369,
               contactPerson: 'PIC Distribusi Area',
               phone: '-',
               deliveryWindow: '08:00 - 17:00',
@@ -2370,6 +2385,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             areaName: areaStd,
             fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
             fleet: matchedFleet,
+            armada: matchedFleet?.initialCode || p.armada,
             crewId: matchedDriver ? matchedDriver.id : 'crw-10',
             crew: matchedDriver,
             crewHelperId: matchedHelper ? matchedHelper.id : undefined,
@@ -2412,7 +2428,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const selectedYearMonthRef = React.useRef({ year: selectedYear, month: selectedMonth });
   selectedYearMonthRef.current = { year: selectedYear, month: selectedMonth };
 
-  // On initial mount, load persisted schedules from server database if available & auto-repair legacy overwritten standby schedules
+  // On initial mount, load authoritative persisted schedules from server database without writing stale localStorage back to server
   useEffect(() => {
     // Bersihkan cache template lama agar jadwal dummy tidak pernah bocor ke bulan baru
     try {
@@ -2423,45 +2439,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       });
     } catch {}
 
-    const allSchedules = logisticsStore.getSchedules();
-    const allCrews = logisticsStore.getCrews();
-    allSchedules.forEach(s => {
-      if (!s.backupCrewName && typeof s.notes === 'string') {
-        const m = s.notes.match(/\[(?:PORTAL DRIVER )?HARI H:\s*([^(]+?)\s*\([^)]+\)\s*menggantikan\s+(.+?)\s+yang berhalangan hadir/i);
-        if (m) {
-          const standbyName = m[1].trim();
-          const origName = m[2].trim();
-          if (standbyName && origName && origName !== '-') {
-            const origCrewObj = allCrews.find(c => isSameCrewPerson(c.name, origName));
-            const stbCrewObj = allCrews.find(c => isSameCrewPerson(c.name, standbyName));
-            const patch: Partial<Schedule> = {
-              backupCrewId: stbCrewObj?.id,
-              backupCrewName: standbyName,
-              backupPosition: 'driver',
-              backupTargetName: origName
-            };
-            if (s.crew && isSameCrewPerson(s.crew.name, standbyName) && origCrewObj) {
-              patch.crewId = origCrewObj.id;
-              patch.crew = origCrewObj;
-            }
-            logisticsStore.updateSchedule(s.id, patch);
-          }
-        }
-      }
-    });
-
-    fetchPersistedSchedulesFromServer().then(res => {
-      if (res.exists && Array.isArray(res.schedules)) {
-        console.info(`[Database Persistence] Loaded ${res.count} persisted schedules from server.`);
-        if (res.schedules.length > 0) {
-          logisticsStore.batchSyncSchedules(res.schedules, [], { isImport: false });
-        }
+    logisticsStore
+      .hydrateOperationalDataFromHostinger(true)
+      .then(() => {
         const { year: curYr, month: curMo } = selectedYearMonthRef.current;
         const effectiveMo = curMo === -1 ? new Date().getMonth() : curMo;
         const syncedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), curYr, effectiveMo);
         setWeeks(syncedWeeks);
-      }
-    }).catch(err => console.warn('[Database Persistence Load Error]', err));
+      })
+      .catch(err => console.warn('[Database Persistence Load Error]', err));
   }, []);
 
   // Keep weeks and store in sync whenever selectedYear, selectedMonth changes or store updates
@@ -2574,9 +2560,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     incomingTrips: Array<ParsedSheetTrip & { source?: 'excel' | 'manual'; bypassChecklistDirectComplete?: boolean }>,
     mode: 'tambahkan' | 'ganti' = 'tambahkan',
     sourceLabel: string = 'Kombinasi Tambah & Unggah Jadwal'
-  ) => {
-    if (!canEditSchedules) return;
-    if (!incomingTrips || incomingTrips.length === 0) return;
+  ): boolean => {
+    if (!canEditSchedules) return false;
+    if (!incomingTrips || incomingTrips.length === 0) return false;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
     const defaultDateObj = new Date(selectedYear, effectiveMonth, 5);
@@ -2605,6 +2591,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const helperCrews = logisticsStore.getHelperCrews();
 
     const changeDetails: string[] = [];
+    const newSchedulesToBatch: Schedule[] = [];
+    const batchFleetDateKeys = new Set<string>();
+    const skippedDuplicateArmadaList: string[] = [];
+    let addedExcelCount = 0;
+    let addedManualCount = 0;
 
     incomingTrips.forEach((t, idx) => {
       const stdArea = standardizeAreaName(t.area || '-');
@@ -2648,10 +2639,50 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const departureIso = `${depDateIso}T${depTime}:00+07:00`;
       const estArrivalIso = `${retDateIso}T${retTime}:00+07:00`;
 
-      const matchedFleet = fleets.find(f =>
-        f.initialCode?.toUpperCase() === armadaCode ||
-        f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armadaCode.replace(/\s+/g, ''))
-      ) || fleets[0];
+      const matchedFleet =
+        logisticsStore.findFleetByCodeOrPlate(armadaCode) ||
+        fleets.find(f =>
+          f.initialCode?.toUpperCase() === armadaCode ||
+          f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armadaCode.replace(/\s+/g, ''))
+        ) ||
+        fleets[0];
+
+      const resolvedArmadaDisplay = matchedFleet?.initialCode || (armadaCode !== '-' ? armadaCode : (matchedFleet?.plateNumber || 'DS1'));
+      const canonicalFleetKey = (matchedFleet?.id || resolvedArmadaDisplay).trim().toUpperCase();
+      const datesToCheck = depDateIso && depDateIso !== effectiveCalendarIso
+        ? [effectiveCalendarIso, depDateIso]
+        : [effectiveCalendarIso];
+
+      const hasBatchDuplicate = datesToCheck.some(dk => batchFleetDateKeys.has(`${canonicalFleetKey}__${dk}`));
+      let existingConflict: ReturnType<typeof logisticsStore.findFleetAssignmentConflict> = null;
+      if (!hasBatchDuplicate) {
+        for (const dk of datesToCheck) {
+          const found = logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaDisplay, dk);
+          if (found) {
+            if (mode === 'ganti') {
+              const conflictCalIso = logisticsStore.getScheduleCalendarIso(found.conflictSchedule);
+              const conflictMonth = conflictCalIso ? Number(conflictCalIso.split('-')[1]) - 1 : -1;
+              const willBeReplaced = conflictMonth === mo && !found.conflictSchedule.isManuallyEdited;
+              if (!willBeReplaced) {
+                existingConflict = found;
+                break;
+              }
+            } else {
+              existingConflict = found;
+              break;
+            }
+          }
+        }
+      }
+
+      if (hasBatchDuplicate || existingConflict) {
+        const conflictReason = existingConflict
+          ? `sudah dijadwalkan untuk ${existingConflict.conflictSchedule.areaName || existingConflict.conflictSchedule.store?.storeName || '-'} (${existingConflict.conflictSchedule.crew?.name || '-'})`
+          : 'terduplikasi dalam daftar input di tanggal yang sama';
+        skippedDuplicateArmadaList.push(`${resolvedArmadaDisplay} (${dateString}) - ${conflictReason}`);
+        return;
+      }
+      datesToCheck.forEach(dk => batchFleetDateKeys.add(`${canonicalFleetKey}__${dk}`));
 
       const matchedDriver = driverCrews.find(c =>
         c.name.toLowerCase().includes(driverName.toLowerCase()) ||
@@ -2671,6 +2702,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const isBali = stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI');
       const uniqSuffix = `${Date.now().toString(36).slice(-4).toUpperCase()}${idx + 1}`;
       const newSchId = `sch-comb-${yr}${monthPadded}${dayPadded}-${armadaCode}-${uniqSuffix}`;
+      const nowIso = new Date().toISOString();
 
       const newSch: Schedule = {
         id: newSchId,
@@ -2696,6 +2728,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         areaName: stdArea,
         fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
         fleet: matchedFleet,
+        armada: resolvedArmadaDisplay,
         crewId: matchedDriver ? matchedDriver.id : 'crw-01',
         crew: matchedDriver,
         crewHelperId: matchedHelper ? matchedHelper.id : undefined,
@@ -2713,7 +2746,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         actualArrival: t.bypassChecklistDirectComplete ? estArrivalIso : undefined,
         isChecklistBypassed: t.bypassChecklistDirectComplete || undefined,
         checklistBypassedBy: t.bypassChecklistDirectComplete ? (logisticsStore.getCurrentUser()?.fullName || 'Super Admin') : undefined,
-        checklistBypassedAt: t.bypassChecklistDirectComplete ? new Date().toISOString() : undefined,
+        checklistBypassedAt: t.bypassChecklistDirectComplete ? nowIso : undefined,
         cargoDescription: `Karton Box & Sheet Kemasan - Area ${stdArea}`,
         cargoWeightTon: isBali ? 4.5 : 2.5,
         isInterIsland: isBali,
@@ -2722,11 +2755,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         notes: t.bypassChecklistDirectComplete
           ? `${t.target || `Rute ${stdArea}`} • [Bypass Checklist Super Admin]`
           : (t.target || `Rute ${stdArea} (Berangkat ${depDateIso} ${depTime} • Pulang ${retDateIso} ${retTime})`),
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
+        updatedAt: nowIso,
         isManuallyEdited: t.source === 'manual'
       };
 
-      logisticsStore.addSchedule(newSch);
+      newSchedulesToBatch.push(newSch);
 
       if (t.bypassChecklistDirectComplete) {
         driverWaybillService.getWaybillForSchedule(newSch);
@@ -2764,7 +2798,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         helper: helperName,
         helper2: helper2Name,
         area: stdArea,
-        armada: armadaCode,
+        armada: resolvedArmadaDisplay,
         target: t.target || 'Gudang Pusat AKK Banyuwangi DC',
         departureTime: depTime,
         targetReturnTime: retTime,
@@ -2773,14 +2807,32 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         isManuallyEdited: t.source === 'manual'
       });
 
+      if (t.source === 'excel') addedExcelCount += 1;
+      else addedManualCount += 1;
+
       if (changeDetails.length < 6) {
         changeDetails.push(
-          `[${t.source === 'excel' ? 'Excel' : 'Input Baru'}] ${dateString}: Driver ${driverName} | Area ${stdArea} | Armada ${armadaCode} | Berangkat ${depDateIso} ${depTime} - Pulang ${retDateIso} ${retTime}`
+          `[${t.source === 'excel' ? 'Excel' : 'Input Baru'}] ${dateString}: Driver ${driverName} | Area ${stdArea} | Armada ${resolvedArmadaDisplay} | Berangkat ${depDateIso} ${depTime} - Pulang ${retDateIso} ${retTime}`
         );
       }
     });
 
-      const mergedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), targetYear, targetMonth);
+    if (newSchedulesToBatch.length === 0) {
+      if (skippedDuplicateArmadaList.length > 0) {
+        const dupMsg = `Gagal menyimpan karena bentrok armada pada tanggal yang sama: ${skippedDuplicateArmadaList[0]}`;
+        setUploadToast({ type: 'error', message: dupMsg });
+        setManualScheduleFormError(dupMsg);
+      }
+      return false;
+    }
+
+    logisticsStore.batchSyncSchedules(newSchedulesToBatch, [], {
+      isImport: mode === 'ganti',
+      replaceMonth: mode === 'ganti',
+      skipBackendPersist: true
+    });
+
+    const mergedWeeks = convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), targetYear, targetMonth);
 
     if (selectedYear !== targetYear) setSelectedYear(targetYear);
     if (selectedMonth !== -1 && selectedMonth !== targetMonth) setSelectedMonth(targetMonth);
@@ -2791,14 +2843,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
     logisticsStore.syncSchedulesToCrewHistory();
 
-    const excelCount = incomingTrips.filter(x => x.source === 'excel').length;
-    const manualCount = incomingTrips.filter(x => x.source !== 'excel').length;
+    const excelCount = addedExcelCount;
+    const manualCount = addedManualCount;
+
+    if (skippedDuplicateArmadaList.length > 0 && changeDetails.length < 8) {
+      changeDetails.push(`⚠️ ${skippedDuplicateArmadaList.length} baris dilewati (armada ganda di hari sama): ${skippedDuplicateArmadaList.slice(0, 2).join('; ')}`);
+    }
 
     logisticsStore.addScheduleChangeLog({
       fileName: sourceLabel,
       actionType: excelCount > 0 ? 'upload_excel' : 'manual_create',
-      summary: `Kombinasi Jadwal Disimpan: ${incomingTrips.length} total jadwal (${excelCount} dari Excel, ${manualCount} dari Input Jadwal Baru)`,
-      rowCount: incomingTrips.length,
+      summary: `Kombinasi Jadwal Disimpan: ${newSchedulesToBatch.length} jadwal (${excelCount} Excel, ${manualCount} Input Baru)${skippedDuplicateArmadaList.length > 0 ? ` • ${skippedDuplicateArmadaList.length} duplikat armada dilewati` : ''}`,
+      rowCount: newSchedulesToBatch.length,
       changes: changeDetails
     });
     setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
@@ -2809,15 +2865,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       source: 'combined_excel_and_manual_schedule'
     }).catch(() => {});
 
-    const msg = `✅ ${incomingTrips.length} jadwal (${excelCount > 0 ? `${excelCount} Excel + ` : ''}${manualCount > 0 ? `${manualCount} Jadwal Baru` : ''}) berhasil disimpan permanen!`;
+    const msg = skippedDuplicateArmadaList.length > 0
+      ? `✅ ${newSchedulesToBatch.length} jadwal tersimpan, dan ${skippedDuplicateArmadaList.length} baris armada ganda di tanggal sama otomatis dilewati.`
+      : `✅ ${newSchedulesToBatch.length} jadwal berhasil disimpan permanen!`;
     setSyncSuccessMessage(msg);
-    if (onSyncComplete) onSyncComplete(incomingTrips.length);
+    if (skippedDuplicateArmadaList.length > 0) {
+      setUploadToast({ type: 'error', message: `⚠️ ${skippedDuplicateArmadaList.length} baris armada ganda dilewati: ${skippedDuplicateArmadaList[0]}` });
+    }
+    if (onSyncComplete) onSyncComplete(newSchedulesToBatch.length);
     setTimeout(() => setSyncSuccessMessage(null), 7000);
+    return true;
   };
 
   const handleSaveTripModal = () => {
     if (!canEditSchedules) return;
     if (!editingTripModal) return;
+    setEditTripModalError(null);
     const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, departureDateIso, returnDateIso, departureTime, targetReturnTime, isNew } = editingTripModal;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
@@ -2834,7 +2897,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const depIsoDate = departureDateIso || retIsoDate;
 
     if (depIsoDate > retIsoDate || (depIsoDate === retIsoDate && depTime > retTime)) {
-      alert('Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.');
+      const timeErr = 'Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.';
+      setEditTripModalError(timeErr);
+      setUploadToast({ type: 'error', message: timeErr });
       return;
     }
 
@@ -2857,10 +2922,42 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const fleets = logisticsStore.getFleets();
     const crews = logisticsStore.getCrews();
 
-    const matchedFleet = fleets.find(f => 
-      f.initialCode?.toUpperCase() === armada.toUpperCase() ||
-      f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armada.replace(/\s+/g, '').toUpperCase())
-    ) || fleets[0];
+    const matchedFleet =
+      logisticsStore.findFleetByCodeOrPlate(armada) ||
+      fleets.find(f =>
+        f.initialCode?.toUpperCase() === armada.toUpperCase() ||
+        f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armada.replace(/\s+/g, '').toUpperCase())
+      ) ||
+      fleets[0];
+    const resolvedArmadaCode = matchedFleet?.initialCode || armada;
+
+    // Validasi ketat: 1 Armada hanya boleh memiliki 1 penugasan pada tanggal yang sama
+    const excludeSchId = isNew ? undefined : scheduleId;
+    const storeConflict =
+      logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaCode, effectiveCalendarIso, excludeSchId) ||
+      (depIsoDate !== effectiveCalendarIso
+        ? logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaCode, depIsoDate, excludeSchId)
+        : null);
+
+    const targetWeekDay = (targetYr === selectedYear && targetMo === effectiveMonth)
+      ? weeksRef.current.flatMap(w => w.days).find(d => d.dayNumber === targetDayNum)
+      : undefined;
+    const legacyWeekConflict = (targetWeekDay?.pengiriman || []).find((row, rIdx) => {
+      if (!isNew && dayNumber === targetDayNum && rIdx === tripIndex) return false;
+      if (excludeSchId && row.id === excludeSchId) return false;
+      const rowFleet = logisticsStore.findFleetByCodeOrPlate(row.armada);
+      if (matchedFleet && rowFleet) return rowFleet.id === matchedFleet.id;
+      return (row.armada || '').trim().toUpperCase() === resolvedArmadaCode.trim().toUpperCase();
+    });
+
+    if (storeConflict || legacyWeekConflict) {
+      const cArea = storeConflict?.conflictSchedule.areaName || storeConflict?.conflictSchedule.store?.storeName || legacyWeekConflict?.area || '-';
+      const cDriver = storeConflict?.conflictSchedule.crew?.name || legacyWeekConflict?.driver || '-';
+      const dupErr = `Armada ${resolvedArmadaCode} sudah terjadwal pada tanggal ${targetDateString} (${cArea} • Driver: ${cDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
+      setEditTripModalError(dupErr);
+      setUploadToast({ type: 'error', message: dupErr });
+      return;
+    }
 
     const matchedDriver = crews.find(c => 
       c.name.toLowerCase().includes(driver.toLowerCase()) || 
@@ -2883,7 +2980,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const newSchId = `sch-man-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
       const newSch: Schedule = {
         id: newSchId,
-        trackingNumber: `PO-AKK-${targetYr}${monthPadded}${dayPadded}-${armada}-${Date.now().toString().slice(-4)}`,
+        trackingNumber: `PO-AKK-${targetYr}${monthPadded}${dayPadded}-${resolvedArmadaCode}-${Date.now().toString().slice(-4)}`,
         originName: 'Gudang Pusat AKK Banyuwangi DC',
         originCoords: [-8.1906, 114.3708],
         storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -2905,6 +3002,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         areaName: stdArea,
         fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
         fleet: matchedFleet,
+        armada: resolvedArmadaCode,
         crewId: matchedDriver ? matchedDriver.id : 'crw-01',
         crew: matchedDriver,
         crewHelperId: matchedHelper ? matchedHelper.id : undefined,
@@ -2938,7 +3036,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         changes: [
           `Tanggal Jadwal: ${targetDateString} | Berangkat: ${depIsoDate} ${depTime} - Pulang: ${retIsoDate} ${retTime}`,
           `Driver: ${driver} | Helper 1: ${helper || '-'} | Helper 2: ${helper2 || '-'}`,
-          `Area Kirim: ${stdArea} | Armada: ${armada}`
+          `Area Kirim: ${stdArea} | Armada: ${resolvedArmadaCode}`
         ]
       });
 
@@ -2948,7 +3046,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         helper: helper || '-',
         helper2: helper2 || '-',
         area: stdArea,
-        armada,
+        armada: resolvedArmadaCode,
         target,
         departureTime: depTime,
         targetReturnTime: retTime,
@@ -3029,6 +3127,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         logisticsStore.updateSchedule(targetId, {
           fleetId: matchedFleet ? matchedFleet.id : undefined,
           fleet: matchedFleet,
+          armada: resolvedArmadaCode,
           crewId: matchedDriver ? matchedDriver.id : undefined,
           crew: matchedDriver,
           crewHelperId: matchedHelper ? matchedHelper.id : undefined,
@@ -3056,7 +3155,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         const generatedId = targetId || `sch-man-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
         const newSch: Schedule = {
           id: generatedId,
-          trackingNumber: `PO-AKK-${targetYr}${monthPadded}${dayPadded}-${armada}-${Date.now().toString().slice(-4)}`,
+          trackingNumber: `PO-AKK-${targetYr}${monthPadded}${dayPadded}-${resolvedArmadaCode}-${Date.now().toString().slice(-4)}`,
           originName: 'Gudang Pusat AKK Banyuwangi DC',
           originCoords: [-8.1906, 114.3708],
           storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -3078,6 +3177,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           areaName: stdArea,
           fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
           fleet: matchedFleet,
+          armada: resolvedArmadaCode,
           crewId: matchedDriver ? matchedDriver.id : 'crw-01',
           crew: matchedDriver,
           crewHelperId: matchedHelper ? matchedHelper.id : undefined,
@@ -3111,10 +3211,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         if ((prevTrip.helper || '-') !== (helper || '-')) editDiffs.push(`Helper 1: ${prevTrip.helper || '-'} → ${helper || '-'}`);
         if ((prevTrip.helper2 || '-') !== (helper2 || '-')) editDiffs.push(`Helper 2: ${prevTrip.helper2 || '-'} → ${helper2 || '-'}`);
         if (standardizeAreaName(prevTrip.area) !== stdArea) editDiffs.push(`Area Kirim: ${prevTrip.area} → ${stdArea}`);
-        if (prevTrip.armada !== armada) editDiffs.push(`Armada: ${prevTrip.armada} → ${armada}`);
+        if (prevTrip.armada !== resolvedArmadaCode) editDiffs.push(`Armada: ${prevTrip.armada} → ${resolvedArmadaCode}`);
       }
       if (editDiffs.length === 0) {
-        editDiffs.push(`Pembaruan ritase ${targetDateString}: Driver ${driver}, Area ${stdArea}, Armada ${armada} (${depTime}-${retTime})`);
+        editDiffs.push(`Pembaruan ritase ${targetDateString}: Driver ${driver}, Area ${stdArea}, Armada ${resolvedArmadaCode} (${depTime}-${retTime})`);
       }
 
       logisticsStore.addScheduleChangeLog({
@@ -3132,12 +3232,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const updatedTripItem: DeliveryAssignment = {
         ...(prevTrip || {}),
         id: targetId || prevTrip?.id,
-        branchId: editingTripModal.branchId || branchStore.getScheduleBranchId(targetId || prevTrip?.id || '', stdArea, armada),
+        branchId: editingTripModal.branchId || branchStore.getScheduleBranchId(targetId || prevTrip?.id || '', stdArea, resolvedArmadaCode),
         driver,
         helper: helper || '-',
         helper2: helper2 || '-',
         area: stdArea,
-        armada,
+        armada: resolvedArmadaCode,
         target,
         departureTime: depTime,
         targetReturnTime: retTime,
@@ -4728,18 +4828,38 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }
 
                 if (scheduleStatusFilter !== 'all') {
+                  const activeDayMoIdx = MONTH_NAMES.findIndex(m =>
+                    (activeDayObj.dateString || '').toLowerCase().includes(m.toLowerCase())
+                  );
+                  const dayMo = activeDayMoIdx >= 0
+                    ? activeDayMoIdx
+                    : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
+                  const rowDateIso = `${selectedYear}-${String(dayMo + 1).padStart(2, '0')}-${String(activeDayObj.dayNumber).padStart(2, '0')}`;
+                  const pFleet = logisticsStore.findFleetByCodeOrPlate(p.armada);
+                  const sameFleetOnDay = activeDayObj.pengiriman.filter(item => {
+                    const fItem = logisticsStore.findFleetByCodeOrPlate(item.armada);
+                    if (pFleet && fItem) return pFleet.id === fItem.id;
+                    return (item.armada || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
+                  }).length;
                   const matched = storeSchedules.find(s => {
                     if (p.id && s.id === p.id) return true;
                     const sDate = getScheduleCalendarDateObj(s);
                     const sameDay = Boolean(
-                      sDate &&
-                      !isNaN(sDate.getTime()) &&
-                      sDate.getDate() === activeDayObj.dayNumber &&
-                      (selectedMonth === -1 || sDate.getMonth() === selectedMonth) &&
-                      sDate.getFullYear() === selectedYear
+                      logisticsStore.doesScheduleCoverDate(s, rowDateIso) ||
+                      (sDate &&
+                        !isNaN(sDate.getTime()) &&
+                        sDate.getDate() === activeDayObj.dayNumber &&
+                        sDate.getMonth() === dayMo &&
+                        sDate.getFullYear() === selectedYear)
                     );
                     if (!sameDay) return false;
-                    if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
+                    const armadaMatches = pFleet
+                      ? logisticsStore.matchesFleetSchedule(pFleet, s)
+                      : (s.armada || s.fleet?.initialCode || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
+                    const areaMatches = (s.areaName || '').trim().toUpperCase() === standardizeAreaName(p.area).trim().toUpperCase();
+                    const driverMatches = Boolean(s.crew?.name && p.driver && isSameCrewPerson(s.crew.name, p.driver));
+                    if (armadaMatches && (areaMatches || driverMatches || sameFleetOnDay === 1)) return true;
+                    if (areaMatches && driverMatches) return true;
                     return false;
                   });
                   const effStatus: ShipmentStatus = matched?.status || 'scheduled';
@@ -4749,6 +4869,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }
 
                 return true;
+              });
+
+              const dayArmadaCounts = new Map<string, number>();
+              activeDayObj.pengiriman.forEach(item => {
+                const fItem = logisticsStore.findFleetByCodeOrPlate(item.armada);
+                const key = (fItem?.id || item.armada || '').trim().toUpperCase();
+                if (key) dayArmadaCounts.set(key, (dayArmadaCounts.get(key) || 0) + 1);
               });
 
               const standbyDataTop = computeDayCrewStandbyBreakdown(activeDayObj);
@@ -4889,20 +5016,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               const targetDayMo = activeDayMonthIdx >= 0
                                 ? activeDayMonthIdx
                                 : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
+                              const rowDateIso = `${selectedYear}-${String(targetDayMo + 1).padStart(2, '0')}-${String(activeDayObj.dayNumber).padStart(2, '0')}`;
+                              const pFleet = logisticsStore.findFleetByCodeOrPlate(p.armada);
+                              const rowFleetKey = (pFleet?.id || p.armada || '').trim().toUpperCase();
+                              const sameFleetDayCount = rowFleetKey ? (dayArmadaCounts.get(rowFleetKey) || 0) : 0;
 
                               const matchedSch = storeSchedules.find(s => {
                                 if (p.id && s.id === p.id) return true;
                                 const sDate = getScheduleCalendarDateObj(s);
                                 const sameDay = Boolean(
-                                  sDate &&
-                                  !isNaN(sDate.getTime()) &&
-                                  sDate.getDate() === activeDayObj.dayNumber &&
-                                  sDate.getMonth() === targetDayMo &&
-                                  sDate.getFullYear() === selectedYear
+                                  logisticsStore.doesScheduleCoverDate(s, rowDateIso) ||
+                                  (sDate &&
+                                    !isNaN(sDate.getTime()) &&
+                                    sDate.getDate() === activeDayObj.dayNumber &&
+                                    sDate.getMonth() === targetDayMo &&
+                                    sDate.getFullYear() === selectedYear)
                                 );
                                 if (!sameDay) return false;
-                                if (s.fleet?.initialCode === p.armada && s.areaName === standardArea) return true;
-                                if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
+                                const sArmada = (s.armada || s.fleet?.initialCode || '').trim().toUpperCase();
+                                const pArmada = (p.armada || '').trim().toUpperCase();
+                                const armadaMatches = pFleet
+                                  ? logisticsStore.matchesFleetSchedule(pFleet, s)
+                                  : Boolean(
+                                      sArmada === pArmada ||
+                                      s.fleet?.initialCode?.toUpperCase() === pArmada ||
+                                      (s.fleet?.initialCode && pArmada.includes(s.fleet.initialCode.toUpperCase()))
+                                    );
+                                const areaMatches = (s.areaName || '').trim().toUpperCase() === (standardArea || '').trim().toUpperCase();
+                                const driverMatches = Boolean(s.crew?.name && p.driver && isSameCrewPerson(s.crew.name, p.driver));
+                                if (armadaMatches && (areaMatches || driverMatches || sameFleetDayCount === 1)) return true;
+                                if (areaMatches && driverMatches) return true;
                                 return false;
                               });
 
@@ -4929,7 +5072,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 selectedYear >= 2026 &&
                                 (selectedYear > 2026 || targetDayMo > 10 || (targetDayMo === 10 && activeDayObj.dayNumber >= 12)) &&
                                 matchedSch?.status === 'delivered' &&
-                                !matchedSch?.podPhotoUrl;
+                                !matchedSch?.podPhotoUrl &&
+                                !matchedSch?.isChecklistBypassed;
 
                               const currentStatus: ShipmentStatus = isFutureOrTodayUnverified
                                 ? 'scheduled'
@@ -4938,7 +5082,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string; border: string }> = {
                                 scheduled: { label: 'Terjadwal', bg: 'bg-blue-50 dark:bg-blue-950/80', text: 'text-blue-700 dark:text-blue-300', border: 'border-blue-300 dark:border-blue-800' },
                                 picked_up: { label: 'Telah Dimuat', bg: 'bg-amber-50 dark:bg-amber-950/80', text: 'text-amber-800 dark:text-amber-300', border: 'border-amber-300 dark:border-amber-800' },
-                                in_transit: { label: 'Dalam Perjalanan', bg: 'bg-purple-50 dark:bg-purple-950/80', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-300 dark:border-purple-800' },
+                                in_transit: { label: 'Sedang Kirim', bg: 'bg-purple-50 dark:bg-purple-950/80', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-300 dark:border-purple-800' },
                                 delivered: { label: 'Terkirim', bg: 'bg-emerald-50 dark:bg-emerald-950/80', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-300 dark:border-emerald-800' },
                                 delayed: { label: 'Tertunda', bg: 'bg-rose-50 dark:bg-rose-950/80', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-300 dark:border-rose-800' }
                               };
@@ -5044,9 +5188,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   {/* Armada & Cabang */}
                                   <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
                                     <div className="flex flex-col gap-1 items-start">
-                                      <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[11px]">
+                                      <span className={`px-2 py-0.5 rounded-md font-mono font-bold text-[11px] border ${
+                                        sameFleetDayCount > 1
+                                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-400 dark:border-amber-600'
+                                          : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                                      }`}>
                                         {p.armada}
                                       </span>
+                                      {sameFleetDayCount > 1 && (
+                                        <span className="text-[9px] font-black text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/70 px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700">
+                                          Armada Ganda ({sameFleetDayCount}x)
+                                        </span>
+                                      )}
                                       {selectedBranchId === 'ALL' && (() => {
                                         const br = branchStore.getScheduleBranch(p.id, p.area, p.armada);
                                         return (
@@ -6177,6 +6330,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             <div className="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
+              {editTripModalError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{editTripModalError}</span>
+                </div>
+              )}
               <CrewCustomSelectDropdown
                 label="Driver / Pengemudi *"
                 value={editingTripModal.driver}
@@ -6235,8 +6394,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 label="Armada Truk (Inisial & Plat Nomor) *"
                 value={editingTripModal.armada}
                 fleets={logisticsStore.getFleets()}
-                dateIso={editingTripModal.departureDateIso}
-                onChange={(val) => setEditingTripModal({ ...editingTripModal, armada: val })}
+                dateIso={editingTripModal.returnDateIso || editingTripModal.departureDateIso}
+                excludeScheduleId={editingTripModal.scheduleId}
+                onChange={(val) => {
+                  setEditTripModalError(null);
+                  setEditingTripModal({ ...editingTripModal, armada: val });
+                }}
                 accentColor="blue"
               />
 
@@ -6362,6 +6525,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
             {/* Form Body (Scrollable inside modal card) */}
             <div className="space-y-3 text-xs flex-1 overflow-y-auto pr-1">
+              {manualScheduleFormError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{manualScheduleFormError}</span>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div className="w-full">
                   <ModernDatePicker
@@ -6369,6 +6538,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     badgeText="Otomatis Hari Ini"
                     value={manualScheduleForm.dateIso}
                     onChange={(nextIso) => {
+                      setManualScheduleFormError(null);
                       setManualScheduleForm({
                         ...manualScheduleForm,
                         dateIso: nextIso,
@@ -6386,8 +6556,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     label="Armada Truk *"
                     value={manualScheduleForm.armada}
                     fleets={logisticsStore.getFleets()}
-                    dateIso={manualScheduleForm.dateIso}
-                    onChange={(val) => setManualScheduleForm({ ...manualScheduleForm, armada: val })}
+                    dateIso={manualScheduleForm.returnDateIso || manualScheduleForm.dateIso}
+                    onChange={(val) => {
+                      setManualScheduleFormError(null);
+                      setManualScheduleForm({ ...manualScheduleForm, armada: val });
+                    }}
                     accentColor="emerald"
                   />
                 </div>
@@ -6734,18 +6907,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => {
+                  setManualScheduleFormError(null);
                   if (!manualScheduleForm.driver.trim()) {
-                    alert('Mohon pilih Driver / Supir terlebih dahulu.');
+                    setManualScheduleFormError('Mohon pilih Driver / Supir terlebih dahulu.');
                     return;
                   }
                   if (!manualScheduleForm.area.trim()) {
-                    alert('Mohon pilih Area Kirim Tujuan terlebih dahulu.');
+                    setManualScheduleFormError('Mohon pilih Area Kirim Tujuan terlebih dahulu.');
                     return;
                   }
                   const stdArea = standardizeAreaName(manualScheduleForm.area.trim());
                   const retIso = manualScheduleForm.returnDateIso || manualScheduleForm.dateIso;
                   const depIso = manualScheduleForm.departureDateIso || retIso;
                   const effectiveDateStr = retIso;
+                  const armadaVal = manualScheduleForm.armada.trim() || 'DS3';
+
+                  const fleetConflict =
+                    logisticsStore.findFleetAssignmentConflict(armadaVal, effectiveDateStr) ||
+                    (depIso !== effectiveDateStr
+                      ? logisticsStore.findFleetAssignmentConflict(armadaVal, depIso)
+                      : null);
+
+                  if (fleetConflict) {
+                    const cSch = fleetConflict.conflictSchedule;
+                    const cCode = fleetConflict.fleet?.initialCode || cSch.armada || armadaVal;
+                    const cArea = cSch.areaName || cSch.store?.storeName || '-';
+                    const cDriver = cSch.crew?.name || '-';
+                    const dupMsg = `Armada ${cCode} sudah terjadwal pada tanggal ${effectiveDateStr} (${cArea} • Driver: ${cDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
+                    setManualScheduleFormError(dupMsg);
+                    setUploadToast({ type: 'error', message: dupMsg });
+                    return;
+                  }
 
                   const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string; bypassChecklistDirectComplete?: boolean } = {
                     tempId: `man-direct-${Date.now()}`,
@@ -6757,18 +6949,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     helper: manualScheduleForm.helper.trim() || '-',
                     helper2: manualScheduleForm.helper2.trim() || '-',
                     area: stdArea,
-                    armada: manualScheduleForm.armada.trim() || 'DS3',
+                    armada: armadaVal,
                     target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC',
                     departureTime: manualScheduleForm.departureTime || '07:30',
                     targetReturnTime: manualScheduleForm.targetReturnTime || '17:00',
                     bypassChecklistDirectComplete: manualScheduleForm.bypassChecklistDirectComplete
                   };
                   branchStore.setScheduleBranchId(manualEntry.tempId, manualScheduleForm.branchId);
-                  mergeAndSaveCombinedTrips(
+                  const savedOk = mergeAndSaveCombinedTrips(
                     [manualEntry],
                     'tambahkan',
                     'Form Tambah Jadwal Baru'
                   );
+                  if (!savedOk) return;
                   // Reset form after submitting so old data never sticks
                   const initDrivers = getIntegratedDrivers();
                   const initHelpers = getIntegratedHelpers();
@@ -7577,20 +7770,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   const adminName = logisticsStore.getCurrentUser()?.fullName || "Super Admin";
                   const nowIso = new Date().toISOString();
 
-                  if (matchedSch) {
-                    const deliveredSchedule = {
-                      ...matchedSch,
-                      status: "delivered" as const,
+                  const resolvedSch =
+                    matchedSch ||
+                    logisticsStore.getSchedules().find(s =>
+                      s.id === schId ||
+                      (p.id && s.id === p.id) ||
+                      (s.trackingNumber && s.trackingNumber === schId)
+                    );
+
+                  let payloadSchedule: Schedule | undefined;
+                  if (resolvedSch) {
+                    const deliveredSchedule: Schedule = {
+                      ...resolvedSch,
+                      status: "delivered",
+                      actualDeparture: resolvedSch.actualDeparture || resolvedSch.departureDate || nowIso,
+                      actualArrival: resolvedSch.actualArrival || resolvedSch.estimatedArrival || nowIso,
                       isChecklistBypassed: true,
                       checklistBypassedBy: adminName,
-                      checklistBypassedAt: nowIso
+                      checklistBypassedAt: nowIso,
+                      updatedAt: nowIso
                     };
-                    logisticsStore.updateSchedule(matchedSch.id, deliveredSchedule);
+                    payloadSchedule = deliveredSchedule;
+                    logisticsStore.updateSchedule(resolvedSch.id, deliveredSchedule);
                     try {
                       const wb = driverWaybillService.getWaybillForSchedule(deliveredSchedule);
                       driverWaybillService.updateWaybillStatus(wb.id, "delivered", "Bypass Checklist Super Admin");
                     } catch (e) {}
                   }
+
+                  const effectiveMo = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
+                  setWeeks(convertSchedulesToAdminWeeks(logisticsStore.getSchedules(), selectedYear, effectiveMo));
 
                   logisticsStore.addScheduleChangeLog({
                     actionType: "manual_edit",
@@ -7603,29 +7812,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     ]
                   });
 
-                  setSyncSuccessMessage(`⚡ Jadwal ${p.area} (${p.driver}) berhasil ditembus & disimpan ke status Selesai.`);
+                  setSyncSuccessMessage(`⚡ Jadwal ${p.area} (${p.driver}) berhasil ditembus & disimpan ke status Terkirim (Selesai).`);
                   setTimeout(() => setSyncSuccessMessage(null), 5000);
 
                   try {
-                    const response = await fetch(`/api/schedules/${encodeURIComponent(schId)}/bypass-checklist`, {
+                    const targetEndpointId = resolvedSch?.id || schId;
+                    await fetch(`/api/schedules/${encodeURIComponent(targetEndpointId)}/bypass-checklist`, {
                       method: "POST",
                       credentials: "same-origin",
-                      headers: { "Content-Type": "application/json" },
+                      headers: logisticsStore.buildSessionAuthHeaders({ "Content-Type": "application/json" }),
                       body: JSON.stringify({
                         note: `Input histori jadwal ${p.area}`,
                         postTripFleetStatus: "available",
-                        schedule: matchedSch ? {
-                          ...matchedSch,
-                          status: "delivered",
-                          isChecklistBypassed: true,
-                          checklistBypassedBy: adminName,
-                          checklistBypassedAt: nowIso
-                        } : undefined
+                        schedule: payloadSchedule
                       })
                     });
-                    if (response.ok) {
-                      await logisticsStore.hydrateOperationalDataFromHostinger().catch(() => {});
-                    }
+                    void persistSchedulesToDatabase(logisticsStore.getSchedules(), undefined, { source: "bypass_checklist" });
                   } catch (netErr) {
                     console.warn("[Bypass Checklist Admin Sync Warning]", netErr);
                   }

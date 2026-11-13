@@ -7,6 +7,10 @@ import { CENTRAL_WAREHOUSE } from '../data/mockData';
 import { RetailStore, TrackingPoint, RouteStop } from '../types';
 import { extractCoordinatesFromObject, getStoreLocationType, getStorePriorityLevel } from '../utils/coordinateParser';
 
+// Escape HTML untuk konten popup/tooltip Leaflet (innerHTML): data toko/GPS berasal dari input pengguna & impor spreadsheet.
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
 // Prevent Leaflet _onZoomTransitionEnd / _getMapPanePos from crashing when map unmounts during a zoom transition
 if (typeof L !== 'undefined' && L.Map && L.Map.prototype) {
   const origGetMapPanePos = (L.Map.prototype as any)._getMapPanePos;
@@ -501,18 +505,18 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       let pinColor = 'bg-blue-600 border-white text-white shadow-md ring-2 ring-blue-400/60';
       let innerDotColor = 'bg-white';
       let tooltipDotColor = 'bg-blue-400';
-      let badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300">Dalam Kota • ${kabupatenLabel}</span>`;
+      let badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300">Dalam Kota • ${escapeHtml(kabupatenLabel)}</span>`;
 
       if (locType === 'luar_pulau') {
         pinColor = 'bg-emerald-500 border-white text-white shadow-md ring-2 ring-emerald-300/70';
         innerDotColor = 'bg-white';
         tooltipDotColor = 'bg-emerald-400';
-        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">Luar Pulau • ${kabupatenLabel}</span>`;
+        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">Luar Pulau • ${escapeHtml(kabupatenLabel)}</span>`;
       } else if (locType === 'luar_kota') {
         pinColor = 'bg-amber-400 border-slate-900 text-slate-950 font-bold shadow-md ring-2 ring-amber-300/80';
         innerDotColor = 'bg-slate-950';
         tooltipDotColor = 'bg-amber-400';
-        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">Luar Kota • ${kabupatenLabel}</span>`;
+        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">Luar Kota • ${escapeHtml(kabupatenLabel)}</span>`;
       }
 
       if (isSelected) {
@@ -543,10 +547,10 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         <div class="flex flex-col gap-0.5 py-0.5 px-1 font-sans">
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full ${tooltipDotColor} shrink-0"></span>
-            <span class="font-bold text-white text-xs whitespace-nowrap">${store.storeName}</span>
-            <span class="text-[10px] text-slate-300 font-semibold">(${kecamatanLabel !== '-' ? `${kecamatanLabel}, ` : ''}${kabupatenLabel})</span>
+            <span class="font-bold text-white text-xs whitespace-nowrap">${escapeHtml(store.storeName)}</span>
+            <span class="text-[10px] text-slate-300 font-semibold">(${kecamatanLabel !== '-' ? `${escapeHtml(kecamatanLabel)}, ` : ''}${escapeHtml(kabupatenLabel)})</span>
           </div>
-          ${storeNote ? `<div class="text-[10px] text-amber-300 font-medium pl-4.5 max-w-[260px] truncate">📝 ${storeNote}</div>` : ''}
+          ${storeNote ? `<div class="text-[10px] text-amber-300 font-medium pl-4.5 max-w-[260px] truncate">📝 ${escapeHtml(storeNote)}</div>` : ''}
         </div>
       `;
 
@@ -561,15 +565,15 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       popupContent.innerHTML = `
         <div class="flex items-center justify-between mb-1.5">
           ${badgeHtml}
-          <span class="text-[10px] text-slate-500 font-mono font-bold">${store.nomor ? `No. ${store.nomor}` : store.storeCode}</span>
+          <span class="text-[10px] text-slate-500 font-mono font-bold">${store.nomor ? `No. ${escapeHtml(store.nomor)}` : escapeHtml(store.storeCode)}</span>
         </div>
-        <h4 class="font-bold text-slate-900 text-sm leading-snug">${store.storeName}</h4>
+        <h4 class="font-bold text-slate-900 text-sm leading-snug">${escapeHtml(store.storeName)}</h4>
         <div class="mt-2.5 pt-2 border-t border-slate-200 grid grid-cols-2 gap-1.5 text-[11px] text-slate-600">
           <div><strong>Latitude:</strong> <span class="font-mono">${lat.toFixed(6)}</span></div>
           <div><strong>Longitude:</strong> <span class="font-mono">${lng.toFixed(6)}</span></div>
         </div>
-        ${store.phone ? `<div class="text-[11px] mt-1 text-slate-600"><strong>Telp:</strong> <a href="tel:${store.phone}" class="text-blue-600 font-bold hover:underline">${store.phone}</a></div>` : ''}
-        ${storeNote ? `<div class="text-[11px] mt-1.5 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900"><strong>Catatan:</strong> ${storeNote}</div>` : ''}
+        ${store.phone ? `<div class="text-[11px] mt-1 text-slate-600"><strong>Telp:</strong> <a href="tel:${escapeHtml(String(store.phone).replace(/[^0-9+]/g, ''))}" class="text-blue-600 font-bold hover:underline">${escapeHtml(store.phone)}</a></div>` : ''}
+        ${storeNote ? `<div class="text-[11px] mt-1.5 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900"><strong>Catatan:</strong> ${escapeHtml(storeNote)}</div>` : ''}
       `;
       const btnContainer = L.DomUtil.create('div', 'mt-3 pt-2 border-t border-slate-200 flex items-center gap-1.5', popupContent);
       const btnSchedule = L.DomUtil.create('button', 'flex-1 py-1.5 px-2.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer', btnContainer);
@@ -613,7 +617,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
             ? `
               <div class="relative flex flex-col items-center" style="transform: translate(-50%, -100%);">
                 <div class="bg-[#d32f2f] text-white px-2.5 py-1 rounded text-[11px] font-black shadow-2xl whitespace-nowrap mb-1 tracking-tight border border-red-700">
-                  ${selectedFleetName}
+                  ${escapeHtml(selectedFleetName)}
                 </div>
                 <div class="w-8 h-8 rounded-full bg-[#1976d2] border-2 border-white shadow-xl flex items-center justify-center text-white ring-4 ring-blue-400/40">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
@@ -637,10 +641,10 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
             .bindPopup(`
               <div class="p-2.5 font-sans min-w-[220px]">
                 <div class="text-[10px] font-black uppercase text-blue-600 tracking-wider">TRACKSOLID LIVE GPS</div>
-                <div class="font-bold text-xs text-slate-900 mt-0.5">${point.locationName || 'Armada GPS'}</div>
+                <div class="font-bold text-xs text-slate-900 mt-0.5">${escapeHtml(point.locationName || 'Armada GPS')}</div>
                 <div class="text-xs text-slate-700 mt-1">Kecepatan: <strong>${point.speed} km/h</strong></div>
                 <div class="text-xs text-slate-600">Status Kontak: <strong class="${point.engineStatus === 'RUNNING' ? 'text-emerald-600' : 'text-red-600'}">${point.engineStatus}</strong></div>
-                <div class="text-[11px] text-slate-400 font-mono mt-1">${point.timestamp}</div>
+                <div class="text-[11px] text-slate-400 font-mono mt-1">${escapeHtml(point.timestamp)}</div>
               </div>
             `);
 
@@ -685,7 +689,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
           iconAnchor: [16, 16]
         });
         const startMarker = L.marker([startPoint.latitude, startPoint.longitude], { icon: startIcon })
-          .bindPopup(`<strong>Pusat Keberangkatan (Gudang DC)</strong><br/>${startPoint.timestamp}<br/>${startPoint.locationName || ''}`);
+          .bindPopup(`<strong>Pusat Keberangkatan (Gudang DC)</strong><br/>${escapeHtml(startPoint.timestamp)}<br/>${escapeHtml(startPoint.locationName || '')}`);
         layerGroup.addLayer(startMarker);
 
         // 4. Current Vehicle Navigation Pointer has been removed as per user request.
@@ -740,18 +744,18 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
               ${isCustomer ? 'TOKO MITRA / PELANGGAN:' : isLongNonCustomer ? 'LOKASI BERHENTI (BUKAN TOKO MITRA):' : 'LOKASI PERHENTIAN:'}
             </div>
             <div class="font-extrabold text-sm text-slate-900 mt-0.5 leading-snug">
-              ${stop.matchedStoreName || stop.locationName}
+              ${escapeHtml(stop.matchedStoreName || stop.locationName)}
             </div>
             ${stop.matchedStoreName && stop.matchedStoreName !== stop.locationName ? `
-              <div class="text-[11px] text-slate-500 mt-0.5 leading-tight">${stop.locationName}</div>
+              <div class="text-[11px] text-slate-500 mt-0.5 leading-tight">${escapeHtml(stop.locationName)}</div>
             ` : ''}
             ${stop.reason ? `
               <div class="text-xs ${isLongNonCustomer ? 'text-rose-800 bg-rose-50 border-rose-200' : 'text-slate-700 bg-slate-50 border-slate-100'} mt-2 p-1.5 rounded border font-medium">
-                <span class="font-bold">Status:</span> ${isLongNonCustomer ? '⚠️ Berhenti Lama di Luar Toko Pelanggan' : isCustomer ? '✅ Bongkar Muatan di Toko Pelanggan' : stop.reason}
+                <span class="font-bold">Status:</span> ${isLongNonCustomer ? '⚠️ Berhenti Lama di Luar Toko Pelanggan' : isCustomer ? '✅ Bongkar Muatan di Toko Pelanggan' : escapeHtml(stop.reason)}
               </div>
             ` : ''}
             <div class="text-[11px] text-slate-500 font-mono mt-2 pt-1 border-t border-slate-100">
-              Waktu Berhenti: ${stop.startTime} - ${stop.endTime}
+              Waktu Berhenti: ${escapeHtml(stop.startTime)} - ${escapeHtml(stop.endTime)}
             </div>
           </div>
         `, {

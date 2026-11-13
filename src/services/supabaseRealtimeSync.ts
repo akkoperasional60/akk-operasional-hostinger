@@ -542,10 +542,20 @@ function scheduleSignature(schedule: any): string {
   });
 }
 
+let hostingerPollInFlight = false;
+let hostingerRateLimitedUntil = 0;
+
 async function pollHostingerSchedules(): Promise<void> {
-  if (typeof fetch === 'undefined') return;
+  if (typeof fetch === 'undefined' || hostingerPollInFlight) return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  if (Date.now() < hostingerRateLimitedUntil) return;
+  hostingerPollInFlight = true;
   try {
     const response = await fetch('/api/schedules/persisted', { cache: 'no-store' });
+    if (response.status === 429) {
+      hostingerRateLimitedUntil = Date.now() + 60000;
+      return;
+    }
     if (!response.ok) return;
     const payload = await response.json();
     const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
@@ -581,13 +591,15 @@ async function pollHostingerSchedules(): Promise<void> {
     triggerStoreSync();
   } catch (err) {
     console.warn('[HostingerLive] Schedule polling skipped:', err);
+  } finally {
+    hostingerPollInFlight = false;
   }
 }
 
 function ensureHostingerPolling(): void {
   if (hostingerPollTimer || typeof window === 'undefined') return;
   void pollHostingerSchedules();
-  hostingerPollTimer = setInterval(() => void pollHostingerSchedules(), 15000);
+  hostingerPollTimer = setInterval(() => void pollHostingerSchedules(), 45000);
   isSubscribed = true;
 }
 

@@ -2150,12 +2150,30 @@ export const databaseBarangService = {
   }
 };
 
-// Aktifkan sinkronisasi Real-Time otomatis antar perangkat (PC <-> HP) segera saat aplikasi dibuka, setiap 3 detik & saat tab kembali aktif
+// Sinkronisasi Real-Time otomatis antar perangkat (PC <-> HP) secara hemat kuota jaringan (hanya aktif saat tab terlihat & sudah terautentikasi)
 if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
   let isRealtimeSyncRunning = false;
+  let lastSyncRunAt = 0;
   const triggerRealtimePhotoSync = () => {
-    if (isRealtimeSyncRunning || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
+    const now = Date.now();
+    if (
+      isRealtimeSyncRunning ||
+      now - lastSyncRunAt < 15000 ||
+      (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+    ) {
+      return;
+    }
+    try {
+      const hasSession = Boolean(
+        localStorage.getItem('akk_auth_session_user_id') ||
+          sessionStorage.getItem('akk_auth_session_user_id')
+      );
+      if (!hasSession) return;
+    } catch {
+      return;
+    }
     isRealtimeSyncRunning = true;
+    lastSyncRunAt = now;
     void databaseBarangService
       .syncRealtimePhotosFromServer()
       .finally(() => {
@@ -2163,16 +2181,7 @@ if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
       });
   };
 
-  setTimeout(() => {
-    void databaseBarangService.ensureHydrated().then(() => {
-      triggerRealtimePhotoSync();
-    });
-  }, 150);
-
-  setInterval(triggerRealtimePhotoSync, 3000);
-  if (typeof window.addEventListener === 'function') {
-    window.addEventListener('focus', triggerRealtimePhotoSync);
-  }
+  setInterval(triggerRealtimePhotoSync, 60000);
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -2181,3 +2190,4 @@ if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
     });
   }
 }
+

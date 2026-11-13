@@ -15,10 +15,10 @@ window.addEventListener('error', (event) => {
   }
 });
 
-// Auto-recover from stale chunk preloads on deployments
+// Prevent unhandled preload error crashes without triggering reload storms
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault();
-  window.location.reload();
+  console.warn('[Preload] Module preload failed; awaiting user action or retry.');
 });
 
 createRoot(document.getElementById('root')!).render(

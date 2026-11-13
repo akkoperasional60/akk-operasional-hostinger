@@ -16,9 +16,219 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('akk_theme_preference_v3');
+          var theme = pref === 'dark' ? 'dark' : 'light';
+          document.documentElement.classList.add(theme);
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.classList.add('light');
+        }
+      })();
+    </script>
+    <style>
+      :root {
+        --boot-bg: #f4f7fb;
+        --boot-surface: #ffffff;
+        --boot-border: #e2e8f0;
+        --boot-text: #0f172a;
+        --boot-muted: #64748b;
+        --boot-sk-a: #e2e8f0;
+        --boot-sk-b: #f8fafc;
+      }
+      html.dark {
+        --boot-bg: #090e17;
+        --boot-surface: #0f172a;
+        --boot-border: #1e293b;
+        --boot-text: #f8fafc;
+        --boot-muted: #94a3b8;
+        --boot-sk-a: #1e293b;
+        --boot-sk-b: #334155;
+      }
+      @keyframes akkBootWave {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+      @keyframes akkBootBar {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(300%); }
+      }
+      .akk-sk {
+        background: linear-gradient(110deg, var(--boot-sk-a) 25%, var(--boot-sk-b) 37%, var(--boot-sk-a) 63%);
+        background-size: 400% 100%;
+        animation: akkBootWave 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        border-radius: 10px;
+      }
+      #akk-boot-shell {
+        min-height: 100vh;
+        display: flex;
+        background: var(--boot-bg);
+        color: var(--boot-text);
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #akk-boot-sidebar {
+        display: none;
+        width: 260px;
+        flex-shrink: 0;
+        background: var(--boot-surface);
+        border-right: 1px solid var(--boot-border);
+        padding: 20px 16px;
+        flex-direction: column;
+        gap: 18px;
+      }
+      @media (min-width: 1024px) {
+        #akk-boot-sidebar { display: flex; }
+      }
+      #akk-boot-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      #akk-boot-topbar {
+        height: 64px;
+        background: var(--boot-surface);
+        border-bottom: 1px solid var(--boot-border);
+        padding: 0 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #akk-boot-grid4 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      @media (min-width: 1024px) {
+        #akk-boot-grid4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      }
+      #akk-boot-grid2 {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      @media (min-width: 1024px) {
+        #akk-boot-grid2 { grid-template-columns: 2fr 1fr; }
+      }
+    </style>
   </head>
-  <body class="bg-slate-950 text-slate-100 antialiased font-sans">
-    <div id="root"></div>
+  <body class="antialiased font-sans" style="margin: 0; background: var(--boot-bg); color: var(--boot-text);">
+    <div id="root">
+      <div id="akk-boot-shell">
+        <div style="position:fixed;top:0;left:0;right:0;height:3px;z-index:9999;overflow:hidden;background:rgba(37,99,235,0.12);">
+          <div style="height:100%;width:35%;background:linear-gradient(90deg,#2563eb,#38bdf8,#6366f1);border-radius:99px;animation:akkBootBar 1.25s ease-in-out infinite;"></div>
+        </div>
+
+        <aside id="akk-boot-sidebar">
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:14px;border-bottom:1px solid var(--boot-border);">
+            <img src="/favicon.svg" alt="AKK Operasional" style="width:36px;height:36px;object-fit:contain;border-radius:10px;" />
+            <div>
+              <div style="font-size:13px;font-weight:800;letter-spacing:-0.01em;">AKK Operasional</div>
+              <div style="font-size:10px;color:var(--boot-muted);font-weight:600;">PT. Anugrah Kemasan Kreatif</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div class="akk-sk" style="height:36px;width:100%;"></div>
+            <div class="akk-sk" style="height:34px;width:92%;"></div>
+            <div class="akk-sk" style="height:34px;width:85%;"></div>
+            <div class="akk-sk" style="height:34px;width:96%;"></div>
+            <div class="akk-sk" style="height:34px;width:78%;"></div>
+            <div class="akk-sk" style="height:34px;width:88%;"></div>
+          </div>
+        </aside>
+
+        <div id="akk-boot-main">
+          <header id="akk-boot-topbar">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <img src="/favicon.svg" alt="AKK" style="width:28px;height:28px;object-fit:contain;" />
+              <span style="font-size:13px;font-weight:800;">AKK Operasional</span>
+              <span id="akk-boot-status" style="font-size:11px;font-weight:600;color:var(--boot-muted);margin-left:4px;">· Memuat sistem...</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div class="akk-sk" style="height:32px;width:120px;border-radius:10px;"></div>
+              <div class="akk-sk" style="height:34px;width:34px;border-radius:50%;"></div>
+            </div>
+          </header>
+
+          <main style="padding:24px;max-width:1240px;width:100%;margin:0 auto;box-sizing:border-box;display:flex;flex-direction:column;gap:18px;">
+            <div id="akk-boot-banner" style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:18px;padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;">
+              <div style="display:flex;align-items:center;gap:14px;">
+                <div style="width:44px;height:44px;border-radius:14px;background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.2);display:flex;align-items:center;justify-content:center;padding:6px;box-sizing:border-box;">
+                  <img src="/favicon.svg" alt="Logo AKK" style="width:100%;height:100%;object-fit:contain;" />
+                </div>
+                <div>
+                  <div style="font-size:14px;font-weight:800;">AKK Operasional</div>
+                  <div id="akk-boot-subtitle" style="font-size:12px;color:var(--boot-muted);margin-top:2px;">Menyiapkan modul distribusi &amp; sinkronisasi data...</div>
+                </div>
+              </div>
+              <div id="akk-boot-action" class="akk-sk" style="height:34px;width:140px;border-radius:12px;"></div>
+            </div>
+
+            <div id="akk-boot-grid4">
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+                <div class="akk-sk" style="height:12px;width:55%;"></div>
+                <div class="akk-sk" style="height:26px;width:72%;"></div>
+                <div class="akk-sk" style="height:10px;width:45%;"></div>
+              </div>
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+                <div class="akk-sk" style="height:12px;width:60%;"></div>
+                <div class="akk-sk" style="height:26px;width:68%;"></div>
+                <div class="akk-sk" style="height:10px;width:50%;"></div>
+              </div>
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+                <div class="akk-sk" style="height:12px;width:52%;"></div>
+                <div class="akk-sk" style="height:26px;width:76%;"></div>
+                <div class="akk-sk" style="height:10px;width:42%;"></div>
+              </div>
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+                <div class="akk-sk" style="height:12px;width:58%;"></div>
+                <div class="akk-sk" style="height:26px;width:65%;"></div>
+                <div class="akk-sk" style="height:10px;width:48%;"></div>
+              </div>
+            </div>
+
+            <div id="akk-boot-grid2">
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+                <div class="akk-sk" style="height:16px;width:40%;"></div>
+                <div class="akk-sk" style="height:44px;width:100%;"></div>
+                <div class="akk-sk" style="height:44px;width:100%;"></div>
+                <div class="akk-sk" style="height:44px;width:100%;"></div>
+                <div class="akk-sk" style="height:44px;width:92%;"></div>
+              </div>
+              <div style="background:var(--boot-surface);border:1px solid var(--boot-border);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+                <div class="akk-sk" style="height:16px;width:55%;"></div>
+                <div class="akk-sk" style="height:130px;width:100%;border-radius:14px;"></div>
+                <div class="akk-sk" style="height:36px;width:100%;"></div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        setTimeout(function () {
+          try {
+            var shell = document.getElementById('akk-boot-shell');
+            if (!shell) return;
+            var status = document.getElementById('akk-boot-status');
+            var subtitle = document.getElementById('akk-boot-subtitle');
+            var action = document.getElementById('akk-boot-action');
+            if (status) status.textContent = '· Koneksi lambat';
+            if (subtitle) subtitle.textContent = 'Koneksi ke server membutuhkan waktu lebih lama. Klik Muat Ulang jika belum terbuka.';
+            if (action) {
+              action.className = '';
+              action.style.cssText = '';
+              action.innerHTML =
+                '<button type="button" onclick="window.location.reload()" style="background:#2563eb;color:#fff;border:none;border-radius:12px;padding:9px 16px;font-weight:700;font-size:12px;cursor:pointer;">Muat Ulang</button>';
+            }
+          } catch (e) {}
+        }, 18000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

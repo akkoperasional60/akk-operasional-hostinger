@@ -16,8 +16,7 @@ import {
   AlertCircle,
   Pencil,
   Trash2,
-  Edit3,
-  Sparkles
+  Edit3
 } from 'lucide-react';
 import {
   SalesHeaderFilter,
@@ -383,11 +382,25 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     return [];
   });
 
+  const persistAdminSchedulesToServer = (nextSchedules: AdminDailyScheduleItem[]) => {
+    try {
+      localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(nextSchedules));
+      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
+    } catch {}
+    fetch('/api/admin-schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedules: nextSchedules })
+    }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
+  };
+
   // Load and hydrate admin schedules from Hostinger MySQL database / server persistent disk
   useEffect(() => {
+    let active = true;
     fetch('/api/admin-schedules')
       .then(r => r.json())
       .then(res => {
+        if (!active) return;
         if (res && res.success && Array.isArray(res.schedules)) {
           setSchedules(res.schedules);
           try {
@@ -397,46 +410,18 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         }
       })
       .catch(err => console.warn('[Admin Schedules Fetch Error]', err));
+    return () => {
+      active = false;
+    };
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(schedules));
-      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
-    } catch {}
-
-    // Auto-sync ke Hostinger MySQL database app_state & server disk (kirim baik ada isi maupun array kosong [])
-    if (Array.isArray(schedules)) {
-      fetch('/api/admin-schedules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedules })
-      }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
-    }
-  }, [schedules]);
 
   const handleClearAllSchedules = () => {
     if (window.confirm('Yakin menghapus SEMUA jadwal & penugasan admin dari database?')) {
       setSchedules([]);
-      try {
-        localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify([]));
-        localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
-      } catch {}
-      fetch('/api/admin-schedules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedules: [] })
-      }).catch(() => {});
+      persistAdminSchedulesToServer([]);
       setSaveToast('Semua jadwal penugasan admin berhasil dihapus & dikosongkan.');
       setTimeout(() => setSaveToast(null), 3000);
     }
-  };
-
-  const handleLoadInitialTemplate = () => {
-    const template = createInitialSchedules(salesAdminNames);
-    setSchedules(template);
-    setSaveToast('Template penugasan contoh berhasil dimuat!');
-    setTimeout(() => setSaveToast(null), 3000);
   };
 
   // Manual Schedule Modal State
@@ -654,6 +639,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         });
       }
 
+      persistAdminSchedulesToServer(next);
       return next;
     });
 
@@ -686,7 +672,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         );
       }
 
-      return next.map(item => {
+      const updatedList = next.map(item => {
         if (item.id === editingSchedule.id) {
           return {
             ...item,
@@ -701,6 +687,8 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         }
         return item;
       });
+      persistAdminSchedulesToServer(updatedList);
+      return updatedList;
     });
 
     setEditingSchedule(null);
@@ -711,7 +699,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   const handleConfirmDeleteSchedule = () => {
     if (!deletingSchedule) return;
     const name = deletingSchedule.adminName;
-    setSchedules(prev => prev.filter(s => s.id !== deletingSchedule.id));
+    setSchedules(prev => {
+      const next = prev.filter(s => s.id !== deletingSchedule.id);
+      persistAdminSchedulesToServer(next);
+      return next;
+    });
     setDeletingSchedule(null);
     setSaveToast(`Penugasan ${name} telah berhasil dihapus dari database.`);
     setTimeout(() => setSaveToast(null), 3000);
@@ -830,17 +822,6 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            {schedules.length === 0 && (
-              <button
-                type="button"
-                onClick={handleLoadInitialTemplate}
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Muat Template Contoh</span>
-              </button>
-            )}
-
             {schedules.length > 0 && (
               <button
                 type="button"

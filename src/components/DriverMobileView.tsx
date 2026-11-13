@@ -24,6 +24,8 @@ import {
   Check,
   X,
   FileText,
+  FileSpreadsheet,
+  ArrowLeft,
   Camera,
   CameraOff,
   Calendar,
@@ -100,6 +102,7 @@ import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../utils/areaNo
 import { formKirimStore, FormKirimRecord } from '../services/formKirimStore';
 import { branchStore } from '../services/branchStore';
 import { getScheduleCalendarDateObj } from '../data/adminSchedule';
+import { DriverFormKirimPanel } from './DriverFormKirimPanel';
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -107,7 +110,20 @@ interface DriverMobileViewProps {
   currentUser?: UserProfile;
 }
 
-export type DriverPortalTab = 'deliveries' | 'checklist' | 'surat_jalan' | 'history' | 'profile';
+export type DriverPortalTab = 'deliveries' | 'checklist' | 'surat_jalan' | 'form_kirim' | 'history' | 'profile';
+
+function getPortalTodayWibIso(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  } catch {
+    return getLocalDateStr();
+  }
+}
 
 function matchSamePerson(nameA?: string, nameB?: string): boolean {
   const a = (nameA || '').trim().toLowerCase();
@@ -795,10 +811,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const handleUpdate = () => loadDriverKendalaReports();
     window.addEventListener('driver-report-updated', handleUpdate);
 
-    // Sinkronisasi berkala setiap 10 detik (didukung SSE / BroadcastChannel real-time tanpa membebani RAM HP)
+    // Sinkronisasi berkala setiap 25 detik (didukung SSE / BroadcastChannel real-time tanpa membebani jaringan)
     const fastSyncTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       driverReportService.syncWithServer().then(() => loadDriverKendalaReports()).catch(() => {});
-    }, 10000);
+    }, 25000);
 
     return () => {
       clearInterval(fastSyncTimer);
@@ -2322,6 +2339,102 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     crews,
     isUserHelperRole
   ]);
+
+  // 📋 Integrasi Form Kirim dengan Jadwal Hari Ini (Hanya tampil 1 Form Kirim untuk hari berjalan)
+  const todayFormKirimIntegration = useMemo<{
+    record: FormKirimRecord | null;
+    matchedArea: string;
+  }>(() => {
+    const todayWibIso = getPortalTodayWibIso();
+    const todayLocalIso = getLocalDateStr();
+    const isTodayDate = (iso?: string) => {
+      const clean = String(iso || '').slice(0, 10);
+      return Boolean(clean && (clean === todayWibIso || clean === todayLocalIso));
+    };
+
+    const todaySchedules = [
+      ...activeDeliveries,
+      ...deliveries.filter(
+        d => isScheduleMatchingTargetDate(d, todayWibIso) || isScheduleMatchingTargetDate(d, todayLocalIso)
+      )
+    ];
+    const primarySch = activeDeliveries[0] || todaySchedules[0] || null;
+    const primaryAreaStd = standardizeAreaName(primarySch?.areaName || primarySch?.store?.city || '');
+    const scheduledAreaSet = new Set(
+      todaySchedules
+        .map(d => standardizeAreaName(d.areaName || d.store?.city || ''))
+        .filter(Boolean)
+    );
+    const activeCrewName = currentDriver?.name || portalDisplayName || '';
+
+    // Filter hanya Form Kirim tanggal hari ini yang memiliki daftar faktur tersimpan dari Admin
+    const todayForms = formKirimList.filter(
+      fk => isTodayDate(fk.tanggalKirim) && (fk.invoiceItems?.length || 0) > 0
+    );
+    if (todayForms.length === 0) {
+      return {
+        record: null,
+        matchedArea: primarySch?.areaName || ''
+      };
+    }
+
+    const scored = todayForms
+      .map(fk => {
+        const fkAreaStd = standardizeAreaName(fk.areaKirim || '');
+        const matchesPrimaryArea = Boolean(primaryAreaStd && fkAreaStd === primaryAreaStd);
+        const matchesAnyTodayScheduleArea = Boolean(fkAreaStd && scheduledAreaSet.has(fkAreaStd));
+        const matchesCrew =
+          doesCrewNameMatch(fk.driverName, activeCrewName) ||
+          doesCrewNameMatch(fk.helperName, activeCrewName);
+        const hasInvoiceItems = (fk.invoiceItems?.length || 0) > 0;
+
+        let score = 0;
+        if (matchesPrimaryArea) score += 100;
+        else if (matchesAnyTodayScheduleArea) score += 60;
+        if (matchesCrew) score += 40;
+        if (hasInvoiceItems) score += 20;
+
+        return {
+          fk,
+          score,
+          isScheduleLinked: matchesPrimaryArea || matchesAnyTodayScheduleArea || matchesCrew
+        };
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return String(b.fk.createdAt || '').localeCompare(String(a.fk.createdAt || ''));
+      });
+
+    // Untuk driver/helper wajib terintegrasi dengan jadwal hari ini;
+    // untuk Super Admin prioritaskan yang cocok jadwal hari ini (fallback form ber-faktur hari ini)
+    const scheduleMatched = scored.find(s => s.isScheduleLinked);
+    const chosen =
+      scheduleMatched?.fk ||
+      (canManageAllPortalSchedules || isSuperAdminUser
+        ? scored.find(s => (s.fk.invoiceItems?.length || 0) > 0)?.fk || scored[0]?.fk || null
+        : todaySchedules.length === 0
+        ? null
+        : null);
+
+    return {
+      record: chosen || null,
+      matchedArea: chosen?.areaKirim || primarySch?.areaName || ''
+    };
+  }, [
+    formKirimList,
+    activeDeliveries,
+    deliveries,
+    currentDriver?.name,
+    portalDisplayName,
+    canManageAllPortalSchedules,
+    isSuperAdminUser
+  ]);
+
+  const readyFormKirimCount = useMemo(() => {
+    const rec = todayFormKirimIntegration.record;
+    if (!rec) return 0;
+    return rec.driverStatus === 'delivered' ? 0 : 1;
+  }, [todayFormKirimIntegration]);
 
   // 📄 Surat Jalan Keluar (SJ Keluar):
   // Tersinkronisasi penuh antara Driver & Helper dalam satu armada/jadwal:
@@ -4314,16 +4427,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <Truck className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                <span>Driver AKK Mobile</span>
-                <span>•</span>
-                <span className="inline-flex items-center gap-1 text-blue-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                  {isSupabaseLive ? 'Live DB' : 'Local DB'}
-                </span>
-              </div>
-              <h1 className="text-sm font-bold text-white truncate">
-                Portal Operasional Kru
+              <h1 className="text-sm sm:text-base font-black text-white tracking-wide uppercase truncate">
+                DRIVER AKK MOBILE
               </h1>
             </div>
           </div>
@@ -4376,13 +4481,34 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             <button
               onClick={() => {
                 setIsRefreshing(true);
+                void formKirimStore.hydrateFromServer(true);
                 loadDeliveries();
               }}
               disabled={isRefreshing}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition active:scale-95 cursor-pointer disabled:opacity-50"
-              title="Perbarui Data Pengiriman"
+              title="Perbarui Data Pengiriman & Form Kirim"
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-amber-400' : ''}`} />
+            </button>
+
+            {/* Profil Kru (Opsi 2: Dipindahkan ke Top Header agar Bottom Bar 100% Fokus Operasional) */}
+            <button
+              type="button"
+              onClick={() => setBottomNav('profile')}
+              className={`relative w-8 h-8 rounded-xl border flex items-center justify-center text-[11px] font-black transition active:scale-95 cursor-pointer shrink-0 ${
+                bottomNav === 'profile'
+                  ? 'bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-600/35 ring-2 ring-blue-400/40'
+                  : 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700/80'
+              }`}
+              title={`Profil Kru (${portalDisplayName})`}
+              aria-label="Buka Profil Kru"
+            >
+              <span>{portalInitials}</span>
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ${
+                  activeShift ? 'bg-emerald-400' : 'bg-slate-500'
+                }`}
+              />
             </button>
           </div>
         </div>
@@ -5507,11 +5633,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 Semua
               </button>
             </div>
-
-              {/* Integrasi Form Kirim pada Portal Driver saat ini di-OFF-kan terlebih dahulu */}
-              {false && formKirimList.filter(fk => fk.financeStatus === 'approved_finance').length > 0 && (
-                <div className="hidden" />
-              )}
 
             {/* Deliveries List */}
             {isLoading ? (
@@ -6843,6 +6964,23 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         )}
 
+        {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD) */}
+        {bottomNav === 'form_kirim' && (
+          <DriverFormKirimPanel
+            todayFormKirim={todayFormKirimIntegration.record}
+            todayDisplayDate={realtimeDayDateStr}
+            matchedScheduleArea={todayFormKirimIntegration.matchedArea}
+            portalDisplayName={portalDisplayName}
+            onRefresh={() => {
+              void formKirimStore.hydrateFromServer(true);
+              loadDeliveries(true);
+              addNotification('delivery', 'Form Kirim Diperbarui', 'Data Form Kirim hari ini telah disinkronkan.');
+            }}
+            onNotify={(title, message) => {
+              addNotification('delivery', title, message);
+            }}
+          />
+        )}
 
         {/* TAB 3: RIWAYAT PENGIRIMAN SELESAI */}
         {bottomNav === 'history' && (
@@ -6924,6 +7062,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         {/* TAB 4: PROFIL DRIVER & ARMADA */}
         {bottomNav === 'profile' && (
           <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setBottomNav('deliveries')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-200 transition active:scale-95 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-blue-400" />
+                <span>Kembali ke Jadwal</span>
+              </button>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Profil &amp; Shift Kru
+              </span>
+            </div>
+
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-14 h-14 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xl">
@@ -7022,9 +7174,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         )}
       </main>
 
-      {/* Floating Bottom Navigation Bar with Centered Elevated (+) Button matching reference design */}
+      {/* Floating Bottom Navigation Bar - Opsi 2 (Operasional Fokus: Jadwal | Checklist/Validasi SJ | + | Form Kirim | SJ Keluar) */}
       <nav className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-auto sm:w-[420px] max-w-md mx-auto z-40">
-        <div className="relative bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-[28px] border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.45)] px-3 py-2">
+        <div className="relative bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-[28px] border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.45)] px-2.5 py-2">
           <div className="grid grid-cols-5 items-center">
             {/* 1. Jadwal */}
             <button
@@ -7052,16 +7204,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   setWaybillStatusFilter('all');
                 }}
                 className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
-                  bottomNav === 'surat_jalan'
+                  bottomNav === 'surat_jalan' && waybillStatusFilter === 'all'
                     ? 'text-cyan-600 dark:text-cyan-400 font-bold'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' ? 'bg-cyan-50 dark:bg-cyan-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' && waybillStatusFilter === 'all' ? 'bg-cyan-50 dark:bg-cyan-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
                   <ClipboardCheck className="w-5 h-5" />
                 </div>
                 <span className="text-[11px] leading-tight mt-0.5">Validasi SJ</span>
-                <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' ? 'bg-cyan-600 dark:bg-cyan-400 scale-100' : 'scale-0 opacity-0'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' && waybillStatusFilter === 'all' ? 'bg-cyan-600 dark:bg-cyan-400 scale-100' : 'scale-0 opacity-0'}`} />
               </button>
             ) : (
               <button
@@ -7098,38 +7250,51 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
-            {/* 4. SJ Keluar */}
+            {/* 4. Form Kirim (Integrasi Admin Penjualan & Validasi Finance) */}
             <button
               type="button"
-              onClick={() => setBottomNav('surat_jalan')}
-              className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
-                bottomNav === 'surat_jalan'
+              onClick={() => {
+                setBottomNav('form_kirim');
+                void formKirimStore.hydrateFromServer(true);
+              }}
+              className={`relative flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
+                bottomNav === 'form_kirim'
                   ? 'text-blue-600 dark:text-blue-400 font-bold'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
-                <FileText className="w-5 h-5" />
+              <div className={`relative p-1 rounded-xl transition ${bottomNav === 'form_kirim' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <FileSpreadsheet className="w-5 h-5" />
+                {readyFormKirimCount > 0 && (
+                  <span className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-black flex items-center justify-center shadow-sm">
+                    {readyFormKirimCount}
+                  </span>
+                )}
               </div>
-              <span className="text-[11px] leading-tight mt-0.5">SJ Keluar</span>
-              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+              <span className="text-[11px] leading-tight mt-0.5 whitespace-nowrap">Form Kirim</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'form_kirim' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
             </button>
 
-            {/* 5. Profil */}
+            {/* 5. SJ Keluar */}
             <button
               type="button"
-              onClick={() => setBottomNav('profile')}
+              onClick={() => {
+                setBottomNav('surat_jalan');
+                if (effectiveJobdeskRole === 'helper' && waybillStatusFilter === 'all') {
+                  setWaybillStatusFilter('gate_out');
+                }
+              }}
               className={`flex flex-col items-center justify-center py-1 transition-all cursor-pointer group ${
-                bottomNav === 'profile'
+                bottomNav === 'surat_jalan' && (effectiveJobdeskRole !== 'helper' || waybillStatusFilter !== 'all')
                   ? 'text-blue-600 dark:text-blue-400 font-bold'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              <div className={`p-1 rounded-xl transition ${bottomNav === 'profile' ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
-                <User className="w-5 h-5" />
+              <div className={`p-1 rounded-xl transition ${bottomNav === 'surat_jalan' && (effectiveJobdeskRole !== 'helper' || waybillStatusFilter !== 'all') ? 'bg-blue-50 dark:bg-blue-500/10' : 'group-hover:bg-slate-100 dark:group-hover:bg-slate-800'}`}>
+                <FileText className="w-5 h-5" />
               </div>
-              <span className="text-[11px] leading-tight mt-0.5">Profil</span>
-              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'profile' ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
+              <span className="text-[11px] leading-tight mt-0.5 whitespace-nowrap">SJ Keluar</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1 transition-all ${bottomNav === 'surat_jalan' && (effectiveJobdeskRole !== 'helper' || waybillStatusFilter !== 'all') ? 'bg-blue-600 dark:bg-blue-400 scale-100' : 'scale-0 opacity-0'}`} />
             </button>
           </div>
         </div>

@@ -332,8 +332,9 @@ export const DriverReportsManagement: React.FC = () => {
     };
 
     const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       driverReportService.syncWithServer().catch(() => {});
-    }, 10000);
+    }, 30000);
 
     window.addEventListener('driver-report-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);

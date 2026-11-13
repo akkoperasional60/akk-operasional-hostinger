@@ -55,6 +55,7 @@ import { UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
 import { driverReportService } from '../services/driverReportService';
 import { canAccess } from '../utils/rbac';
+import { preloadTabModule } from '../utils/tabLoaders';
 
 export type NavTab =
   | 'dashboard'
@@ -1116,6 +1117,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                           <button
                             key={item.tab}
                             type="button"
+                            onMouseEnter={() => preloadTabModule(item.tab)}
+                            onFocus={() => preloadTabModule(item.tab)}
                             onClick={() => handleTabClick(item.tab)}
                             className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
                               isItemActive

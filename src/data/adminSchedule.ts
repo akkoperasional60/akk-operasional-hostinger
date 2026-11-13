@@ -501,7 +501,13 @@ export function convertSchedulesToAdminWeeks(
     let helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
     let helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id ? (!sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : '-') : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
     const areaName = sch.areaName || sch.store?.storeName || 'Area Kirim';
-    const armadaName = sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId || 'DS3';
+    const explicitArmada = sch.armada && sch.armada !== '-' ? String(sch.armada).trim() : '';
+    const armadaName =
+      sch.fleet?.initialCode ||
+      explicitArmada ||
+      sch.fleet?.plateNumber ||
+      (sch.fleetId && !sch.fleetId.startsWith('flt-') ? sch.fleetId : '') ||
+      'DS3';
     const targetDesc = sch.notes || sch.cargoDescription || 'Gudang Pusat AKK Banyuwangi DC';
 
     let backupCrewName: string | undefined = sch.backupCrewName;

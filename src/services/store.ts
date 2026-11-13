@@ -1083,29 +1083,6 @@ class LogisticsStore {
       return f;
     });
 
-    // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal pengiriman aktif:
-    // - Status 'maintenance' (Servis) tetap dipertahankan.
-    // - Status 'on-duty' (Kirim) hanya aktif apabila armada sedang memiliki jadwal yang sudah Gate-Out ('in_transit' / 'picked_up' / 'delayed').
-    // - Selain itu otomatis menjadi 'available' (Ready) agar siap digunakan jadwal berikutnya.
-    this.fleets = this.fleets.map(f => {
-      if (f.status === 'maintenance') return f;
-      const hasActiveTrip = (this.schedules || []).some(
-        sch =>
-          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
-          (sch.fleetId === f.id ||
-            (sch.fleet?.plateNumber &&
-              sch.fleet.plateNumber.trim().toUpperCase() === f.plateNumber.trim().toUpperCase()))
-      );
-      const targetStatus: Fleet['status'] = hasActiveTrip ? 'on-duty' : 'available';
-      if (f.status !== targetStatus) {
-        updatedFleets = true;
-        return { ...f, status: targetStatus };
-      }
-      return f;
-    });
-
-    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-
     // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC & sanitize combined Denpasar 1 & 2
     // Serta memulihkan jadwal baru (>= 2026-11-12) yang sempat terdampak bug status 'delivered' tanpa bukti POD / tanpa bypass checklist
     let updatedSchedules = false;
@@ -1132,7 +1109,8 @@ class LogisticsStore {
       if (
         depIso >= '2026-11-12' &&
         nextS.status === 'delivered' &&
-        !nextS.podPhotoUrl
+        !nextS.podPhotoUrl &&
+        !nextS.isChecklistBypassed
       ) {
         updatedSchedules = true;
         nextS = {
@@ -1147,6 +1125,9 @@ class LogisticsStore {
     if (updatedSchedules) {
       this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     }
+
+    // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal aktif hari ini (WIB)
+    this.reconcileFleetAndScheduleStatuses(false);
 
     let updatedFuel = false;
     this.fuelLogs = this.fuelLogs.map(l => {
@@ -1568,6 +1549,7 @@ class LogisticsStore {
   private cachedSchedules: Schedule[] | null = null;
   private hydratePromise: Promise<boolean> | null = null;
   private lastHydrateAt = 0;
+  private hydrateRateLimitedUntil = 0;
 
   private invalidateReadCaches() {
     this.cachedFleets = null;
@@ -1582,12 +1564,24 @@ class LogisticsStore {
       let sanitizedData = data;
       if (Array.isArray(data)) {
         if (key === STORAGE_KEYS.SCHEDULES) {
-          // Strip duplicated heavy sub-objects before stringify while preserving lightweight crew/helper identity
+          // Strip duplicated heavy sub-objects before stringify while preserving lightweight fleet & crew/helper identity
           sanitizedData = data.slice(0, 5000).map((sch: any) => {
             if (!sch || typeof sch !== 'object') return sch;
             const { store, fleet, crew, crewHelper, crewHelper2, ...compact } = sch;
+            const resolvedArmada = sch.armada || fleet?.initialCode || fleet?.plateNumber;
             return {
               ...compact,
+              ...(resolvedArmada ? { armada: resolvedArmada } : {}),
+              ...(fleet && (fleet.id || fleet.plateNumber || fleet.initialCode)
+                ? {
+                    fleet: {
+                      id: fleet.id,
+                      plateNumber: fleet.plateNumber,
+                      initialCode: fleet.initialCode,
+                      vehicleType: fleet.vehicleType
+                    }
+                  }
+                : {}),
               ...(crew && crew.name ? { crew: { id: crew.id, name: crew.name, phone: crew.phone, role: crew.role } } : {}),
               ...(crewHelper && crewHelper.name ? { crewHelper: { id: crewHelper.id, name: crewHelper.name, phone: crewHelper.phone, role: crewHelper.role } } : {}),
               ...(crewHelper2 && crewHelper2.name ? { crewHelper2: { id: crewHelper2.id, name: crewHelper2.name, phone: crewHelper2.phone, role: crewHelper2.role } } : {})
@@ -1726,7 +1720,10 @@ class LogisticsStore {
       const sch = this.schedules.find(s => s.id === scheduleId);
       if (sch && (sch.status === 'scheduled' || sch.status === 'picked_up')) {
         sch.status = 'in_transit';
+        sch.actualDeparture = sch.actualDeparture || now.toISOString();
+        sch.updatedAt = now.toISOString();
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('gate_out_sync');
       }
     }
 
@@ -1769,7 +1766,9 @@ class LogisticsStore {
       if (sch) {
         sch.actualArrival = `${now.toISOString().split('T')[0]} ${timeStr}`;
         sch.status = 'delivered';
+        sch.updatedAt = now.toISOString();
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('gate_in_sync');
       }
     }
 
@@ -1865,49 +1864,63 @@ class LogisticsStore {
   }
 
   public getFleets(): Fleet[] {
-    if (this.cachedFleets !== null) {
+    if (this.cachedFleets !== null && this.cachedFleets.length > 0) {
       return this.cachedFleets;
     }
-    this.cachedFleets = sortFleetsByCanonicalOrder(this.fleets.map(f => this.enrichFleetItem(f)));
+    const sourceFleets = this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS;
+    this.cachedFleets = sortFleetsByCanonicalOrder(sourceFleets.map(f => this.enrichFleetItem(f)));
     return this.cachedFleets;
   }
 
   public findFleetByCodeOrPlate(codeOrPlate?: string | null, areaName?: string): Fleet | undefined {
     const all = this.getFleets();
-    const normArea = (areaName || '').trim().toLowerCase();
+    const cleanStr = String(codeOrPlate || '').trim();
 
-    // 1. Priority: Muncar Pinggir / Muncar Retail official fleet is N4 / NS2
-    if (normArea.includes('muncar')) {
+    if (cleanStr && cleanStr !== '-') {
+      // 1. Canonical resolver (checks exact initialCode, slash tokens like N4 / NS2, NMR / DS4, plateNumber, id)
+      const canonical = resolveCanonicalFleetMeta(cleanStr);
+      if (canonical) {
+        const matchInStore = all.find(
+          f =>
+            f.id === canonical.id ||
+            (f.plateNumber && canonical.plateNumber && f.plateNumber.replace(/\s+/g, '').toUpperCase() === canonical.plateNumber.replace(/\s+/g, '').toUpperCase())
+        );
+        return matchInStore || this.enrichFleetItem(canonical);
+      }
+
+      // 2. Normalized comparison across active store fleets and INITIAL_FLEETS
+      const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+      const clean = norm(cleanStr);
+      const upperRaw = cleanStr.toUpperCase();
+
+      const searchPool = [...all, ...INITIAL_FLEETS];
+      const matched = searchPool.find(f => {
+        if (f.id && f.id.toLowerCase() === cleanStr.toLowerCase()) return true;
+        if (f.plateNumber && norm(f.plateNumber) === clean) return true;
+        if (f.initialCode && norm(f.initialCode) === clean) return true;
+        if (f.initialCode && f.initialCode.toUpperCase() === upperRaw) return true;
+        if (f.initialCode) {
+          const parts = f.initialCode.split(/[/]+/).map(p => norm(p)).filter(Boolean);
+          if (parts.includes(clean)) return true;
+        }
+        if (clean.length >= 4 && f.plateNumber && norm(f.plateNumber).includes(clean)) return true;
+        return false;
+      });
+      if (matched) {
+        return this.enrichFleetItem(matched);
+      }
+    }
+
+    // 3. Fallback by areaName ONLY when codeOrPlate was not provided
+    const normArea = (areaName || '').trim().toLowerCase();
+    if (!cleanStr && normArea.includes('muncar')) {
       const muncarFleet = all.find(
         f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')
       );
       if (muncarFleet) return muncarFleet;
     }
 
-    if (!codeOrPlate) return undefined;
-    const cleanStr = String(codeOrPlate).trim();
-
-    // 2. Canonical resolver
-    const canonical = resolveCanonicalFleetMeta(cleanStr);
-    if (canonical) {
-      const matchInStore = all.find(f => f.id === canonical.id || f.plateNumber === canonical.plateNumber);
-      return matchInStore || canonical;
-    }
-
-    // 3. Normalized comparison
-    const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
-    const clean = norm(cleanStr);
-
-    return all.find(f => {
-      if (f.id.toLowerCase() === cleanStr.toLowerCase()) return true;
-      if (norm(f.plateNumber) === clean) return true;
-      if (norm(f.initialCode || '') === clean) return true;
-      if (f.initialCode) {
-        const parts = f.initialCode.split(/[/]+/).map(p => norm(p));
-        if (parts.includes(clean)) return true;
-      }
-      return false;
-    });
+    return undefined;
   }
 
   public setFleets(fleets: Fleet[]): void {
@@ -2286,16 +2299,55 @@ class LogisticsStore {
         storeCategory: 'Distribution Hub'
       };
 
-      const matchedFleet =
-        (sch.fleetId ? fleetById.get(sch.fleetId) : undefined) ||
-        (sch.fleet?.plateNumber ? fleetByPlate.get(normPlate(sch.fleet.plateNumber)) : undefined) ||
-        sch.fleet;
+      let matchedFleet: Fleet | undefined = undefined;
+      const explicitArmadaCode =
+        (sch.armada && sch.armada !== '-' ? String(sch.armada).trim() : '') ||
+        (sch.fleet?.initialCode ? String(sch.fleet.initialCode).trim() : '') ||
+        (sch.fleet?.plateNumber ? String(sch.fleet.plateNumber).trim() : '');
+
+      // Extract armada token from trackingNumber if formatted as PO-AKK-YYYYMMDD-<ARMADA>-<SUFFIX>
+      let trackingArmadaToken = '';
+      if (sch.trackingNumber) {
+        const trkMatch = sch.trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i);
+        if (trkMatch && trkMatch[1] && trkMatch[1].toUpperCase() !== 'FLT') {
+          trackingArmadaToken = trkMatch[1].trim();
+        }
+      }
+
+      if (explicitArmadaCode) {
+        matchedFleet = this.findFleetByCodeOrPlate(explicitArmadaCode);
+      }
+      if (!matchedFleet && sch.fleetId && sch.fleetId !== 'flt-01') {
+        matchedFleet = fleetById.get(sch.fleetId) || this.findFleetByCodeOrPlate(sch.fleetId);
+      }
+      if (!matchedFleet && trackingArmadaToken) {
+        matchedFleet = this.findFleetByCodeOrPlate(trackingArmadaToken);
+      }
+      if (!matchedFleet && sch.fleetId) {
+        matchedFleet = fleetById.get(sch.fleetId) || this.findFleetByCodeOrPlate(sch.fleetId);
+      }
+      if (!matchedFleet && sch.fleet?.plateNumber) {
+        matchedFleet = fleetByPlate.get(normPlate(sch.fleet.plateNumber));
+      }
+      if (!matchedFleet && sch.fleet) {
+        matchedFleet = sch.fleet;
+      }
+
+      const enrichedFleet = matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined;
+      const resolvedArmada =
+        enrichedFleet?.initialCode ||
+        explicitArmadaCode ||
+        trackingArmadaToken ||
+        enrichedFleet?.plateNumber ||
+        sch.armada;
 
       return {
         ...sch,
         areaName,
         store: areaStore,
-        fleet: matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined,
+        fleetId: enrichedFleet?.id || sch.fleetId,
+        fleet: enrichedFleet,
+        armada: resolvedArmada,
         crew: findMatchingCrew(sch.crewId, sch.crew),
         crewHelper: (sch.crewHelperId || sch.crewHelper) ? findMatchingCrew(sch.crewHelperId, sch.crewHelper) : undefined,
         crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
@@ -2673,7 +2725,7 @@ class LogisticsStore {
     return this.users;
   }
 
-  private buildSessionAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
+  public buildSessionAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
     const savedToken =
       (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
       (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
@@ -3421,7 +3473,10 @@ class LogisticsStore {
       return this.hydratePromise;
     }
     const nowMs = Date.now();
-    if (!force && nowMs - this.lastHydrateAt < 5000) {
+    if (nowMs < this.hydrateRateLimitedUntil) {
+      return false;
+    }
+    if (!force && nowMs - this.lastHydrateAt < 15000) {
       return true;
     }
     this.lastHydrateAt = nowMs;
@@ -3443,6 +3498,16 @@ class LogisticsStore {
           fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
         ]);
+
+        if (
+          fleetRes.status === 429 ||
+          crewRes.status === 429 ||
+          storeRes.status === 429 ||
+          scheduleRes.status === 429
+        ) {
+          this.hydrateRateLimitedUntil = Date.now() + 60000;
+          return false;
+        }
 
         const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
           fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
@@ -3483,7 +3548,7 @@ class LogisticsStore {
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-          } else if (deletedIdSet.size > 0 || deletedPlateSet.size > 0) {
+          } else {
             this.fleets = sortFleetsByCanonicalOrder(baseFleets);
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
           }
@@ -3496,34 +3561,51 @@ class LogisticsStore {
           this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
           this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
         }
-        if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
-          const remoteSchedules: Schedule[] = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
+        if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.source === 'disk_database' || schedulePayload?.exists)) {
+          const remoteSchedules: Schedule[] = (Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : []).filter(
+            (s: any) => s && typeof s === 'object' && s.id && !String(s.id).startsWith('batch-') && (s.departureDate || s.areaName || s.trackingNumber)
+          );
+          const deletedIdsSet = new Set<string>(
+            Array.isArray(schedulePayload?.deletedIds) ? schedulePayload.deletedIds.map((x: any) => String(x)) : []
+          );
           const localById = new Map<string, Schedule>();
           for (const loc of this.schedules || []) {
-            if (loc?.id) localById.set(loc.id, loc);
+            if (loc?.id && !String(loc.id).startsWith('batch-')) localById.set(loc.id, loc);
           }
           const mergedIds = new Set<string>();
           const mergedSchedules: Schedule[] = [];
 
           for (const rem of remoteSchedules) {
-            if (!rem?.id) continue;
+            if (!rem?.id || deletedIdsSet.has(String(rem.id))) continue;
             mergedIds.add(rem.id);
             const loc = localById.get(rem.id);
-            let combined: Schedule = loc && (loc.isManuallyEdited || loc.backupCrewName !== undefined)
-              ? {
-                  ...rem,
-                  ...loc,
-                  backupCrewName: loc.backupCrewName,
-                  backupPosition: loc.backupPosition,
-                  backupTargetName: loc.backupTargetName
-                }
-              : { ...rem };
+            const locTime = loc?.updatedAt ? new Date(loc.updatedAt).getTime() : 0;
+            const remTime = rem?.updatedAt ? new Date(rem.updatedAt).getTime() : 0;
+
+            // Server database is authoritative. Only prefer local if local has a strictly newer updatedAt timestamp.
+            let combined: Schedule = (loc && locTime > 0 && remTime > 0 && locTime > remTime)
+              ? { ...rem, ...loc }
+              : (loc ? { ...loc, ...rem } : { ...rem });
+
+            if (!combined.armada && (rem.armada || loc?.armada || rem.fleet?.initialCode || loc?.fleet?.initialCode)) {
+              combined.armada = rem.armada || loc?.armada || rem.fleet?.initialCode || loc?.fleet?.initialCode;
+            }
+            if (!combined.fleet && (rem.fleet || loc?.fleet)) {
+              combined.fleet = rem.fleet || loc?.fleet;
+            }
+            if ((rem.isChecklistBypassed || loc?.isChecklistBypassed) && (rem.status === 'delivered' || loc?.status === 'delivered')) {
+              combined.status = 'delivered';
+              combined.isChecklistBypassed = true;
+              combined.checklistBypassedBy = rem.checklistBypassedBy || loc?.checklistBypassedBy || 'Super Admin';
+              combined.checklistBypassedAt = rem.checklistBypassedAt || loc?.checklistBypassedAt;
+            }
 
             const depIso = String(combined.departureDate || '').slice(0, 10);
             if (
               depIso >= '2026-11-12' &&
               combined.status === 'delivered' &&
-              !combined.podPhotoUrl
+              !combined.podPhotoUrl &&
+              !combined.isChecklistBypassed
             ) {
               combined = {
                 ...combined,
@@ -3535,16 +3617,14 @@ class LogisticsStore {
             mergedSchedules.push(combined);
           }
 
+          // Only keep un-synced local schedules if they were just created within the last 15 seconds on this browser
+          const nowMs = Date.now();
           for (const loc of this.schedules || []) {
-            if (loc?.id && !mergedIds.has(loc.id)) {
-              const depIso = String(loc.departureDate || '').slice(0, 10);
-              const cleanLoc =
-                depIso >= '2026-11-12' &&
-                loc.status === 'delivered' &&
-                !loc.podPhotoUrl
-                  ? { ...loc, status: 'scheduled' as const, isChecklistBypassed: false, actualArrival: undefined }
-                  : loc;
-              mergedSchedules.push(cleanLoc);
+            if (loc?.id && !mergedIds.has(loc.id) && !deletedIdsSet.has(String(loc.id)) && !String(loc.id).startsWith('batch-')) {
+              const createdMs = loc.createdAt ? new Date(loc.createdAt).getTime() : 0;
+              if (createdMs > 0 && nowMs - createdMs < 15000) {
+                mergedSchedules.push(loc);
+              }
             }
           }
 
@@ -3552,6 +3632,7 @@ class LogisticsStore {
           this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
         }
 
+        this.reconcileFleetAndScheduleStatuses(true);
         this.syncUsersWithCrews();
         this.notify();
         return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
@@ -3579,6 +3660,9 @@ class LogisticsStore {
 
   public async restoreServerSession(): Promise<boolean> {
     try {
+      // Mulai hydrate jadwal & armada secara paralel sejak milidetik pertama reload halaman tanpa menunggu /api/auth/me selesai
+      void this.hydrateOperationalDataFromHostinger();
+
       const savedToken =
         (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
         (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
@@ -3985,39 +4069,54 @@ class LogisticsStore {
     };
 
     const customId = (schedule as any).id;
-    const newSchedule: Schedule = {
+    const nowIso = new Date().toISOString();
+    const resolvedFleet =
+      this.findFleetByCodeOrPlate(
+        schedule.armada || schedule.fleet?.initialCode || schedule.fleet?.plateNumber || schedule.fleetId
+      ) ||
+      schedule.fleet ||
+      this.fleets.find(f => f.id === schedule.fleetId);
+
+    const resolvedCrew = this.crews.find(c => c.id === schedule.crewId) || schedule.crew;
+    const resolvedHelper = schedule.crewHelperId
+      ? (this.crews.find(c => c.id === schedule.crewHelperId) || schedule.crewHelper)
+      : schedule.crewHelper;
+    const resolvedHelper2 = schedule.crewHelper2Id
+      ? (this.crews.find(c => c.id === schedule.crewHelper2Id) || schedule.crewHelper2)
+      : schedule.crewHelper2;
+
+    const hydratedNewSchedule: Schedule = {
       ...schedule,
       id: customId && typeof customId === 'string' && customId.trim() ? customId.trim() : 'sch-' + Math.random().toString(36).substring(2, 9),
       areaName,
       store: areaStore,
-      createdAt: new Date().toISOString()
+      fleetId: resolvedFleet?.id || schedule.fleetId || 'flt-01',
+      fleet: resolvedFleet,
+      armada: schedule.armada || resolvedFleet?.initialCode || resolvedFleet?.plateNumber,
+      crew: resolvedCrew,
+      crewHelper: resolvedHelper,
+      crewHelper2: resolvedHelper2,
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     // Status armada berubah menjadi 'on-duty' (Kirim) hanya saat sudah Gate-Out ('in_transit' / 'picked_up')
-    if (newSchedule.status === 'in_transit' || newSchedule.status === 'picked_up') {
-      this.updateFleetStatus(newSchedule.fleetId, 'on-duty', newSchedule.cargoWeightTon);
-      this.updateCrewStatus(newSchedule.crewId, 'on-duty');
+    if (hydratedNewSchedule.status === 'in_transit' || hydratedNewSchedule.status === 'picked_up') {
+      this.updateFleetStatus(hydratedNewSchedule.fleetId, 'on-duty', hydratedNewSchedule.cargoWeightTon);
+      this.updateCrewStatus(hydratedNewSchedule.crewId, 'on-duty');
     }
 
-    this.schedules = [newSchedule, ...this.schedules.filter(s => s.id !== newSchedule.id)];
+    this.schedules = [hydratedNewSchedule, ...this.schedules.filter(s => s.id !== hydratedNewSchedule.id)];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
-
-    const hydratedNewSchedule: Schedule = {
-      ...newSchedule,
-      fleet: this.fleets.find(f => f.id === newSchedule.fleetId) || newSchedule.fleet,
-      crew: this.crews.find(c => c.id === newSchedule.crewId) || newSchedule.crew,
-      crewHelper: newSchedule.crewHelperId ? (this.crews.find(c => c.id === newSchedule.crewHelperId) || newSchedule.crewHelper) : undefined,
-      crewHelper2: newSchedule.crewHelper2Id ? (this.crews.find(c => c.id === newSchedule.crewHelper2Id) || newSchedule.crewHelper2) : undefined
-    };
 
     // Trigger auto-write middleware
     this.dispatchMiddleware({
       entityType: 'schedule',
       action: 'create',
-      id: newSchedule.id,
+      id: hydratedNewSchedule.id,
       data: hydratedNewSchedule,
-      timestamp: new Date().toISOString()
+      timestamp: nowIso
     });
 
     // Publish real-time assignment notification via Supabase Realtime (filtered to assigned driver)
@@ -4030,9 +4129,21 @@ class LogisticsStore {
     return hydratedNewSchedule;
   }
 
-  private persistSchedulesSnapshotToBackend(source: string = 'store_sync') {
+  private persistSchedulesTimer: any = null;
+  private pendingDeletedScheduleIds: Set<string> = new Set();
+
+  private persistSchedulesSnapshotToBackend(source: string = 'store_sync', deletedIds: string[] = [], replaceAll: boolean = false) {
     if (typeof fetch === 'undefined') return;
-    setTimeout(() => {
+    deletedIds.forEach(id => {
+      if (id) this.pendingDeletedScheduleIds.add(String(id));
+    });
+    if (this.persistSchedulesTimer) {
+      clearTimeout(this.persistSchedulesTimer);
+    }
+    this.persistSchedulesTimer = setTimeout(() => {
+      this.persistSchedulesTimer = null;
+      const batchDeletedIds = Array.from(this.pendingDeletedScheduleIds);
+      this.pendingDeletedScheduleIds.clear();
       try {
         fetch('/api/schedules/persist', {
           method: 'POST',
@@ -4040,11 +4151,13 @@ class LogisticsStore {
           credentials: 'same-origin',
           body: JSON.stringify({
             schedules: this.schedules,
+            deletedIds: batchDeletedIds,
+            replaceAll,
             source
           })
         }).catch(() => {});
       } catch {}
-    }, 30);
+    }, 180);
   }
 
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
@@ -4062,13 +4175,36 @@ class LogisticsStore {
     }
     let oldSch: Schedule | null = null;
     let newSch: Schedule | null = null;
+    const nowIso = new Date().toISOString();
+
     this.schedules = this.schedules.map(sch => {
       if (sch.id === id) {
         oldSch = sch;
-        const result = { ...sch, ...updatedSchedule };
-        newSch = result;
+        const merged = { ...sch, ...updatedSchedule, updatedAt: nowIso };
+        const resolvedFleet =
+          (updatedSchedule.armada || updatedSchedule.fleet || updatedSchedule.fleetId
+            ? this.findFleetByCodeOrPlate(
+                updatedSchedule.armada ||
+                  updatedSchedule.fleet?.initialCode ||
+                  updatedSchedule.fleet?.plateNumber ||
+                  updatedSchedule.fleetId
+              )
+            : undefined) ||
+          merged.fleet ||
+          this.fleets.find(f => f.id === merged.fleetId);
+
+        const hydrated: Schedule = {
+          ...merged,
+          fleetId: resolvedFleet?.id || merged.fleetId,
+          fleet: resolvedFleet,
+          armada: updatedSchedule.armada || resolvedFleet?.initialCode || merged.armada || resolvedFleet?.plateNumber,
+          crew: this.crews.find(c => c.id === merged.crewId) || merged.crew,
+          crewHelper: merged.crewHelperId ? (this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
+          crewHelper2: merged.crewHelper2Id ? (this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
+        };
+        newSch = hydrated;
         this.logActivity('Update Jadwal', sch.trackingNumber, `Perubahan pada jadwal ${id}`);
-        return result;
+        return hydrated;
       }
       return sch;
     });
@@ -4076,25 +4212,17 @@ class LogisticsStore {
     this.syncSchedulesToCrewHistory(this.schedules);
 
     if (newSch) {
-      const hydratedUpdated: Schedule = {
-        ...(newSch as Schedule),
-        fleet: this.fleets.find(f => f.id === (newSch as Schedule).fleetId) || (newSch as Schedule).fleet,
-        crew: this.crews.find(c => c.id === (newSch as Schedule).crewId) || (newSch as Schedule).crew,
-        crewHelper: (newSch as Schedule).crewHelperId ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelperId) || (newSch as Schedule).crewHelper) : undefined,
-        crewHelper2: (newSch as Schedule).crewHelper2Id ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelper2Id) || (newSch as Schedule).crewHelper2) : undefined
-      };
-
       this.dispatchMiddleware({
         entityType: 'schedule',
         action: 'update',
         id,
-        data: hydratedUpdated,
+        data: newSch,
         previousData: oldSch || undefined,
-        timestamp: new Date().toISOString()
+        timestamp: nowIso
       });
 
       try {
-        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedUpdated, oldSch).catch(() => {});
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', newSch, oldSch).catch(() => {});
       } catch {}
     }
 
@@ -4113,6 +4241,7 @@ class LogisticsStore {
     this.schedules = this.schedules.filter(sch => sch.id !== id && sch.id !== String(id));
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
+    this.reconcileFleetAndScheduleStatuses(true);
 
     this.dispatchMiddleware({
       entityType: 'schedule',
@@ -4122,15 +4251,19 @@ class LogisticsStore {
       timestamp: new Date().toISOString()
     });
 
+    this.persistSchedulesSnapshotToBackend('delete_schedule', [String(id)]);
     this.notify();
   }
 
   public clearAllSchedules() {
+    const allIds = this.schedules.map(s => String(s.id)).filter(Boolean);
     this.schedules = [];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
+    this.reconcileFleetAndScheduleStatuses(true);
     try {
       localStorage.removeItem('akk_driver_cached_deliveries_v2');
     } catch {}
+    this.persistSchedulesSnapshotToBackend('clear_all', allIds, true);
     this.notify();
   }
 
@@ -4141,7 +4274,7 @@ class LogisticsStore {
   public batchSyncSchedules(
     itemsToAdd: Schedule[],
     itemsToUpdate: { id: string; data: Partial<Schedule> }[] = [],
-    options: { isImport?: boolean; replaceMonth?: boolean } = {}
+    options: { isImport?: boolean; replaceMonth?: boolean; skipBackendPersist?: boolean } = {}
   ): { addedCount: number; updatedCount: number } {
     // On import or explicit replace request, purge old unedited schedules for the affected month(s)
     if (options.isImport || options.replaceMonth) {
@@ -4168,35 +4301,56 @@ class LogisticsStore {
       }
     }
 
-    const updateMap = new Map<string, Partial<Schedule>>();
-    itemsToUpdate.forEach(u => updateMap.set(u.id, u.data));
-
-    // 1. In-memory update existing items
-    if (updateMap.size > 0) {
-      this.schedules = this.schedules.map(sch => {
-        if (updateMap.has(sch.id)) {
-          return { ...sch, ...updateMap.get(sch.id)! };
-        }
-        return sch;
-      });
-    }
-
-    // 2. In-memory prepend new items (deduplicated by ID, and sanitize >= 2026-11-12 delivered items without POD photo)
     const sanitizeScheduleItem = (sch: Schedule): Schedule => {
       const depIso = String(sch?.departureDate || '').slice(0, 10);
-      if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl) {
+      const resolvedFleet =
+        this.findFleetByCodeOrPlate(
+          sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId
+        ) || sch.fleet;
+      const base: Schedule = {
+        ...sch,
+        fleetId: resolvedFleet?.id || sch.fleetId || 'flt-01',
+        fleet: resolvedFleet,
+        armada: sch.armada || resolvedFleet?.initialCode || resolvedFleet?.plateNumber
+      };
+      if (depIso >= '2026-11-12' && base.status === 'delivered' && !base.podPhotoUrl && !base.isChecklistBypassed) {
         return {
-          ...sch,
+          ...base,
           status: 'scheduled',
           isChecklistBypassed: false,
           actualArrival: undefined
         };
       }
-      return sch;
+      return base;
     };
+
+    const updateMap = new Map<string, Partial<Schedule>>();
+    itemsToUpdate.forEach(u => updateMap.set(u.id, u.data));
+    const addByIdMap = new Map<string, Schedule>();
+    itemsToAdd.forEach(item => {
+      if (item?.id && !String(item.id).startsWith('batch-')) {
+        addByIdMap.set(item.id, sanitizeScheduleItem(item));
+      }
+    });
+
+    // 1. In-memory update existing items (from itemsToUpdate or matching IDs in itemsToAdd)
+    let updatedExistingCount = 0;
+    this.schedules = this.schedules.map(sch => {
+      if (updateMap.has(sch.id)) {
+        updatedExistingCount++;
+        return sanitizeScheduleItem({ ...sch, ...updateMap.get(sch.id)! });
+      }
+      if (addByIdMap.has(sch.id)) {
+        updatedExistingCount++;
+        return sanitizeScheduleItem({ ...sch, ...addByIdMap.get(sch.id)! });
+      }
+      return sanitizeScheduleItem(sch);
+    });
+
+    // 2. In-memory prepend new items (deduplicated by ID)
     const existingIdSet = new Set(this.schedules.map(s => s.id));
-    const cleanNewItems = itemsToAdd.filter(item => !existingIdSet.has(item.id)).map(sanitizeScheduleItem);
-    this.schedules = [...cleanNewItems, ...this.schedules.map(sanitizeScheduleItem)];
+    const cleanNewItems = Array.from(addByIdMap.values()).filter(item => !existingIdSet.has(item.id));
+    this.schedules = [...cleanNewItems, ...this.schedules];
 
     // 3. Single disk save
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
@@ -4204,20 +4358,13 @@ class LogisticsStore {
     // 4. Single crew history recalculation
     this.syncSchedulesToCrewHistory(this.schedules);
 
-    // 5. Single batched middleware dispatch (non-blocking)
-    setTimeout(() => {
-      this.dispatchMiddleware({
-        entityType: 'schedule',
-        action: 'update',
-        id: `batch-${Date.now()}`,
-        data: { added: cleanNewItems.length, updated: itemsToUpdate.length },
-        metadata: { isBatch: true, source: options.isImport ? 'google_sheets_sync' : 'batch' },
-        timestamp: new Date().toISOString()
-      });
-    }, 50);
+    // 5. Persist via debounced snapshot endpoint unless caller handles persistence directly
+    if (!options.skipBackendPersist) {
+      this.persistSchedulesSnapshotToBackend(options.isImport ? 'google_sheets_sync' : 'batch_sync');
+    }
 
     this.notify();
-    return { addedCount: cleanNewItems.length, updatedCount: itemsToUpdate.length };
+    return { addedCount: cleanNewItems.length, updatedCount: updatedExistingCount };
   }
 
   /**
@@ -4300,6 +4447,7 @@ class LogisticsStore {
   ) {
     let deliveredSchedule: Schedule | null = null;
     let targetSch: Schedule | null = null;
+    const nowIso = new Date().toISOString();
 
     this.schedules = this.schedules.map(sch => {
       if (sch.id === id) {
@@ -4311,14 +4459,16 @@ class LogisticsStore {
           ...sch,
           status,
           notes: updatedNotes,
+          updatedAt: nowIso,
+          ...(status === 'in_transit' && !sch.actualDeparture ? { actualDeparture: nowIso } : {}),
           ...(podData?.podPhotoUrl ? { podPhotoUrl: podData.podPhotoUrl } : {}),
           ...(podData?.podPhotoTimestamp ? { podPhotoTimestamp: podData.podPhotoTimestamp } : {}),
           ...(podData?.podReceiverName ? { podReceiverName: podData.podReceiverName } : {}),
           ...(podData?.podConditionNote ? { podConditionNote: podData.podConditionNote } : {}),
         };
-        const targetFleetKey = sch.fleetId || sch.fleet?.plateNumber || '';
+        const targetFleetKey = sch.fleetId || sch.armada || sch.fleet?.plateNumber || '';
         if (status === 'delivered') {
-          updated.actualArrival = new Date().toISOString();
+          updated.actualArrival = nowIso;
           deliveredSchedule = updated;
           this.logActivity('Update Status', 'Pengiriman', `Status ${sch.trackingNumber} menjadi delivered`);
           if (podData?.podPhotoUrl) {
@@ -4372,6 +4522,7 @@ class LogisticsStore {
       return sch;
     });
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+    this.persistSchedulesSnapshotToBackend('update_schedule_status');
 
     if (targetSch) {
       const sch = targetSch as Schedule;
@@ -4488,7 +4639,7 @@ class LogisticsStore {
           : undefined;
       const response = await fetch(`/api/schedules/${encodeURIComponent(item.scheduleId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'same-origin',
         body: JSON.stringify({
           status: item.status,
@@ -4610,8 +4761,194 @@ class LogisticsStore {
     };
   }
 
-  public updateFleetStatus(idOrPlate: string, status: Fleet['status'], tonnage?: number) {
+  public getWibTodayIso(): string {
+    const now = new Date();
+    const wibMs = now.getTime() + 7 * 60 * 60 * 1000;
+    return new Date(wibMs).toISOString().slice(0, 10);
+  }
+
+  public getScheduleCalendarIso(sch: Schedule): string {
+    const toLocalWibIso = (raw?: string): string => {
+      if (!raw) return '';
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // Extract YYYY-MM-DD directly when +07:00 or plain ISO date prefix exists
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && s.includes('+07:00')) return s.slice(0, 10);
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      }
+      return s.slice(0, 10);
+    };
+
+    const depIso = toLocalWibIso(sch.deliveryDate || sch.departureDate);
+    const retIso = toLocalWibIso(sch.returnDate || sch.estimatedArrival);
+    if (retIso && depIso && retIso > depIso) {
+      return retIso;
+    }
+    return depIso || retIso || toLocalWibIso(sch.createdAt);
+  }
+
+  public doesScheduleCoverDate(sch: Schedule, targetIso: string): boolean {
+    if (!targetIso) return false;
+    const toIso = (raw?: string): string => {
+      if (!raw) return '';
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && s.includes('+07:00')) return s.slice(0, 10);
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      }
+      return s.slice(0, 10);
+    };
+
+    const depIso = toIso(sch.deliveryDate || sch.departureDate);
+    const retIso = toIso(sch.returnDate || sch.estimatedArrival) || depIso;
+    const calIso = this.getScheduleCalendarIso(sch);
+
+    if (calIso === targetIso || depIso === targetIso || retIso === targetIso) return true;
+    if (depIso && retIso && depIso <= targetIso && retIso >= targetIso) return true;
+    return false;
+  }
+
+  public matchesFleetSchedule(fleet: Fleet, sch: Schedule): boolean {
+    if (!fleet || !sch) return false;
+    if (sch.fleetId && sch.fleetId === fleet.id) return true;
+    const cleanPlate = (fleet.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const schPlate = (sch.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    if (cleanPlate && schPlate && schPlate === cleanPlate) return true;
+
+    const resolvedFromSch = this.findFleetByCodeOrPlate(
+      sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId
+    );
+    if (resolvedFromSch && resolvedFromSch.id === fleet.id) return true;
+
+    const fInit = (fleet.initialCode || '').trim().toUpperCase();
+    const sArm = (sch.armada || sch.fleet?.initialCode || '').trim().toUpperCase();
+    if (fInit && sArm) {
+      if (fInit === sArm) return true;
+      const fParts = fInit.split('/').map(x => x.trim()).filter(Boolean);
+      const sParts = sArm.split('/').map(x => x.trim()).filter(Boolean);
+      if (fParts.some(p => sParts.includes(p))) return true;
+    }
+    return false;
+  }
+
+  public findFleetAssignmentConflict(
+    armadaOrFleetId: string,
+    targetDateIso: string,
+    excludeScheduleId?: string
+  ): { fleet: Fleet | null; conflictSchedule: Schedule } | null {
+    const cleanTargetIso = (targetDateIso || '').slice(0, 10);
+    const rawKey = (armadaOrFleetId || '').trim().toUpperCase();
+    if (!rawKey || !cleanTargetIso) return null;
+
+    const resolvedFleet =
+      this.fleets.find(
+        f =>
+          f.id === armadaOrFleetId ||
+          f.plateNumber.trim().toUpperCase() === rawKey ||
+          (f.initialCode && f.initialCode.trim().toUpperCase() === rawKey)
+      ) ||
+      this.findFleetByCodeOrPlate(armadaOrFleetId) ||
+      null;
+
+    const conflictSchedule = (this.schedules || []).find(sch => {
+      if (excludeScheduleId && sch.id === excludeScheduleId) return false;
+      if (!this.doesScheduleCoverDate(sch, cleanTargetIso)) return false;
+
+      if (resolvedFleet) {
+        return this.matchesFleetSchedule(resolvedFleet, sch);
+      }
+
+      const schArmada = (sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || '').trim().toUpperCase();
+      return schArmada === rawKey;
+    });
+
+    if (!conflictSchedule) return null;
+    return { fleet: resolvedFleet, conflictSchedule };
+  }
+
+  public reconcileFleetAndScheduleStatuses(persistChanges: boolean = false) {
+    const todayWib = this.getWibTodayIso();
+    let schedulesChanged = false;
+
+    // 1. Tutup otomatis jadwal lampau (< hari ini WIB) yang masih nyangkut status 'in_transit' / 'picked_up' / 'delayed'
+    // agar armada seperti NMR/DS5 tidak terus-terusan stuck status Kirim area hari sebelumnya.
+    this.schedules = (this.schedules || []).map(sch => {
+      if (['in_transit', 'picked_up', 'delayed'].includes(sch.status)) {
+        const calIso = this.getScheduleCalendarIso(sch);
+        const endIso = (sch.returnDate || sch.estimatedArrival || calIso || '').slice(0, 10);
+        const depActIso = (sch.actualDeparture || '').slice(0, 10);
+        const isStillTodayOrFuture =
+          this.doesScheduleCoverDate(sch, todayWib) ||
+          (calIso && calIso >= todayWib) ||
+          (endIso && endIso >= todayWib) ||
+          depActIso === todayWib;
+
+        if (!isStillTodayOrFuture && endIso && endIso < todayWib) {
+          schedulesChanged = true;
+          return {
+            ...sch,
+            status: 'delivered' as const,
+            actualArrival: sch.actualArrival || sch.estimatedArrival || `${endIso}T17:00:00+07:00`,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      }
+      return sch;
+    });
+
+    if (schedulesChanged) {
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      if (persistChanges) {
+        this.persistSchedulesSnapshotToBackend('reconcile_past_active_trips');
+      }
+    }
+
+    // 2. Sinkronkan status armada dengan jadwal aktif hari ini:
+    // - 'maintenance' tetap dipertahankan
+    // - 'on-duty' hanya aktif jika benar-benar ada jadwal aktif hari ini ('in_transit' / 'picked_up' / 'delayed')
+    // - Jika tidak ada jadwal aktif yang sedang jalan hari ini, otomatis pulihkan ke 'available' (Ready)
+    const fleetsNeedingSync: Fleet[] = [];
+    let fleetsChanged = false;
+    this.fleets = (this.fleets || []).map(f => {
+      if (f.status === 'maintenance') return f;
+      const hasTodayActiveTrip = (this.schedules || []).some(
+        sch =>
+          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+          this.matchesFleetSchedule(f, sch) &&
+          (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
+      );
+      const targetStatus: Fleet['status'] = hasTodayActiveTrip ? 'on-duty' : 'available';
+      if (f.status !== targetStatus) {
+        fleetsChanged = true;
+        const updatedF = { ...f, status: targetStatus };
+        fleetsNeedingSync.push(updatedF);
+        return updatedF;
+      }
+      return f;
+    });
+
+    if (fleetsChanged) {
+      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+      if (persistChanges) {
+        fleetsNeedingSync.forEach(uf => {
+          updateFleetInSupabase(uf.id, { status: uf.status }).catch(() => {});
+        });
+      }
+    }
+  }
+
+  public updateFleetStatus(
+    idOrPlate: string,
+    status: Fleet['status'],
+    tonnage?: number,
+    options?: { syncTodaySchedule?: boolean }
+  ) {
     const cleanTarget = (idOrPlate || '').trim().toUpperCase();
+    let matchedFleet: Fleet | null = null;
     let matchedId = idOrPlate;
     this.fleets = this.fleets.map(f => {
       if (
@@ -4620,17 +4957,52 @@ class LogisticsStore {
         (f.initialCode && f.initialCode.trim().toUpperCase() === cleanTarget)
       ) {
         matchedId = f.id;
-        return {
+        matchedFleet = {
           ...f,
           status,
           currentTonnage: tonnage !== undefined ? tonnage : f.currentTonnage
         };
+        return matchedFleet;
       }
       return f;
     });
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
-    // Asynchronous backend integration with Supabase
+    // Sinkronkan status jadwal hari ini apabila admin mengubah status armada secara langsung dari Manajemen Armada
+    if (options?.syncTodaySchedule && matchedFleet) {
+      const todayWib = this.getWibTodayIso();
+      const nowIso = new Date().toISOString();
+      let schUpdated = false;
+      this.schedules = (this.schedules || []).map(sch => {
+        if (!this.matchesFleetSchedule(matchedFleet!, sch)) return sch;
+        const coversToday = this.doesScheduleCoverDate(sch, todayWib);
+        if (status === 'on-duty' && coversToday && sch.status === 'scheduled') {
+          schUpdated = true;
+          return {
+            ...sch,
+            status: 'in_transit' as const,
+            actualDeparture: sch.actualDeparture || nowIso,
+            updatedAt: nowIso
+          };
+        }
+        if ((status === 'available' || status === 'maintenance') && ['in_transit', 'picked_up', 'delayed'].includes(sch.status)) {
+          schUpdated = true;
+          return {
+            ...sch,
+            status: 'delivered' as const,
+            actualArrival: sch.actualArrival || nowIso,
+            updatedAt: nowIso
+          };
+        }
+        return sch;
+      });
+      if (schUpdated) {
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('fleet_status_sync');
+      }
+    }
+
+    // Asynchronous backend integration with Supabase / Hostinger MySQL
     updateFleetInSupabase(matchedId, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
 
     this.dispatchMiddleware({
@@ -4651,19 +5023,21 @@ class LogisticsStore {
    * - Data Armada & Portal Driver
    *
    * 3 Status Kondisi Armada:
-   * 1. Ready ('available'): Siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / normal). Penanda: Titik Besar Hijau.
-   * 2. Kirim ('on-duty'): Sedang dipakai kirim tim pengiriman (setelah driver/helper klik Gate-Out). Penanda: Titik Besar Biru + Area Kirim hari tersebut.
+   * 1. Ready ('available'): Siap digunakan jadwal (atau sedang terjadwal menunggu berangkat). Penanda: Titik Besar Hijau.
+   * 2. Kirim ('on-duty'): Sedang dipakai kirim tim pengiriman (sudah Gate-Out / status jadwal in_transit / picked_up / delayed hari ini). Penanda: Titik Besar Biru + Area Kirim hari tersebut.
    * 3. Servis ('maintenance'): Dalam keadaan perbaikan dan TIDAK BISA diaturkan kirim. Penanda: Titik Besar Merah.
    */
   public getFleetLiveOperationalInfo(
     fleetOrId: Fleet | string,
-    targetDateStr?: string
+    targetDateStr?: string,
+    excludeScheduleId?: string
   ): {
     effectiveStatus: 'available' | 'on-duty' | 'maintenance';
     statusLabel: 'Ready' | 'Kirim' | 'Servis';
     dotColorClass: string;
     badgeColorClass: string;
     areaName: string | null;
+    todayScheduledArea: string | null;
     driverName: string | null;
     helperName: string | null;
     canBeScheduled: boolean;
@@ -4675,8 +5049,9 @@ class LogisticsStore {
         ? this.fleets.find(
             f =>
               f.id === fleetOrId ||
-              f.plateNumber.trim().toUpperCase() === fleetOrId.trim().toUpperCase()
-          )
+              f.plateNumber.trim().toUpperCase() === fleetOrId.trim().toUpperCase() ||
+              (f.initialCode && f.initialCode.trim().toUpperCase() === fleetOrId.trim().toUpperCase())
+          ) || this.findFleetByCodeOrPlate(fleetOrId)
         : fleetOrId;
 
     if (!fleet) {
@@ -4686,6 +5061,7 @@ class LogisticsStore {
         dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/20',
         badgeColorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
         areaName: null,
+        todayScheduledArea: null,
         driverName: null,
         helperName: null,
         canBeScheduled: true,
@@ -4694,50 +5070,59 @@ class LogisticsStore {
       };
     }
 
-    const todayIso = targetDateStr || new Date().toISOString().slice(0, 10);
+    const todayWib = this.getWibTodayIso();
+    const targetIso = (targetDateStr || todayWib).slice(0, 10);
+    const isDateSpecificQuery = Boolean(targetDateStr && targetDateStr.trim() !== '');
     const cleanPlate = (fleet.plateNumber || '').trim().toUpperCase();
 
-    const matchesFleet = (sch: Schedule) => {
-      if (sch.fleetId === fleet.id) return true;
-      const schPlate = (sch.fleet?.plateNumber || '').trim().toUpperCase();
-      if (schPlate && schPlate === cleanPlate) return true;
-      return false;
-    };
+    const matchesFleet = (sch: Schedule) => this.matchesFleetSchedule(fleet, sch);
 
-    // 1. Cari jadwal yang sedang aktif di jalan (sudah klik Gate-Out: in_transit, picked_up, delayed)
+    // 1. Cari jadwal yang sedang aktif di jalan pada hari ini (sudah klik Gate-Out: in_transit, picked_up, delayed)
     const activeTripSch = (this.schedules || []).find(
-      sch => ['in_transit', 'picked_up', 'delayed'].includes(sch.status) && matchesFleet(sch)
+      sch =>
+        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+        ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+        matchesFleet(sch) &&
+        (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
     );
 
-    // 2. Cari jadwal pada tanggal hari ini (atau tanggal terpilih) untuk menampilkan info area kirim hari tersebut
-    const dateMatchedSch =
-      activeTripSch ||
-      (this.schedules || []).find(
-        sch =>
-          matchesFleet(sch) &&
-          (sch.departureDate || sch.createdAt || '').slice(0, 10) === todayIso
-      ) ||
-      (this.schedules || []).find(sch => matchesFleet(sch) && sch.status === 'scheduled');
+    // 2. Cari jadwal yang tepat pada tanggal target (hari ini atau tanggal form jadwal yang sedang dipilih)
+    const targetDateSch = (this.schedules || []).find(
+      sch =>
+        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+        matchesFleet(sch) &&
+        this.doesScheduleCoverDate(sch, targetIso)
+    );
+
+    // Jadwal aktif untuk tampilan Live Armada (hari ini) vs Form Jadwal (tanggal spesifik)
+    const effectiveSch = isDateSpecificQuery
+      ? targetDateSch
+      : (activeTripSch || targetDateSch);
 
     let resolvedArea: string | null = null;
     let resolvedDriver: string | null = null;
     let resolvedHelper: string | null = null;
 
-    if (dateMatchedSch) {
+    if (effectiveSch) {
       resolvedArea =
-        dateMatchedSch.areaName ||
-        dateMatchedSch.store?.storeName ||
+        effectiveSch.areaName ||
+        effectiveSch.store?.storeName ||
         null;
       resolvedDriver =
-        dateMatchedSch.crew?.name ||
-        this.crews.find(c => c.id === dateMatchedSch.crewId)?.name ||
+        effectiveSch.crew?.name ||
+        this.crews.find(c => c.id === effectiveSch.crewId)?.name ||
         null;
       resolvedHelper =
-        dateMatchedSch.crewHelper?.name ||
-        (dateMatchedSch.crewHelperId
-          ? this.crews.find(c => c.id === dateMatchedSch.crewHelperId)?.name || null
+        effectiveSch.crewHelper?.name ||
+        (effectiveSch.crewHelperId
+          ? this.crews.find(c => c.id === effectiveSch.crewHelperId)?.name || null
           : null);
     }
+
+    const todayScheduledArea =
+      !activeTripSch && targetDateSch && targetDateSch.status === 'scheduled'
+        ? (targetDateSch.areaName || targetDateSch.store?.storeName || null)
+        : null;
 
     // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
     if (!resolvedArea && typeof localStorage !== 'undefined') {
@@ -4747,7 +5132,7 @@ class LogisticsStore {
           const shifts: any[] = JSON.parse(rawShifts);
           const activeShift = shifts.find(
             s =>
-              s.date === todayIso &&
+              s.date === targetIso &&
               s.status !== 'checked_out' &&
               (s.fleetId === fleet.id ||
                 (s.plateNumber && s.plateNumber.trim().toUpperCase() === cleanPlate))
@@ -4759,14 +5144,18 @@ class LogisticsStore {
       } catch {}
     }
 
-    // Penentuan 3 Status Kondisi Armada:
-    // - Servis ('maintenance'): Armada dalam perbaikan (tidak bisa diaturkan kirim)
-    // - Kirim ('on-duty'): Armada sedang dipakai kirim (setelah klik Gate-Out atau status armada 'on-duty')
-    // - Ready ('available'): Armada siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / standby)
+    // Penentuan Status Kondisi Armada:
+    // - Jika sedang ditanya untuk tanggal penjadwalan tertentu (`isDateSpecificQuery`):
+    //   armada yang SUDAH punya jadwal pada `targetIso` tidak boleh dipilih ulang (canBeScheduled: false)
+    // - Untuk status Live Operasional hari ini:
+    //   'Kirim' hanya aktif apabila benar-benar memiliki trip aktif hari ini (`activeTripSch`),
+    //   sehingga armada tanpa trip hari ini tidak pernah stuck di status 'Kirim' area kemarin.
     let effectiveStatus: 'available' | 'on-duty' | 'maintenance' = 'available';
     if (fleet.status === 'maintenance') {
       effectiveStatus = 'maintenance';
-    } else if (activeTripSch || fleet.status === 'on-duty') {
+    } else if (isDateSpecificQuery) {
+      effectiveStatus = targetDateSch ? 'on-duty' : 'available';
+    } else if (activeTripSch) {
       effectiveStatus = 'on-duty';
     } else {
       effectiveStatus = 'available';
@@ -4779,28 +5168,31 @@ class LogisticsStore {
         dotColorClass: 'bg-rose-500 ring-4 ring-rose-500/25',
         badgeColorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
         areaName: resolvedArea,
+        todayScheduledArea: null,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: false,
         statusDescription: 'Dalam perbaikan (Tidak bisa diaturkan kirim)',
-        scheduleStatus: dateMatchedSch?.status || null
+        scheduleStatus: effectiveSch?.status || null
       };
     }
 
     if (effectiveStatus === 'on-duty') {
+      const canScheduleFlag = isDateSpecificQuery ? !targetDateSch : !targetDateSch;
       return {
         effectiveStatus: 'on-duty',
         statusLabel: 'Kirim',
         dotColorClass: 'bg-blue-500 ring-4 ring-blue-500/25',
         badgeColorClass: 'bg-blue-500/15 text-blue-300 border-blue-500/40',
         areaName: resolvedArea,
+        todayScheduledArea: null,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
-        canBeScheduled: true,
+        canBeScheduled: canScheduleFlag,
         statusDescription: resolvedArea
           ? `Sedang Kirim • Area: ${resolvedArea}`
           : 'Sedang dipakai kirim tim pengiriman (Gate-Out)',
-        scheduleStatus: dateMatchedSch?.status || 'in_transit'
+        scheduleStatus: effectiveSch?.status || 'in_transit'
       };
     }
 
@@ -4810,11 +5202,14 @@ class LogisticsStore {
       dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/25',
       badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
       areaName: null,
+      todayScheduledArea,
       driverName: resolvedDriver,
       helperName: resolvedHelper,
       canBeScheduled: true,
-      statusDescription: 'Siap jadwal esok',
-      scheduleStatus: null
+      statusDescription: todayScheduledArea
+        ? `Terjadwal hari ini: ${todayScheduledArea}`
+        : 'Siap jadwal esok',
+      scheduleStatus: effectiveSch?.status || null
     };
   }
 

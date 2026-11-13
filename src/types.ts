@@ -137,6 +137,8 @@ export interface Schedule {
   store?: RetailStore;
   fleetId: string;
   fleet?: Fleet;
+  armada?: string;
+  updatedAt?: string;
   crewId: string;
   crewHelperId?: string; // Kernet / Helper 1
   crewHelper2Id?: string; // Kernet / Helper 2 (Tambahan)

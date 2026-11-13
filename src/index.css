@@ -1082,6 +1082,36 @@ html.dark .leaflet-cluster-spider-leg {
   }
 }
 
+@keyframes skeletonWave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-wave {
+  background: linear-gradient(
+    110deg,
+    rgba(226, 232, 240, 0.72) 25%,
+    rgba(248, 250, 252, 0.96) 37%,
+    rgba(226, 232, 240, 0.72) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeletonWave 1.65s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+html.dark .skeleton-wave {
+  background: linear-gradient(
+    110deg,
+    rgba(30, 41, 59, 0.65) 25%,
+    rgba(51, 65, 85, 0.85) 37%,
+    rgba(30, 41, 59, 0.65) 63%
+  );
+  background-size: 400% 100%;
+}
+
 /* =========================================================================
    HANDHELD WMS SCANNER DARK PHONE FRAME ISOLATION (IMMUNE TO LIGHT THEME)
    ========================================================================= */

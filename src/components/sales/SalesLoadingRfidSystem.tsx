@@ -532,13 +532,20 @@ function useSharedSalesRfidInvoices() {
   // Cross-device two-way synchronization via server /api/sales-rfid-invoices + localStorage (PC <-> HP)
   useEffect(() => {
     let active = true;
+    let lastFetchAt = 0;
+    let rateLimitedUntil = 0;
     const fetchRemote = async () => {
+      if (Date.now() < rateLimitedUntil) return;
       try {
         const res = await fetch('/api/sales-rfid-invoices', {
           method: 'GET',
           credentials: 'include',
           cache: 'no-store'
         });
+        if (res.status === 429) {
+          rateLimitedUntil = Date.now() + 60000;
+          return;
+        }
         if (res.ok) {
           const json = await res.json();
           if (active && json.success && Array.isArray(json.data)) {
@@ -565,6 +572,16 @@ function useSharedSalesRfidInvoices() {
       } catch {}
     };
 
+    const throttledFetchRemote = () => {
+      if (!active) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (now < rateLimitedUntil || now - lastFetchAt < 8000) return;
+      lastFetchAt = now;
+      void fetchRemote();
+    };
+
+    lastFetchAt = Date.now();
     void fetchRemote();
 
     const syncFromStorage = () => {
@@ -579,7 +596,7 @@ function useSharedSalesRfidInvoices() {
 
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
-        void fetchRemote();
+        throttledFetchRemote();
       }
     };
 
@@ -587,7 +604,7 @@ function useSharedSalesRfidInvoices() {
     window.addEventListener('storage', syncFromStorage);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    const interval = window.setInterval(fetchRemote, 3000);
+    const interval = window.setInterval(throttledFetchRemote, 20000);
 
     return () => {
       active = false;

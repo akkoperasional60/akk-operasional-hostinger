@@ -418,127 +418,15 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   };
 
   const handleManualSyncAll = () => {
-    // 1. Sync from admin schedule weeks cache if available
-    let cachedWeeks: any[] | null = null;
-    try {
-      const saved2026 = localStorage.getItem('akk_admin_schedule_cache_2026_0');
-      if (saved2026) cachedWeeks = JSON.parse(saved2026);
-      if (!cachedWeeks) {
-        const savedAll = localStorage.getItem('akk_admin_schedule_weeks_cache');
-        if (savedAll) cachedWeeks = JSON.parse(savedAll);
-      }
-    } catch {}
-
-    let syncedCount = 0;
-    if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0 && cachedWeeks[0]?.days?.length > 0) {
-      const curFleets = logisticsStore.getFleets();
-      const curCrews = logisticsStore.getCrews();
-
-      cachedWeeks.forEach((week: any, weekIdx: number) => {
-        (week.days || []).forEach((day: any) => {
-          let dayNum = day.dayNumber || 5;
-          let dayPadded = String(dayNum).padStart(2, '0');
-          let depIso = `2026-01-${dayPadded}T07:30:00.000Z`;
-          let arrIso = `2026-01-${dayPadded}T18:00:00.000Z`;
-
-          if (day.dateString) {
-            const parsed = scheduleImportValidator.parseDate(day.dateString, new Date(2026, 0, dayNum));
-            if (parsed.date) {
-              const dStr = parsed.date.toISOString().substring(0, 10);
-              depIso = `${dStr}T07:30:00.000Z`;
-              arrIso = `${dStr}T18:00:00.000Z`;
-            }
-          }
-
-          (day.pengiriman || []).forEach((p: any, idx: number) => {
-            const stdArea = p.area || 'Area Kirim';
-            const isBali = stdArea.toUpperCase().includes('DENPASAR') || stdArea.toUpperCase().includes('SINGARAJA') || stdArea.toUpperCase().includes('NEGARA') || stdArea.toUpperCase().includes('BALI');
-            const cleanArmada = (p.armada || 'FLT').replace(/[^a-zA-Z0-9]/g, '').toUpperCase() || 'FLT';
-            const datePart = depIso.substring(0, 10).replace(/-/g, '');
-            const targetTracking = `PO-AKK-${datePart}-${cleanArmada}-${idx + 1}`;
-            const targetId = p.id || `sch-${datePart}-${cleanArmada}-${idx + 1}`;
-
-            const matchedFleet = curFleets.find(f => 
-              f.initialCode?.toUpperCase() === p.armada?.toUpperCase() ||
-              f.plateNumber.replace(/\s+/g, '').toUpperCase().includes((p.armada || '').replace(/\s+/g, '').toUpperCase())
-            ) || curFleets[idx % curFleets.length] || curFleets[0];
-
-            const matchedDriver = curCrews.find(c => 
-              c.name.toLowerCase().includes((p.driver || '').toLowerCase()) || 
-              (p.driver || '').toLowerCase().includes(c.name.toLowerCase())
-            ) || curCrews[0];
-
-            const matchedHelper = p.helper && p.helper !== '-' ? curCrews.find(c =>
-              c.name.toLowerCase().includes((p.helper || '').toLowerCase()) ||
-              (p.helper || '').toLowerCase().includes(c.name.toLowerCase())
-            ) : undefined;
-
-            const matchedHelper2 = p.helper2 && p.helper2 !== '-' ? curCrews.find(c =>
-              c.name.toLowerCase().includes((p.helper2 || '').toLowerCase()) ||
-              (p.helper2 || '').toLowerCase().includes(c.name.toLowerCase())
-            ) : undefined;
-
-            const existingList = logisticsStore.getSchedules();
-            const existingIdx = existingList.findIndex(s => s.id === targetId || s.trackingNumber === targetTracking || (p.id && s.id === p.id));
-
-            const newSch: Schedule = {
-              id: targetId,
-              trackingNumber: targetTracking,
-              originName: 'Gudang Pusat Banyuwangi DC',
-              originCoords: [-8.1906, 114.3708],
-              storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-              store: {
-                id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-                storeCode: `AREA-${stdArea.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
-                storeName: stdArea,
-                island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
-                province: isBali ? 'Bali' : 'Jawa Timur',
-                city: isBali ? 'Denpasar' : 'Banyuwangi',
-                address: `Area Distribusi ${stdArea}`,
-                latitude: isBali ? -8.6705 : -8.219,
-                longitude: isBali ? 115.2126 : 114.369,
-                contactPerson: 'PIC Distribusi Area',
-                phone: '-',
-                deliveryWindow: '08:00 - 17:00',
-                storeCategory: 'Distribution Hub'
-              },
-              areaName: stdArea,
-              fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
-              fleet: matchedFleet,
-              crewId: matchedDriver ? matchedDriver.id : 'crw-01',
-              crew: matchedDriver,
-              crewHelperId: matchedHelper ? matchedHelper.id : undefined,
-              crewHelper: matchedHelper,
-              crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
-              crewHelper2: matchedHelper2,
-              status: 'scheduled',
-              departureDate: depIso,
-              estimatedArrival: arrIso,
-              cargoDescription: `Karton Box & Sheet Kemasan - ${stdArea}`,
-              cargoWeightTon: isBali ? 4.5 : 2.5,
-              isInterIsland: isBali,
-              ferryBookingCode: isBali ? `ASDP-KTP-GLM-${idx + 100}` : undefined,
-              transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-              notes: p.target || `Rute Distribusi ${stdArea}`,
-              createdAt: new Date().toISOString(),
-              isManuallyEdited: !!p.isManuallyEdited
-            };
-
-            if (existingIdx !== -1) {
-              logisticsStore.updateSchedule(existingList[existingIdx].id, newSch);
-            } else {
-              logisticsStore.addSchedule(newSch);
-            }
-            syncedCount++;
-          });
-        });
-      });
-    }
-
-    logisticsStore.syncSchedulesToCrewHistory();
-    setSchedules(logisticsStore.getSchedules());
-    setAutoInitMessage(`⚡ Sinkronisasi manual selesai! Semua jadwal operasional (${logisticsStore.getSchedules().length} ritase), kalender mingguan, dan histori kru tersinkronkan penuh tanpa ada data yang terlewat.`);
-    setTimeout(() => setAutoInitMessage(null), 7000);
+    void logisticsStore.hydrateOperationalDataFromHostinger(true).then(() => {
+      logisticsStore.syncSchedulesToCrewHistory();
+      setSchedules(logisticsStore.getSchedules());
+      setStores(logisticsStore.getStores());
+      setCrews(logisticsStore.getCrews());
+      setFleets(logisticsStore.getFleets());
+      setAutoInitMessage(`⚡ Sinkronisasi manual selesai! Semua jadwal operasional (${logisticsStore.getSchedules().length} ritase), kalender mingguan, dan histori kru tersinkronkan penuh dari database.`);
+      setTimeout(() => setAutoInitMessage(null), 7000);
+    });
   };
 
   // Area Approval Pop-up State
@@ -841,6 +729,32 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       isNaN(d.getTime())
         ? ''
         : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const depDateStr = fmtYyyyMmDd(depDateObj);
+    const arrDateStr = fmtYyyyMmDd(arrDateObj);
+    const editSchId = (newSchedule as any).id as string | undefined;
+    const fleetConflict =
+      (depDateStr && logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, depDateStr, editSchId)) ||
+      (arrDateStr && arrDateStr !== depDateStr
+        ? logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, arrDateStr, editSchId)
+        : null);
+
+    if (fleetConflict) {
+      const conflictSch = fleetConflict.conflictSchedule;
+      const conflictCode =
+        fleetConflict.fleet?.initialCode ||
+        conflictSch.armada ||
+        selectedFleetObj?.initialCode ||
+        selectedFleetObj?.plateNumber ||
+        newSchedule.fleetId;
+      const conflictArea = conflictSch.areaName || conflictSch.store?.storeName || '-';
+      const conflictDriver = conflictSch.crew?.name || '-';
+      const conflictMsg = `Armada ${conflictCode} sudah terjadwal pada tanggal tersebut (${conflictArea} • Driver: ${conflictDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
+      addNotification('sla_warning', 'Bentrok Jadwal Armada', conflictMsg);
+      setAutoInitMessage(`⚠️ ${conflictMsg}`);
+      setTimeout(() => setAutoInitMessage(null), 6000);
+      return;
+    }
 
     const scheduleData = {
       ...newSchedule,

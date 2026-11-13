@@ -410,6 +410,37 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
   // Integrated Real-time Fleet (Inisial Mobil) Area Stats from Jadwal & Penugasan (1 Jadwal / Hari = 1 Trip Armada, tanpa terduplikasi baris Helper)
   const fleetAreaStatsList = useMemo(() => {
+    const scheduleDateById = new Map<string, string>();
+    logisticsStore.getSchedules().forEach(s => {
+      const calIso = logisticsStore.getScheduleCalendarIso(s);
+      if (s.id && calIso) {
+        scheduleDateById.set(s.id, calIso);
+      }
+    });
+
+    const formatFleetTripDate = (rawIso: string): { iso: string; label: string } => {
+      const clean = (rawIso || '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+        const [y, m, d] = clean.split('-').map(Number);
+        const dt = new Date(y, (m || 1) - 1, d || 1);
+        const label = dt.toLocaleDateString('id-ID', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric'
+        });
+        return { iso: clean, label };
+      }
+      const parsed = new Date(rawIso);
+      if (!isNaN(parsed.getTime())) {
+        const iso = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+        return {
+          iso,
+          label: parsed.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+        };
+      }
+      return { iso: rawIso || '-', label: rawIso || '-' };
+    };
+
     const map: Record<
       string,
       {
@@ -417,7 +448,14 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         plateNumber: string;
         vehicleType: string;
         totalTrips: number;
-        areas: Record<string, number>;
+        areas: Record<
+          string,
+          {
+            count: number;
+            dates: Array<{ iso: string; label: string; driverName: string }>;
+          }
+        >;
+        allDates: Array<{ iso: string; label: string }>;
       }
     > = {};
 
@@ -435,7 +473,10 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       const resolved = resolveCanonicalFleet(rawInit, item.vehiclePlate);
       const key = resolved.initialCode;
 
-      const dateSlice = (item.completionDate || '').slice(0, 10);
+      const resolvedIso =
+        (item.scheduleId && scheduleDateById.get(item.scheduleId)) ||
+        (item.completionDate || '').slice(0, 10);
+      const dateSlice = resolvedIso.slice(0, 10);
       const uniqueTripKey = item.scheduleId
         ? `${key}__sch__${item.scheduleId}`
         : `${key}__date__${dateSlice}__${item.area.toLowerCase().trim()}`;
@@ -456,11 +497,25 @@ export const CrewDeliveryHistoryView: React.FC = () => {
           plateNumber: resolved.plateNumber || item.vehiclePlate,
           vehicleType: resolved.vehicleType || item.vehicleType,
           totalTrips: 0,
-          areas: {}
+          areas: {},
+          allDates: []
         };
       }
+
+      const formattedDate = formatFleetTripDate(resolvedIso || item.completionDate);
       map[key].totalTrips += 1;
-      map[key].areas[item.area] = (map[key].areas[item.area] || 0) + 1;
+      if (!map[key].areas[item.area]) {
+        map[key].areas[item.area] = { count: 0, dates: [] };
+      }
+      map[key].areas[item.area].count += 1;
+      map[key].areas[item.area].dates.push({
+        iso: formattedDate.iso,
+        label: formattedDate.label,
+        driverName: item.crewName || '-'
+      });
+      if (!map[key].allDates.some(d => d.iso === formattedDate.iso)) {
+        map[key].allDates.push({ iso: formattedDate.iso, label: formattedDate.label });
+      }
     });
 
     // Jika pengguna mencari kode armada tertentu (misal: n4/ns2) atau memilih filter armada yang kebetulan belum memiliki trip pada bulan terpilih, tetap tampilkan kartu armadanya
@@ -485,13 +540,29 @@ export const CrewDeliveryHistoryView: React.FC = () => {
             plateNumber: fl.plateNumber,
             vehicleType: fl.vehicleType,
             totalTrips: 0,
-            areas: {}
+            areas: {},
+            allDates: []
           };
         }
       });
     }
 
-    return Object.values(map).sort((a, b) => b.totalTrips - a.totalTrips);
+    return Object.values(map)
+      .map(fl => {
+        const sortedAreas: typeof fl.areas = {};
+        Object.entries(fl.areas).forEach(([areaName, info]) => {
+          sortedAreas[areaName] = {
+            count: info.count,
+            dates: [...info.dates].sort((a, b) => a.iso.localeCompare(b.iso))
+          };
+        });
+        return {
+          ...fl,
+          areas: sortedAreas,
+          allDates: [...fl.allDates].sort((a, b) => a.iso.localeCompare(b.iso))
+        };
+      })
+      .sort((a, b) => b.totalTrips - a.totalTrips);
   }, [filteredHistory, fleets, searchQuery, selectedFleetFilter, resolveCanonicalFleet]);
 
   // Deteksi apakah pengguna sedang mencari kode/nama Armada (misal: "n4/ns2", "n4", "ns2", "ds3", dll.) atau memilih Filter Armada
@@ -1492,7 +1563,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
               <div className="space-y-2">
                 {fleetAreaStatsList.map(fl => {
                   const isExpanded = expandedIds[fl.initialCode] ?? true;
-                  const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+                  const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1].count - a[1].count);
                   return (
                     <UiAccordionItem
                       key={`direct-fleet-${fl.initialCode}`}
@@ -1500,7 +1571,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                       isExpanded={isExpanded}
                       onToggle={toggleAccordion}
                       title={`Armada ${fl.initialCode} · ${fl.plateNumber}`}
-                      subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi`}
+                      subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi · ${fl.allDates.length} Hari Kirim`}
                       rightMeta={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
                     >
                       {areaEntries.length === 0 ? (
@@ -1509,24 +1580,43 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                          {areaEntries.map(([areaName, count]) => (
+                          {areaEntries.map(([areaName, areaInfo]) => (
                             <div
                               key={areaName}
-                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5"
+                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-semibold text-white text-xs truncate">
                                   {areaName}
                                 </span>
-                                <UiBadge count={`${count} Trip`} variant="emerald" />
+                                <UiBadge count={`${areaInfo.count} Trip`} variant="emerald" />
                               </div>
                               <UiProgressBar
-                                value={count}
+                                value={areaInfo.count}
                                 max={Math.max(1, fl.totalTrips)}
                                 label="Porsi Rute Armada"
-                                valueLabel={`${Math.round((count / Math.max(1, fl.totalTrips)) * 100)}%`}
+                                valueLabel={`${Math.round((areaInfo.count / Math.max(1, fl.totalTrips)) * 100)}%`}
                                 status="success"
                               />
+                              {areaInfo.dates.length > 0 && (
+                                <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
+                                    <span>Tanggal Kirim:</span>
+                                  </span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {areaInfo.dates.map((dt, dIdx) => (
+                                      <span
+                                        key={`${dt.iso}-${dIdx}`}
+                                        title={`Tanggal: ${dt.label} • Driver: ${dt.driverName}`}
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700/80 text-[10px] font-mono font-semibold text-emerald-300"
+                                      >
+                                        {dt.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1740,7 +1830,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 <div className="space-y-2 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
                   {fleetAreaStatsList.map(fl => {
                     const isExpanded = !!expandedIds[fl.initialCode];
-                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1].count - a[1].count);
 
                     return (
                       <UiAccordionItem
@@ -1749,28 +1839,47 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         isExpanded={isExpanded}
                         onToggle={toggleAccordion}
                         title={`Armada ${fl.initialCode} · ${fl.plateNumber}`}
-                        subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi`}
+                        subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi · ${fl.allDates.length} Hari Kirim`}
                         rightMeta={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                          {areaEntries.map(([areaName, count]) => (
+                          {areaEntries.map(([areaName, areaInfo]) => (
                             <div
                               key={areaName}
-                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5"
+                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-semibold text-white text-xs truncate">
                                   {areaName}
                                 </span>
-                                <UiBadge count={`${count} Trip`} variant="emerald" />
+                                <UiBadge count={`${areaInfo.count} Trip`} variant="emerald" />
                               </div>
                               <UiProgressBar
-                                value={count}
+                                value={areaInfo.count}
                                 max={fl.totalTrips}
                                 label="Porsi Rute Armada"
-                                valueLabel={`${Math.round((count / Math.max(1, fl.totalTrips)) * 100)}%`}
+                                valueLabel={`${Math.round((areaInfo.count / Math.max(1, fl.totalTrips)) * 100)}%`}
                                 status="success"
                               />
+                              {areaInfo.dates.length > 0 && (
+                                <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
+                                    <span>Tanggal Kirim:</span>
+                                  </span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {areaInfo.dates.map((dt, dIdx) => (
+                                      <span
+                                        key={`${dt.iso}-${dIdx}`}
+                                        title={`Tanggal: ${dt.label} • Driver: ${dt.driverName}`}
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700/80 text-[10px] font-mono font-semibold text-emerald-300"
+                                      >
+                                        {dt.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1781,35 +1890,49 @@ export const CrewDeliveryHistoryView: React.FC = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
                   {fleetAreaStatsList.map(fl => {
-                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1].count - a[1].count);
 
                     return (
                       <UiCard
                         key={fl.initialCode}
                         compact
                         title={`Armada ${fl.initialCode}`}
-                        subtitle={`${fl.plateNumber} · ${fl.vehicleType}`}
+                        subtitle={`${fl.plateNumber} · ${fl.vehicleType} · ${fl.allDates.length} Hari Kirim`}
                         headerAction={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
                       >
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
-                          {areaEntries.map(([areaName, count]) => (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                          {areaEntries.map(([areaName, areaInfo]) => (
                             <div
                               key={areaName}
-                              className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1"
+                              className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-semibold text-white text-xs truncate">
                                   {areaName}
                                 </span>
                                 <span className="font-mono tabular-nums text-[11px] font-bold text-emerald-400">
-                                  {count} Trip
+                                  {areaInfo.count} Trip
                                 </span>
                               </div>
                               <UiProgressBar
-                                value={count}
+                                value={areaInfo.count}
                                 max={fl.totalTrips}
                                 status="success"
                               />
+                              {areaInfo.dates.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1 pt-1">
+                                  <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  {areaInfo.dates.map((dt, dIdx) => (
+                                    <span
+                                      key={`${dt.iso}-${dIdx}`}
+                                      title={`Tanggal: ${dt.label} • Driver: ${dt.driverName}`}
+                                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-emerald-300"
+                                    >
+                                      {dt.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

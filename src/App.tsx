@@ -1,46 +1,272 @@
-import React, { useState, useEffect, useRef, useCallback, startTransition } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
-import { ExecutiveDashboard } from './components/ExecutiveDashboard';
-import { DashboardOverview } from './components/DashboardOverview';
-import { ScheduleManagement } from './components/ScheduleManagement';
-import { FleetCrewManagement } from './components/FleetCrewManagement';
-import { SparePartManagement } from './components/SparePartManagement';
-import { FuelEfficiencyManagement } from './components/FuelEfficiencyManagement';
-import { CrewDeliveryHistoryView } from './components/CrewDeliveryHistoryView';
-import { UserManagement } from './components/UserManagement';
-import { ExcelTrackingEvaluator } from './components/ExcelTrackingEvaluator';
-import { CustomerMapping } from './components/CustomerMapping';
-import { FleetFormCenter } from './components/FleetFormCenter';
-import { SupabaseSqlArchitecture } from './components/SupabaseSqlArchitecture';
-import { SalesAdminHub, SalesAdminSubTab } from './components/sales/SalesAdminHub';
-import { FinanceValidasiFormKirimTab } from './components/sales/FormKirimSystem';
-import { SalesKpi } from './components/sales/SalesKpi';
-import { PurchasingStockAnalysis } from './components/purchasing/PurchasingStockAnalysis';
+import type { WmsSubTab } from './components/WarehouseManagementSystem';
 import { AuthModal } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
-import { SystemActivityLog } from './components/SystemActivityLog';
-import { DepartmentDashboard } from './components/DepartmentDashboard';
-import { WarehouseManagementSystem, WmsSubTab } from './components/WarehouseManagementSystem';
-import { MarketingDashboard } from './components/MarketingDashboard';
-import { DriverMobileView } from './components/DriverMobileView';
-import { DriverReportsManagement } from './components/DriverReportsManagement';
-import { AnalyticsReportingModule } from './components/AnalyticsReportingModule';
-import { E2ETesterModule } from './components/E2ETesterModule';
-import { MasterCabang } from './components/MasterCabang';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
-import { ThreeDLogoLoader } from './components/ThreeDLogoLoader';
+import { AkkLogo } from './components/AkkLogo';
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
-import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, ChevronDown, Calendar, Bell, Smartphone, Lock, Building2 } from 'lucide-react';
+import { Clock, ChevronDown, Bell, Lock } from 'lucide-react';
 import { useToast } from './context/ToastContext';
-import { canAccess, getDefaultTabForRole, getFirstAccessibleTabForUser } from './utils/rbac';
+import { canAccess, getFirstAccessibleTabForUser } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
-import { databaseBarangService } from './services/databaseBarangService';
+import {
+  loadExecutiveDashboard,
+  loadScheduleManagement,
+  loadFleetCrewManagement,
+  loadSparePartManagement,
+  loadFuelEfficiencyManagement,
+  loadUserManagement,
+  loadExcelTrackingEvaluator,
+  loadCustomerMapping,
+  loadFleetFormCenter,
+  loadSupabaseSqlArchitecture,
+  loadSalesAdminHub,
+  loadFinanceValidasiFormKirimTab,
+  loadSalesKpi,
+  loadPurchasingStockAnalysis,
+  loadSystemActivityLog,
+  loadDepartmentDashboard,
+  loadWarehouseManagementSystem,
+  loadMarketingDashboard,
+  loadDriverMobileView,
+  loadDriverReportsManagement,
+  loadAnalyticsReportingModule,
+  loadE2ETesterModule,
+  loadMasterCabang,
+  preloadTabsSequential,
+  lazyWithRetry
+} from './utils/tabLoaders';
+
+const ExecutiveDashboard = lazyWithRetry(loadExecutiveDashboard);
+const ScheduleManagement = lazyWithRetry(loadScheduleManagement);
+const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
+const SparePartManagement = lazyWithRetry(loadSparePartManagement);
+const FuelEfficiencyManagement = lazyWithRetry(loadFuelEfficiencyManagement);
+const UserManagement = lazyWithRetry(loadUserManagement);
+const ExcelTrackingEvaluator = lazyWithRetry(loadExcelTrackingEvaluator);
+const CustomerMapping = lazyWithRetry(loadCustomerMapping);
+const FleetFormCenter = lazyWithRetry(loadFleetFormCenter);
+const SupabaseSqlArchitecture = lazyWithRetry(loadSupabaseSqlArchitecture);
+const SalesAdminHub = lazyWithRetry(loadSalesAdminHub);
+const FinanceValidasiFormKirimTab = lazyWithRetry(loadFinanceValidasiFormKirimTab);
+const SalesKpi = lazyWithRetry(loadSalesKpi);
+const PurchasingStockAnalysis = lazyWithRetry(loadPurchasingStockAnalysis);
+const SystemActivityLog = lazyWithRetry(loadSystemActivityLog);
+const DepartmentDashboard = lazyWithRetry(loadDepartmentDashboard);
+const WarehouseManagementSystem = lazyWithRetry(loadWarehouseManagementSystem);
+const MarketingDashboard = lazyWithRetry(loadMarketingDashboard);
+const DriverMobileView = lazyWithRetry(loadDriverMobileView);
+const DriverReportsManagement = lazyWithRetry(loadDriverReportsManagement);
+const AnalyticsReportingModule = lazyWithRetry(loadAnalyticsReportingModule);
+const E2ETesterModule = lazyWithRetry(loadE2ETesterModule);
+const MasterCabang = lazyWithRetry(loadMasterCabang);
+
+const AppShellSkeleton: React.FC<{
+  statusLabel?: string;
+}> = ({ statusLabel = 'Memverifikasi sesi...' }) => {
+  const [logoImgFailed, setLogoImgFailed] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
+      {/* Top Progress Bar */}
+      <div className="fixed top-0 left-0 right-0 h-[3px] z-50 bg-blue-500/15 overflow-hidden">
+        <div className="h-full w-1/3 bg-gradient-to-r from-blue-600 via-sky-400 to-indigo-500 rounded-full animate-[shimmer_1.2s_infinite]" />
+      </div>
+
+      {/* Desktop Sidebar Skeleton */}
+      <aside className="hidden lg:flex w-72 shrink-0 flex-col justify-between bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4">
+        <div className="space-y-5">
+          <div className="flex items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-slate-800 border border-blue-200/70 dark:border-slate-700 p-1.5 flex items-center justify-center shrink-0">
+              {!logoImgFailed ? (
+                <img
+                  src="/favicon.svg"
+                  alt="AKK Operasional"
+                  className="w-full h-full object-contain"
+                  onError={() => setLogoImgFailed(true)}
+                />
+              ) : (
+                <AkkLogo size="sm" showText={false} />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white truncate">
+                AKK Operasional
+              </div>
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                PT. Anugrah Kemasan Kreatif
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="h-3 w-24 rounded-md skeleton-wave" />
+            {[100, 88, 94, 82, 96, 76].map((w, idx) => (
+              <div
+                key={idx}
+                style={{ width: `${w}%` }}
+                className="h-9 rounded-xl skeleton-wave"
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+          <div className="h-9 w-9 rounded-xl skeleton-wave" />
+          <div className="h-9 flex-1 rounded-xl skeleton-wave" />
+        </div>
+      </aside>
+
+      {/* Main Content Skeleton */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <header className="h-16 bg-white/95 dark:bg-slate-900/95 border-b border-slate-200/80 dark:border-slate-800 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="lg:hidden w-9 h-9 rounded-xl bg-blue-50 dark:bg-slate-800 border border-blue-200/60 dark:border-slate-700 p-1.5 flex items-center justify-center shrink-0">
+              {!logoImgFailed ? (
+                <img
+                  src="/favicon.svg"
+                  alt="AKK"
+                  className="w-full h-full object-contain"
+                  onError={() => setLogoImgFailed(true)}
+                />
+              ) : (
+                <AkkLogo size="sm" showText={false} />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate">
+                AKK Operasional
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                {statusLabel}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="hidden sm:block h-9 w-36 rounded-xl skeleton-wave" />
+            <div className="h-9 w-9 rounded-xl skeleton-wave" />
+            <div className="h-9 w-9 rounded-full skeleton-wave" />
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-5">
+          {/* Status Header Card */}
+          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 border border-blue-200/80 dark:border-slate-700 p-2 flex items-center justify-center shrink-0">
+                {!logoImgFailed ? (
+                  <img
+                    src="/favicon.svg"
+                    alt="Logo PT Anugrah Kemasan Kreatif"
+                    className="w-full h-full object-contain"
+                    onError={() => setLogoImgFailed(true)}
+                  />
+                ) : (
+                  <AkkLogo size="md" showText={false} />
+                )}
+              </div>
+              <div className="space-y-1 min-w-0">
+                <div className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  AKK Operasional
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {statusLabel}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200/80 dark:border-blue-500/25 text-xs font-bold text-blue-700 dark:text-blue-300">
+                <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+                <span>Menyiapkan Ruang Kerja</span>
+              </span>
+            </div>
+          </div>
+
+          {/* 4 KPI Bento Skeletons */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="h-3 w-20 rounded-md skeleton-wave" />
+                  <div className="h-7 w-7 rounded-lg skeleton-wave" />
+                </div>
+                <div className="h-7 w-28 rounded-lg skeleton-wave" />
+                <div className="h-2.5 w-24 rounded-md skeleton-wave" />
+              </div>
+            ))}
+          </div>
+
+          {/* Asymmetric Content Bento Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 space-y-3.5">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                <div className="h-4 w-44 rounded-lg skeleton-wave" />
+                <div className="h-8 w-28 rounded-xl skeleton-wave" />
+              </div>
+              {[0, 1, 2, 3].map((row) => (
+                <div key={row} className="h-12 w-full rounded-xl skeleton-wave" />
+              ))}
+            </div>
+
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 space-y-3.5">
+              <div className="h-4 w-36 rounded-lg skeleton-wave" />
+              <div className="h-36 w-full rounded-xl skeleton-wave" />
+              <div className="h-10 w-full rounded-xl skeleton-wave" />
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+const ModuleLoaderFallback: React.FC = () => (
+  <div className="space-y-4">
+    <div className="h-1 w-full bg-blue-500/15 rounded-full overflow-hidden relative">
+      <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-blue-600 via-sky-400 to-indigo-500 rounded-full animate-[shimmer_1.1s_infinite]" />
+    </div>
+
+    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl skeleton-wave shrink-0" />
+          <div className="space-y-2">
+            <div className="h-4 w-48 rounded-lg skeleton-wave" />
+            <div className="h-3 w-72 max-w-[60vw] rounded-md skeleton-wave" />
+          </div>
+        </div>
+        <div className="hidden sm:block h-9 w-28 rounded-xl skeleton-wave" />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-20 rounded-xl skeleton-wave" />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+        <div className="lg:col-span-2 space-y-2.5">
+          <div className="h-12 rounded-xl skeleton-wave" />
+          <div className="h-12 rounded-xl skeleton-wave" />
+          <div className="h-12 rounded-xl skeleton-wave" />
+        </div>
+        <div className="h-40 rounded-xl skeleton-wave" />
+      </div>
+    </div>
+  </div>
+);
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
@@ -125,9 +351,7 @@ export default function App() {
 
   const selectTabImmediate = useCallback((nextTab: NavTab) => {
     setActiveNavTab(nextTab);
-    startTransition(() => {
-      setCurrentTab(nextTab);
-    });
+    setCurrentTab(nextTab);
   }, []);
 
   useEffect(() => {
@@ -179,6 +403,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (isAuthChecking || !isAuthenticated || !import.meta.env.PROD) return;
+    const basePriorityTabs: NavTab[] = [
+      'sales_form_kirim',
+      'finance_validasi_form_kirim',
+      'schedules'
+    ];
+    if (isDriver(currentUser)) {
+      basePriorityTabs.unshift('driver_portal');
+    }
+
+    const priorityTabs = basePriorityTabs.filter(
+      (t): t is NavTab => t !== currentTab && canAccess(currentUser, t)
+    );
+
+    if (priorityTabs.length === 0) return;
+
+    let stopWarmup: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      stopWarmup = preloadTabsSequential(priorityTabs, 600);
+    }, 2500);
+
+    return () => {
+      clearTimeout(timer);
+      if (stopWarmup) stopWarmup();
+    };
+  }, [isAuthChecking, isAuthenticated, currentUser.id, currentUser.role, isDriver]);
+
+  useEffect(() => {
     setOnNavigateCallback((tab) => selectTabImmediate(tab as NavTab));
   }, [setOnNavigateCallback, selectTabImmediate]);
 
@@ -198,8 +450,21 @@ export default function App() {
   });
 
   useEffect(() => {
-    void databaseBarangService.ensureHydrated();
-  }, []);
+    const isWarehouseTab = [
+      'warehouse_scanner',
+      'warehouse_cubication',
+      'warehouse_fleet_cubication',
+      'warehouse_inventory',
+      'warehouse_dashboard',
+      'wms_inbound_outbound',
+      'wms_opname'
+    ].includes(currentTab);
+    if (isWarehouseTab) {
+      void import('./services/databaseBarangService').then(({ databaseBarangService }) =>
+        databaseBarangService.ensureHydrated()
+      );
+    }
+  }, [currentTab]);
 
   useEffect(() => {
     if (isAuthChecking || !isAuthenticated) return;
@@ -350,14 +615,7 @@ export default function App() {
 
 
   if (isAuthChecking) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-4 selection:bg-amber-500 selection:text-slate-950">
-        <ThreeDLogoLoader
-          statusText="Memverifikasi sesi Hostinger..."
-          subText="Autentikasi diperiksa langsung ke backend sebelum aplikasi dibuka."
-        />
-      </div>
-    );
+    return <AppShellSkeleton statusLabel="Memverifikasi sesi & menyinkronkan data..." />;
   }
 
   if (!isAuthenticated) {
@@ -478,6 +736,7 @@ export default function App() {
             : `p-4 sm:p-6 lg:p-8 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'}`
         }`}>
           <ReadOnlyModuleBoundary user={currentUser} activeTab={currentTab}>
+          <Suspense fallback={<ModuleLoaderFallback />}>
           {currentTab === 'dashboard' && (
             isAdmin() || canAccess(currentUser, 'dashboard') ? (
               <ExecutiveDashboard onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
@@ -750,6 +1009,7 @@ export default function App() {
           {currentTab === 'e2e_testing' && (
             <E2ETesterModule onNavigate={(tab) => setCurrentTab(tab)} />
           )}
+          </Suspense>
           </ReadOnlyModuleBoundary>
         </main>
 

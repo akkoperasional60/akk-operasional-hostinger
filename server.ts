@@ -7,15 +7,21 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
 import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
 
-dotenv.config();
+let cachedSharpModule: any = undefined;
+async function getSharp(): Promise<any | null> {
+  if (cachedSharpModule !== undefined) return cachedSharpModule;
+  try {
+    const mod: any = await import("sharp");
+    cachedSharpModule = mod?.default || mod;
+    return cachedSharpModule;
+  } catch (err: any) {
+    console.warn("⚠️ [Sharp Dynamic Import] Modul sharp tidak dapat dimuat di environment ini:", err?.message || err);
+    cachedSharpModule = null;
+    return null;
+  }
+}
 
-// sharp (modul native) dimuat malas: bila gagal ter-install di Hostinger, server tetap bisa start
-// dan hanya fitur yang memakainya (visual matching / YOLO fallback) yang menurun.
-let sharpModulePromise: Promise<any> | null = null;
-const getSharp = (): Promise<any> => {
-  if (!sharpModulePromise) sharpModulePromise = import("sharp").then((m: any) => m.default ?? m);
-  return sharpModulePromise;
-};
+dotenv.config();
 
 // Initialize Gemini Client if API key is present and not set to 'disabled'
 const rawGeminiKey = String(process.env.GEMINI_API_KEY || '').trim();
@@ -327,12 +333,208 @@ async function startServer() {
   };
   const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
   const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  const hashSessionId = (sid: string): string => crypto.createHash('sha256').update(`akk-sid:${sid}`).digest('hex');
 
-  const createSessionToken = (userId: string, sid?: string): string => {
+  // Memakai req.ip yang dihitung Express dari 'trust proxy' (jumlah hop proxy tepercaya, TRUST_PROXY_HOPS).
+  // Header X-Forwarded-For mentah TIDAK dipercaya karena bisa dipalsukan penyerang untuk melewati rate-limit.
+  const getClientIp = (req: any): string => String(req?.ip || req?.socket?.remoteAddress || '127.0.0.1');
+
+  // Pelonggaran & proteksi Rate Limit Login:
+  // Menggunakan kombinasi Akun + IP (bukan akun saja) dengan batas 25 percobaan gagal & penundaan progresif,
+  // sehingga orang iseng dari IP berbeda tidak bisa mengunci akun Admin asli.
+  interface LoginRateState {
+    failures: number;
+    firstFailAt: number;
+    lockedUntil: number;
+  }
+  const loginRateByAccountIp = new Map<string, LoginRateState>();
+  const loginRateByIpOnly = new Map<string, LoginRateState>();
+  const loginRateByAccountOnly = new Map<string, LoginRateState>(); // serangan terdistribusi ke 1 akun dari banyak IP
+  const MAX_ACCOUNT_ALL_IP_ATTEMPTS = 40;
+  const registerRateByIp = new Map<string, { count: number; resetAt: number }>();
+  const MAX_REGISTER_PER_IP = 10;
+  const RATE_WINDOW_MS = 15 * 60 * 1000; // 15 menit
+  const MAX_ACCOUNT_IP_ATTEMPTS = 25; // dilonggarkan ke 25 percobaan per kombinasi (akun + IP)
+  const MAX_IP_ONLY_ATTEMPTS = 60; // batas global per IP
+
+  const checkLoginRateLimit = (accountIdentifier: string, ip: string): { allowed: boolean; retryAfterSec: number; delayMs: number } => {
+    const now = Date.now();
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    const ipKey = ip;
+
+    const cleanAndGet = (map: Map<string, LoginRateState>, key: string): LoginRateState | undefined => {
+      const st = map.get(key);
+      if (!st) return undefined;
+      if (st.lockedUntil > 0 && now >= st.lockedUntil) {
+        map.delete(key);
+        return undefined;
+      }
+      if (now - st.firstFailAt > RATE_WINDOW_MS && st.lockedUntil <= now) {
+        map.delete(key);
+        return undefined;
+      }
+      return st;
+    };
+
+    const compState = cleanAndGet(loginRateByAccountIp, compositeKey);
+    if (compState && compState.lockedUntil > now) {
+      return { allowed: false, retryAfterSec: Math.ceil((compState.lockedUntil - now) / 1000), delayMs: 0 };
+    }
+
+    const ipState = cleanAndGet(loginRateByIpOnly, ipKey);
+    if (ipState && ipState.lockedUntil > now) {
+      return { allowed: false, retryAfterSec: Math.ceil((ipState.lockedUntil - now) / 1000), delayMs: 0 };
+    }
+
+    const acctState = cleanAndGet(loginRateByAccountOnly, accountIdentifier.toLowerCase());
+    if (acctState && acctState.lockedUntil > now) {
+      return { allowed: false, retryAfterSec: Math.ceil((acctState.lockedUntil - now) / 1000), delayMs: 0 };
+    }
+
+    // Penundaan progresif ringan setelah 5x gagal pada kombinasi Akun + IP yang sama
+    const failCount = compState?.failures || 0;
+    const delayMs = failCount >= 5 ? Math.min(2500, (failCount - 4) * 350) : 0;
+    return { allowed: true, retryAfterSec: 0, delayMs };
+  };
+
+  const recordLoginFailure = (accountIdentifier: string, ip: string): void => {
+    const now = Date.now();
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    const ipKey = ip;
+
+    const prevComp = loginRateByAccountIp.get(compositeKey);
+    const nextCompFailures = (prevComp && now - prevComp.firstFailAt <= RATE_WINDOW_MS ? prevComp.failures : 0) + 1;
+    loginRateByAccountIp.set(compositeKey, {
+      failures: nextCompFailures,
+      firstFailAt: prevComp && now - prevComp.firstFailAt <= RATE_WINDOW_MS ? prevComp.firstFailAt : now,
+      lockedUntil: nextCompFailures >= MAX_ACCOUNT_IP_ATTEMPTS ? now + RATE_WINDOW_MS : 0
+    });
+
+    const acctKey = accountIdentifier.toLowerCase();
+    const prevAcct = loginRateByAccountOnly.get(acctKey);
+    const nextAcctFailures = (prevAcct && now - prevAcct.firstFailAt <= RATE_WINDOW_MS ? prevAcct.failures : 0) + 1;
+    loginRateByAccountOnly.set(acctKey, {
+      failures: nextAcctFailures,
+      firstFailAt: prevAcct && now - prevAcct.firstFailAt <= RATE_WINDOW_MS ? prevAcct.firstFailAt : now,
+      lockedUntil: nextAcctFailures >= MAX_ACCOUNT_ALL_IP_ATTEMPTS ? now + RATE_WINDOW_MS : 0
+    });
+
+    const prevIp = loginRateByIpOnly.get(ipKey);
+    const nextIpFailures = (prevIp && now - prevIp.firstFailAt <= RATE_WINDOW_MS ? prevIp.failures : 0) + 1;
+    loginRateByIpOnly.set(ipKey, {
+      failures: nextIpFailures,
+      firstFailAt: prevIp && now - prevIp.firstFailAt <= RATE_WINDOW_MS ? prevIp.firstFailAt : now,
+      lockedUntil: nextIpFailures >= MAX_IP_ONLY_ATTEMPTS ? now + RATE_WINDOW_MS : 0
+    });
+  };
+
+  const clearLoginFailure = (accountIdentifier: string, ip: string): void => {
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    loginRateByAccountIp.delete(compositeKey);
+    loginRateByAccountOnly.delete(accountIdentifier.toLowerCase());
+  };
+
+  // Registrasi: maks 10 per IP / 15 menit (mencegah spam akun pending). Mengembalikan detik tunggu (0 = boleh).
+  const checkRegisterRate = (ip: string): number => {
+    const now = Date.now();
+    const cur = registerRateByIp.get(ip);
+    if (!cur || cur.resetAt <= now) {
+      registerRateByIp.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+      return 0;
+    }
+    cur.count += 1;
+    return cur.count > MAX_REGISTER_PER_IP ? Math.ceil((cur.resetAt - now) / 1000) : 0;
+  };
+
+  // Pembersihan berkala agar peta di memori tidak membengkak (mis. saat diserang).
+  setInterval(() => {
+    const now = Date.now();
+    for (const map of [loginRateByAccountIp, loginRateByIpOnly, loginRateByAccountOnly]) {
+      for (const [k, st] of map) {
+        if (st.lockedUntil <= now && now - st.firstFailAt > RATE_WINDOW_MS) map.delete(k);
+      }
+      if (map.size > 50000) map.clear();
+    }
+    for (const [k, v] of registerRateByIp) if (v.resetAt <= now) registerRateByIp.delete(k);
+    if (registerRateByIp.size > 50000) registerRateByIp.clear();
+  }, 5 * 60 * 1000).unref();
+
+  // Fallback pencatatan pencabutan sesi di memori jika MySQL sedang tidak terhubung
+  const inMemoryRevokedSessionHashes = new Set<string>();
+  const inMemoryUserRevokedBeforeMs = new Map<string, number>();
+  const inMemoryUserKeepSid = new Map<string, string>(); // sesi yang sengaja dipertahankan saat "keluar dari perangkat lain"
+
+  const createSessionToken = (userId: string, existingSid?: string): { token: string; sid: string; sidHash: string; exp: number } => {
     const secret = getSessionSecret();
     if (!secret) throw new Error('SESSION_SECRET belum dikonfigurasi');
-    const payload = base64url(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS, ...(sid ? { sid } : {}) }));
-    return `${payload}.${signSession(payload, secret)}`;
+    const sid = existingSid || crypto.randomBytes(18).toString('base64url');
+    const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+    const iat = Math.floor(Date.now() / 1000);
+    const payload = base64url(JSON.stringify({ uid: userId, sid, iat, exp }));
+    const token = `${payload}.${signSession(payload, secret)}`;
+    return { token, sid, sidHash: hashSessionId(sid), exp };
+  };
+
+  const persistSessionToDb = async (userId: string, sidHash: string, expUnix: number, req?: any): Promise<void> => {
+    if (!isDatabaseConfigured()) return;
+    try {
+      const ip = req ? getClientIp(req).slice(0, 64) : null;
+      const ua = req ? String(req.headers?.['user-agent'] || '').slice(0, 500) : null;
+      const expDate = toMysqlDateTime(new Date(expUnix * 1000));
+      await mysqlQuery(
+        `INSERT INTO sessions (session_id_hash, user_id, ip_address, user_agent, expires_at, revoked_at, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+           expires_at = VALUES(expires_at),
+           ip_address = COALESCE(VALUES(ip_address), ip_address),
+           user_agent = COALESCE(VALUES(user_agent), user_agent),
+           last_seen_at = NOW()`,
+        [sidHash, userId, ip, ua, expDate]
+      );
+    } catch (err: any) {
+      // Jangan gagalkan login apabila tabel belum termigrasi atau koneksi sementara sibuk
+      console.warn('[Session DB Persist Warning]', err?.message || err);
+    }
+  };
+
+  const revokeSessionBySid = async (sid?: string): Promise<void> => {
+    if (!sid) return;
+    const sidHash = hashSessionId(sid);
+    inMemoryRevokedSessionHashes.add(sidHash);
+    if (!isDatabaseConfigured()) return;
+    try {
+      await mysqlQuery(`UPDATE sessions SET revoked_at = NOW() WHERE session_id_hash = ?`, [sidHash]);
+    } catch (err: any) {
+      console.warn('[Session Revoke Warning]', err?.message || err);
+    }
+  };
+
+  const revokeAllUserSessions = async (userId: string, exceptSid?: string): Promise<number> => {
+    const cleanUid = String(userId || '').trim();
+    if (!cleanUid) return 0;
+    inMemoryUserRevokedBeforeMs.set(cleanUid, Date.now());
+    if (exceptSid) inMemoryUserKeepSid.set(cleanUid, exceptSid);
+    else inMemoryUserKeepSid.delete(cleanUid);
+    if (!isDatabaseConfigured()) return 1;
+    try {
+      await ensureDatabaseSchema();
+      if (exceptSid) {
+        const result: any = await mysqlQuery(
+          `UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND session_id_hash <> ? AND revoked_at IS NULL`,
+          [cleanUid, hashSessionId(exceptSid)]
+        );
+        return Number(result?.affectedRows || 0);
+      } else {
+        const result: any = await mysqlQuery(
+          `UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL`,
+          [cleanUid]
+        );
+        return Number(result?.affectedRows || 0);
+      }
+    } catch (err: any) {
+      console.warn('[Revoke All User Sessions Warning]', err?.message || err);
+      return 0;
+    }
   };
 
   const readCookie = (req: any, name: string): string => {
@@ -346,7 +548,7 @@ async function startServer() {
     return '';
   };
 
-  const verifySessionToken = (token: string): { uid: string; sid?: string } | null => {
+  const verifySessionToken = (token: string): { uid: string; sid?: string; iat?: number; exp: number } | null => {
     const secret = getSessionSecret();
     if (!secret || !token || !token.includes('.')) return null;
     const [payload, signature] = token.split('.', 2);
@@ -356,81 +558,24 @@ async function startServer() {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try {
       const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-      if (!decoded?.uid || Number(decoded.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
-      return {
-        uid: String(decoded.uid),
-        sid: typeof decoded.sid === 'string' && /^[a-f0-9]{48}$/.test(decoded.sid) ? decoded.sid : undefined
-      };
+      const exp = Number(decoded?.exp || 0);
+      if (!decoded?.uid || exp <= Math.floor(Date.now() / 1000)) return null;
+      const uid = String(decoded.uid);
+      const sid = decoded.sid ? String(decoded.sid) : undefined;
+      const iat = decoded.iat ? Number(decoded.iat) : undefined;
+      if (sid && inMemoryRevokedSessionHashes.has(hashSessionId(sid))) {
+        return null;
+      }
+      const userRevokedBefore = inMemoryUserRevokedBeforeMs.get(uid);
+      const isKeptSession = Boolean(sid) && inMemoryUserKeepSid.get(uid) === sid;
+      if (userRevokedBefore && !isKeptSession && (!iat || iat * 1000 < userRevokedBefore)) {
+        return null;
+      }
+      return { uid, sid, iat, exp };
     } catch {
       return null;
     }
   };
-
-  // --- Sesi tersimpan di MySQL (tabel user_sessions): bisa dicabut per perangkat / semua perangkat ---
-  // Yang disimpan hanya hash SHA-256 dari ID sesi, bukan ID-nya.
-  const sessionHash = (sid: string): string => crypto.createHash('sha256').update(sid).digest('hex');
-  const sessionOkCache = new Map<string, number>(); // cache 20 detik agar tidak query tiap request
-  const SESSION_CACHE_MS = 20_000;
-
-  const issueSession = async (userId: string): Promise<string> => {
-    if (!isDatabaseConfigured()) return createSessionToken(userId);
-    const sid = crypto.randomBytes(24).toString('hex'); // 48 karakter hex
-    try {
-      await mysqlQuery(
-        `INSERT INTO user_sessions (session_hash, user_id, expires_at, last_seen_at)
-         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), NOW())`,
-        [sessionHash(sid), userId, SESSION_TTL_SECONDS]
-      );
-    } catch (err: any) {
-      // Jangan sampai login gagal total bila tabel sesi bermasalah: beri token tanpa sid (tanpa kemampuan cabut).
-      console.warn('[Session] Gagal menyimpan sesi ke MySQL, memakai token tanpa sid:', err?.message || err);
-      return createSessionToken(userId);
-    }
-    return createSessionToken(userId, sid);
-  };
-
-  const isSessionActive = async (sid: string, userId: string): Promise<boolean> => {
-    const key = `${sessionHash(sid)}:${userId}`;
-    const until = sessionOkCache.get(key);
-    if (until && until > Date.now()) return true;
-    try {
-      const rows = await mysqlQuery<any[]>(
-        `SELECT 1 AS ok FROM user_sessions WHERE session_hash = ? AND user_id = ? AND expires_at > NOW() LIMIT 1`,
-        [sessionHash(sid), userId]
-      );
-      const ok = Array.isArray(rows) && rows.length > 0;
-      if (ok) {
-        if (sessionOkCache.size > 5000) sessionOkCache.clear();
-        sessionOkCache.set(key, Date.now() + SESSION_CACHE_MS);
-      }
-      return ok;
-    } catch (err: any) {
-      if (err?.code === 'ER_NO_SUCH_TABLE') {
-        console.warn('[Session] Tabel user_sessions belum ada; pengecekan sesi dilewati sementara.');
-        return true;
-      }
-      throw err;
-    }
-  };
-
-  const revokeSession = async (sid: string): Promise<void> => {
-    const h = sessionHash(sid);
-    for (const k of Array.from(sessionOkCache.keys())) if (k.startsWith(`${h}:`)) sessionOkCache.delete(k);
-    if (!isDatabaseConfigured()) return;
-    await mysqlQuery('DELETE FROM user_sessions WHERE session_hash = ?', [h]).catch(() => {});
-  };
-
-  const revokeUserSessions = async (userId: string): Promise<void> => {
-    for (const k of Array.from(sessionOkCache.keys())) if (k.endsWith(`:${userId}`)) sessionOkCache.delete(k);
-    if (!isDatabaseConfigured()) return;
-    await mysqlQuery('DELETE FROM user_sessions WHERE user_id = ?', [userId]).catch(() => {});
-  };
-
-  // Bersihkan sesi kedaluwarsa tiap jam.
-  setInterval(() => {
-    if (!isDatabaseConfigured()) return;
-    mysqlQuery('DELETE FROM user_sessions WHERE expires_at < NOW()').catch(() => {});
-  }, 60 * 60 * 1000).unref();
 
   const setSessionCookie = (res: any, token: string) => {
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
@@ -479,28 +624,63 @@ async function startServer() {
     return '';
   };
 
+  const sessionUserCache = new Map<string, { user: any; expiresAt: number }>();
+
   const getSessionUser = async (req: any): Promise<any | null> => {
-    const parsed = verifySessionToken(extractSessionTokenFromReq(req));
+    const rawToken = extractSessionTokenFromReq(req);
+    const parsed = verifySessionToken(rawToken);
     if (!parsed) return null;
+    req.sessionMeta = parsed;
     if (previewSessionUsers.has(parsed.uid)) {
       return previewSessionUsers.get(parsed.uid) || null;
     }
     if (!isDatabaseConfigured()) {
       return null;
     }
+    const sidHash = parsed.sid ? hashSessionId(parsed.sid) : '';
+    if (sidHash && inMemoryRevokedSessionHashes.has(sidHash)) {
+      sessionUserCache.delete(rawToken);
+      return null;
+    }
+    const cached = sessionUserCache.get(rawToken);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.user;
+    }
     try {
-      const rows = await mysqlQuery<any[]>(
-        `SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes
-         FROM users WHERE id = ? LIMIT 1`,
-        [parsed.uid]
-      );
+      const [sessRows, rows] = await Promise.all([
+        sidHash
+          ? mysqlQuery<any[]>(
+              `SELECT session_id_hash, revoked_at, expires_at FROM sessions WHERE session_id_hash = ? LIMIT 1`,
+              [sidHash]
+            ).catch(() => [])
+          : Promise.resolve([]),
+        mysqlQuery<any[]>(
+          `SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes
+           FROM users WHERE id = ? LIMIT 1`,
+          [parsed.uid]
+        )
+      ]);
+
+      if (Array.isArray(sessRows) && sessRows.length > 0) {
+        const sRow = sessRows[0];
+        if (sRow.revoked_at !== null && sRow.revoked_at !== undefined) {
+          inMemoryRevokedSessionHashes.add(sidHash);
+          sessionUserCache.delete(rawToken);
+          return null;
+        }
+        if (sRow.expires_at && new Date(sRow.expires_at).getTime() <= Date.now()) {
+          sessionUserCache.delete(rawToken);
+          return null;
+        }
+      }
+
       if (!Array.isArray(rows) || rows.length === 0) return null;
       const u = rows[0];
       if (String(u.status || '') !== 'approved') return null;
-      // Token baru membawa sid: harus masih tercatat di user_sessions (belum di-logout/dicabut).
-      if (parsed.sid && !(await isSessionActive(parsed.sid, String(u.id)))) return null;
+      sessionUserCache.set(rawToken, { user: u, expiresAt: Date.now() + 30000 });
       return u;
     } catch (err: any) {
+      if (cached?.user) return cached.user;
       if (process.env.K_SERVICE || process.env.NODE_ENV !== 'production') {
         return previewSessionUsers.get(parsed.uid) || null;
       }
@@ -671,6 +851,35 @@ async function startServer() {
     ['hr_dashboard', 'ga_security', 'training_videos', 'attendance', 'hr_data_karyawan', 'absensi_kehadiran'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper']
   );
+
+  // Validasi Finance pada Form Kirim: hanya Super Admin, Finance & Tax, atau akun yang diberi akses penuh lewat Hak Akses.
+  const requireFinanceFormKirimWrite = requireModuleWrite(
+    'finance_tax',
+    ['finance_validasi_form_kirim', 'finance_dashboard'],
+    ['super_admin', 'finance_tax_admin']
+  );
+  const isFinanceFormKirimWriter = (u: any): boolean => {
+    const role = String(u?.role || '');
+    if (role === 'super_admin' || role === 'finance_tax_admin') return true;
+    return resolveServerSubMenuAccess(u, 'finance_tax', ['finance_validasi_form_kirim']) === 'full_access';
+  };
+  // Buang field validasi Finance dari kiriman user non-Finance agar tidak bisa "memvalidasi" lewat POST massal.
+  const stripFinanceFields = (rec: any): any => {
+    if (!rec || typeof rec !== 'object') return rec;
+    const clean: any = { ...rec };
+    for (const k of Object.keys(clean)) {
+      if (/^finance/i.test(k) || k === 'validatedByFinance' || k === 'validatedAt') delete clean[k];
+    }
+    if (Array.isArray(clean.invoiceItems)) {
+      clean.invoiceItems = clean.invoiceItems.map((it: any) => {
+        if (!it || typeof it !== 'object') return it;
+        const c: any = { ...it };
+        for (const k of Object.keys(c)) if (/^finance/i.test(k)) delete c[k];
+        return c;
+      });
+    }
+    return clean;
+  };
 
   const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
     const lat = typeof rawLat === 'string' ? Number(rawLat.replace(',', '.').trim()) : Number(rawLat);
@@ -901,14 +1110,17 @@ async function startServer() {
         INDEX idx_wms_db_barang_order (order_index),
         INDEX idx_wms_db_barang_code (no_barang)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-      `CREATE TABLE IF NOT EXISTS user_sessions (
-        session_hash CHAR(64) NOT NULL PRIMARY KEY,
+      `CREATE TABLE IF NOT EXISTS sessions (
+        session_id_hash VARCHAR(64) NOT NULL PRIMARY KEY,
         user_id VARCHAR(64) NOT NULL,
+        ip_address VARCHAR(64) NULL,
+        user_agent VARCHAR(500) NULL,
         expires_at DATETIME NOT NULL,
+        revoked_at DATETIME NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_seen_at DATETIME NULL,
-        INDEX idx_user_sessions_user (user_id),
-        INDEX idx_user_sessions_expires (expires_at)
+        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_sessions_user (user_id, revoked_at, expires_at),
+        INDEX idx_sessions_expires (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -919,7 +1131,7 @@ async function startServer() {
         console.warn('[Database Schema] Gagal memastikan tabel:', err?.message || err);
       }
     }
-    // Hanya dianggap beres bila semua statement sukses; kalau tidak, dicoba lagi pada panggilan berikutnya.
+    // Dianggap beres hanya bila semua statement sukses; jika tidak, dicoba lagi pada panggilan berikutnya.
     if (schemaFailures === 0) schemaEnsured = true;
   };
 
@@ -998,9 +1210,16 @@ async function startServer() {
     };
   };
 
-  const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
+  const genericDbError = (err: any): string =>
+    process.env.NODE_ENV === 'production' && !process.env.K_SERVICE
+      ? 'Layanan database sementara tidak tersedia. Silakan coba lagi beberapa saat atau hubungi administrator.'
+      : String(err?.message || err || 'Koneksi MySQL gagal');
+
+  const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, req: any, res: any) => {
     const cleanId = loginIdentifier.trim().toLowerCase();
+    const clientIp = getClientIp(req);
     if (!cleanId || cleanPass.length < 6) {
+      recordLoginFailure(cleanId || 'unknown', clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
@@ -1022,51 +1241,22 @@ async function startServer() {
     }
 
     if (!matchedUser) {
+      recordLoginFailure(cleanId, clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
     if (String(matchedUser.status || 'approved') !== 'approved') {
       return res.status(403).json({ success: false, error: `Akun berstatus ${matchedUser.status || 'pending'} dan belum dapat login` });
     }
     if (!verifyPassword(cleanPass, String(matchedUser.password_hash || ''))) {
+      recordLoginFailure(cleanId, clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
-    const token = createSessionToken(String(matchedUser.id));
+    clearLoginFailure(cleanId, clientIp);
+    const { token } = createSessionToken(String(matchedUser.id));
     setSessionCookie(res, token);
     return res.json({ success: true, source: 'preview_session', sessionToken: token, user: publicUser(matchedUser) });
   };
-
-  // --- Pembatas percobaan login / registrasi (in-memory, cukup untuk 1 proses Node di Hostinger) ---
-  type AttemptBucket = { count: number; resetAt: number };
-  const authAttempts = new Map<string, AttemptBucket>();
-  const AUTH_WINDOW_MS = 15 * 60 * 1000;
-  const bucketOf = (key: string): AttemptBucket => {
-    const now = Date.now();
-    const existing = authAttempts.get(key);
-    if (existing && existing.resetAt > now) return existing;
-    const fresh = { count: 0, resetAt: now + AUTH_WINDOW_MS };
-    authAttempts.set(key, fresh);
-    return fresh;
-  };
-  const isLimited = (key: string, max: number): number => {
-    const b = authAttempts.get(key);
-    if (!b || b.resetAt <= Date.now()) return 0;
-    return b.count >= max ? Math.ceil((b.resetAt - Date.now()) / 1000) : 0;
-  };
-  const noteFailure = (key: string) => { bucketOf(key).count += 1; };
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, b] of authAttempts) if (b.resetAt <= now) authAttempts.delete(k);
-  }, 5 * 60 * 1000).unref();
-
-  const LOGIN_MAX_PER_ACCOUNT_IP = 10;   // gagal per KOMBINASI akun + IP / 15 menit (penebak tunggal)
-  const LOGIN_MAX_PER_ACCOUNT_ALL = 40;  // gagal per akun dari SEMUA IP / 15 menit (serangan terdistribusi)
-  const LOGIN_MAX_PER_IP = 100;     // gagal per IP / 15 menit
-  const REGISTER_MAX_PER_IP = 10;   // registrasi per IP / 15 menit
-  const genericDbError = (err: any): string =>
-    process.env.NODE_ENV === 'production' && !process.env.K_SERVICE
-      ? 'Layanan database sementara tidak tersedia. Silakan coba lagi beberapa saat atau hubungi administrator.'
-      : String(err?.message || err || 'Koneksi MySQL gagal');
 
   app.post('/api/auth/login', async (req, res) => {
     const { email, identifier, password } = req.body || {};
@@ -1075,22 +1265,23 @@ async function startServer() {
       return res.status(400).json({ success: false, error: 'Email/username dan password wajib diisi' });
     }
     const cleanPass = String(password).slice(0, 256);
-    const pairKey = `login:pair:${loginIdentifier}:${req.ip}`;
-    const accountKey = `login:acct:${loginIdentifier}`;
-    const ipKey = `login:ip:${req.ip}`;
-    const retryAfter = Math.max(
-      isLimited(pairKey, LOGIN_MAX_PER_ACCOUNT_IP),
-      isLimited(accountKey, LOGIN_MAX_PER_ACCOUNT_ALL),
-      isLimited(ipKey, LOGIN_MAX_PER_IP)
-    );
-    if (retryAfter > 0) {
-      res.setHeader('Retry-After', String(retryAfter));
-      return res.status(429).json({ success: false, error: 'Terlalu banyak percobaan login gagal. Coba lagi dalam beberapa menit.' });
+    const clientIp = getClientIp(req);
+
+    // Cek Rate Limit berbasis Kombinasi (Akun + IP) serta Penundaan Progresif
+    const rateStatus = checkLoginRateLimit(loginIdentifier, clientIp);
+    if (!rateStatus.allowed) {
+      res.setHeader('Retry-After', String(rateStatus.retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: `Terlalu banyak percobaan gagal dari perangkat/IP ini. Silakan coba lagi dalam ${Math.ceil(rateStatus.retryAfterSec / 60)} menit.`
+      });
     }
-    const failLogin = () => { noteFailure(pairKey); noteFailure(accountKey); noteFailure(ipKey); };
+    if (rateStatus.delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, rateStatus.delayMs));
+    }
 
     if (!isDatabaseConfigured()) {
-      return handlePreviewLogin(loginIdentifier, cleanPass, res);
+      return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
     }
 
     try {
@@ -1118,31 +1309,31 @@ async function startServer() {
             error: 'Database belum memiliki akun. Aktifkan BOOTSTRAP_ADMIN_* sementara di Hostinger untuk membuat Super Admin pertama.'
           });
         }
-        failLogin();
+        recordLoginFailure(loginIdentifier, clientIp);
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
       const u = mysqlUsers[0];
       if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
-        failLogin();
+        recordLoginFailure(loginIdentifier, clientIp);
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
-      // Status akun baru diungkap SETELAH password benar (mencegah enumerasi akun).
+      // Status akun diungkap SETELAH password benar (mencegah enumerasi akun).
       if (String(u.status || '') !== 'approved') {
         return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
       }
-      authAttempts.delete(pairKey);
-      authAttempts.delete(accountKey);
+      clearLoginFailure(loginIdentifier, clientIp);
       if (!String(u.password_hash || '').startsWith('scrypt$')) {
         await mysqlQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(cleanPass), u.id]);
       }
-      const token = await issueSession(String(u.id));
+      const { token, sidHash, exp } = createSessionToken(String(u.id));
+      await persistSessionToDb(String(u.id), sidHash, exp, req);
       setSessionCookie(res, token);
       return res.json({ success: true, source: 'hostinger_mysql', sessionToken: token, user: publicUser(u) });
     } catch (err: any) {
       const errMsg = String(err?.message || err || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
-        return handlePreviewLogin(loginIdentifier, cleanPass, res);
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
+        return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
       }
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
@@ -1154,17 +1345,15 @@ async function startServer() {
 
   app.post('/api/auth/register', async (req, res) => {
     const { fullName, email, phone, department, password } = req.body || {};
-    const cleanName = String(fullName || '').trim().slice(0, 255);
-    const cleanEmail = String(email || '').trim().toLowerCase().slice(0, 191);
+    const cleanName = String(fullName || '').trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
     const cleanPassword = String(password || '').slice(0, 256);
-    const registerKey = `register:ip:${req.ip}`;
-    const registerRetry = isLimited(registerKey, REGISTER_MAX_PER_IP);
-    if (registerRetry > 0) {
-      res.setHeader('Retry-After', String(registerRetry));
+    const registerWait = checkRegisterRate(getClientIp(req));
+    if (registerWait > 0) {
+      res.setHeader('Retry-After', String(registerWait));
       return res.status(429).json({ success: false, error: 'Terlalu banyak pendaftaran dari jaringan ini. Coba lagi nanti.' });
     }
-    noteFailure(registerKey);
-    if (!cleanName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanPassword.length < 8) {
+    if (!cleanName || cleanName.length > 255 || cleanEmail.length > 191 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanPassword.length < 8) {
       return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
     }
     try {
@@ -1190,7 +1379,7 @@ async function startServer() {
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
         const previewUser = {
           id,
@@ -1212,22 +1401,13 @@ async function startServer() {
     }
   });
 
-  app.get('/api/auth/me', async (req, res) => {
+  app.get('/api/auth/me', async (req: any, res) => {
     try {
       const user = await getSessionUser(req);
       if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
-      // Perpanjang sesi yang sama (tidak membuat baris baru tiap /me). Token lama tanpa sid dimigrasi ke sesi baru.
-      const currentToken = verifySessionToken(extractSessionTokenFromReq(req));
-      let refreshedToken: string;
-      if (currentToken?.sid && isDatabaseConfigured()) {
-        refreshedToken = createSessionToken(String(user.id), currentToken.sid);
-        void mysqlQuery(
-          `UPDATE user_sessions SET expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND), last_seen_at = NOW() WHERE session_hash = ?`,
-          [SESSION_TTL_SECONDS, sessionHash(currentToken.sid)]
-        ).catch(() => {});
-      } else {
-        refreshedToken = await issueSession(String(user.id));
-      }
+      const existingSid = req.sessionMeta?.sid;
+      const { token: refreshedToken, sidHash, exp } = createSessionToken(String(user.id), existingSid);
+      await persistSessionToDb(String(user.id), sidHash, exp, req);
       setSessionCookie(res, refreshedToken);
       return res.json({ success: true, backend: 'hostinger_mysql', sessionToken: refreshedToken, user: publicUser(user) });
     } catch (err: any) {
@@ -1235,18 +1415,37 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/logout', async (req, res) => {
-    const current = verifySessionToken(extractSessionTokenFromReq(req));
-    if (current?.sid) await revokeSession(current.sid);
+  app.post('/api/auth/logout', async (req: any, res) => {
+    const parsed = verifySessionToken(extractSessionTokenFromReq(req));
+    if (parsed?.sid) {
+      await revokeSessionBySid(parsed.sid);
+    }
     clearSessionCookie(res);
     res.json({ success: true, message: 'Logged out successfully' });
   });
 
-  // Keluar dari SEMUA perangkat (mis. HP hilang / password dicurigai bocor).
+  // Endpoint untuk mencabut seluruh sesi aktif ("Logout Semua Perangkat") milik user sendiri atau target user (oleh Super Admin)
   app.post('/api/auth/logout-all', requireAuth, async (req: any, res) => {
-    await revokeUserSessions(String(req.authUser?.id || ''));
-    clearSessionCookie(res);
-    res.json({ success: true, message: 'Semua sesi perangkat telah dikeluarkan' });
+    try {
+      const requestedUserId = String(req.body?.userId || '').trim();
+      const isSuper = req.authUser?.role === 'super_admin';
+      const targetUserId = requestedUserId && isSuper ? requestedUserId : String(req.authUser.id);
+      const keepCurrent = Boolean(req.body?.keepCurrent) && targetUserId === String(req.authUser.id);
+      const currentSid = keepCurrent ? req.sessionMeta?.sid : undefined;
+
+      const revokedCount = await revokeAllUserSessions(targetUserId, currentSid);
+      if (!keepCurrent && targetUserId === String(req.authUser.id)) {
+        clearSessionCookie(res);
+      }
+      return res.json({
+        success: true,
+        userId: targetUserId,
+        revokedCount,
+        message: `Berhasil mencabut seluruh sesi perangkat untuk pengguna ${targetUserId}`
+      });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal mencabut sesi perangkat' });
+    }
   });
 
   // User Management is persisted in Hostinger MySQL; authenticated users can read sanitized user profiles for schedule/crew assignment.
@@ -1430,12 +1629,17 @@ async function startServer() {
         ).catch(() => {});
       }
 
+      // Jika status pengguna diubah menjadi non-aktif (inactive/rejected/pending), otomatis cabut seluruh sesi aktif di perangkatnya
+      if (resolvedStatus !== 'approved') {
+        await revokeAllUserSessions(targetUserId).catch(() => {});
+      }
+
       const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [targetUserId]);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         const existingPreview = previewSessionUsers.get(id) || {};
         const updatedPreview = {
           ...existingPreview,
@@ -1456,22 +1660,40 @@ async function startServer() {
     }
   });
 
-  app.post('/api/users/:id/password', requireSuperAdmin, async (req, res) => {
+  app.post('/api/users/:id/password', requireSuperAdmin, async (req: any, res) => {
     const password = String(req.body?.password || '');
     if (password.length < 8) return res.status(400).json({ success: false, error: 'Password minimal 8 karakter' });
     try {
       const result: any = await mysqlQuery('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hashPassword(password), req.params.id]);
       if (!Number(result?.affectedRows || 0)) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
-      await revokeUserSessions(String(req.params.id)); // password diganti → semua perangkat user itu harus login ulang
+      // Cabut seluruh sesi lama pengguna agar perangkat yang hilang tidak bisa lagi mengakses akun
+      const exceptSid = String(req.authUser?.id) === String(req.params.id) ? req.sessionMeta?.sid : undefined;
+      await revokeAllUserSessions(String(req.params.id), exceptSid).catch(() => {});
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal reset password' });
     }
   });
 
+  app.post('/api/users/:id/revoke-sessions', requireSuperAdmin, async (req: any, res) => {
+    try {
+      const targetId = String(req.params.id || '').trim();
+      const revokedCount = await revokeAllUserSessions(targetId);
+      return res.json({
+        success: true,
+        userId: targetId,
+        revokedCount,
+        message: `Seluruh sesi aktif perangkat untuk pengguna berhasil dicabut.`
+      });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal mencabut sesi perangkat pengguna' });
+    }
+  });
+
   app.delete('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
     if (String(req.authUser?.id) === String(req.params.id)) return res.status(400).json({ success: false, error: 'Super Admin tidak dapat menghapus akun yang sedang digunakan' });
     try {
+      await revokeAllUserSessions(String(req.params.id)).catch(() => {});
       const result: any = await mysqlQuery('DELETE FROM users WHERE id = ?', [req.params.id]);
       return res.json({ success: true, removed: Number(result?.affectedRows || 0) });
     } catch (err: any) {
@@ -1778,38 +2000,77 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       // Persist single schedule mutations into the Hostinger MySQL snapshot.
       // This keeps normal create/edit/delete actions durable without relying on local JSON files.
       if (entityType === 'schedule') {
-        const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
-        const existingPayload = Array.isArray(rows) && rows.length > 0
-          ? (typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json)
-          : { schedules: [], weeks: [], month: 'Januari', year: new Date().getFullYear(), count: 0 };
-        const schedules = Array.isArray(existingPayload?.schedules) ? [...existingPayload.schedules] : [];
         const scheduleData = payload?.data || {};
-        const targetId = String(entityId || scheduleData?.id || '');
-        const index = schedules.findIndex((sch: any) => String(sch?.id || '') === targetId);
+        const targetId = String(entityId || scheduleData?.id || '').trim();
 
-        if (action === 'delete') {
-          existingPayload.schedules = schedules.filter((sch: any) => String(sch?.id || '') !== targetId);
-        } else if (index >= 0) {
-          schedules[index] = { ...schedules[index], ...scheduleData, id: scheduleData?.id || targetId };
-          existingPayload.schedules = schedules;
-        } else if (targetId && scheduleData && Object.keys(scheduleData).length > 0) {
-          existingPayload.schedules = [{ ...scheduleData, id: scheduleData?.id || targetId }, ...schedules];
+        // Ignore synthetic batch summary notifications so they never insert corrupt dummy rows
+        if (payload?.metadata?.isBatch || !targetId || targetId === 'unknown' || targetId.startsWith('batch-')) {
+          return res.json({
+            success: true,
+            source: 'hostinger_mysql',
+            message: 'Batch metadata event ignored (handled by /api/schedules/persist)',
+            timestamp: new Date().toISOString()
+          });
         }
 
-        existingPayload.updatedAt = new Date().toISOString();
+        let existingPayload: any = null;
+        try {
+          const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+          if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+            existingPayload = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          }
+        } catch {}
+        if (!existingPayload) {
+          existingPayload = readPersistentAppState('schedules_payload') || { schedules: [], weeks: [], deletedIds: [], month: 'Januari', year: new Date().getFullYear(), count: 0 };
+        }
+
+        const schedules = Array.isArray(existingPayload?.schedules)
+          ? existingPayload.schedules.filter((s: any) => s?.id && !String(s.id).startsWith('batch-'))
+          : [];
+        const deletedIdsSet = new Set<string>(Array.isArray(existingPayload?.deletedIds) ? existingPayload.deletedIds.map((x: any) => String(x)) : []);
+        const index = schedules.findIndex((sch: any) => String(sch?.id || '') === targetId);
+        const nowIso = new Date().toISOString();
+
+        if (action === 'delete') {
+          deletedIdsSet.add(targetId);
+          existingPayload.schedules = schedules.filter((sch: any) => String(sch?.id || '') !== targetId);
+        } else if (index >= 0) {
+          deletedIdsSet.delete(targetId);
+          schedules[index] = {
+            ...schedules[index],
+            ...scheduleData,
+            id: scheduleData?.id || targetId,
+            updatedAt: scheduleData?.updatedAt || nowIso
+          };
+          existingPayload.schedules = schedules;
+        } else if (scheduleData && Object.keys(scheduleData).length > 1 && (scheduleData.departureDate || scheduleData.areaName || scheduleData.trackingNumber)) {
+          deletedIdsSet.delete(targetId);
+          existingPayload.schedules = [
+            { ...scheduleData, id: scheduleData?.id || targetId, updatedAt: scheduleData?.updatedAt || nowIso },
+            ...schedules
+          ];
+        }
+
+        existingPayload.deletedIds = Array.from(deletedIdsSet).slice(-500);
+        existingPayload.updatedAt = nowIso;
         existingPayload.source = 'store_middleware';
         existingPayload.count = Array.isArray(existingPayload.schedules) ? existingPayload.schedules.length : 0;
+
+        writePersistentAppState('schedules_payload', existingPayload);
         await mysqlQuery(
           `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
            ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
           ['schedules_payload', JSON.stringify(existingPayload)]
         );
 
-        if (action === 'delete') {
-          await mysqlQuery('DELETE FROM schedules WHERE id = ?', [targetId]);
-        } else if (scheduleData?.id || targetId) {
-          await upsertScheduleRow({ ...scheduleData, id: scheduleData?.id || targetId });
-        }
+        // Non-blocking background sync to normalized schedules table so HTTP response returns immediately
+        setImmediate(() => {
+          if (action === 'delete') {
+            mysqlQuery('DELETE FROM schedules WHERE id = ?', [targetId]).catch(() => {});
+          } else if ((scheduleData?.id || targetId) && (scheduleData?.departureDate || scheduleData?.areaName)) {
+            upsertScheduleRow({ ...scheduleData, id: scheduleData?.id || targetId }).catch(() => {});
+          }
+        });
       }
 
       res.json({
@@ -1840,30 +2101,99 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     });
   });
 
+  let backgroundScheduleTableSyncRunning = false;
+  let pendingBackgroundSchedulesToSync: any[] | null = null;
+  const triggerBackgroundScheduleTableSync = (schedulesList: any[]) => {
+    pendingBackgroundSchedulesToSync = schedulesList;
+    if (backgroundScheduleTableSyncRunning) return;
+    backgroundScheduleTableSyncRunning = true;
+    setImmediate(async () => {
+      try {
+        while (pendingBackgroundSchedulesToSync) {
+          const batch = pendingBackgroundSchedulesToSync;
+          pendingBackgroundSchedulesToSync = null;
+          for (const schedule of batch) {
+            if (!schedule?.id || String(schedule.id).startsWith('batch-')) continue;
+            try {
+              await upsertScheduleRow(schedule);
+            } catch {}
+          }
+        }
+      } finally {
+        backgroundScheduleTableSyncRunning = false;
+      }
+    });
+  };
+
   // Persistent schedules snapshot in Hostinger MySQL (no local JSON files)
+  let inMemorySchedulesPayload: any = (() => {
+    const disk = readPersistentAppState('schedules_payload');
+    return disk && typeof disk === 'object' ? disk : null;
+  })();
+  let lastSchedulesDbSyncAt = 0;
+  let schedulesDbRefreshPromise: Promise<any> | null = null;
+
+  const refreshSchedulesPayloadFromDb = async (): Promise<any> => {
+    if (!isDatabaseConfigured()) return inMemorySchedulesPayload;
+    if (schedulesDbRefreshPromise) return schedulesDbRefreshPromise;
+    schedulesDbRefreshPromise = (async () => {
+      try {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1",
+          ['schedules_payload']
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          if (parsed && typeof parsed === 'object') {
+            inMemorySchedulesPayload = parsed;
+            lastSchedulesDbSyncAt = Date.now();
+            writePersistentAppState('schedules_payload', parsed);
+            return parsed;
+          }
+        }
+        lastSchedulesDbSyncAt = Date.now();
+      } catch {} finally {
+        schedulesDbRefreshPromise = null;
+      }
+      return inMemorySchedulesPayload;
+    })();
+    return schedulesDbRefreshPromise;
+  };
+
+  setImmediate(() => {
+    void refreshSchedulesPayloadFromDb();
+  });
+
   app.post("/api/schedules/persist", requireScheduleWrite, express.json({ limit: '50mb' }), async (req, res) => {
     try {
-      const { schedules, weeks, month, year, source } = req.body || {};
-      const incomingSchedules = Array.isArray(schedules) ? schedules : [];
+      const { schedules, weeks, month, year, source, deletedIds, replaceAll } = req.body || {};
+      const incomingSchedules = (Array.isArray(schedules) ? schedules : []).filter(
+        (s: any) => s && typeof s === 'object' && s.id && !String(s.id).startsWith('batch-') && (s.departureDate || s.areaName || s.trackingNumber)
+      );
       const authRole = String((req as any).authUser?.role || '');
       const authName = String((req as any).authUser?.full_name || 'Super Admin');
+
+      let existingPayload: any = inMemorySchedulesPayload;
+      if (!existingPayload) {
+        existingPayload = await Promise.race([
+          refreshSchedulesPayloadFromDb(),
+          new Promise<any>(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      }
+      if (!existingPayload) {
+        existingPayload = readPersistentAppState('schedules_payload');
+      }
+
+      const existingSchedules: any[] = (Array.isArray(existingPayload?.schedules) ? existingPayload.schedules : []).filter(
+        (s: any) => s && typeof s === 'object' && s.id && !String(s.id).startsWith('batch-') && (s.departureDate || s.areaName || s.trackingNumber)
+      );
 
       // Bypass checklist is a privileged historical-correction action. Existing
       // bypassed rows may be re-persisted by other authorized roles, but only a
       // Super Admin may introduce a NEW bypass flag.
       if (authRole !== 'super_admin' && incomingSchedules.some((s: any) => Boolean(s?.isChecklistBypassed))) {
-        const existingRows = await mysqlQuery<any[]>(
-          "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
-          ['schedules_payload']
-        );
-        const existingRaw = Array.isArray(existingRows) && existingRows[0]?.state_json
-          ? existingRows[0].state_json
-          : null;
-        const existingPayload = existingRaw
-          ? (typeof existingRaw === 'string' ? JSON.parse(existingRaw) : existingRaw)
-          : null;
         const existingBypassIds = new Set(
-          (Array.isArray(existingPayload?.schedules) ? existingPayload.schedules : [])
+          existingSchedules
             .filter((s: any) => Boolean(s?.isChecklistBypassed))
             .map((s: any) => String(s?.id || ''))
             .filter(Boolean)
@@ -1879,7 +2209,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         }
       }
 
-      const safeSchedules = incomingSchedules.map((schedule: any) => {
+      const safeIncomingSchedules = incomingSchedules.map((schedule: any) => {
         if (!schedule?.isChecklistBypassed || authRole !== 'super_admin') return schedule;
         return {
           ...schedule,
@@ -1889,30 +2219,92 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         };
       });
 
-      const count = safeSchedules.length;
+      const deletedIdsSet = new Set<string>([
+        ...(Array.isArray(existingPayload?.deletedIds) ? existingPayload.deletedIds.map((x: any) => String(x)) : []),
+        ...(Array.isArray(deletedIds) ? deletedIds.map((x: any) => String(x)) : [])
+      ]);
+
+      const isExplicitReplaceAll =
+        Boolean(replaceAll) ||
+        source === 'clear_all' ||
+        source === 'replace_all' ||
+        (safeIncomingSchedules.length === 0 && (source === 'delete_all' || source === 'kosongkan_semua'));
+
+      let finalSchedules: any[] = [];
+      if (isExplicitReplaceAll) {
+        finalSchedules = safeIncomingSchedules.filter((s: any) => !deletedIdsSet.has(String(s.id)));
+      } else {
+        // Merge incoming schedules with existing server schedules by ID so a browser with stale localStorage
+        // never wipes out newly created schedules (e.g. Tanggal 13) or overwrites a newer edit from another user.
+        const existingById = new Map<string, any>();
+        for (const ex of existingSchedules) {
+          if (ex?.id) existingById.set(String(ex.id), ex);
+        }
+        const seenIds = new Set<string>();
+        for (const inc of safeIncomingSchedules) {
+          const idStr = String(inc.id);
+          if (deletedIdsSet.has(idStr)) continue;
+          seenIds.add(idStr);
+          const ex = existingById.get(idStr);
+          if (!ex) {
+            finalSchedules.push(inc);
+          } else {
+            const exTime = ex.updatedAt ? new Date(ex.updatedAt).getTime() : 0;
+            const incTime = inc.updatedAt ? new Date(inc.updatedAt).getTime() : 0;
+            const merged = (exTime > 0 && incTime > 0 && exTime > incTime)
+              ? { ...inc, ...ex }
+              : { ...ex, ...inc };
+            // Always preserve explicit armada / fleet metadata if incoming lost it
+            if (!merged.armada && (inc.armada || ex.armada || inc.fleet?.initialCode || ex.fleet?.initialCode)) {
+              merged.armada = inc.armada || ex.armada || inc.fleet?.initialCode || ex.fleet?.initialCode;
+            }
+            if (!merged.fleet && (inc.fleet || ex.fleet)) {
+              merged.fleet = inc.fleet || ex.fleet;
+            }
+            // Preserve Super Admin bypass status if already bypassed on server
+            if (ex.isChecklistBypassed && ex.status === 'delivered' && inc.status === 'scheduled' && !inc.updatedAt) {
+              merged.status = 'delivered';
+              merged.isChecklistBypassed = true;
+              merged.checklistBypassedBy = ex.checklistBypassedBy;
+              merged.checklistBypassedAt = ex.checklistBypassedAt;
+            }
+            finalSchedules.push(merged);
+          }
+        }
+        // Preserve existing schedules on the server that weren't in the client's local snapshot (unless explicitly deleted)
+        for (const ex of existingSchedules) {
+          const idStr = String(ex.id);
+          if (!seenIds.has(idStr) && !deletedIdsSet.has(idStr)) {
+            finalSchedules.push(ex);
+          }
+        }
+      }
+
+      const count = finalSchedules.length;
       const weeksCount = Array.isArray(weeks) ? weeks.length : 0;
       const payload = {
         updatedAt: new Date().toISOString(),
         source: source || 'upload',
-        month: month || 'Januari',
-        year: year || 2026,
+        month: month || existingPayload?.month || 'Januari',
+        year: year || existingPayload?.year || 2026,
         count,
-        schedules: safeSchedules,
-        weeks: Array.isArray(weeks) ? weeks : []
+        deletedIds: Array.from(deletedIdsSet).slice(-500),
+        schedules: finalSchedules,
+        weeks: Array.isArray(weeks) && weeks.length > 0 ? weeks : (Array.isArray(existingPayload?.weeks) ? existingPayload.weeks : [])
       };
 
+      inMemorySchedulesPayload = payload;
+      lastSchedulesDbSyncAt = Date.now();
       writePersistentAppState('schedules_payload', payload);
 
-      await mysqlQuery(
-        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
-         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-        ['schedules_payload', JSON.stringify(payload)]
-      );
-
-      // Keep a normalized schedule table in sync for reporting/search while preserving the complete object in payload_json/app_state.
-      for (const schedule of safeSchedules) {
-        await upsertScheduleRow(schedule);
-      }
+      setImmediate(() => {
+        mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['schedules_payload', JSON.stringify(payload)]
+        ).catch(err => console.warn("[Schedule MySQL Async Write Warning]", err?.message || err));
+        triggerBackgroundScheduleTableSync(safeIncomingSchedules);
+      });
 
       return res.json({
         success: true,
@@ -1928,38 +2320,46 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.get("/api/schedules/persisted", requireAuth, async (req: any, res) => {
+  app.get("/api/schedules/persisted", requireAuth, async (_req: any, res) => {
     try {
-      let raw: any = null;
+      let raw: any = inMemorySchedulesPayload;
       let source = 'hostinger_mysql';
-      try {
-        const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
-        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-          raw = rows[0].state_json;
-        }
-      } catch (dbErr) {
-        // DB offline, lanjut ke disk
+
+      if (!raw) {
+        raw = await Promise.race([
+          refreshSchedulesPayloadFromDb(),
+          new Promise<any>(resolve => setTimeout(() => resolve(null), 1500))
+        ]);
+      } else if (Date.now() - lastSchedulesDbSyncAt > 3000) {
+        const refreshed = await Promise.race([
+          refreshSchedulesPayloadFromDb(),
+          new Promise<any>(resolve => setTimeout(() => resolve(raw), 800))
+        ]);
+        if (refreshed) raw = refreshed;
       }
 
       if (!raw) {
         const diskData = readPersistentAppState('schedules_payload');
         if (diskData && typeof diskData === 'object') {
           raw = diskData;
+          inMemorySchedulesPayload = diskData;
           source = 'disk_database';
         }
       }
 
       if (!raw) {
-        return res.json({ success: true, exists: false, source: 'none', schedules: [], weeks: [], count: 0 });
+        return res.json({ success: true, exists: false, source: 'none', schedules: [], weeks: [], deletedIds: [], count: 0 });
       }
 
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      const role = String(req.authUser?.role || '');
-      let schedules = Array.isArray(data?.schedules) ? data.schedules : [];
+      const deletedIdsSet = new Set<string>(Array.isArray(data?.deletedIds) ? data.deletedIds.map((x: any) => String(x)) : []);
+      let schedules = (Array.isArray(data?.schedules) ? data.schedules : []).filter(
+        (sch: any) => sch && typeof sch === 'object' && sch.id && !String(sch.id).startsWith('batch-') && !deletedIdsSet.has(String(sch.id)) && (sch.departureDate || sch.areaName || sch.trackingNumber)
+      );
       let sanitized = false;
       schedules = schedules.map((sch: any) => {
         const depIso = String(sch?.departureDate || '').slice(0, 10);
-        if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl) {
+        if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl && !sch?.isChecklistBypassed) {
           sanitized = true;
           return {
             ...sch,
@@ -1972,6 +2372,8 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       });
       if (sanitized) {
         const nextPayload = { ...data, schedules, updatedAt: new Date().toISOString() };
+        inMemorySchedulesPayload = nextPayload;
+        writePersistentAppState('schedules_payload', nextPayload);
         mysqlQuery(
           `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
            ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
@@ -1984,8 +2386,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       return res.json({
         success: true,
         exists: true,
-        source: 'hostinger_mysql',
+        source,
         ...data,
+        deletedIds: Array.from(deletedIdsSet),
         schedules,
         count: schedules.length
       });
@@ -2322,18 +2725,22 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         return res.status(403).json({ success: false, error: 'Akses khusus Super Admin' });
       }
 
-      const rows = await mysqlQuery<any[]>(
-        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
-        ['schedules_payload']
-      );
-
-      let payload: any = { updatedAt: nowIso, count: 0, schedules: [] };
-      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-        const raw = rows[0].state_json;
-        payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      let payload: any = inMemorySchedulesPayload || readPersistentAppState('schedules_payload');
+      if (!payload) {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+          ['schedules_payload']
+        ).catch(() => []);
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const raw = rows[0].state_json;
+          payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        }
+      }
+      if (!payload || typeof payload !== 'object') {
+        payload = { updatedAt: nowIso, count: 0, schedules: [] };
       }
 
-      const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+      const schedules = Array.isArray(payload?.schedules) ? [...payload.schedules] : [];
       const targetIndex = schedules.findIndex((sch: any) =>
         String(sch?.id || '') === scheduleId ||
         (trackingNumber && String(sch?.trackingNumber || '') === trackingNumber) ||
@@ -2349,7 +2756,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         const actualArrival = existing.estimatedArrival || existing.actualArrival || nowIso;
         const baseNotes = String(existing.notes || '').trim();
         const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
-        const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+        const notes = baseNotes.includes('[Bypass Checklist Super Admin')
+          ? baseNotes
+          : `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
 
         updatedSchedule = {
           ...existing,
@@ -2359,6 +2768,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           isChecklistBypassed: true,
           checklistBypassedBy: adminName,
           checklistBypassedAt: nowIso,
+          updatedAt: nowIso,
           notes
         };
         schedules[targetIndex] = updatedSchedule;
@@ -2368,7 +2778,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         const actualArrival = incoming.estimatedArrival || incoming.actualArrival || nowIso;
         const baseNotes = String(incoming.notes || '').trim();
         const bypassLabel = customNote || 'Arsip riwayat pengiriman selesai';
-        const notes = `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
+        const notes = baseNotes.includes('[Bypass Checklist Super Admin')
+          ? baseNotes
+          : `${baseNotes}${baseNotes ? ' • ' : ''}[Bypass Checklist Super Admin: ${bypassLabel}]`;
 
         updatedSchedule = {
           ...incoming,
@@ -2380,38 +2792,52 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           isChecklistBypassed: true,
           checklistBypassedBy: adminName,
           checklistBypassedAt: nowIso,
+          updatedAt: nowIso,
           notes
         };
         schedules.push(updatedSchedule);
       }
 
-      payload.schedules = schedules;
-      payload.updatedAt = nowIso;
-      payload.count = schedules.length;
+      payload = {
+        ...payload,
+        schedules,
+        updatedAt: nowIso,
+        count: schedules.length
+      };
 
-      await mysqlQuery(
-        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
-         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-        ['schedules_payload', JSON.stringify(payload)]
-      );
-      await upsertScheduleRow(updatedSchedule);
+      inMemorySchedulesPayload = payload;
+      lastSchedulesDbSyncAt = Date.now();
+      writePersistentAppState('schedules_payload', payload);
 
-      if (updatedSchedule.fleetId) {
-        await mysqlQuery(
-          "UPDATE fleets SET status = ?, updated_at = NOW() WHERE id = ?",
-          [postTripFleetStatus, String(updatedSchedule.fleetId)]
-        );
-      }
+      setImmediate(async () => {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            ['schedules_payload', JSON.stringify(payload)]
+          );
+          await upsertScheduleRow(updatedSchedule);
 
-      const crewIds = [updatedSchedule.crewId, updatedSchedule.crewHelperId, updatedSchedule.crewHelper2Id]
-        .map((value: any) => String(value || '').trim())
-        .filter(Boolean);
-      for (const crewId of [...new Set(crewIds)]) {
-        await mysqlQuery(
-          "UPDATE crews SET trips_completed = trips_completed + 1, status = 'available', updated_at = NOW() WHERE id = ?",
-          [crewId]
-        );
-      }
+          if (updatedSchedule.fleetId) {
+            await mysqlQuery(
+              "UPDATE fleets SET status = ?, updated_at = NOW() WHERE id = ?",
+              [postTripFleetStatus, String(updatedSchedule.fleetId)]
+            );
+          }
+
+          const crewIds = [updatedSchedule.crewId, updatedSchedule.crewHelperId, updatedSchedule.crewHelper2Id]
+            .map((value: any) => String(value || '').trim())
+            .filter(Boolean);
+          for (const crewId of [...new Set(crewIds)]) {
+            await mysqlQuery(
+              "UPDATE crews SET trips_completed = trips_completed + 1, status = 'available', updated_at = NOW() WHERE id = ?",
+              [crewId]
+            );
+          }
+        } catch (bgErr: any) {
+          console.warn('[Schedule Bypass Background Sync Warning]', bgErr?.message || bgErr);
+        }
+      });
 
       return res.json({
         success: true,
@@ -2438,12 +2864,15 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         return res.status(400).json({ success: false, error: 'Status jadwal tidak valid' });
       }
 
-      const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(404).json({ success: false, error: 'Snapshot jadwal belum tersedia' });
+      let payload: any = inMemorySchedulesPayload || readPersistentAppState('schedules_payload');
+      if (!payload) {
+        const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+        if (!Array.isArray(rows) || rows.length === 0) {
+          return res.status(404).json({ success: false, error: 'Snapshot jadwal belum tersedia' });
+        }
+        const raw = rows[0].state_json;
+        payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
       }
-      const raw = rows[0].state_json;
-      const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
 
       const role = String((req as any).authUser?.role || '');
@@ -2460,6 +2889,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
 
       let changed = false;
+      const nowIso = new Date().toISOString();
       payload.schedules = schedules.map((sch: any) => {
         if (sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)) {
           changed = true;
@@ -2467,20 +2897,26 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             ...sch,
             status: status || sch.status,
             notes: notes !== undefined ? notes : sch.notes,
-            actualArrival: actualArrival || (status === 'delivered' ? new Date().toISOString() : sch.actualArrival)
+            updatedAt: nowIso,
+            actualArrival: actualArrival || (status === 'delivered' ? nowIso : sch.actualArrival)
           };
         }
         return sch;
       });
       if (!changed) return res.status(404).json({ success: false, error: 'Jadwal tidak ditemukan' });
-      payload.updatedAt = new Date().toISOString();
+      payload.updatedAt = nowIso;
       payload.count = payload.schedules.length;
-      await mysqlQuery("UPDATE app_state SET state_json = ?, updated_at = NOW() WHERE state_key = ?", [JSON.stringify(payload), 'schedules_payload']);
-      await mysqlQuery(
-        `UPDATE schedules SET status=COALESCE(?, status), notes=COALESCE(?, notes), actual_arrival=COALESCE(?, actual_arrival), updated_at=NOW()
-         WHERE id=? OR tracking_number=?`,
-        [status || null, notes !== undefined ? notes : null, actualArrival ? toMysqlDateTime(actualArrival) : (status === 'delivered' ? toMysqlDateTime(new Date()) : null), scheduleId, trackingNumber || '']
-      );
+      inMemorySchedulesPayload = payload;
+      lastSchedulesDbSyncAt = Date.now();
+      writePersistentAppState('schedules_payload', payload);
+      setImmediate(() => {
+        mysqlQuery("UPDATE app_state SET state_json = ?, updated_at = NOW() WHERE state_key = ?", [JSON.stringify(payload), 'schedules_payload']).catch(() => {});
+        mysqlQuery(
+          `UPDATE schedules SET status=COALESCE(?, status), notes=COALESCE(?, notes), actual_arrival=COALESCE(?, actual_arrival), updated_at=NOW()
+           WHERE id=? OR tracking_number=?`,
+          [status || null, notes !== undefined ? notes : null, actualArrival ? toMysqlDateTime(actualArrival) : (status === 'delivered' ? toMysqlDateTime(new Date()) : null), scheduleId, trackingNumber || '']
+        ).catch(() => {});
+      });
       return res.json({ success: true, source: 'hostinger_mysql', timestamp: payload.updatedAt });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui status jadwal' });
@@ -3961,34 +4397,81 @@ Kembalikan HANYA JSON valid:
   });
 
   // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state & Disk Fallback)
-  let inMemoryAdminCalendarSchedules: any[] = [];
+  let inMemoryAdminCalendarSchedules: any[] = (() => {
+    const disk = readPersistentAppState('admin_calendar_schedules_payload');
+    return Array.isArray(disk) ? disk : [];
+  })();
+  let inMemoryAdminCalendarSchedulesLoaded = inMemoryAdminCalendarSchedules.length > 0;
+  let lastAdminSchedulesDbSyncAt = 0;
+  let adminSchedulesDbRefreshPromise: Promise<any[] | null> | null = null;
+
+  const refreshAdminCalendarSchedulesFromDb = async (): Promise<any[] | null> => {
+    if (!isDatabaseConfigured()) return null;
+    if (adminSchedulesDbRefreshPromise) return adminSchedulesDbRefreshPromise;
+    adminSchedulesDbRefreshPromise = (async () => {
+      try {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json, updated_at FROM app_state WHERE state_key = 'admin_calendar_schedules_payload' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json !== undefined && rows[0]?.state_json !== null) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          if (Array.isArray(parsed)) {
+            inMemoryAdminCalendarSchedules = parsed;
+            inMemoryAdminCalendarSchedulesLoaded = true;
+            lastAdminSchedulesDbSyncAt = Date.now();
+            writePersistentAppState('admin_calendar_schedules_payload', parsed);
+            return parsed;
+          }
+        }
+        lastAdminSchedulesDbSyncAt = Date.now();
+      } catch {} finally {
+        adminSchedulesDbRefreshPromise = null;
+      }
+      return null;
+    })();
+    return adminSchedulesDbRefreshPromise;
+  };
+
+  setImmediate(() => {
+    void refreshAdminCalendarSchedulesFromDb();
+  });
 
   app.get('/api/admin-schedules', requireAuth, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      // 1. Cek MySQL jika database terkonfigurasi
+      if (inMemoryAdminCalendarSchedulesLoaded && Date.now() - lastAdminSchedulesDbSyncAt < 3000) {
+        return res.json({
+          success: true,
+          schedules: inMemoryAdminCalendarSchedules,
+          count: inMemoryAdminCalendarSchedules.length,
+          source: 'hostinger_mysql_cache'
+        });
+      }
+
       if (isDatabaseConfigured()) {
-        try {
-          const rows = await mysqlQuery<any[]>(
-            "SELECT state_json, updated_at FROM app_state WHERE state_key = 'admin_calendar_schedules_payload' LIMIT 1"
-          );
-          if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json !== undefined && rows[0]?.state_json !== null) {
-            const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
-            if (Array.isArray(parsed)) {
-              inMemoryAdminCalendarSchedules = parsed;
-              writePersistentAppState('admin_calendar_schedules_payload', parsed);
-              return res.json({ success: true, schedules: parsed, count: parsed.length, source: 'hostinger_mysql' });
-            }
-          }
-        } catch (dbErr: any) {
-          // DB offline / circuit breaker: lanjut ke disk storage
+        const timeoutMs = inMemoryAdminCalendarSchedulesLoaded ? 700 : 1500;
+        const dbResult = await Promise.race([
+          refreshAdminCalendarSchedulesFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs))
+        ]);
+        if (Array.isArray(dbResult)) {
+          return res.json({ success: true, schedules: dbResult, count: dbResult.length, source: 'hostinger_mysql' });
         }
       }
 
-      // 2. Fallback disk storage (persisten permanen di server meskipun MySQL offline/container restart)
+      if (inMemoryAdminCalendarSchedulesLoaded) {
+        return res.json({
+          success: true,
+          schedules: inMemoryAdminCalendarSchedules,
+          count: inMemoryAdminCalendarSchedules.length,
+          source: 'memory_cache'
+        });
+      }
+
       const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
       if (Array.isArray(diskSaved)) {
         inMemoryAdminCalendarSchedules = diskSaved;
+        inMemoryAdminCalendarSchedulesLoaded = true;
         return res.json({ success: true, schedules: diskSaved, count: diskSaved.length, source: 'disk_database' });
       }
 
@@ -4007,21 +4490,20 @@ Kembalikan HANYA JSON valid:
         return res.status(400).json({ success: false, error: 'Expected schedules array' });
       }
       inMemoryAdminCalendarSchedules = incoming;
-      // Simpan ke disk storage permanen segera
+      inMemoryAdminCalendarSchedulesLoaded = true;
+      lastAdminSchedulesDbSyncAt = Date.now();
       writePersistentAppState('admin_calendar_schedules_payload', incoming);
 
-      let mysqlSaved = false;
       if (isDatabaseConfigured()) {
-        try {
-          await mysqlQuery(
+        setImmediate(() => {
+          mysqlQuery(
             `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
              ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
             [JSON.stringify(incoming)]
-          );
-          mysqlSaved = true;
-        } catch (dbErr: any) {
-          console.warn('[Hostinger MySQL Sync Warning for Admin Schedules]', dbErr?.message);
-        }
+          ).catch((dbErr: any) => {
+            console.warn('[Hostinger MySQL Sync Warning for Admin Schedules]', dbErr?.message);
+          });
+        });
       }
 
       const msg = incoming.length === 0
@@ -4031,9 +4513,361 @@ Kembalikan HANYA JSON valid:
       return res.json({
         success: true,
         count: incoming.length,
-        source: mysqlSaved ? 'hostinger_mysql' : 'disk_database',
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database',
         message: msg
       });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 📦 Form Kirim Sales (Terintegrasi Area Kirim & Portal Driver - Persistent di MySQL app_state & Disk)
+  const LEGACY_DUMMY_FK_IDS = new Set(['FK-202611-001', 'FK-202611-002']);
+  const sanitizeFormKirimRecords = (list: any[]): any[] =>
+    Array.isArray(list) ? list.filter((r: any) => r && !LEGACY_DUMMY_FK_IDS.has(r.id)) : [];
+
+  let inMemoryFormKirimRecords: any[] = (() => {
+    const disk = readPersistentAppState('form_kirim_records_v1');
+    const cleaned = sanitizeFormKirimRecords(Array.isArray(disk) ? disk : []);
+    if (Array.isArray(disk) && cleaned.length !== disk.length) {
+      writePersistentAppState('form_kirim_records_v1', cleaned);
+    }
+    return cleaned;
+  })();
+  let inMemoryFormKirimLoaded = inMemoryFormKirimRecords.length > 0;
+  let lastFormKirimDbSyncAt = 0;
+
+  const refreshFormKirimFromDb = async (): Promise<any[] | null> => {
+    if (!isDatabaseConfigured()) return null;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = 'form_kirim_records_v1' LIMIT 1"
+      );
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (Array.isArray(parsed)) {
+          const cleaned = sanitizeFormKirimRecords(parsed);
+          inMemoryFormKirimRecords = cleaned;
+          inMemoryFormKirimLoaded = true;
+          lastFormKirimDbSyncAt = Date.now();
+          writePersistentAppState('form_kirim_records_v1', cleaned);
+          if (cleaned.length !== parsed.length) {
+            mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_records_v1', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(cleaned)]
+            ).catch(() => {});
+          }
+          return cleaned;
+        }
+      }
+      lastFormKirimDbSyncAt = Date.now();
+    } catch {}
+    return null;
+  };
+
+  setImmediate(() => {
+    void refreshFormKirimFromDb();
+  });
+
+  const persistFormKirimToDbAndDisk = (records: any[]) => {
+    inMemoryFormKirimRecords = records;
+    inMemoryFormKirimLoaded = true;
+    lastFormKirimDbSyncAt = Date.now();
+    writePersistentAppState('form_kirim_records_v1', records);
+    if (isDatabaseConfigured()) {
+      setImmediate(() => {
+        mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_records_v1', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(records)]
+        ).catch((dbErr: any) => {
+          console.warn('[Hostinger MySQL Sync Warning for Form Kirim]', dbErr?.message);
+        });
+      });
+    }
+  };
+
+  const mergeInvoiceItemFields = (existingItem: any, incomingItem: any) => {
+    if (!existingItem) return incomingItem;
+    const exDriverTs = Date.parse(existingItem.driverUpdatedAt || existingItem.ttdSignedAt || '') || 0;
+    const incDriverTs = Date.parse(incomingItem.driverUpdatedAt || incomingItem.ttdSignedAt || '') || 0;
+    const incHasDriverData = Boolean(
+      incomingItem.metodeBayarAktual ||
+        incomingItem.ttdDataUrl ||
+        Number(incomingItem.nominalDiterima) > 0 ||
+        incomingItem.isCombinedPayment
+    );
+    const exHasDriverData = Boolean(
+      existingItem.metodeBayarAktual ||
+        existingItem.ttdDataUrl ||
+        Number(existingItem.nominalDiterima) > 0 ||
+        existingItem.isCombinedPayment
+    );
+    const keepExistingDriver = exHasDriverData && (!incHasDriverData || exDriverTs > incDriverTs);
+
+    const pickLatestFlag = (flagKey: string, atKey: string, byKey: string) => {
+      const exTs = Date.parse(existingItem[atKey] || '') || 0;
+      const incTs = Date.parse(incomingItem[atKey] || '') || 0;
+      if (exTs > incTs && existingItem[flagKey] !== undefined) {
+        return {
+          [flagKey]: existingItem[flagKey],
+          [atKey]: existingItem[atKey],
+          [byKey]: existingItem[byKey]
+        };
+      }
+      if (incomingItem[flagKey] !== undefined) {
+        return {
+          [flagKey]: incomingItem[flagKey],
+          [atKey]: incomingItem[atKey],
+          [byKey]: incomingItem[byKey]
+        };
+      }
+      return {
+        [flagKey]: existingItem[flagKey],
+        [atKey]: existingItem[atKey],
+        [byKey]: existingItem[byKey]
+      };
+    };
+
+    return {
+      ...existingItem,
+      ...incomingItem,
+      ...(keepExistingDriver
+        ? {
+            nominalDiterima: existingItem.nominalDiterima,
+            bayar: existingItem.bayar,
+            metodeBayarAktual: existingItem.metodeBayarAktual,
+            isCombinedPayment: existingItem.isCombinedPayment,
+            combinedGroupId: existingItem.combinedGroupId,
+            ttdDataUrl: existingItem.ttdDataUrl,
+            ttdSignerName: existingItem.ttdSignerName,
+            ttdSignedAt: existingItem.ttdSignedAt,
+            driverUpdatedBy: existingItem.driverUpdatedBy,
+            driverUpdatedAt: existingItem.driverUpdatedAt
+          }
+        : {}),
+      ...pickLatestFlag('financeTfValidated', 'financeTfValidatedAt', 'financeTfValidatedBy'),
+      ...pickLatestFlag('financeTtdValidated', 'financeTtdValidatedAt', 'financeTtdValidatedBy'),
+      ...pickLatestFlag('financeTunaiValidated', 'financeTunaiValidatedAt', 'financeTunaiValidatedBy'),
+      ...pickLatestFlag('financeMatchedChecked', 'financeMatchedCheckedAt', 'financeMatchedCheckedBy'),
+      ...pickLatestFlag('financeSettlementChecked', 'financeSettlementCheckedAt', 'financeSettlementCheckedBy')
+    };
+  };
+
+  const mergeFormKirimRecord = (existingRec: any, incomingRec: any) => {
+    if (!existingRec) return incomingRec;
+    const exItems: any[] = Array.isArray(existingRec.invoiceItems) ? existingRec.invoiceItems : [];
+    const incItems: any[] = Array.isArray(incomingRec.invoiceItems) ? incomingRec.invoiceItems : [];
+    const exById = new Map(exItems.map((it: any) => [it.id, it]));
+    const exByNo = new Map(exItems.map((it: any) => [String(it.noFaktur || '').trim().toUpperCase(), it]));
+
+    const mergedItems = incItems.map((inc: any) => {
+      const prev = exById.get(inc.id) || exByNo.get(String(inc.noFaktur || '').trim().toUpperCase());
+      return mergeInvoiceItemFields(prev, inc);
+    });
+
+    const exDriverTs = Date.parse(existingRec.driverUpdatedAt || '') || 0;
+    const incDriverTs = Date.parse(incomingRec.driverUpdatedAt || '') || 0;
+    const keepExistingHeaderDriver = exDriverTs > incDriverTs;
+
+    const totalTunai = mergedItems
+      .filter((it: any) => it.metodeBayarAktual === 'Tunai' && Number(it.nominalDiterima) > 0)
+      .reduce((s: number, it: any) => s + (Number(it.nominalDiterima) || 0), 0);
+
+    return {
+      ...existingRec,
+      ...incomingRec,
+      armadaInitial: incomingRec.armadaInitial || existingRec.armadaInitial,
+      ...(keepExistingHeaderDriver
+        ? {
+            driverStatus: existingRec.driverStatus,
+            driverUpdatedAt: existingRec.driverUpdatedAt,
+            driverNotes: existingRec.driverNotes
+          }
+        : {}),
+      invoiceItems: mergedItems,
+      totalNominalDiterima:
+        mergedItems.length > 0 ? totalTunai : incomingRec.totalNominalDiterima ?? existingRec.totalNominalDiterima
+    };
+  };
+
+  app.get('/api/form-kirim', requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      if (!inMemoryFormKirimLoaded || Date.now() - lastFormKirimDbSyncAt > 3000) {
+        await Promise.race([
+          refreshFormKirimFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 900))
+        ]);
+      }
+      return res.json({
+        success: true,
+        records: inMemoryFormKirimRecords,
+        count: inMemoryFormKirimRecords.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch (err: any) {
+      return res.json({
+        success: true,
+        records: inMemoryFormKirimRecords,
+        count: inMemoryFormKirimRecords.length,
+        source: 'memory_fallback'
+      });
+    }
+  });
+
+  app.post('/api/form-kirim', requireAuth, async (req: any, res) => {
+    try {
+      let incomingRaw = req.body?.records;
+      if (!Array.isArray(incomingRaw)) {
+        return res.status(400).json({ success: false, error: 'Expected records array' });
+      }
+      if (!isFinanceFormKirimWriter(req.authUser)) incomingRaw = incomingRaw.map(stripFinanceFields);
+      const existingById = new Map(inMemoryFormKirimRecords.map((r: any) => [r.id, r]));
+      const incoming = sanitizeFormKirimRecords(incomingRaw).map((rec: any) =>
+        mergeFormKirimRecord(existingById.get(rec.id), rec)
+      );
+      persistFormKirimToDbAndDisk(incoming);
+
+      return res.json({
+        success: true,
+        records: incoming,
+        count: incoming.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.patch('/api/form-kirim/:id/driver', requireAuth, async (req, res) => {
+    try {
+      const targetId = String(req.params.id || '').trim();
+      const idx = inMemoryFormKirimRecords.findIndex((r: any) => r.id === targetId);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: 'Form kirim record not found' });
+      }
+      const existing = inMemoryFormKirimRecords[idx];
+      const patch = req.body || {};
+
+      let nextItems = Array.isArray(existing.invoiceItems) ? [...existing.invoiceItems] : [];
+      if (Array.isArray(patch.invoiceItems)) {
+        const incById = new Map(patch.invoiceItems.map((it: any) => [it.id, it]));
+        nextItems = nextItems.map((exIt: any) => {
+          const incIt: any = incById.get(exIt.id);
+          if (!incIt) return exIt;
+          return {
+            ...exIt,
+            nominalDiterima: incIt.nominalDiterima,
+            bayar: incIt.bayar,
+            metodeBayarAktual: incIt.metodeBayarAktual,
+            isCombinedPayment: incIt.isCombinedPayment,
+            combinedGroupId: incIt.combinedGroupId,
+            ttdDataUrl: incIt.ttdDataUrl,
+            ttdSignerName: incIt.ttdSignerName,
+            ttdSignedAt: incIt.ttdSignedAt,
+            driverUpdatedBy: incIt.driverUpdatedBy,
+            driverUpdatedAt: incIt.driverUpdatedAt || patch.driverUpdatedAt || new Date().toISOString()
+          };
+        });
+      }
+
+      const computedTunai = nextItems
+        .filter((it: any) => it.metodeBayarAktual === 'Tunai' && Number(it.nominalDiterima) > 0)
+        .reduce((s: number, it: any) => s + (Number(it.nominalDiterima) || 0), 0);
+
+      const updatedRecord = {
+        ...existing,
+        driverStatus: patch.driverStatus !== undefined ? patch.driverStatus : existing.driverStatus,
+        driverUpdatedAt: patch.driverUpdatedAt || new Date().toISOString(),
+        driverNotes: patch.driverNotes !== undefined ? patch.driverNotes : existing.driverNotes,
+        invoiceItems: nextItems,
+        totalNominalDiterima:
+          nextItems.length > 0
+            ? computedTunai
+            : patch.totalNominalDiterima !== undefined
+            ? patch.totalNominalDiterima
+            : existing.totalNominalDiterima
+      };
+
+      const nextList = [...inMemoryFormKirimRecords];
+      nextList[idx] = updatedRecord;
+      persistFormKirimToDbAndDisk(nextList);
+
+      return res.json({ success: true, record: updatedRecord });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.patch('/api/form-kirim/:id/finance', requireFinanceFormKirimWrite, async (req, res) => {
+    try {
+      const targetId = String(req.params.id || '').trim();
+      const idx = inMemoryFormKirimRecords.findIndex((r: any) => r.id === targetId);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: 'Form kirim record not found' });
+      }
+      const existing = inMemoryFormKirimRecords[idx];
+      const patch = req.body || {};
+
+      let nextItems = Array.isArray(existing.invoiceItems) ? [...existing.invoiceItems] : [];
+      if (Array.isArray(patch.invoiceItems)) {
+        const incById = new Map(patch.invoiceItems.map((it: any) => [it.id, it]));
+        nextItems = nextItems.map((exIt: any) => {
+          const incIt: any = incById.get(exIt.id);
+          if (!incIt) return exIt;
+          return {
+            ...exIt,
+            financeTfValidated: incIt.financeTfValidated,
+            financeTfValidatedAt: incIt.financeTfValidatedAt,
+            financeTfValidatedBy: incIt.financeTfValidatedBy,
+            financeTtdValidated: incIt.financeTtdValidated,
+            financeTtdValidatedAt: incIt.financeTtdValidatedAt,
+            financeTtdValidatedBy: incIt.financeTtdValidatedBy,
+            financeTunaiValidated: incIt.financeTunaiValidated,
+            financeTunaiValidatedAt: incIt.financeTunaiValidatedAt,
+            financeTunaiValidatedBy: incIt.financeTunaiValidatedBy,
+            financeMatchedChecked: incIt.financeMatchedChecked,
+            financeMatchedCheckedAt: incIt.financeMatchedCheckedAt,
+            financeMatchedCheckedBy: incIt.financeMatchedCheckedBy,
+            financeSettlementChecked: incIt.financeSettlementChecked,
+            financeSettlementCheckedAt: incIt.financeSettlementCheckedAt,
+            financeSettlementCheckedBy: incIt.financeSettlementCheckedBy,
+            financeItemNote: incIt.financeItemNote !== undefined ? incIt.financeItemNote : exIt.financeItemNote
+          };
+        });
+      }
+
+      const updatedRecord = {
+        ...existing,
+        ...(patch.financeStatus !== undefined ? { financeStatus: patch.financeStatus } : {}),
+        ...(patch.validatedByFinance !== undefined ? { validatedByFinance: patch.validatedByFinance } : {}),
+        ...(patch.validatedAt !== undefined ? { validatedAt: patch.validatedAt } : {}),
+        ...(patch.financeNotes !== undefined ? { financeNotes: patch.financeNotes } : {}),
+        ...(patch.driverStatus !== undefined ? { driverStatus: patch.driverStatus } : {}),
+        ...(patch.financeMatchedChecked !== undefined
+          ? {
+              financeMatchedChecked: patch.financeMatchedChecked,
+              financeMatchedCheckedAt: patch.financeMatchedCheckedAt,
+              financeMatchedCheckedBy: patch.financeMatchedCheckedBy
+            }
+          : {}),
+        ...(patch.financeSettlementChecked !== undefined
+          ? {
+              financeSettlementChecked: patch.financeSettlementChecked,
+              financeSettlementCheckedAt: patch.financeSettlementCheckedAt,
+              financeSettlementCheckedBy: patch.financeSettlementCheckedBy
+            }
+          : {}),
+        invoiceItems: nextItems
+      };
+
+      const nextList = [...inMemoryFormKirimRecords];
+      nextList[idx] = updatedRecord;
+      persistFormKirimToDbAndDisk(nextList);
+
+      return res.json({ success: true, record: updatedRecord });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
     }
@@ -5578,8 +6412,10 @@ Kembalikan HANYA JSON valid:
     inputBuf: Buffer
   ): Promise<{ chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number } | null> => {
     try {
+      const sharpFn = await getSharp();
+      if (!sharpFn) return null;
       const GRID = 16;
-      const { data } = await (await getSharp())(inputBuf)
+      const { data } = await sharpFn(inputBuf)
         .resize(GRID, GRID, { fit: 'cover' })
         .removeAlpha()
         .raw()
@@ -5669,6 +6505,14 @@ Kembalikan HANYA JSON valid:
   app.post('/api/yolo/detect-fallback', requireAuth, limitServerInference, async (req: any, res: any) => {
     const tStart = Date.now();
     try {
+      const sharpFn = await getSharp();
+      if (!sharpFn) {
+        return res.status(503).json({
+          status: 'error',
+          success: false,
+          message: 'Modul pemrosesan gambar (sharp) tidak tersedia di server ini. Gunakan Jalur A (Browser ONNX Web).'
+        });
+      }
       const rawBase64 = String(req.body?.image || req.body?.image_base64 || '').trim();
       const targetSkuRaw = String(req.body?.target_item_code || req.body?.target_sku || '').trim().toUpperCase();
       const targetNameRaw = String(req.body?.target_item_name || '').trim();
@@ -5711,7 +6555,7 @@ Kembalikan HANYA JSON valid:
       }
 
       const INPUT_SIZE = 640;
-      const { data: rawRgbBytes, info } = await (await getSharp())(imgBuffer)
+      const { data: rawRgbBytes, info } = await sharpFn(imgBuffer)
         .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill' })
         .removeAlpha()
         .raw()
@@ -6049,6 +6893,12 @@ Kembalikan HANYA JSON valid:
   app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloads')));
   app.use('/downloads', express.static(path.join(process.cwd(), 'downloads')));
 
+  const serverBootId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  app.get('/api/dev-boot-id', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.json({ bootId: serverBootId });
+  });
+
   // In development, always use Vite middleware; in production, serve built dist/ if available
   const isProduction = process.env.NODE_ENV === "production";
   const distPath = path.join(process.cwd(), 'dist');
@@ -6094,15 +6944,23 @@ Kembalikan HANYA JSON valid:
         server: {
           middlewareMode: true,
           hmr: disableHmr ? false : undefined,
-          watch: disableHmr ? null : {},
+          watch: {},
         },
         appType: "spa",
       });
+      void vite.warmupRequest('/src/main.tsx').catch(() => {});
       return vite.middlewares;
     })();
 
     app.use(async (req, res, next) => {
       try {
+        if (req.path === '/' || req.path === '/index.html' || req.path.startsWith('/api/')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else if (req.path === '/favicon.svg' || req.path.startsWith('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=3600');
+        }
         const middlewares = await viteReadyPromise;
         return middlewares(req, res, next);
       } catch (err) {
@@ -6120,8 +6978,8 @@ Kembalikan HANYA JSON valid:
 
     server.on('error', (err: any) => {
       if (err.code === 'EADDRINUSE' && !isProduction) {
-        console.warn(`Port ${port} is already in use, trying port ${port + 1}...`);
-        listenOnPort(port + 1);
+        console.warn(`Port ${port} is busy, retrying port ${port} in 400ms...`);
+        setTimeout(() => listenOnPort(port), 400);
         return;
       }
       console.error('Server error:', err);
@@ -6131,15 +6989,19 @@ Kembalikan HANYA JSON valid:
     // Graceful shutdown for Hostinger Node.js lifecycle
     process.on('SIGTERM', () => {
       console.log('SIGTERM received, closing HTTP server gracefully...');
+      (server as any).closeAllConnections?.();
       server.close(() => {
         process.exit(0);
       });
+      setTimeout(() => process.exit(0), 200).unref();
     });
 
     process.on('SIGINT', () => {
+      (server as any).closeAllConnections?.();
       server.close(() => {
         process.exit(0);
       });
+      setTimeout(() => process.exit(0), 200).unref();
     });
   }
 
@@ -6147,16 +7009,7 @@ Kembalikan HANYA JSON valid:
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     const status = Number(err?.status || err?.statusCode || 500);
-    if (status === 413) {
-      // Request besar tanpa sesi valid dibatasi 100 KB oleh body parser. Jawab 401 (bukan 413) supaya klien
-      // (mis. antrean sinkronisasi offline sopir) tahu harus login ulang dan tidak membuang datanya.
-      const reqPath = String((_req as any).path || '');
-      const hasSession = Boolean(verifySessionToken(extractSessionTokenFromReq(_req)));
-      if (!hasSession && reqPath.startsWith('/api/') && !reqPath.startsWith('/api/auth/')) {
-        return res.status(401).json({ success: false, error: 'Sesi login tidak valid atau telah berakhir' });
-      }
-      return res.status(413).json({ success: false, error: 'Ukuran data terlalu besar' });
-    }
+    if (status === 413) return res.status(413).json({ success: false, error: 'Ukuran data terlalu besar' });
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ success: false, error: 'Format JSON tidak valid' });
     console.error('[Unhandled Express Error]', err?.message || err);
     return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: 'Terjadi kesalahan pada server' });

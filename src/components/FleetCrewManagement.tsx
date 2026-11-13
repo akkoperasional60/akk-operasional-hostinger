@@ -822,10 +822,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
-    const nextStatus: FleetStatus =
-      fleet.status === 'available' ? 'on-duty' : fleet.status === 'on-duty' ? 'maintenance' : 'available';
-    logisticsStore.updateFleetStatus(fleet.id, nextStatus);
-    void updateFleetInSupabase(fleet.id, { ...fleet, status: nextStatus }).catch(() => null);
+    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+    let nextStatus: FleetStatus;
+    if (liveInfo.effectiveStatus === 'available') {
+      // Hanya masuk status Kirim jika ada jadwal pengiriman hari ini; jika tidak ada, langsung beralih ke Servis
+      nextStatus = liveInfo.todayScheduledArea ? 'on-duty' : 'maintenance';
+    } else if (liveInfo.effectiveStatus === 'on-duty') {
+      nextStatus = 'maintenance';
+    } else {
+      nextStatus = 'available';
+    }
+    logisticsStore.updateFleetStatus(fleet.id, nextStatus, undefined, { syncTodaySchedule: true });
     setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
   };
 
@@ -1534,6 +1541,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                     <span className="text-rose-400 font-semibold">
                                       Tidak bisa diatur kirim
                                     </span>
+                                  ) : liveInfo.todayScheduledArea ? (
+                                    <span className="text-emerald-300 font-semibold">
+                                      Terjadwal: {liveInfo.todayScheduledArea}
+                                    </span>
                                   ) : (
                                     <span>Siap jadwal esok</span>
                                   )}
@@ -1695,6 +1706,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
                             : liveInfo.effectiveStatus === 'maintenance'
                             ? 'Dalam perbaikan (Tidak bisa kirim)'
+                            : liveInfo.todayScheduledArea
+                            ? `Terjadwal: ${liveInfo.todayScheduledArea}`
                             : 'Siap jadwal esok'}
                         </span>
                       </div>
