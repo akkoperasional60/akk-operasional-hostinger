@@ -58,7 +58,8 @@ export const ADDITIONAL_JOBDESK_OPTIONS = [
   'NX',
   'Retur',
   'BT',
-  'Bantu Muat Kelilingan'
+  'Bantu Muat Kelilingan',
+  'AKS'
 ];
 
 // Istilah non-area yang tidak boleh masuk sebagai nama Area Kirim
@@ -125,14 +126,12 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
   const now = new Date();
   const yr = now.getFullYear();
   const mo = now.getMonth();
-  const d1 = formatDateIso(yr, mo, Math.min(10, getDaysInMonth(yr, mo)));
-  const d2 = formatDateIso(yr, mo, Math.min(11, getDaysInMonth(yr, mo)));
-  const d3 = formatDateIso(yr, mo, Math.min(12, getDaysInMonth(yr, mo)));
+  const getD = (dayNum: number) => formatDateIso(yr, mo, Math.min(dayNum, getDaysInMonth(yr, mo)));
 
   return [
     {
       id: 'sch-1',
-      date: d1,
+      date: getD(10),
       adminName: a0,
       branchId: 'cab-banyuwangi',
       duties: ['Muncar Pasar', 'Muncar Pinggir'],
@@ -144,7 +143,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-2',
-      date: d1,
+      date: getD(10),
       adminName: a1,
       branchId: 'cab-banyuwangi',
       duties: ['Rogojampi Retail', 'Genteng Retail'],
@@ -156,7 +155,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-3',
-      date: d2,
+      date: getD(11),
       adminName: a1,
       branchId: 'cab-banyuwangi',
       duties: ['Denpasar 1', 'Singaraja'],
@@ -168,7 +167,7 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
     },
     {
       id: 'sch-4',
-      date: d3,
+      date: getD(12),
       adminName: a2,
       branchId: 'cab-banyuwangi',
       duties: ['Jember Kota', 'Situbondo'],
@@ -176,6 +175,42 @@ function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] 
       shiftTime: '08:00 - 16:00',
       isBackupAcc: true,
       notes: 'Monitoring pemberangkatan armada pagi',
+      attendanceStatus: 'hadir'
+    },
+    {
+      id: 'sch-5',
+      date: getD(13),
+      adminName: a0,
+      branchId: 'cab-banyuwangi',
+      duties: ['Muncar Pasar', 'Denpasar 1'],
+      additionalDuties: ['Ekspor Transaksi', 'HP Telkomsel'],
+      shiftTime: '08:00 - 16:00',
+      isBackupAcc: true,
+      notes: 'Validasi form kirim utama area Muncar & Denpasar',
+      attendanceStatus: 'hadir'
+    },
+    {
+      id: 'sch-6',
+      date: getD(13),
+      adminName: a1,
+      branchId: 'cab-banyuwangi',
+      duties: ['Genteng Retail', 'Jember Kota'],
+      additionalDuties: ['Retur', 'Bantu Muat Kelilingan'],
+      shiftTime: '08:00 - 16:00',
+      isBackupAcc: false,
+      notes: 'Pengecekan faktur & pelunasan kasir',
+      attendanceStatus: 'hadir'
+    },
+    {
+      id: 'sch-7',
+      date: getD(14),
+      adminName: a2,
+      branchId: 'cab-banyuwangi',
+      duties: ['Situbondo', 'Singaraja'],
+      additionalDuties: ['Ekspor Argo'],
+      shiftTime: '08:00 - 16:00',
+      isBackupAcc: true,
+      notes: 'Jadwal operasional harian cabang',
       attendanceStatus: 'hadir'
     }
   ];
@@ -296,91 +331,8 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setSelectedDateIso(formatDateIso(yearNum, monthIndex, clampedDay));
   }, [selectedMonth, selectedYear, yearNum, monthIndex]);
 
-  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
-      if (saved !== null) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          if (parsed.length === 0) {
-            return [];
-          }
-          const valid = parsed
-            .filter((item: any) => item && typeof item === 'object')
-            .map((item: any, idx: number): AdminDailyScheduleItem => {
-              const rawDuties = Array.isArray(item.duties)
-                ? item.duties
-                : Array.isArray(item.areas)
-                ? item.areas
-                : typeof item.duty === 'string'
-                ? [item.duty]
-                : [];
-              const cleanDuties = rawDuties
-                .filter((d: any) => typeof d === 'string' && d.trim())
-                .map((d: string) => d.trim())
-                .filter((d: string) => !NON_AREA_TERMS.includes(d));
-
-              const rawAdd = Array.isArray(item.additionalDuties) ? item.additionalDuties : [];
-              const cleanAdd = rawAdd
-                .filter((d: any) => typeof d === 'string' && d.trim())
-                .map((d: string) => d.trim());
-
-              return {
-                id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `sch-${idx + 1}`,
-                date:
-                  typeof item.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date.trim())
-                    ? item.date.trim()
-                    : '2026-08-10',
-                adminName:
-                  typeof item.adminName === 'string' && item.adminName.trim()
-                    ? item.adminName.trim().toUpperCase()
-                    : salesAdminNames[0] || 'MUHAMMAD SHOIM',
-                branchId:
-                  item.branchId === 'cab-sidoarjo' || item.branchId === 'cab-banyuwangi'
-                    ? item.branchId
-                    : undefined,
-                duties: cleanDuties.length > 0 ? cleanDuties : ['Muncar Pasar'],
-                additionalDuties: cleanAdd,
-                shiftTime: typeof item.shiftTime === 'string' && item.shiftTime ? item.shiftTime : '08:00 - 16:00',
-                isBackupAcc: Boolean(item.isBackupAcc),
-                notes: typeof item.notes === 'string' ? item.notes : '',
-                attendanceStatus:
-                  item.attendanceStatus === 'ijin' || item.attendanceStatus === 'sakit'
-                    ? item.attendanceStatus
-                    : 'hadir',
-                absenceReason: typeof item.absenceReason === 'string' ? item.absenceReason : undefined
-              };
-            });
-          if (valid.length > 0) {
-            const dedupedMap = new Map<string, AdminDailyScheduleItem>();
-            valid.forEach(item => {
-              const key = `${item.date}__${item.adminName.toUpperCase()}`;
-              const prev = dedupedMap.get(key);
-              if (!prev) {
-                dedupedMap.set(key, item);
-              } else {
-                const useNew = prev.attendanceStatus !== 'hadir' && item.attendanceStatus === 'hadir';
-                const base = useNew ? item : prev;
-                const mergedDuties = Array.from(new Set([...prev.duties, ...item.duties]));
-                const mergedAdd = Array.from(new Set([...(prev.additionalDuties || []), ...(item.additionalDuties || [])]));
-                dedupedMap.set(key, {
-                  ...base,
-                  duties: base.attendanceStatus === 'hadir' ? mergedDuties : [],
-                  additionalDuties: base.attendanceStatus === 'hadir' ? mergedAdd : [],
-                  isBackupAcc: base.attendanceStatus === 'hadir' ? (prev.isBackupAcc || item.isBackupAcc) : false
-                });
-              }
-            });
-            return Array.from(dedupedMap.values());
-          }
-          return [];
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
+  // Mulai dari kosong: data contoh (demo) tidak boleh tampil/tersimpan sebagai jadwal sungguhan.
+  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>([]);
 
   const persistAdminSchedulesToServer = (nextSchedules: AdminDailyScheduleItem[]) => {
     try {
@@ -394,22 +346,44 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
   };
 
-  // Load and hydrate admin schedules from Hostinger MySQL database / server persistent disk
+  // Load and hydrate admin schedules from Hostinger MySQL database (/api/admin-schedules) as primary source of truth
   useEffect(() => {
     let active = true;
-    fetch('/api/admin-schedules')
+    fetch('/api/admin-schedules', { cache: 'no-store' })
       .then(r => r.json())
       .then(res => {
         if (!active) return;
-        if (res && res.success && Array.isArray(res.schedules)) {
+        if (res && res.success && Array.isArray(res.schedules) && res.schedules.length > 0) {
           setSchedules(res.schedules);
           try {
             localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(res.schedules));
-            localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
+          } catch {}
+        } else if (res && res.success && Array.isArray(res.schedules)) {
+          // Database memang kosong: tampilkan kosong. JANGAN menyimpan data contoh ke server.
+          setSchedules([]);
+        } else {
+          // Respons gagal (sesi habis, DB error, rate-limit): pakai cache lokal, dan JANGAN menulis apa pun ke server
+          // (sebelumnya jadwal contoh dikirim ke server dan menimpa jadwal asli).
+          try {
+            const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
+            const parsed = saved ? JSON.parse(saved) : null;
+            if (Array.isArray(parsed) && parsed.length > 0) setSchedules(parsed);
           } catch {}
         }
       })
-      .catch(err => console.warn('[Admin Schedules Fetch Error]', err));
+      .catch(err => {
+        console.warn('[Admin Schedules Fetch from MySQL Error]', err);
+        try {
+          const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSchedules(parsed);
+              return;
+            }
+          }
+        } catch {}
+      });
     return () => {
       active = false;
     };

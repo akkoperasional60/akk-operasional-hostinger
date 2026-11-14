@@ -79,3 +79,15 @@ Route `/api` yang sengaja tetap publik: `auth/login|register|me|logout`, `db-sta
 Pengujian: 11 skenario pada kode sesi & rate-limit asli (semua lulus), sintaks 172 file lolos, validator baseline Hostinger lolos. Belum diuji terhadap MySQL Hostinger sungguhan dan `npm run build` belum dijalankan.
 
 Catatan: model `best.onnx` dapat diunduh tanpa login. Itu perlu agar deteksi browser bekerja; bila model dianggap aset rahasia, batasi lewat login (uji dulu pemuatan ONNX di browser).
+
+## F. Zip ketiga: perubahan baru & penggabungan ulang
+
+Zip ketiga memakai `server.ts`/`LeafletMap.tsx` **sebelum** patch bagian E (patch tidak terbawa). Semua patch E digabungkan kembali. Perubahan baru Anda di `FormKirimSystem.tsx` dan `AdminSchedulesTab.tsx` diperiksa:
+
+| Tingkat | Temuan | Perbaikan |
+|---------|--------|-----------|
+| Tinggi | `AdminSchedulesTab`: bila `GET /api/admin-schedules` gagal (sesi habis, error DB, rate-limit) atau kosong, kode mengirim jadwal **contoh** (MUHAMMAD SHOIM, ISTI, IZZUL, FATA) ke server dan **menimpa jadwal asli**. Jadwal contoh juga tampil sebagai nilai awal | Nilai awal kosong; respons gagal → pakai cache lokal tanpa menulis ke server; database kosong → tampil kosong |
+
+Tidak ada pola berbahaya baru (innerHTML, document.write, dsb.) pada `FormKirimSystem.tsx`.
+
+Saran alur kerja: jangan menyunting `server.ts` di dua tempat (mis. AI Studio dan GitHub). Setiap kali versi lama menimpa file, patch keamanan hilang. Lakukan *pull* dari GitHub sebelum menyunting, dan jalankan `npm run lint` + `npm run build` sebelum push.

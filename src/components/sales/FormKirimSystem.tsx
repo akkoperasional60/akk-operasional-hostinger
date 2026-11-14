@@ -772,14 +772,20 @@ export const SalesFormKirimTab: React.FC = () => {
     });
   };
 
-  // Pembagian otomatis pelanggan COD (Net Days = 0) dan TEMPO (Net Days > 0)
+  // Pembagian otomatis pelanggan COD (Net Days = 0) dan TEMPO (Net Days > 0) dengan dukungan kategori manual & override
   const codItems = useMemo(() => {
-    const rawCod = invoiceItems.filter(it => Number(it.netDays) <= 0);
+    const rawCod = invoiceItems.filter(it => {
+      const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+      return cat === 'COD';
+    });
     return sortItemsList(rawCod);
   }, [invoiceItems, sortField, sortDirection, tableSearch]);
 
   const tempoItems = useMemo(() => {
-    const rawTempo = invoiceItems.filter(it => Number(it.netDays) > 0);
+    const rawTempo = invoiceItems.filter(it => {
+      const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+      return cat === 'TEMPO';
+    });
     return sortItemsList(rawTempo);
   }, [invoiceItems, sortField, sortDirection, tableSearch]);
 
@@ -1150,6 +1156,45 @@ export const SalesFormKirimTab: React.FC = () => {
 
   const handleDeleteInvoiceRow = (id: string) => {
     setInvoiceItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleMoveItemUp = (id: string) => {
+    setInvoiceItems(prev => {
+      const idx = prev.findIndex(item => item.id === id);
+      if (idx <= 0) return prev;
+      const next = [...prev];
+      const temp = next[idx];
+      next[idx] = next[idx - 1];
+      next[idx - 1] = temp;
+      return next;
+    });
+  };
+
+  const handleMoveItemDown = (id: string) => {
+    setInvoiceItems(prev => {
+      const idx = prev.findIndex(item => item.id === id);
+      if (idx === -1 || idx >= prev.length - 1) return prev;
+      const next = [...prev];
+      const temp = next[idx];
+      next[idx] = next[idx + 1];
+      next[idx + 1] = temp;
+      return next;
+    });
+  };
+
+  const handleToggleCategory = (id: string) => {
+    setInvoiceItems(prev =>
+      prev.map(item => {
+        if (item.id !== id) return item;
+        const currentCat = item.paymentCategory || (Number(item.netDays) > 0 ? 'TEMPO' : 'COD');
+        const nextCat = currentCat === 'COD' ? 'TEMPO' : 'COD';
+        return {
+          ...item,
+          paymentCategory: nextCat,
+          netDays: nextCat === 'TEMPO' && item.netDays <= 0 ? 7 : (nextCat === 'COD' ? 0 : item.netDays)
+        };
+      })
+    );
   };
 
   const persistFormKirimToStore = (
@@ -2138,25 +2183,57 @@ export const SalesFormKirimTab: React.FC = () => {
                       {viewMode === 'edit' && (
                         <>
                           <td className="border border-slate-600 py-1 px-2 text-center font-mono align-middle">
-                            <input
-                              type="number"
-                              min={0}
-                              step="1"
-                              value={item.netDays}
-                              onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                              className="w-16 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono"
-                              title="0 = COD, > 0 = TEMPO"
-                            />
+                            <div className="flex items-center justify-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step="1"
+                                value={item.netDays}
+                                onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
+                                className="w-10 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono text-xs"
+                                title="0 = COD, > 0 = TEMPO"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCategory(item.id)}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase transition cursor-pointer ${
+                                  (item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD')) === 'COD'
+                                    ? 'bg-yellow-200 text-yellow-900 hover:bg-yellow-300'
+                                    : 'bg-blue-200 text-blue-900 hover:bg-blue-300'
+                                }`}
+                                title="Klik untuk pindah kategori COD / TEMPO"
+                              >
+                                {(item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD'))}
+                              </button>
+                            </div>
                           </td>
                           <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteInvoiceRow(item.id)}
-                              className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
-                              title="Hapus baris faktur"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveItemUp(item.id)}
+                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                title="Pindah baris ke atas"
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveItemDown(item.id)}
+                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                title="Pindah baris ke bawah"
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteInvoiceRow(item.id)}
+                                className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                title="Hapus baris faktur"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </>
                       )}
@@ -2345,25 +2422,57 @@ export const SalesFormKirimTab: React.FC = () => {
                       {viewMode === 'edit' && (
                         <>
                           <td className="border border-slate-600 py-1 px-2 text-center font-mono align-middle">
-                            <input
-                              type="number"
-                              min={0}
-                              step="1"
-                              value={item.netDays}
-                              onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                              className="w-16 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono"
-                              title="0 = COD, > 0 = TEMPO"
-                            />
+                            <div className="flex items-center justify-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step="1"
+                                value={item.netDays}
+                                onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
+                                className="w-10 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono text-xs"
+                                title="0 = COD, > 0 = TEMPO"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCategory(item.id)}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase transition cursor-pointer ${
+                                  (item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD')) === 'COD'
+                                    ? 'bg-yellow-200 text-yellow-900 hover:bg-yellow-300'
+                                    : 'bg-blue-200 text-blue-900 hover:bg-blue-300'
+                                }`}
+                                title="Klik untuk pindah kategori COD / TEMPO"
+                              >
+                                {(item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD'))}
+                              </button>
+                            </div>
                           </td>
                           <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteInvoiceRow(item.id)}
-                              className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
-                              title="Hapus baris faktur"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveItemUp(item.id)}
+                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                title="Pindah baris ke atas"
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveItemDown(item.id)}
+                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                title="Pindah baris ke bawah"
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteInvoiceRow(item.id)}
+                                className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                title="Hapus baris faktur"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </>
                       )}
