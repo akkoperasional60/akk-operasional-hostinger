@@ -616,25 +616,25 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           items: [
             {
               tab: 'sales_kpi_individual',
-              label: '1. KPI Individu Staf',
+              label: 'KPI Individu Staff',
               icon: <User className="w-4 h-4 text-blue-500" />,
               description: 'Skor performa dan pemenuhan target'
             },
             {
               tab: 'sales_kpi_fines',
-              label: '2. Akumulasi Denda',
+              label: 'Akumulasi Denda',
               icon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
               description: 'Pinalti keterlambatan atau ketidaksesuaian'
             },
             {
               tab: 'sales_kpi_nusantara',
-              label: '3. Persentase Kiriman',
+              label: 'Persentase Kiriman',
               icon: <Percent className="w-4 h-4 text-indigo-500" />,
               description: 'Tingkat keberhasilan distribusi nusantara'
             },
             {
               tab: 'sales_kpi_omset',
-              label: '4. Omset Admin Penjualan',
+              label: 'Omset Admin Penjualan',
               icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
               description: 'Akumulasi omset kiriman terverifikasi'
             }
@@ -1108,6 +1108,13 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 <div className="space-y-0.5">
                   {activeCategory.groups.map((group, groupIdx) => (
                     <div key={groupIdx} className="space-y-0.5">
+                      {group.groupTitle === 'Data KPI Penjualan' && groupIdx > 0 && (
+                        <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-800 px-3">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                            Data KPI Penjualan
+                          </span>
+                        </div>
+                      )}
                       {group.items.map((item) => {
                         const isItemActive =
                           currentTab === item.tab ||
@@ -1235,6 +1242,13 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                       <div className="p-2 space-y-1 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
                         {cat.groups.map((group, gIdx) => (
                           <div key={gIdx} className="space-y-0.5">
+                            {group.groupTitle === 'Data KPI Penjualan' && gIdx > 0 && (
+                              <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-800 px-3">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                                  Data KPI Penjualan
+                                </span>
+                              </div>
+                            )}
                             {group.items.map((item) => {
                               const isCur = currentTab === item.tab;
                               return (

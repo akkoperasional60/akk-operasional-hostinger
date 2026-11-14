@@ -38,12 +38,22 @@ export interface SalesHeaderFilterProps {
   onExportExcel?: () => void;
 }
 
-export function isSalesAdminUser(u: UserProfile, targetBranchId?: string): boolean {
-  if (!u || u.status !== 'approved') return false;
+export function getSalesAdminAssignedBranchId(u: UserProfile): string {
+  if (!u || u.status !== 'approved') return 'NONE';
   const deptClean = (u.department || '').trim().toLowerCase();
   const deptMatch = deptClean === 'adm. penjualan' || deptClean === 'admin penjualan';
-  if (u.role === 'super_admin') {
-    return deptMatch;
+  if (u.role === 'super_admin' && !deptMatch) {
+    return 'NONE';
+  }
+
+  if (u.role !== 'super_admin') {
+    const hasSalesAccess = canAccess(u, 'sales_admin');
+    if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
+      return 'NONE';
+    }
+    if (u.role !== 'sales_admin' && !hasSalesAccess) {
+      return 'NONE';
+    }
   }
 
   const branchPerms = branchStore.getUserBranchPermissions(
@@ -53,22 +63,73 @@ export function isSalesAdminUser(u: UserProfile, targetBranchId?: string): boole
     u.permissions?.branchPermissions
   );
 
-  if (targetBranchId && targetBranchId !== 'ALL') {
-    const bEntry = branchPerms[targetBranchId];
-    if (!bEntry || !bEntry.enabled) return false;
+  const activeBranches = branchStore.getBranches();
+  const enabledSalesBranches: string[] = [];
+
+  activeBranches.forEach(br => {
+    const bEntry = branchPerms[br.id];
+    if (!bEntry || !bEntry.enabled) return;
     const salesMod = bEntry.modules?.sales_admin;
     if (salesMod && salesMod.enabled) {
       const hasSub = Object.values(salesMod.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
-      if (hasSub) return true;
+      if (hasSub) {
+        enabledSalesBranches.push(br.id);
+        return;
+      }
     }
-    return u.role === 'sales_admin' && bEntry.enabled && (!salesMod || salesMod.enabled !== false);
+    if (u.role === 'sales_admin' && (!salesMod || salesMod.enabled !== false)) {
+      enabledSalesBranches.push(br.id);
+    }
+  });
+
+  if (enabledSalesBranches.length === 0) {
+    return 'NONE';
+  }
+  if (enabledSalesBranches.length === 1) {
+    return enabledSalesBranches[0];
   }
 
-  const hasSalesAccess = canAccess(u, 'sales_admin');
-  if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
-    return false;
+  // When multiple branches are enabled on the user record, resolve primary branch so admins never mix across branches
+  try {
+    const rawMap = localStorage.getItem('akk_sales_admin_branch_map_v1');
+    if (rawMap) {
+      const parsedMap = JSON.parse(rawMap);
+      const key = (u.fullName || '').trim().toUpperCase();
+      if (parsedMap && parsedMap[key] && enabledSalesBranches.includes(parsedMap[key])) {
+        return parsedMap[key];
+      }
+    }
+  } catch {}
+
+  const rawSavedPerms = u.permissions?.branchPermissions;
+  if (rawSavedPerms && typeof rawSavedPerms === 'object') {
+    const rawSda = Boolean(rawSavedPerms['cab-sidoarjo']?.enabled);
+    const rawBwi = Boolean(rawSavedPerms['cab-banyuwangi']?.enabled);
+    if (rawSda && !rawBwi && enabledSalesBranches.includes('cab-sidoarjo')) return 'cab-sidoarjo';
+    if (rawBwi && !rawSda && enabledSalesBranches.includes('cab-banyuwangi')) return 'cab-banyuwangi';
   }
-  return u.role === 'sales_admin' || hasSalesAccess;
+
+  const textHint = `${u.department || ''} ${u.notes || ''} ${u.email || ''}`.toLowerCase();
+  if ((textHint.includes('sidoarjo') || textHint.includes('sda')) && enabledSalesBranches.includes('cab-sidoarjo')) {
+    return 'cab-sidoarjo';
+  }
+  if ((textHint.includes('nusantara') || textHint.includes('banyuwangi') || textHint.includes('bwi')) && enabledSalesBranches.includes('cab-banyuwangi')) {
+    return 'cab-banyuwangi';
+  }
+
+  const crewBranch = branchStore.getCrewBranchId(u.id, u.fullName);
+  if (crewBranch && enabledSalesBranches.includes(crewBranch)) {
+    return crewBranch;
+  }
+
+  return enabledSalesBranches.includes('cab-banyuwangi') ? 'cab-banyuwangi' : enabledSalesBranches[0];
+}
+
+export function isSalesAdminUser(u: UserProfile, targetBranchId?: string): boolean {
+  const assignedBranchId = getSalesAdminAssignedBranchId(u);
+  if (assignedBranchId === 'NONE') return false;
+  if (!targetBranchId || targetBranchId === 'ALL') return true;
+  return assignedBranchId === targetBranchId;
 }
 
 export function useSalesAdminUsers(targetBranchId?: string): UserProfile[] {

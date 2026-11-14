@@ -22,3 +22,4 @@ bun.lock
 # Runtime state server (dibuat otomatis oleh server.ts; jangan di-commit)
 data/server_app_state.json
 data/*.tmp
+public/uploads/

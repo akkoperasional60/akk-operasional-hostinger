@@ -3237,9 +3237,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.get("/api/fleet-checklists", requireAuth, async (_req, res) => {
     try {
       const list = await getPersistedChecklists();
-      return res.json({ success: true, count: list.length, data: list });
+      return res.json({ success: true, count: list.length, data: list, checklists: list });
     } catch (err: any) {
-      return res.json({ success: true, count: inMemoryFleetChecklists.length, data: inMemoryFleetChecklists, warning: err?.message });
+      return res.json({ success: true, count: inMemoryFleetChecklists.length, data: inMemoryFleetChecklists, checklists: inMemoryFleetChecklists, warning: err?.message });
     }
   });
 

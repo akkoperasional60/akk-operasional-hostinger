@@ -507,10 +507,10 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat' },
       { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
       { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
-      { id: 'sales_kpi_individual', name: '1. KPI Individu Staf' },
-      { id: 'sales_kpi_fines', name: '2. Akumulasi Denda' },
-      { id: 'sales_kpi_nusantara', name: '3. Persentase Kiriman' },
-      { id: 'sales_kpi_omset', name: '4. Omset Admin Penjualan' }
+      { id: 'sales_kpi_individual', name: 'KPI Individu Staff' },
+      { id: 'sales_kpi_fines', name: 'Akumulasi Denda' },
+      { id: 'sales_kpi_nusantara', name: 'Persentase Kiriman' },
+      { id: 'sales_kpi_omset', name: 'Omset Admin Penjualan' }
     ]
   },
   {
