@@ -88,6 +88,8 @@ interface CustomerInvoiceGroup {
   allSigned: boolean;
   anySigned: boolean;
   savedMethod: PaymentChoice | null;
+  editCount: number;
+  customerNote: string;
 }
 
 interface SignatureTarget {
@@ -133,6 +135,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
   const [activeOptionMap, setActiveOptionMap] = useState<Record<string, PaymentChoice | null>>({});
   // Draft input nominal tunai sebelum klik Simpan
   const [draftInputs, setDraftInputs] = useState<Record<string, string>>({});
+  // Draft input keterangan per master pelanggan
+  const [customerNotesDraft, setCustomerNotesDraft] = useState<Record<string, string>>({});
 
   // Signature Modal
   const [signatureTarget, setSignatureTarget] = useState<SignatureTarget | null>(null);
@@ -283,6 +287,13 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             ? 'TTD'
             : null;
 
+        const maxEditCount = groupItems.reduce(
+          (mx, it) => Math.max(mx, Number(it.driverEditCount) || 0),
+          0
+        );
+        const existingCustomerNote =
+          groupItems.find(it => String(it.customerNote || '').trim())?.customerNote || '';
+
         groups.push({
           customerKey,
           customerName: groupItems[0]?.namaPelanggan || customerKey,
@@ -294,7 +305,9 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           totalTunaiDiterima: totalTunaiGrp,
           allSigned,
           anySigned,
-          savedMethod
+          savedMethod,
+          editCount: maxEditCount,
+          customerNote: existingCustomerNote
         });
       });
       return groups;
@@ -305,10 +318,11 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const codGrps = buildGroups(codList, 'COD', 1);
     const tempoGrps = buildGroups(tempoList, 'TEMPO', codGrps.length + 1);
 
+    // Total Tagihan hanya diambil untuk pelanggan dengan faktur COD saja
     const totTagihan =
-      items.length > 0
-        ? items.reduce((s, it) => s + (Number(it.nilaiFaktur) || 0), 0)
-        : Number(todayFormKirim?.totalNominalFaktur) || 0;
+      codList.length > 0
+        ? codList.reduce((s, it) => s + (Number(it.nilaiFaktur) || 0), 0)
+        : Number(todayFormKirim?.codTotalNominal) || 0;
 
     // Hanya nominal Tunai yang dihitung sebagai uang setoran tunai
     const totTunai = items
@@ -346,9 +360,30 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     );
   };
 
-  // Save Combined Tunai across all invoices of one customer
+  const MAX_DRIVER_EDIT_COUNT = 3;
+
+  const handleSaveCustomerNote = (group: CustomerInvoiceGroup, noteText: string) => {
+    if (!todayFormKirim?.invoiceItems) return;
+    const targetIds = new Set(group.items.map(it => it.id));
+    const trimmed = noteText.trim();
+    const updated = todayFormKirim.invoiceItems.map(it => {
+      if (!targetIds.has(it.id)) return it;
+      return {
+        ...it,
+        customerNote: trimmed
+      };
+    });
+    persistUpdatedItems(updated);
+    onNotify('Keterangan Tersimpan', `Keterangan pelanggan ${group.customerName} berhasil disimpan.`);
+  };
+
+  // Save Combined Tunai across all invoices of one customer (dibatasi maksimal 3x edit)
   const handleSaveCombinedTunai = (group: CustomerInvoiceGroup, amount: number, targetKey: string) => {
     if (!todayFormKirim?.invoiceItems) return;
+    if (group.editCount >= MAX_DRIVER_EDIT_COUNT) {
+      onNotify('Batas Edit Tercapai', `${group.customerName} sudah mencapai batas maksimal 3x edit.`);
+      return;
+    }
     if (amount <= 0) {
       onNotify('Nominal Belum Diisi', `Masukkan nominal tunai lebih dari Rp 0 untuk ${group.customerName}.`);
       return;
@@ -356,6 +391,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const targetIds = new Set(group.items.map(it => it.id));
     const groupCombinedId = `CMB-${group.category}-${group.customerKey}`;
     const nowIso = new Date().toISOString();
+    const nextEditCount = group.editCount + 1;
     let remaining = Math.max(0, amount);
 
     const updated = todayFormKirim.invoiceItems.map(it => {
@@ -376,6 +412,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         metodeBayarAktual: 'Tunai' as const,
         isCombinedPayment: true,
         combinedGroupId: groupCombinedId,
+        driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
         driverUpdatedAt: nowIso
       };
@@ -386,18 +423,24 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
     onNotify(
       'Setoran Tunai Tersimpan',
-      `${group.customerName} (${group.items.length} Faktur): Tunai Rp ${formatRibuan(amount)} disimpan.`
+      `${group.customerName}: Tunai Rp ${formatRibuan(amount)} disimpan (Edit ke-${nextEditCount}/3).`
     );
   };
 
-  // Save Single Invoice Tunai
+  // Save Single Invoice Tunai (dibatasi maksimal 3x edit)
   const handleSaveSingleTunai = (item: FormKirimInvoiceItem, amount: number, targetKey: string) => {
     if (!todayFormKirim?.invoiceItems) return;
+    const currentEdits = Number(item.driverEditCount) || 0;
+    if (currentEdits >= MAX_DRIVER_EDIT_COUNT) {
+      onNotify('Batas Edit Tercapai', `${item.noFaktur} sudah mencapai batas maksimal 3x edit.`);
+      return;
+    }
     if (amount <= 0) {
       onNotify('Nominal Belum Diisi', `Masukkan nominal tunai lebih dari Rp 0 untuk ${item.noFaktur}.`);
       return;
     }
     const nowIso = new Date().toISOString();
+    const nextEditCount = currentEdits + 1;
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (it.id !== item.id) return it;
       return {
@@ -407,24 +450,37 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         metodeBayarAktual: 'Tunai' as const,
         isCombinedPayment: false,
         combinedGroupId: undefined,
+        driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
         driverUpdatedAt: nowIso
       };
     });
 
     persistUpdatedItems(updated);
-    setDraftInputs(prev => ({ ...prev, [targetKey]: formatRibuan(amount) }));
+    setDraftInputs(prev => ({ ...prev, [targetKey]: formatRibuan(parsedAmountSafe(amount)) }));
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
     onNotify(
       'Setoran Tunai Tersimpan',
-      `${item.namaPelanggan} (${item.noFaktur}): Tunai Rp ${formatRibuan(amount)} disimpan.`
+      `${item.namaPelanggan} (${item.noFaktur}): Tunai Rp ${formatRibuan(amount)} disimpan (Edit ke-${nextEditCount}/3).`
     );
   };
 
-  // Save Transfer (NO nominal input; clears cash nominal so Transfer nominal never appears at bottom)
+  function parsedAmountSafe(val: number): number {
+    return Math.max(0, Number(val) || 0);
+  }
+
+  // Save Transfer (dibatasi maksimal 3x edit)
   const handleSaveTransfer = (itemIds: string[], label: string, targetKey: string, isCombined: boolean) => {
     if (!todayFormKirim?.invoiceItems) return;
     const idSet = new Set(itemIds);
+    const currentMaxEdit = todayFormKirim.invoiceItems
+      .filter(it => idSet.has(it.id))
+      .reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+    if (currentMaxEdit >= MAX_DRIVER_EDIT_COUNT) {
+      onNotify('Batas Edit Tercapai', `${label} sudah mencapai batas maksimal 3x edit.`);
+      return;
+    }
+    const nextEditCount = currentMaxEdit + 1;
     const nowIso = new Date().toISOString();
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!idSet.has(it.id)) return it;
@@ -435,13 +491,14 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         metodeBayarAktual: 'Transfer' as const,
         isCombinedPayment: isCombined,
         combinedGroupId: isCombined ? it.combinedGroupId : undefined,
+        driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
         driverUpdatedAt: nowIso
       };
     });
     persistUpdatedItems(updated);
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
-    onNotify('Transfer Tersimpan', `${label} dikonfirmasi bayar via Transfer.`);
+    onNotify('Transfer Tersimpan', `${label} dikonfirmasi bayar via Transfer (Edit ke-${nextEditCount}/3).`);
   };
 
   // Signature Canvas Handlers
@@ -518,8 +575,17 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
       onNotify('TTD Kosong', 'Silakan goreskan tanda tangan pelanggan pada area kanvas.');
       return;
     }
-    const dataUrl = canvasRef.current.toDataURL('image/png');
     const idSet = new Set(signatureTarget.itemIds);
+    const currentMaxEdit = todayFormKirim.invoiceItems
+      .filter(it => idSet.has(it.id))
+      .reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+    if (currentMaxEdit >= MAX_DRIVER_EDIT_COUNT) {
+      onNotify('Batas Edit Tercapai', `${signatureTarget.label} sudah mencapai batas maksimal 3x edit.`);
+      setSignatureTarget(null);
+      return;
+    }
+    const nextEditCount = currentMaxEdit + 1;
+    const dataUrl = canvasRef.current.toDataURL('image/png');
     const nowIso = new Date().toISOString();
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!idSet.has(it.id)) return it;
@@ -540,18 +606,26 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           : keepExistingCodMethod
           ? it.metodeBayarAktual
           : ('TTD' as const),
+        driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
         driverUpdatedAt: nowIso
       };
     });
     persistUpdatedItems(updated);
-    onNotify('TTD Tersimpan', `Tanda tangan untuk ${signatureTarget.label} berhasil disimpan.`);
+    onNotify('TTD Tersimpan', `Tanda tangan untuk ${signatureTarget.label} berhasil disimpan (Edit ke-${nextEditCount}/3).`);
     setSignatureTarget(null);
   };
 
   const handleRemoveSignature = (itemIds: string[]) => {
     if (!todayFormKirim?.invoiceItems) return;
     const idSet = new Set(itemIds);
+    const currentMaxEdit = todayFormKirim.invoiceItems
+      .filter(it => idSet.has(it.id))
+      .reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+    if (currentMaxEdit >= MAX_DRIVER_EDIT_COUNT) {
+      onNotify('Batas Edit Tercapai', 'Sudah mencapai batas maksimal 3x edit.');
+      return;
+    }
     const nowIso = new Date().toISOString();
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!idSet.has(it.id)) return it;
@@ -694,7 +768,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
       ? tempoGroups
       : [...codGroups, ...tempoGroups];
 
-  // Reusable 3-choice payment control (Tunai | Transfer | TTD)
+  // Reusable 3-choice payment control (Tunai | Transfer | TTD) with Max 3x Edit limit
   const renderThreeOptionFlow = (opts: {
     targetKey: string;
     label: string;
@@ -706,6 +780,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     ttdDataUrl?: string;
     itemIds: string[];
     isCombinedCod: boolean;
+    editCount: number;
     groupItems?: FormKirimInvoiceItem[];
     onSaveTunai: (amount: number) => void;
     onSaveTransfer: () => void;
@@ -715,6 +790,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const activeChoice = activeOptionMap[opts.targetKey] || null;
     const isTunaiOpen = activeChoice === 'Tunai';
     const isTransferOpen = activeChoice === 'Transfer';
+    const isMaxEditReached = opts.editCount >= MAX_DRIVER_EDIT_COUNT;
+    const remainingEdits = Math.max(0, MAX_DRIVER_EDIT_COUNT - opts.editCount);
 
     const inputVal =
       draftInputs[opts.targetKey] !== undefined
@@ -724,6 +801,10 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         : '';
 
     const selectChoice = (choice: PaymentChoice) => {
+      if (isMaxEditReached) {
+        onNotify('Batas Edit Tercapai', `${opts.label} sudah mencapai batas maksimal 3x edit.`);
+        return;
+      }
       if (choice === 'TTD') {
         setActiveOptionMap(prev => ({ ...prev, [opts.targetKey]: null }));
         opts.onOpenSignature();
@@ -751,7 +832,21 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
 
     return (
       <div className="space-y-2.5">
-        {/* Saved Status Summary Strip */}
+        {/* Saved Status Summary Strip + Edit Limit Counter */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span
+            className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+              isMaxEditReached
+                ? 'bg-red-100 text-red-700 border border-red-300'
+                : 'bg-slate-100 text-slate-700 border border-slate-300'
+            }`}
+          >
+            {isMaxEditReached
+              ? `Batas Edit Tercapai (${opts.editCount}/${MAX_DRIVER_EDIT_COUNT})`
+              : `Fitur Edit: ${opts.editCount}/${MAX_DRIVER_EDIT_COUNT} (Sisa ${remainingEdits}x)`}
+          </span>
+        </div>
+
         {(opts.savedMethod || opts.hasSignature) && (
           <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px]">
             <div className="flex items-center gap-2 min-w-0">
@@ -778,28 +873,33 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                   alt="TTD"
                   className="h-6 w-12 object-contain bg-white rounded border border-emerald-300"
                 />
-                <button
-                  type="button"
-                  onClick={opts.onRemoveSignature}
-                  className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
-                  title="Hapus TTD"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {!isMaxEditReached && (
+                  <button
+                    type="button"
+                    onClick={opts.onRemoveSignature}
+                    className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+                    title="Hapus TTD"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* 3 Pilihan Utama: Tunai | Transfer | TTD */}
+        {/* 3 Pilihan Utama: Tunai | Transfer | TTD (Dibatasi Maksimal 3x Edit) */}
         <div className="grid grid-cols-3 gap-1.5">
           <button
             type="button"
+            disabled={isMaxEditReached}
             onClick={() => selectChoice('Tunai')}
-            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              isTunaiOpen || opts.savedMethod === 'Tunai'
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50'
+            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition ${
+              isMaxEditReached
+                ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
+                : isTunaiOpen || opts.savedMethod === 'Tunai'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs cursor-pointer'
+                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50 cursor-pointer'
             }`}
           >
             <Banknote className="w-3.5 h-3.5 shrink-0" />
@@ -808,11 +908,14 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
 
           <button
             type="button"
+            disabled={isMaxEditReached}
             onClick={() => selectChoice('Transfer')}
-            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              isTransferOpen || opts.savedMethod === 'Transfer'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50'
+            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition ${
+              isMaxEditReached
+                ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
+                : isTransferOpen || opts.savedMethod === 'Transfer'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs cursor-pointer'
+                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50 cursor-pointer'
             }`}
           >
             <Landmark className="w-3.5 h-3.5 shrink-0" />
@@ -821,11 +924,14 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
 
           <button
             type="button"
+            disabled={isMaxEditReached}
             onClick={() => selectChoice('TTD')}
-            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              opts.hasSignature
-                ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50'
+            className={`min-h-[44px] px-2 rounded-xl border text-[11px] font-black flex items-center justify-center gap-1.5 transition ${
+              isMaxEditReached
+                ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
+                : opts.hasSignature
+                ? 'bg-slate-900 text-white border-slate-900 shadow-xs cursor-pointer'
+                : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50 cursor-pointer'
             }`}
           >
             <PenTool className="w-3.5 h-3.5 shrink-0" />
@@ -834,7 +940,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         </div>
 
         {/* Panel Input Nominal (HANYA MUNCUL KETIKA PILIH TUNAI) */}
-        {isTunaiOpen && (
+        {isTunaiOpen && !isMaxEditReached && (
           <div className="bg-emerald-50/90 border border-emerald-300 rounded-xl p-3 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-black text-emerald-950">
@@ -921,7 +1027,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         )}
 
         {/* Panel Konfirmasi Transfer (TANPA INPUT NOMINAL + TOMBOL SIMPAN) */}
-        {isTransferOpen && (
+        {isTransferOpen && !isMaxEditReached && (
           <div className="bg-blue-50/90 border border-blue-300 rounded-xl p-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[11px] font-black text-blue-950">Konfirmasi Pembayaran Transfer</div>
@@ -951,19 +1057,24 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const itemIds = group.items.map(i => i.id);
     const firstItem = group.items[0];
     const combinedTargetKey = `cmb::${modeKey}`;
+    const isGroupMaxEditReached = group.editCount >= MAX_DRIVER_EDIT_COUNT;
+    const noteDraftValue =
+      customerNotesDraft[modeKey] !== undefined ? customerNotesDraft[modeKey] : group.customerNote;
 
     return (
       <div
         key={modeKey}
         className="bg-white text-slate-900 rounded-2xl border border-slate-300 shadow-sm overflow-hidden"
       >
-        {/* Header Pelanggan 1, 2, 3 dst. */}
+        {/* Header Master Pelanggan (Tanpa Tulisan Pelanggan 1, 2, 3 dst & TEMPO Warna Merah) */}
         <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-start justify-between gap-2">
           <div className="flex items-start gap-2.5 min-w-0">
             <div
               className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0 mt-0.5 ${
                 group.savedMethod || group.allSigned
                   ? 'bg-emerald-600 text-white'
+                  : group.category === 'TEMPO'
+                  ? 'bg-red-600 text-white'
                   : 'bg-blue-600 text-white'
               }`}
             >
@@ -971,13 +1082,11 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-slate-500">
-                <span className="uppercase tracking-wider">Pelanggan {group.customerNumber}</span>
-                <span>•</span>
                 <span
-                  className={`font-black ${
+                  className={`font-black px-2 py-0.5 rounded ${
                     group.category === 'COD'
-                      ? 'bg-[#FFFF00] text-slate-950 px-1.5 py-0.5 rounded border border-amber-400'
-                      : 'text-indigo-700'
+                      ? 'bg-[#FFFF00] text-slate-950 border border-amber-400'
+                      : 'bg-red-600 text-white border border-red-700'
                   }`}
                 >
                   {group.category}
@@ -1067,39 +1176,126 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           </div>
         )}
 
-        {/* Bar Khusus TEMPO > 1 Faktur: Hanya Fitur TTD */}
-        {group.category === 'TEMPO' && isMultiInvoice && (
-          <div className="px-3.5 py-2 bg-indigo-50/80 border-b border-indigo-200/80 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-950 min-w-0">
-              <PenTool className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="truncate">Pelanggan TEMPO · TTD ({group.items.length} Faktur)</span>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                openSignatureModal({
-                  label: `${group.customerName} (${group.items.length} Faktur TEMPO)`,
-                  itemIds,
-                  initialSignerName: firstItem?.ttdSignerName || group.customerName
-                })
-              }
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-black inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
-                group.allSigned
-                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                  : 'bg-slate-900 text-white hover:bg-slate-800'
-              }`}
-            >
-              <PenTool className="w-3 h-3" />
-              <span>{group.allSigned ? 'Ubah TTD Semua' : `TTD Semua (${group.items.length})`}</span>
-            </button>
-          </div>
-        )}
-
         {/* Daftar Faktur Pelanggan */}
         <div className="divide-y divide-slate-200">
-          {isCombinedActive ? (
+          {group.category === 'TEMPO' ? (
+            /* Pelanggan TEMPO (1 Master Pelanggan dengan 1 atau > 1 Faktur dijadikan 1 TTD saja) */
             <div className="p-3.5 space-y-3">
-              {/* Rincian Faktur dalam Gabungan */}
+              <div className="bg-rose-50/40 border border-rose-200 rounded-xl divide-y divide-rose-100">
+                {group.items.map(it => {
+                  const isBoldSbu = isNonGudangFaktur(it.noFaktur);
+                  const hasKet = Boolean((it.keterangan || '').trim());
+                  return (
+                    <div key={it.id} className="px-3 py-2 text-[11px] space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 whitespace-normal break-words">
+                          <span className={isBoldSbu ? 'font-black text-slate-950' : 'font-bold text-slate-900'}>
+                            {it.noFaktur}
+                          </span>
+                          <span className="text-slate-400 mx-1.5">•</span>
+                          <span className="text-slate-500">{it.tglFaktur}</span>
+                          {it.coly > 0 && (
+                            <span className="text-slate-600 font-bold ml-1.5">• {it.coly} COLY</span>
+                          )}
+                        </div>
+                        <div className={`shrink-0 tabular-nums ${isBoldSbu ? 'font-black text-slate-950' : 'font-bold text-slate-900'}`}>
+                          Rp {formatRibuan(it.nilaiFaktur)}
+                        </div>
+                      </div>
+                      {hasKet && (
+                        <div className="px-2 py-1 rounded bg-[#FFFF00] text-slate-950 font-bold text-[10px] whitespace-normal break-words border border-amber-400">
+                          Ket Faktur: {it.keterangan}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Status & 1 Tombol TTD Terpadu untuk Master Pelanggan TEMPO (Maks 3x Edit) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                      isGroupMaxEditReached
+                        ? 'bg-red-100 text-red-700 border border-red-300'
+                        : 'bg-slate-100 text-slate-700 border border-slate-300'
+                    }`}
+                  >
+                    {isGroupMaxEditReached
+                      ? `Batas Edit Tercapai (${group.editCount}/${MAX_DRIVER_EDIT_COUNT})`
+                      : `Fitur Edit: ${group.editCount}/${MAX_DRIVER_EDIT_COUNT} (Sisa ${Math.max(
+                          0,
+                          MAX_DRIVER_EDIT_COUNT - group.editCount
+                        )}x)`}
+                  </span>
+                </div>
+
+                {group.anySigned && firstItem?.ttdDataUrl && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="font-bold text-emerald-900 truncate">
+                        Tersimpan · TTD ({firstItem?.ttdSignerName || group.customerName})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <img
+                        src={firstItem.ttdDataUrl}
+                        alt="TTD"
+                        className="h-6 w-12 object-contain bg-white rounded border border-emerald-300"
+                      />
+                      {!isGroupMaxEditReached && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSignature(itemIds)}
+                          className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+                          title="Hapus TTD"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isGroupMaxEditReached}
+                  onClick={() => {
+                    if (isGroupMaxEditReached) {
+                      onNotify('Batas Edit Tercapai', `${group.customerName} sudah mencapai batas maksimal 3x edit.`);
+                      return;
+                    }
+                    openSignatureModal({
+                      label:
+                        group.items.length > 1
+                          ? `${group.customerName} (${group.items.length} Faktur TEMPO)`
+                          : `${group.customerName} • ${firstItem?.noFaktur || ''}`,
+                      itemIds,
+                      initialSignerName: firstItem?.ttdSignerName || group.customerName
+                    });
+                  }}
+                  className={`w-full min-h-[44px] px-3 rounded-xl border text-xs font-black flex items-center justify-center gap-2 transition ${
+                    isGroupMaxEditReached
+                      ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
+                      : group.allSigned
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs hover:bg-slate-800 cursor-pointer'
+                      : 'bg-red-600 text-white border-red-600 hover:bg-red-500 shadow-xs cursor-pointer'
+                  }`}
+                >
+                  <PenTool className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {group.allSigned
+                      ? `Ubah TTD Pelanggan TEMPO${group.items.length > 1 ? ` (${group.items.length} Faktur)` : ''}`
+                      : `TTD Pelanggan TEMPO${group.items.length > 1 ? ` (${group.items.length} Faktur Jadi 1 TTD)` : ''}`}
+                  </span>
+                </button>
+              </div>
+            </div>
+          ) : isCombinedActive ? (
+            <div className="p-3.5 space-y-3">
+              {/* Rincian Faktur dalam Gabungan COD */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl divide-y divide-slate-200">
                 {group.items.map(it => {
                   const isBoldSbu = isNonGudangFaktur(it.noFaktur);
@@ -1123,7 +1319,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                       </div>
                       {hasKet && (
                         <div className="px-2 py-1 rounded bg-[#FFFF00] text-slate-950 font-bold text-[10px] whitespace-normal break-words border border-amber-400">
-                          Ket: {it.keterangan}
+                          Ket Faktur: {it.keterangan}
                         </div>
                       )}
                     </div>
@@ -1131,7 +1327,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                 })}
               </div>
 
-              {/* 3 Pilihan Gabungan COD: Tunai (+ Kalkulator + Simpan) | Transfer (+ Simpan) | TTD (+ Simpan TTD) */}
+              {/* 3 Pilihan Gabungan COD */}
               {renderThreeOptionFlow({
                 targetKey: combinedTargetKey,
                 label: `${group.customerName} (${group.items.length} Faktur COD)`,
@@ -1143,6 +1339,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                 ttdDataUrl: firstItem?.ttdDataUrl,
                 itemIds,
                 isCombinedCod: true,
+                editCount: group.editCount,
                 groupItems: group.items,
                 onSaveTunai: (amt) => handleSaveCombinedTunai(group, amt, combinedTargetKey),
                 onSaveTransfer: () =>
@@ -1166,7 +1363,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
               const isBoldSbu = isNonGudangFaktur(it.noFaktur);
               const hasKet = Boolean((it.keterangan || '').trim());
               const singleTargetKey = `single::${it.id}`;
-              const isTempoItem = group.category === 'TEMPO' || it.paymentCategory === 'TEMPO' || Number(it.netDays) > 0;
+              const itemEditCount = Number(it.driverEditCount) || 0;
               const itemSavedMethod: PaymentChoice | null =
                 it.metodeBayarAktual === 'Transfer' || String(it.bayar || '').trim().toUpperCase() === 'TRANSFER'
                   ? 'Transfer'
@@ -1197,85 +1394,71 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
 
                   {hasKet && (
                     <div className="px-2.5 py-1.5 rounded-lg bg-[#FFFF00] text-slate-950 font-bold text-[10px] whitespace-normal break-words border border-amber-400">
-                      Ket: {it.keterangan}
+                      Ket Faktur: {it.keterangan}
                     </div>
                   )}
 
-                  {isTempoItem ? (
-                    <div className="space-y-2">
-                      {it.ttdDataUrl && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px]">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span className="font-bold text-emerald-900 truncate">
-                              Tersimpan · TTD ({it.ttdSignerName || it.namaPelanggan})
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <img
-                              src={it.ttdDataUrl}
-                              alt="TTD"
-                              className="h-6 w-12 object-contain bg-white rounded border border-emerald-300"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveSignature([it.id])}
-                              className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
-                              title="Hapus TTD"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openSignatureModal({
-                            label: `${it.namaPelanggan} • ${it.noFaktur}`,
-                            itemIds: [it.id],
-                            initialSignerName: it.ttdSignerName || it.namaPelanggan
-                          })
-                        }
-                        className={`w-full min-h-[44px] px-3 rounded-xl border text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer ${
-                          it.ttdDataUrl
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs hover:bg-slate-800'
-                            : 'bg-white text-slate-800 border-slate-300 hover:border-slate-400 hover:bg-slate-50'
-                        }`}
-                      >
-                        <PenTool className="w-3.5 h-3.5 shrink-0" />
-                        <span>{it.ttdDataUrl ? 'Ubah TTD Pelanggan' : 'TTD Pelanggan TEMPO'}</span>
-                      </button>
-                    </div>
-                  ) : (
-                    renderThreeOptionFlow({
-                      targetKey: singleTargetKey,
-                      label: `${it.namaPelanggan} • ${it.noFaktur}`,
-                      totalTagihan: Number(it.nilaiFaktur) || 0,
-                      savedMethod: itemSavedMethod,
-                      savedTunaiAmount: Number(it.nominalDiterima) || 0,
-                      hasSignature: Boolean(it.ttdDataUrl),
-                      signerLabel: it.ttdSignerName || it.namaPelanggan,
-                      ttdDataUrl: it.ttdDataUrl,
-                      itemIds: [it.id],
-                      isCombinedCod: false,
-                      onSaveTunai: (amt) => handleSaveSingleTunai(it, amt, singleTargetKey),
-                      onSaveTransfer: () =>
-                        handleSaveTransfer([it.id], `${it.namaPelanggan} (${it.noFaktur})`, singleTargetKey, false),
-                      onOpenSignature: () =>
-                        openSignatureModal({
-                          label: `${it.namaPelanggan} • ${it.noFaktur}`,
-                          itemIds: [it.id],
-                          initialSignerName: it.ttdSignerName || it.namaPelanggan
-                        }),
-                      onRemoveSignature: () => handleRemoveSignature([it.id])
-                    })
-                  )}
+                  {renderThreeOptionFlow({
+                    targetKey: singleTargetKey,
+                    label: `${it.namaPelanggan} • ${it.noFaktur}`,
+                    totalTagihan: Number(it.nilaiFaktur) || 0,
+                    savedMethod: itemSavedMethod,
+                    savedTunaiAmount: Number(it.nominalDiterima) || 0,
+                    hasSignature: Boolean(it.ttdDataUrl),
+                    signerLabel: it.ttdSignerName || it.namaPelanggan,
+                    ttdDataUrl: it.ttdDataUrl,
+                    itemIds: [it.id],
+                    isCombinedCod: false,
+                    editCount: itemEditCount,
+                    onSaveTunai: (amt) => handleSaveSingleTunai(it, amt, singleTargetKey),
+                    onSaveTransfer: () =>
+                      handleSaveTransfer([it.id], `${it.namaPelanggan} (${it.noFaktur})`, singleTargetKey, false),
+                    onOpenSignature: () =>
+                      openSignatureModal({
+                        label: `${it.namaPelanggan} • ${it.noFaktur}`,
+                        itemIds: [it.id],
+                        initialSignerName: it.ttdSignerName || it.namaPelanggan
+                      }),
+                    onRemoveSignature: () => handleRemoveSignature([it.id])
+                  })}
                 </div>
               );
             })
           )}
+        </div>
+
+        {/* Fitur Keterangan untuk Setiap 1 Master Pelanggan */}
+        <div className="px-3.5 py-2.5 bg-slate-50 border-t border-slate-200 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[10px] font-black uppercase tracking-wider text-slate-600">
+              Keterangan Pelanggan
+            </label>
+            {group.customerNote && (
+              <span className="text-[10px] font-bold text-emerald-700">Tersimpan</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={noteDraftValue}
+              onChange={e =>
+                setCustomerNotesDraft(prev => ({
+                  ...prev,
+                  [modeKey]: e.target.value
+                }))
+              }
+              placeholder={`Tulis keterangan untuk ${group.customerName}...`}
+              className="flex-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => handleSaveCustomerNote(group, noteDraftValue)}
+              className="min-h-[38px] px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black inline-flex items-center gap-1 transition cursor-pointer shrink-0"
+            >
+              <Save className="w-3 h-3" />
+              <span>Simpan</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1337,10 +1520,10 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           <span className="font-black text-amber-400 shrink-0 tabular-nums">{totalColyDisplay} COLY</span>
         </div>
 
-        {/* 3 KPI Setoran Hari Ini */}
+        {/* 3 KPI Setoran Hari Ini (Total Tagihan Diambil dari Faktur COD Saja) */}
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-            <div className="text-[9px] font-bold uppercase text-slate-400">Total Tagihan</div>
+            <div className="text-[9px] font-bold uppercase text-amber-300">Total Tagihan (COD)</div>
             <div className="text-xs font-black text-white mt-0.5 tabular-nums">
               Rp {formatRibuan(totalTagihan)}
             </div>
@@ -1359,7 +1542,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           </div>
         </div>
 
-        {/* Sub-Tab Filter COD / TEMPO */}
+        {/* Sub-Tab Filter COD / TEMPO (TEMPO Warna Merah) */}
         <div className="grid grid-cols-3 gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
           <button
             type="button"
@@ -1383,7 +1566,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             type="button"
             onClick={() => setSectionTab('TEMPO')}
             className={`min-h-[40px] rounded-lg font-bold transition cursor-pointer ${
-              sectionTab === 'TEMPO' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+              sectionTab === 'TEMPO' ? 'bg-red-600 text-white' : 'text-red-400 hover:text-red-300'
             }`}
           >
             TEMPO ({tempoGroups.length})
@@ -1404,10 +1587,10 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         </div>
       )}
 
-      {/* Daftar Pelanggan TEMPO */}
+      {/* Daftar Pelanggan TEMPO (Warna Merah) */}
       {(sectionTab === 'all' || sectionTab === 'TEMPO') && tempoGroups.length > 0 && (
         <div className="space-y-2.5">
-          <div className="px-3.5 py-2 rounded-xl bg-[#FFFF00] text-slate-950 flex items-center justify-between text-xs font-black shadow-sm">
+          <div className="px-3.5 py-2 rounded-xl bg-red-600 text-white flex items-center justify-between text-xs font-black shadow-sm">
             <span>PELANGGAN TEMPO ({tempoGroups.length} Pelanggan)</span>
             <span className="tabular-nums">
               Rp {formatRibuan(tempoGroups.reduce((s, g) => s + g.totalTagihan, 0))}

@@ -89,6 +89,7 @@ export type NavTab =
   | 'purchasing_stock_overview'
   | 'purchasing_stock_forecast'
   | 'purchasing_stok_opname'
+  | 'purchasing_kartu_stok'
   | 'hr_dashboard'
   | 'ga_security'
   | 'ga_hk'
@@ -96,6 +97,7 @@ export type NavTab =
   | 'training_videos'
   | 'training_karyawan'
   | 'finance_dashboard'
+  | 'finance_customer_mapping'
   | 'finance_validasi_form_kirim'
   | 'finance_billing_app'
   | 'warehouse_dashboard'
@@ -110,6 +112,8 @@ export type NavTab =
   | 'marketing_online'
   | 'marketing_offline'
   | 'marketing_to_vo_ro'
+  | 'marketing_invoice_validation'
+  | 'marketing_billing_app'
   | 'activity_log'
   | 'users'
   | 'branches'
@@ -481,18 +485,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           groupTitle: 'Inventori & Rak Gudang',
           items: [
             {
-              tab: 'warehouse_dashboard',
-              label: 'Ringkasan Gudang',
-              icon: <Building2 className="w-4 h-4 text-blue-500" />,
-              description: 'Statistik okupansi ruang dan kapasitas'
-            },
-            {
-              tab: 'warehouse_inventory',
-              label: 'Master SKU & Stok Bin',
-              icon: <Package className="w-4 h-4 text-indigo-500" />,
-              description: 'Daftar produk, karton box, dan stok aktif'
-            },
-            {
               tab: 'warehouse_slotting',
               label: 'Denah Rak & Slotting',
               icon: <MapIcon className="w-4 h-4 text-amber-500" />,
@@ -537,15 +529,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           items: [
             {
               tab: 'sales_dashboard',
-              label: 'Dashboard Sales Hub',
-              icon: <Briefcase className="w-4 h-4 text-blue-500" />,
-              description: 'Monitoring aktivitas terpadu sales admin'
-            },
-            {
-              tab: 'sales_activities',
-              label: 'Checklist Aktivitas Harian',
-              icon: <Activity className="w-4 h-4 text-blue-500" />,
-              description: 'Input dan verifikasi checklist tugas'
+              label: 'Dashboard Admin Penjualan',
+              icon: <BarChart3 className="w-4 h-4 text-blue-500" />,
+              description: 'Grafik & analitik performa seluruh modul Admin Penjualan'
             },
             {
               tab: 'sales_schedules',
@@ -591,23 +577,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Aplikasi Scan & Foto Muat',
               icon: <QrCode className="w-4 h-4 text-emerald-500" />,
               description: 'Foto item sesuai faktur, deteksi otomatis YOLO & verifikasi muat'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Kompetensi & Jobdesk',
-          items: [
-            {
-              tab: 'sales_skill_matrix',
-              label: 'Matriks Skill Admin',
-              icon: <Award className="w-4 h-4 text-emerald-500" />,
-              description: 'Level keahlian dan sertifikasi admin'
-            },
-            {
-              tab: 'sales_jobdesk',
-              label: 'Pengaturan SOP & Jobdesk',
-              icon: <Settings className="w-4 h-4 text-slate-500" />,
-              description: 'Pembagian wewenang dan alur kerja'
             }
           ]
         },
@@ -660,14 +629,25 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'purchasing_stok_opname',
-              label: 'Stok Opname & Kartu Stok',
-              icon: <ClipboardCheck className="w-4 h-4 text-emerald-500" />,
+              label: 'Stok Opname',
+              icon: <ClipboardCheck className="w-4 h-4 text-indigo-500" />,
               badge: (
-                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
                   Integrasi Gudang
                 </span>
               ),
-              description: 'Kartu stok digital & integrasi hasil opname gudang'
+              description: 'Rekapitulasi selisih opname fisik gudang & tindak lanjut PO restock'
+            },
+            {
+              tab: 'purchasing_kartu_stok',
+              label: 'Kartu Stok',
+              icon: <FileText className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  Analisa Hari
+                </span>
+              ),
+              description: 'Kartu stok digital & analisa otomatis selisih hari pengisian stok'
             },
             {
               tab: 'purchasing_stock_overview',
@@ -693,19 +673,35 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'marketing'),
       groups: [
         {
-          groupTitle: 'Pemasaran & Pemetaan Wilayah',
+          groupTitle: 'Marketing Online',
           items: [
             {
               tab: 'marketing_online',
               label: 'Marketing Online & Ads',
               icon: <Globe className="w-4 h-4 text-cyan-500" />,
               description: 'Kampanye digital dan inbound leads'
-            },
+            }
+          ]
+        },
+        {
+          groupTitle: 'Marketing Offline',
+          items: [
             {
               tab: 'marketing_offline',
               label: 'Marketing Offline / Kunjungan',
               icon: <Megaphone className="w-4 h-4 text-amber-500" />,
-              description: 'Pipeline prospek pabrik dan industri'
+              description: 'Pipeline prospek pabrik, laporan penjualan & input tagihan'
+            },
+            {
+              tab: 'marketing_invoice_validation',
+              label: 'Validasi Faktur',
+              icon: <ClipboardCheck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  WA Sales
+                </span>
+              ),
+              description: 'Validasi faktur kirim esok hari & integrasi WA Sales'
             },
             {
               tab: 'marketing_to_vo_ro',
@@ -723,6 +719,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Jaringan Toko & Wilayah Mitra',
               icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
               description: 'Peta sebaran retail store Jawa Timur & Bali'
+            },
+            {
+              tab: 'marketing_billing_app',
+              label: 'Aplikasi Penagihan Pelanggan',
+              icon: <DollarSign className="w-4 h-4 text-amber-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                  Kolektor
+                </span>
+              ),
+              description: 'Aplikasi HP penagihan ke pelanggan, foto bukti, kendala & lunas'
             }
           ]
         }
@@ -742,7 +749,13 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
               icon: <FileText className="w-4 h-4 text-emerald-500" />,
-              description: 'Faktur penjualan, pajak & konfirmasi piutang'
+              description: 'Monitoring buku besar tagihan & piutang pelanggan per wilayah'
+            },
+            {
+              tab: 'finance_customer_mapping',
+              label: 'Mapping Master Pelanggan',
+              icon: <Users className="w-4 h-4 text-indigo-500" />,
+              description: 'Pengkategorian pelanggan Tempo & COD, sisa limit & umur jatuh tempo'
             },
             {
               tab: 'finance_validasi_form_kirim',
@@ -1108,10 +1121,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 <div className="space-y-0.5">
                   {activeCategory.groups.map((group, groupIdx) => (
                     <div key={groupIdx} className="space-y-0.5">
-                      {group.groupTitle === 'Data KPI Penjualan' && groupIdx > 0 && (
-                        <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-800 px-3">
+                      {(group.groupTitle === 'Data KPI Penjualan' || group.groupTitle === 'Marketing Offline') && groupIdx > 0 && (
+                        <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-700/90 px-3">
                           <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                            Data KPI Penjualan
+                            {group.groupTitle}
                           </span>
                         </div>
                       )}
@@ -1242,10 +1255,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                       <div className="p-2 space-y-1 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
                         {cat.groups.map((group, gIdx) => (
                           <div key={gIdx} className="space-y-0.5">
-                            {group.groupTitle === 'Data KPI Penjualan' && gIdx > 0 && (
-                              <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-800 px-3">
+                            {(group.groupTitle === 'Data KPI Penjualan' || group.groupTitle === 'Marketing Offline') && gIdx > 0 && (
+                              <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-700/90 px-3">
                                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                                  Data KPI Penjualan
+                                  {group.groupTitle}
                                 </span>
                               </div>
                             )}

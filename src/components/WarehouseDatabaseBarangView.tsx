@@ -37,17 +37,22 @@ import {
   RotateCcw,
   RotateCw,
   Crop,
-  Check
+  Check,
+  ShieldAlert,
+  ShieldCheck,
+  Clock
 } from 'lucide-react';
 import {
   databaseBarangService,
   DatabaseBarangRecord,
   DatabaseBarangSyncStatus,
+  PhotoDeletionApprovalRequest,
   calculateVolM3,
   createDefaultBarangThumbnail,
   compressDocumentationPhoto,
   estimateDataUrlSizeKb
 } from '../services/databaseBarangService';
+import { logisticsStore } from '../services/store';
 
 interface WarehouseDatabaseBarangViewProps {
   onSyncWithMasterSku?: (records: DatabaseBarangRecord[]) => void;
@@ -58,6 +63,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 }) => {
   const [items, setItems] = useState<DatabaseBarangRecord[]>(() => databaseBarangService.getAll());
   const [syncStatus, setSyncStatus] = useState<DatabaseBarangSyncStatus>(() => databaseBarangService.getSyncStatus());
+  const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const [photoDeleteRequests, setPhotoDeleteRequests] = useState<PhotoDeletionApprovalRequest[]>([]);
+  const [deletePhotoReason, setDeletePhotoReason] = useState('');
+  const [isSubmittingPhotoDelete, setIsSubmittingPhotoDelete] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [unitFilter, setUnitFilter] = useState('ALL');
   const [volFilter, setVolFilter] = useState<'ALL' | 'has_vol' | 'no_vol'>('ALL');
@@ -641,15 +651,27 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
   };
 
+  const refreshPhotoDeleteRequests = async () => {
+    const reqs = await databaseBarangService.fetchPhotoDeleteRequests();
+    setPhotoDeleteRequests(reqs);
+  };
+
   useEffect(() => {
     databaseBarangService.ensureHydrated().then(loaded => {
       if (Array.isArray(loaded)) {
         setItems(loaded);
       }
+      void databaseBarangService.syncRealtimePhotosFromServer().then(changed => {
+        if (changed) {
+          setItems(databaseBarangService.getAll());
+        }
+      });
     });
+    void refreshPhotoDeleteRequests();
 
     const sync = () => {
       setItems(databaseBarangService.getAll());
+      setCurrentUser(logisticsStore.getCurrentUser());
     };
     const handleSyncStatus = (e: Event) => {
       const custom = e as CustomEvent<DatabaseBarangSyncStatus>;
@@ -662,10 +684,14 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     window.addEventListener('akk-database-barang-updated', sync);
     window.addEventListener('akk-database-barang-sync-status', handleSyncStatus);
     window.addEventListener('storage', sync);
+    const unsubStore = logisticsStore.subscribe(() => {
+      setCurrentUser(logisticsStore.getCurrentUser());
+    });
     return () => {
       window.removeEventListener('akk-database-barang-updated', sync);
       window.removeEventListener('akk-database-barang-sync-status', handleSyncStatus);
       window.removeEventListener('storage', sync);
+      unsubStore();
     };
   }, []);
 
@@ -673,8 +699,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     let result: { count: number; items: DatabaseBarangRecord[] };
     try {
       result = await databaseBarangService.forceSyncNow();
+      await refreshPhotoDeleteRequests();
     } catch (err: any) {
-      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server database.' });
+      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server database MySQL.' });
       return;
     }
     const syncError = databaseBarangService.getSyncStatus().error;
@@ -688,50 +715,116 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
     ).length;
     setFeedbackModal({
-      title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi 2 Arah (PC ↔ HP) Berhasil' : 'Server Belum Memiliki Data Barang'),
+      title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi MySQL (HP ↔ Browser PC) Berhasil' : 'Server Belum Memiliki Data Barang'),
       message:
-        syncError ? `Server melaporkan masalah: ${syncError}. Data lokal belum dihapus. Gunakan tombol Pulihkan Foto Lokal ke DB dari perangkat asal.` : result.count > 0
-          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh dua arah antara server database, tampilan PC, dan tampilan HP.`
-          : 'Saat ini belum ada data di server database. Buka halaman Database Barang di perangkat tempat Anda menginput data agar otomatis terunggah ke server.'
+        syncError ? `Server melaporkan masalah: ${syncError}.` : result.count > 0
+          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh langsung dari MySQL ke seluruh perangkat (HP & Browser PC).`
+          : 'Saat ini belum ada data di server database MySQL.'
     });
   };
 
   const handleRecoverLocalPhotos = async () => {
     try {
       const result = await databaseBarangService.recoverLocalPhotosToMysql();
-      setItems(databaseBarangService.getAll());
-      if (result.localPhotoSkuCount === 0) {
-        setFeedbackModal({
-          title: 'Load Foto ke DB Selesai',
-          message: `Total foto berhasil terupload: 0, gagal: 0.`
-        });
-        return;
-      }
+      const latestItems = databaseBarangService.getAll();
+      setItems(latestItems);
+      await refreshPhotoDeleteRequests();
+      const syncedPhotoCount = latestItems.filter(
+        it =>
+          (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml'))) ||
+          (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
+      ).length;
       setFeedbackModal({
-        title: 'Load Foto ke DB Selesai',
-        message: `Total foto berhasil terupload: ${result.succeededSkuCount}, gagal: ${result.failedSkuCount}.`
+        title: 'Sinkronisasi Foto Dokumentasi MySQL Selesai',
+        message: `Total SKU berfoto terdokumentasi di MySQL saat ini: ${Math.max(syncedPhotoCount, result.afterPhotoSkuCount)} barang (Berhasil disinkronkan: ${Math.max(result.succeededSkuCount, syncedPhotoCount)}, Gagal: ${result.failedSkuCount}).`
       });
     } catch (err: any) {
       setFeedbackModal({
-        title: 'Gagal Menghubungkan Foto ke Server Database',
-        message: `${err?.message || 'Server belum tersedia'}. Foto asli di browser tetap aman. Pastikan patch sudah dideploy ke aplikasi yang aktif.`
+        title: 'Gagal Menghubungkan Foto ke Server Database MySQL',
+        message: `${err?.message || 'Server belum tersedia'}.`
       });
     }
   };
 
-  const confirmDeletePhoto = () => {
+  const confirmDeletePhoto = async () => {
     if (!photoToDelete) return;
-    const { item, photoIdx, isAll } = photoToDelete;
+    const { item, photoIdx, isAll, photoUrl } = photoToDelete;
+
+    // Jika bukan Super Admin, kirim permohonan persetujuan hapus foto ke Super Admin di MySQL
+    if (!isSuperAdmin) {
+      setIsSubmittingPhotoDelete(true);
+      try {
+        const res = await databaseBarangService.requestPhotoDeletion({
+          noBarang: item.noBarang,
+          deskripsiBarang: item.deskripsiBarang || item.keteranganBarang,
+          photoUrl: photoUrl || item.dokumentasiUrls?.[photoIdx] || item.dokumentasiUrl || '',
+          clearAll: Boolean(isAll),
+          reason: deletePhotoReason.trim() || 'Permohonan penghapusan dokumentasi foto barang',
+          requestedByUserId: currentUser?.id || 'staff',
+          requestedByName: currentUser?.fullName || currentUser?.email || 'Staf Gudang',
+          requestedByRole: currentUser?.role || 'warehouse_admin'
+        });
+        await refreshPhotoDeleteRequests();
+        setPhotoToDelete(null);
+        setDeletePhotoReason('');
+        setFeedbackModal({
+          title: res.success ? 'Menunggu Persetujuan Super Admin' : 'Gagal Mengajukan Hapus Foto',
+          message: res.success
+            ? `Permohonan hapus dokumentasi foto barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dikirim ke Super Admin. Foto hanya akan terhapus dari MySQL setelah disetujui oleh Super Admin.`
+            : (res.message || 'Gagal mengirim permohonan ke Super Admin.'),
+          variant: res.success ? 'info' : 'danger',
+          badge: item.noBarang
+        });
+      } finally {
+        setIsSubmittingPhotoDelete(false);
+      }
+      return;
+    }
+
+    // Jika Super Admin, langsung hapus dari MySQL & perbarui tampilan
     if (isAll) {
       handleClearAllPhotosFromPreview(item);
     } else {
       handleDeletePhotoFromPreview(item, photoIdx);
     }
     setPhotoToDelete(null);
+    setDeletePhotoReason('');
     setFeedbackModal({
-      title: 'Foto Berhasil Dihapus',
-      message: `Foto barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah terhapus.`
+      title: 'Foto Dokumentasi Dihapus (Super Admin)',
+      message: `Foto dokumentasi barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dihapus secara permanen dari database MySQL.`,
+      variant: 'danger',
+      badge: item.noBarang
     });
+  };
+
+  const handleDecidePhotoDeleteRequest = async (reqItem: PhotoDeletionApprovalRequest, decision: 'approved' | 'rejected') => {
+    if (!isSuperAdmin) return;
+    const res = await databaseBarangService.decidePhotoDeleteRequest(
+      reqItem.id,
+      decision,
+      currentUser?.fullName || currentUser?.email || 'Super Admin',
+      currentUser?.role || 'super_admin'
+    );
+    if (res.success) {
+      if (decision === 'approved') {
+        if (reqItem.clearAll) {
+          databaseBarangService.clearAllPhotos(reqItem.noBarang);
+        } else {
+          databaseBarangService.deletePhoto(reqItem.noBarang, reqItem.photoUrl);
+        }
+      }
+      await refreshPhotoDeleteRequests();
+      setItems(databaseBarangService.getAll());
+      setFeedbackModal({
+        title: decision === 'approved' ? 'Penghapusan Foto Disetujui' : 'Permohonan Hapus Foto Ditolak',
+        message:
+          decision === 'approved'
+            ? `Dokumentasi foto untuk barang ${reqItem.noBarang} (${reqItem.deskripsiBarang}) telah disetujui dan dihapus dari database MySQL.`
+            : `Permohonan hapus foto untuk barang ${reqItem.noBarang} oleh ${reqItem.requestedByName} telah ditolak. Foto tetap tersimpan aman di MySQL.`,
+        variant: decision === 'approved' ? 'danger' : 'info',
+        badge: reqItem.noBarang
+      });
+    }
   };
 
   // Auto-calculate volM3 whenever panjang, lebar, tinggi change
@@ -935,6 +1028,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   };
 
   const handleRemovePhoto = (index: number) => {
+    if (!isSuperAdmin && editingItem) {
+      const targetUrl = dokumentasiUrls[index] || editingItem.dokumentasiUrl || '';
+      setPhotoToDelete({
+        item: editingItem,
+        photoIdx: index,
+        isAll: false,
+        photoUrl: targetUrl
+      });
+      return;
+    }
     setDokumentasiUrls(prev => {
       const updated = prev.filter((_, idx) => idx !== index);
       setDokumentasiUrl(updated[0] || '');
@@ -1765,6 +1868,99 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
           </p>
         </div>
       </div>
+
+      {/* Panel Persetujuan Hapus Dokumentasi Foto (Khusus Otorisasi Super Admin) */}
+      {photoDeleteRequests.filter(r => r.status === 'pending').length > 0 && (
+        <div className="bg-amber-50/90 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700/70 rounded-2xl p-4 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                    Antrean Persetujuan Hapus Foto Dokumentasi Barang
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-600 text-white text-[10px] font-black">
+                    {photoDeleteRequests.filter(r => r.status === 'pending').length} Menunggu Super Admin
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  {isSuperAdmin
+                    ? 'Sebagai Super Admin, Anda memiliki hak akses penuh untuk menyetujui atau menolak penghapusan foto dokumentasi dari database MySQL.'
+                    : 'Penghapusan foto dokumentasi memerlukan persetujuan Super Admin sebelum dihapus permanen dari database MySQL.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {photoDeleteRequests
+              .filter(r => r.status === 'pending')
+              .map(req => (
+                <div
+                  key={req.id}
+                  className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {req.photoUrl && !req.photoUrl.startsWith('data:image/svg+xml') ? (
+                      <img
+                        src={req.photoUrl}
+                        alt={req.noBarang}
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-[10px] font-black text-amber-800 dark:text-amber-300 shrink-0">
+                        {req.clearAll ? 'SEMUA' : 'FOTO'}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-mono text-[10px] font-black">
+                          {req.noBarang}
+                        </span>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {req.deskripsiBarang}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        Diajukan oleh: <strong className="text-slate-700 dark:text-slate-200">{req.requestedByName}</strong> &bull; {req.reason}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isSuperAdmin ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleDecidePhotoDeleteRequest(req, 'approved')}
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                        title="Setujui & Hapus Foto dari Database MySQL"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Setujui Hapus</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDecidePhotoDeleteRequest(req, 'rejected')}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold cursor-pointer transition"
+                        title="Tolak Permohonan"
+                      >
+                        Tolak
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[10px] font-bold flex items-center gap-1 shrink-0">
+                      <Clock className="w-3 h-3" />
+                      <span>Menunggu Super Admin</span>
+                    </span>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Search, Filter, Sort & Table Mode Controls */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
@@ -4000,35 +4196,49 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         </div>
       )}
 
-      {/* Custom Delete Confirmation Modal for Photo (Menggantikan window.confirm browser) */}
+      {/* Custom Delete Confirmation Modal for Photo (Otorisasi Super Admin) */}
       {photoToDelete && (
         <div
           className="fixed inset-0 z-[1600] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
           style={{ zIndex: 1600 }}
-          onClick={() => setPhotoToDelete(null)}
+          onClick={() => {
+            setPhotoToDelete(null);
+            setDeletePhotoReason('');
+          }}
         >
           <div
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl my-auto"
             onClick={e => e.stopPropagation()}
           >
             {/* Top Accent Header */}
-            <div className="bg-gradient-to-r from-rose-600 via-rose-600 to-red-600 px-6 py-4 flex items-center justify-between text-white">
+            <div
+              className={`px-6 py-4 flex items-center justify-between text-white ${
+                isSuperAdmin
+                  ? 'bg-gradient-to-r from-rose-600 via-rose-600 to-red-600'
+                  : 'bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600'
+              }`}
+            >
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                  <Trash2 className="w-5 h-5 text-white" />
+                  {isSuperAdmin ? <ShieldCheck className="w-5 h-5 text-white" /> : <ShieldAlert className="w-5 h-5 text-white" />}
                 </div>
                 <div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-rose-100">
-                    Konfirmasi Hapus Foto
+                  <div className="text-[10px] font-black uppercase tracking-widest opacity-90">
+                    {isSuperAdmin ? 'Otorisasi Super Admin Aktif' : 'Memerlukan Persetujuan Super Admin'}
                   </div>
                   <h4 className="text-sm font-black tracking-tight text-white">
-                    {photoToDelete.isAll ? 'Hapus Semua Foto Barang' : 'Hapus Foto Barang'}
+                    {isSuperAdmin
+                      ? (photoToDelete.isAll ? 'Hapus Semua Foto Dokumentasi' : 'Hapus Foto Dokumentasi')
+                      : 'Ajukan Hapus Foto ke Super Admin'}
                   </h4>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setPhotoToDelete(null)}
+                onClick={() => {
+                  setPhotoToDelete(null);
+                  setDeletePhotoReason('');
+                }}
                 className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -4038,15 +4248,31 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
             {/* Body */}
             <div className="p-6 space-y-4">
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed">
-                Apakah Anda yakin ingin menghapus gambar <span className="text-rose-600 dark:text-rose-400 font-black">{photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang || photoToDelete.item.noBarang}</span>?
+                {isSuperAdmin ? (
+                  <>
+                    Anda masuk sebagai <strong>Super Admin</strong>. Apakah Anda yakin ingin menghapus dokumentasi foto{' '}
+                    <span className="text-rose-600 dark:text-rose-400 font-black">
+                      {photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang || photoToDelete.item.noBarang}
+                    </span>{' '}
+                    secara permanen dari database MySQL?
+                  </>
+                ) : (
+                  <>
+                    Penghapusan foto atau dokumentasi barang hanya dapat dilakukan atas <strong>persetujuan Super Admin</strong>. Ajukan permohonan hapus foto untuk{' '}
+                    <span className="text-amber-600 dark:text-amber-400 font-black">
+                      {photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang || photoToDelete.item.noBarang}
+                    </span>
+                    :
+                  </>
+                )}
               </p>
 
-              <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 flex gap-3.5 items-center">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex gap-3.5 items-center">
                 {photoToDelete.photoUrl && !photoToDelete.photoUrl.startsWith('data:image/svg+xml') ? (
                   <img
                     src={photoToDelete.photoUrl}
                     alt={photoToDelete.item.noBarang}
-                    className="w-16 h-16 rounded-xl object-cover border border-rose-300 dark:border-rose-700 shrink-0 bg-white dark:bg-slate-800"
+                    className="w-16 h-16 rounded-xl object-cover border border-slate-300 dark:border-slate-600 shrink-0 bg-white dark:bg-slate-800"
                   />
                 ) : (
                   <div className="w-16 h-16 rounded-xl bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center shrink-0 text-rose-500 font-bold text-xs">
@@ -4055,7 +4281,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 )}
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-mono text-[11px] font-black">
+                    <span className="px-2 py-0.5 rounded-md bg-blue-600 text-white font-mono text-[11px] font-black">
                       {photoToDelete.item.noBarang}
                     </span>
                     <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
@@ -4071,10 +4297,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 </div>
               </div>
 
+              {!isSuperAdmin && (
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                    Alasan Penghapusan Dokumentasi (Untuk Ditinjau Super Admin)
+                  </label>
+                  <input
+                    type="text"
+                    value={deletePhotoReason}
+                    onChange={e => setDeletePhotoReason(e.target.value)}
+                    placeholder="Contoh: Foto buram / salah ambil varian barang..."
+                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center gap-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => setPhotoToDelete(null)}
+                  onClick={() => {
+                    setPhotoToDelete(null);
+                    setDeletePhotoReason('');
+                  }}
                   className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
                 >
                   Batal
@@ -4082,11 +4326,20 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 <button
                   type="button"
                   autoFocus
+                  disabled={isSubmittingPhotoDelete}
                   onClick={confirmDeletePhoto}
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className={`flex-1 py-2.5 px-4 rounded-xl text-white font-black text-xs shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-60 ${
+                    isSuperAdmin
+                      ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20'
+                      : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+                  }`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Ya, Hapus Foto</span>
+                  <span>
+                    {isSuperAdmin
+                      ? 'Setujui & Hapus Foto'
+                      : (isSubmittingPhotoDelete ? 'Mengirim...' : 'Minta Persetujuan Super Admin')}
+                  </span>
                 </button>
               </div>
             </div>

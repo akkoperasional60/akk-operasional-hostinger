@@ -200,7 +200,9 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'training_videos':
     case 'training_karyawan':
     case 'finance_dashboard':
+    case 'finance_customer_mapping':
     case 'finance_billing_app':
+    case 'marketing_billing_app':
     case 'purchasing_dashboard':
       return loadDepartmentDashboard;
     case 'finance_validasi_form_kirim':
@@ -215,6 +217,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'warehouse_cubication':
     case 'warehouse_fleet_cubication':
     case 'purchasing_stok_opname':
+    case 'purchasing_kartu_stok':
       return loadWarehouseManagementSystem;
     case 'purchasing_stock_overview':
     case 'purchasing_stock_forecast':
@@ -222,6 +225,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'marketing_online':
     case 'marketing_offline':
     case 'marketing_to_vo_ro':
+    case 'marketing_invoice_validation':
       return loadMarketingDashboard;
     case 'activity_log':
       return loadSystemActivityLog;

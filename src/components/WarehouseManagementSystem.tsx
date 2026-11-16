@@ -39,6 +39,7 @@ export type WmsSubTab =
   | 'scanner'
   | 'slotting'
   | 'opname'
+  | 'purchasing_opname'
   | 'kartu_stok'
   | 'cubication'
   | 'fleet_cubication';
@@ -2027,12 +2028,11 @@ export const WarehouseManagementSystem: React.FC<{
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: STOK OPNAME & KARTU STOK DIGITAL (BERPINDAH KE ADM PEMBELIAN)    */}
+      {/* TAB: STOK OPNAME (ADM PEMBELIAN — REKAPITULASI SELISIH OPNAME GUDANG) */}
       {/* ===================================================================== */}
-      {activeTab === 'kartu_stok' && (
+      {activeTab === 'purchasing_opname' && (
         <div className="space-y-4">
-          {/* Integrasi Hasil Opname dari Gudang Banner & Table */}
-          <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -2040,21 +2040,23 @@ export const WarehouseManagementSystem: React.FC<{
                     Adm Pembelian &bull; Integrasi Opname Gudang
                   </span>
                 </div>
-                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-1">
-                  Rekapitulasi Selisih Opname Fisik Gudang (Pengajuan PO Restock)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Data hasil opname fisik dari tim Gudang yang memerlukan tindak lanjut Purchase Order (PO) atau penyesuaian kartu stok oleh Adm Pembelian.
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 tracking-tight">
+                  Stok Opname &mdash; Rekapitulasi Selisih Opname Fisik Gudang (Pengajuan PO Restock)
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Data hasil opname fisik dari tim Gudang yang memerlukan tindak lanjut Purchase Order (PO) oleh Adm Pembelian.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => handleTabChange('opname')}
-                className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
-              >
-                <Warehouse className="w-3.5 h-3.5" />
-                <span>Lihat Audit Opname Gudang</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('opname')}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Warehouse className="w-3.5 h-3.5" />
+                  <span>Lihat Audit Opname Gudang</span>
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
@@ -2072,63 +2074,84 @@ export const WarehouseManagementSystem: React.FC<{
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {opnameAuditList.filter(i => i.stokFisik !== i.stokSistem || i.purchasingStatus !== 'Sesuai Sistem').map(item => {
-                    const diff = item.stokFisik - item.stokSistem;
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                        <td className="py-2.5 px-3">
-                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mr-1.5">{item.kodeBarang}</span>
-                          <span className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 font-semibold">
-                          {item.namaGudang} ({item.cabang})
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono">{item.stokSistem} {item.satuan}</td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold">{item.stokFisik} {item.satuan}</td>
-                        <td className="py-2.5 px-3 text-center font-mono font-bold text-rose-600 dark:text-rose-400">
-                          {diff > 0 ? `+${diff}` : diff} {item.satuan}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-mono font-black text-indigo-600 dark:text-indigo-400">
-                          {item.reorderQty} {item.satuan}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            item.purchasingStatus === 'Diproses PO Pembelian'
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                          }`}>
-                            {item.purchasingStatus}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          {item.purchasingStatus !== 'Diproses PO Pembelian' ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpnameAuditList(prev =>
-                                  prev.map(r => (r.id === item.id ? { ...r, purchasingStatus: 'Diproses PO Pembelian' } : r))
-                                );
-                                setPopupModal({
-                                  title: 'PO Restock Diproses Adm Pembelian',
-                                  message: `Pengajuan restock ${item.kodeBarang} sebanyak ${item.reorderQty} ${item.satuan} telah disetujui dan masuk antrean Purchase Order (PO).`
-                                });
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                  {opnameAuditList
+                    .filter(i => i.stokFisik !== i.stokSistem || i.purchasingStatus !== 'Sesuai Sistem')
+                    .map(item => {
+                      const diff = item.stokFisik - item.stokSistem;
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3">
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mr-1.5">
+                              {item.kodeBarang}
+                            </span>
+                            <span className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 font-semibold">
+                            {item.namaGudang} ({item.cabang})
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono">
+                            {item.stokSistem} {item.satuan}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold">
+                            {item.stokFisik} {item.satuan}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono font-bold text-rose-600 dark:text-rose-400">
+                            {diff > 0 ? `+${diff}` : diff} {item.satuan}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono font-black text-indigo-600 dark:text-indigo-400">
+                            {item.reorderQty} {item.satuan}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                item.purchasingStatus === 'Diproses PO Pembelian'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                              }`}
                             >
-                              Proses PO Restock
-                            </button>
-                          ) : (
-                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">✓ Sudah Diproses PO</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                              {item.purchasingStatus}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            {item.purchasingStatus !== 'Diproses PO Pembelian' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpnameAuditList(prev =>
+                                    prev.map(r =>
+                                      r.id === item.id ? { ...r, purchasingStatus: 'Diproses PO Pembelian' } : r
+                                    )
+                                  );
+                                  setPopupModal({
+                                    title: 'PO Restock Diproses Adm Pembelian',
+                                    message: `Pengajuan restock ${item.kodeBarang} sebanyak ${item.reorderQty} ${item.satuan} telah disetujui dan masuk antrean Purchase Order (PO).`
+                                  });
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                              >
+                                Proses PO Restock
+                              </button>
+                            ) : (
+                              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                                ✓ Sudah Diproses PO
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+      )}
 
+      {/* ===================================================================== */}
+      {/* TAB: KARTU STOK DIGITAL (ADM PEMBELIAN — ANALISA SELISIH HARI)        */}
+      {/* ===================================================================== */}
+      {activeTab === 'kartu_stok' && (
+        <div className="space-y-4">
           {/* Header Kartu Stok */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="space-y-1">
@@ -2138,7 +2161,7 @@ export const WarehouseManagementSystem: React.FC<{
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Stok Opname &amp; Kartu Stok Digital (Analisa Selisih Hari Pengisian Stok)
+                Kartu Stok Digital (Analisa Selisih Hari Pengisian Stok)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Unggah file Excel mentahan Kartu Stok untuk diolah otomatis oleh sistem menjadi laporan analisa tanggal kuantitas minimum/kosong, tanggal stok masuk, selisih hari, dan kuantitas terakhir per gudang.
@@ -2339,7 +2362,7 @@ export const WarehouseManagementSystem: React.FC<{
       {/* ===================================================================== */}
       {/* TAB: DATABASE BARANG (NOMOR BARANG, KETERANGAN, SATUAN, DOKUMENTASI)  */}
       {/* ===================================================================== */}
-      {activeTab === 'scanner' && (
+      {(activeTab === 'scanner' || activeTab === 'inventory' || activeTab === 'overview') && (
         <WarehouseDatabaseBarangView
           onSyncWithMasterSku={records => {
             setSkuItems(prev => {
@@ -2377,433 +2400,6 @@ export const WarehouseManagementSystem: React.FC<{
             });
           }}
         />
-      )}
-
-      {/* ===================================================================== */}
-      {/* TAB: MASTER SKU & STOK BIN GUDANG (DEFAULT FOR OVERVIEW / INVENTORY)  */}
-      {/* ===================================================================== */}
-      {(activeTab === 'inventory' || activeTab === 'overview') && (
-        <div className="space-y-4">
-          {/* Header Banner WMS */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span>Master SKU &amp; Stok Gudang</span>
-                </span>
-              </div>
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Warehouse Management System (WMS) &mdash; PT Anugrah Kemasan Kreatif
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Daftar Master SKU dan ketersediaan stok barang gudang. Gunakan fitur <strong>Unggah File</strong> untuk mengimport file Excel stok mentah secara otomatis.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {skuItems.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSkuItems([]);
-                    try {
-                      localStorage.removeItem(LS_KEY_MASTER_SKU);
-                      localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
-                    } catch {}
-                    setPopupModal({
-                      title: 'Data Berhasil Dikosongkan',
-                      message: 'Seluruh data ringkasan gudang Master SKU telah berhasil dibersihkan.'
-                    });
-                  }}
-                  className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                  title="Kosongkan seluruh data ringkasan gudang"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Kosongkan Data ({skuItems.length})</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setIsUploadSkuPageOpen(true)}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Unggah File (Upload Excel)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsAddSkuModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Master SKU</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Multi-Store Branch Selector Bar */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Warehouse className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                Filter Cabang (Multi-Store Inventaris):
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  branchStore.setSelectedOriginBranchId('ALL');
-                  setSkuPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                  selectedBranchId === 'ALL'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
-                }`}
-              >
-                Semua Cabang ({skuItems.length} SKU)
-              </button>
-              {branches.map((b) => {
-                const count = skuItems.filter(i => branchStore.getInventoryBranch(i.id).id === b.id).length;
-                const active = selectedBranchId === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      branchStore.setSelectedOriginBranchId(b.id);
-                      setSkuPage(1);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                      active
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                        : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
-                    }`}
-                  >
-                    {b.name} ({count} SKU)
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Search, Filter & Page Size Controls */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={skuSearch}
-                onChange={(e) => setSkuSearch(e.target.value)}
-                placeholder="Cari No Barang / Kode Barang atau Nama Barang..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={skuKategoriFilter}
-                onChange={(e) => setSkuKategoriFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="ALL">Semua Kategori Barang ({availableKategoriList.length})</option>
-                {availableKategoriList.map((kat) => (
-                  <option key={kat} value={kat}>
-                    {kat}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={skuSatuanFilter}
-                onChange={(e) => setSkuSatuanFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="ALL">Semua Satuan ({skuItems.length})</option>
-                {availableSatuanList.map((sat) => (
-                  <option key={sat} value={sat}>
-                    Satuan: {sat}
-                  </option>
-                ))}
-              </select>
-
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-slate-500 font-semibold">Batas Halaman:</span>
-                <select
-                  value={skuPageSize}
-                  onChange={(e) => setSkuPageSize(Number(e.target.value))}
-                  className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-                >
-                  <option value={5}>5 Baris / Hal</option>
-                  <option value={10}>10 Baris / Hal</option>
-                  <option value={20}>20 Baris / Hal</option>
-                  <option value={50}>50 Baris / Hal</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Master Barang Table with 5 Required Columns: Kategori Barang, No Barang, Nama Barang, Stok Tersedia, Satuan */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Daftar Master Barang &amp; Stok Tersedia
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Menampilkan Kategori Barang, No Barang, Nama Barang, Stok Tersedia, dan Satuan.
-                </p>
-              </div>
-              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                Total Barang: <span className="font-mono text-indigo-600 dark:text-indigo-400">{filteredSkus.length}</span>
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Kategori Barang</th>
-                    <th className="py-3 px-4">No Barang</th>
-                    <th className="py-3 px-4">Nama Barang</th>
-                    <th className="py-3 px-4 text-right">Stok Tersedia</th>
-                    <th className="py-3 px-4">Satuan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
-                  {paginatedSkus.length > 0 ? (
-                    paginatedSkus.map((item) => {
-                      const itemBranch = branchStore.getInventoryBranch(item.id);
-                      return (
-                        <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                          <td className="py-3 px-4">
-                            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] inline-block">
-                              {item.kategoriBarang || 'Karton Box Corrugated'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                            {item.noBarang}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[10px] text-slate-400 font-semibold">Cabang:</span>
-                              <select
-                                value={itemBranch.id}
-                                onChange={(e) => {
-                                  branchStore.setInventoryBranch(item.id, e.target.value);
-                                  setBranches(branchStore.getActiveBranches());
-                                }}
-                                className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 cursor-pointer focus:outline-none"
-                              >
-                                {branches.map((b) => (
-                                  <option key={b.id} value={b.id}>
-                                    Gudang {b.name} ({b.slug})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono font-black text-slate-900 dark:text-white">
-                            {item.stokTersedia.toLocaleString('id-ID')}
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">
-                            {item.satuan}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <Package className="w-8 h-8 text-slate-300 dark:text-slate-600" />
-                          <div className="font-bold text-slate-700 dark:text-slate-300 text-sm">
-                            {skuItems.length === 0
-                              ? 'Ringkasan Gudang Kosong (0 SKU)'
-                              : 'Tidak ada data barang yang cocok dengan pencarian atau filter cabang.'}
-                          </div>
-                          {skuItems.length === 0 && (
-                            <p className="text-[11px] text-slate-400 max-w-sm">
-                              Gunakan tombol <strong>Unggah File (Upload Excel)</strong> atau <strong>Tambah Master SKU</strong> di atas untuk memasukkan data stok fisik gudang.
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination (Pagging) Controls */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="text-slate-500 dark:text-slate-400 font-medium">
-                Menampilkan{' '}
-                <strong className="text-slate-900 dark:text-white">
-                  {filteredSkus.length === 0 ? 0 : (currentSkuPage - 1) * skuPageSize + 1}
-                </strong>{' '}
-                &ndash;{' '}
-                <strong className="text-slate-900 dark:text-white">
-                  {Math.min(currentSkuPage * skuPageSize, filteredSkus.length)}
-                </strong>{' '}
-                dari <strong className="text-slate-900 dark:text-white">{filteredSkus.length}</strong> barang (Halaman {currentSkuPage} dari {totalSkuPages})
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={currentSkuPage <= 1}
-                  onClick={() => setSkuPage(p => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Sebelumnya</span>
-                </button>
-
-                {Array.from({ length: totalSkuPages }, (_, i) => i + 1).map((pageNum) => (
-                  <button
-                    key={pageNum}
-                    type="button"
-                    onClick={() => setSkuPage(pageNum)}
-                    className={`w-8 h-8 rounded-xl font-mono text-xs font-black transition cursor-pointer ${
-                      pageNum === currentSkuPage
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  disabled={currentSkuPage >= totalSkuPages}
-                  onClick={() => setSkuPage(p => Math.min(totalSkuPages, p + 1))}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                >
-                  <span>Selanjutnya</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===================================================================== */}
-      {/* MODAL: TAMBAH MASTER SKU MANUAL                                       */}
-      {/* ===================================================================== */}
-      {isAddSkuModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                Tambah Master SKU Baru
-              </h4>
-              <button
-                onClick={() => setIsAddSkuModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddManualSku} className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  Kategori Barang
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Karton Box Corrugated"
-                  value={newSkuForm.kategoriBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, kategoriBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  No Barang / Kode Barang
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: AKK-KBX-055"
-                  value={newSkuForm.noBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, noBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  Nama Barang / Deskripsi
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Karton Box B-Flute 60x40x40 cm"
-                  value={newSkuForm.namaBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, namaBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                    Stok Tersedia
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="Contoh: 1500"
-                    value={newSkuForm.stokTersedia}
-                    onChange={(e) => setNewSkuForm({ ...newSkuForm, stokTersedia: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                    Satuan
-                  </label>
-                  <select
-                    value={newSkuForm.satuan}
-                    onChange={(e) => setNewSkuForm({ ...newSkuForm, satuan: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                  >
-                    <option value="Pcs">Pcs</option>
-                    <option value="Ball">Ball</option>
-                    <option value="Roll">Roll</option>
-                    <option value="Karton">Karton</option>
-                    <option value="Ikat">Ikat</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddSkuModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer"
-                >
-                  Simpan Barang
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
       )}
 
       {/* ===================================================================== */}

@@ -6,8 +6,8 @@ import {
   CheckCircle2, UserCheck, ShieldAlert, Brush, Award, Video, Play,
   Check, Clock, Search, Plus, Calendar, ShieldCheck, FileText, ExternalLink,
   Truck, ArrowRight, X, Download, DollarSign, MapPin, CreditCard,
-  ChevronLeft, ChevronRight, Trash2, MessageSquare, Printer, Phone, Send,
-  Camera, Smartphone, Upload, AlertTriangle, History
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Trash2, MessageSquare, Printer, Phone, Send,
+  Camera, Smartphone, Upload, AlertTriangle, History, Layers, Filter, Edit3
 } from 'lucide-react';
 import { SecurityGateLog } from '../types';
 import { TeamCalendar } from './TeamCalendar';
@@ -17,6 +17,10 @@ import { AbsenceManagementModal } from './AbsenceManagementModal';
 import { WarehouseManagementSystem } from './WarehouseManagementSystem';
 import { AkkLogo } from './AkkLogo';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import {
+  FinanceMonitoringLedgerView,
+  CustomerMasterMappingView
+} from './finance/FinanceLedgerAndMapping';
 
 const MetricCard = ({ title, value, subtext, icon: Icon, color }: { title: string, value: string, subtext: string, icon: any, color: string }) => (
   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-xs">
@@ -992,7 +996,7 @@ const WarehouseDashboard = () => (
   <WarehouseManagementSystem />
 );
 
-interface CollectorProofLog {
+export interface CollectorProofLog {
   id: string;
   invoiceId: string;
   noInvoice: string;
@@ -1009,7 +1013,7 @@ interface CollectorProofLog {
   photoDataUrl: string;
 }
 
-interface CustomerUnpaidInvoice {
+export interface CustomerUnpaidInvoice {
   id: string;
   noInvoice: string;
   noSuratJalan: string;
@@ -1023,130 +1027,656 @@ interface CustomerUnpaidInvoice {
   jumlahTerbayar: number;
   lastPaymentDate?: string;
   notes: string;
+  limitPelanggan?: number;
+  paymentCategory?: 'TEMPO' | 'COD';
+  tempoDays?: number;
+  isBoldHighlight?: boolean;
   collectionPhotoUrl?: string;
   kendalaTagihan?: string;
   lastCollectedAmount?: number;
+  collectionName?: string;
   collectorName?: string;
   collectionTimestamp?: string;
   collectionLogs?: CollectorProofLog[];
+  billingTeam?: 'FINANCE' | 'SALES';
+  salesPersonName?: string;
 }
 
-const INITIAL_UNPAID_INVOICES: CustomerUnpaidInvoice[] = [
+export interface CustomerMasterRecord {
+  id: string;
+  customerCode: string;
+  customerName: string;
+  region: string;
+  contactPhone: string;
+  paymentCategory: 'TEMPO' | 'COD';
+  tempoDays: number;
+  creditLimit: number;
+  notes: string;
+}
+
+export const INITIAL_MASTER_CUSTOMERS: CustomerMasterRecord[] = [
   {
-    id: 'INV-001',
-    noInvoice: 'INV/AKK/2026/10/0142',
-    noSuratJalan: 'SJ-AKK-2610-088',
+    id: 'CUST-RGJ-001',
+    customerCode: 'PLG-RGJ-001',
+    customerName: 'BP H KHOLIK',
+    region: 'ROGOJAMPI',
+    contactPhone: '0812-3456-7801',
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    creditLimit: 2000000,
+    notes: 'Pelanggan Tempo Rutin Area Rogojampi'
+  },
+  {
+    id: 'CUST-RGJ-002',
+    customerCode: 'PLG-RGJ-002',
+    customerName: 'BP HERU ROGOJAMPI',
+    region: 'ROGOJAMPI',
+    contactPhone: '0813-3390-1120',
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    creditLimit: 5000000,
+    notes: 'Pelanggan Tempo Area Rogojampi'
+  },
+  {
+    id: 'CUST-RGJ-003',
+    customerCode: 'PLG-RGJ-003',
+    customerName: 'BP SUKRI',
+    region: 'ROGOJAMPI',
+    contactPhone: '0812-5900-4411',
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    creditLimit: 4500000,
+    notes: 'Pelanggan Tempo Lancar Rogojampi'
+  },
+  {
+    id: 'CUST-RGJ-004',
+    customerCode: 'PLG-RGJ-004',
+    customerName: 'BU ARISTA',
+    region: 'ROGOJAMPI',
+    contactPhone: '0852-3109-8821',
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    creditLimit: 2000000,
+    notes: 'Pelanggan Tempo Rogojampi - pantau batas limit'
+  },
+  {
+    id: 'CUST-RGJ-005',
+    customerCode: 'PLG-RGJ-005',
+    customerName: 'BU TUTIK ROGOJAMPI',
+    region: 'ROGOJAMPI',
+    contactPhone: '0821-4099-3312',
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    creditLimit: 1500000,
+    notes: 'Pelanggan Tempo 14 Hari Area Rogojampi'
+  },
+  {
+    id: 'CUST-RGJ-006',
+    customerCode: 'PLG-RGJ-006',
+    customerName: 'TK WIGEN',
+    region: 'ROGOJAMPI',
+    contactPhone: '0811-3509-7741',
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    creditLimit: 3500000,
+    notes: 'Toko Grosir Kemasan Rogojampi'
+  },
+  {
+    id: 'CUST-SBA-001',
+    customerCode: 'PLG-SBA-001',
+    customerName: 'BU IIS',
+    region: 'SUMBER AYU',
+    contactPhone: '0813-5801-9920',
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    creditLimit: 15000000,
+    notes: 'Pelanggan Prioritas Area Sumber Ayu - Plafon 15 Jt'
+  },
+  {
+    id: 'CUST-BWI-001',
+    customerCode: 'PLG-BWI-001',
     customerName: 'TK ANUGRAH SEKAR WANGI',
+    region: 'BANYUWANGI KOTA',
     contactPhone: '0812-3456-7811',
-    region: 'Banyuwangi Kota',
-    invoiceDate: '2026-10-05',
-    dueDate: '2026-10-19',
-    itemSummary: 'Karton Box Corrugated B-Flute 60x40x40 cm (3.000 Pcs)',
-    totalTagihan: 20400000,
-    jumlahTerbayar: 5400000,
-    lastPaymentDate: '2026-10-15',
-    notes: 'Baru masuk pembayaran cicilan pertama Rp 5,4 Jt, sisa janji transfer minggu ini'
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    creditLimit: 20000000,
+    notes: 'Mitra Toko Kemasan Banyuwangi Kota'
   },
   {
-    id: 'INV-002',
-    noInvoice: 'INV/AKK/2026/09/0319',
-    noSuratJalan: 'SJ-AKK-2609-214',
+    id: 'CUST-JBR-001',
+    customerCode: 'PLG-JBR-001',
     customerName: 'UD SUMBER REJEKI JEMBER',
+    region: 'JEMBER',
     contactPhone: '0811-3490-221',
-    region: 'Jember',
-    invoiceDate: '2026-09-18',
-    dueDate: '2026-10-02',
-    itemSummary: 'Karton Box Double Wall CB-Flute Export (2.500 Pcs) & Lakban OPP (25 Karton)',
-    totalTagihan: 48500000,
-    jumlahTerbayar: 0,
-    notes: 'Sudah lewat jatuh tempo >25 hari, perlu penagihan prioritas tim Finance'
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    creditLimit: 50000000,
+    notes: 'Distributor Karton Box Area Jember'
   },
   {
-    id: 'INV-003',
-    noInvoice: 'INV/AKK/2026/10/0165',
-    noSuratJalan: 'SJ-AKK-2610-104',
-    customerName: 'TK LIMA SEPULUH',
-    contactPhone: '0813-5521-9088',
-    region: 'Genteng - Banyuwangi',
-    invoiceDate: '2026-10-12',
-    dueDate: '2026-10-26',
-    itemSummary: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm (8.000 Pcs)',
-    totalTagihan: 17600000,
-    jumlahTerbayar: 10000000,
-    lastPaymentDate: '2026-10-22',
-    notes: 'Cicilan ke-1 Rp 10 Jt via BCA, sisa Rp 7,6 Jt menunggu giro cair'
+    id: 'CUST-COD-001',
+    customerCode: 'PLG-COD-001',
+    customerName: 'TK SINAR BARU ROGOJAMPI',
+    region: 'ROGOJAMPI',
+    contactPhone: '0812-4410-8890',
+    paymentCategory: 'COD',
+    tempoDays: 0,
+    creditLimit: 0,
+    notes: 'Pelanggan COD - Wajib bayar tunai/transfer saat barang turun'
   },
   {
-    id: 'INV-004',
-    noInvoice: 'INV/AKK/2026/10/0188',
-    noSuratJalan: 'SJ-AKK-2610-129',
-    customerName: 'TK PRATAMA SRONO',
-    contactPhone: '0852-3310-4412',
-    region: 'Srono - Banyuwangi',
-    invoiceDate: '2026-10-20',
-    dueDate: '2026-11-03',
-    itemSummary: 'Box Die-Cut Pizza Kraft Coklat 25x25x5 cm (4.500 Pcs)',
-    totalTagihan: 14850000,
-    jumlahTerbayar: 0,
-    notes: 'Tempo 14 hari berjalan, jatuh tempo awal November'
+    id: 'CUST-COD-002',
+    customerCode: 'PLG-COD-002',
+    customerName: 'UD MAKMUR PLASTIK GENTENG',
+    region: 'GENTENG',
+    contactPhone: '0853-3011-7762',
+    paymentCategory: 'COD',
+    tempoDays: 0,
+    creditLimit: 0,
+    notes: 'Pelanggan COD Genteng - Tunai via Supir / Kolektor'
   },
   {
-    id: 'INV-005',
-    noInvoice: 'INV/AKK/2026/10/0194',
-    noSuratJalan: 'SJ-AKK-2610-137',
-    customerName: 'MITRA COLD STORAGE MUNCAR',
-    contactPhone: '0812-8890-3341',
-    region: 'Muncar - Banyuwangi',
-    invoiceDate: '2026-10-08',
-    dueDate: '2026-10-22',
-    itemSummary: 'Karton Box Ekspor Waxed Tahan Lembab Cold Storage (3.200 Pcs)',
-    totalTagihan: 46400000,
-    jumlahTerbayar: 23200000,
-    lastPaymentDate: '2026-10-10',
-    notes: 'DP 50% lunas saat PO, sisa 50% jatuh tempo minggu lalu'
-  },
-  {
-    id: 'INV-006',
-    noInvoice: 'INV/AKK/2026/10/0205',
-    noSuratJalan: 'SJ-AKK-2610-149',
-    customerName: 'TOKO BERKAH JAYA ROGOJAMPI',
-    contactPhone: '0821-4409-1182',
-    region: 'Rogojampi - Banyuwangi',
-    invoiceDate: '2026-10-24',
-    dueDate: '2026-11-07',
-    itemSummary: 'Plastik Kemasan HD/PE Grosir (120 Ball) & Stretch Film (40 Roll)',
-    totalTagihan: 26800000,
-    jumlahTerbayar: 0,
-    notes: 'Faktur sudah diterima admin toko, belum jatuh tempo'
-  },
-  {
-    id: 'INV-007',
-    noInvoice: 'INV/AKK/2026/09/0290',
-    noSuratJalan: 'SJ-AKK-2609-192',
-    customerName: 'GROSIR KEMASAN DENPASAR',
-    contactPhone: '0819-9901-7721',
-    region: 'Denpasar - Bali',
-    invoiceDate: '2026-09-10',
-    dueDate: '2026-09-25',
-    itemSummary: 'Paper Cup Hot 8 Oz Custom Print + Lid (150 Karton)',
-    totalTagihan: 67500000,
-    jumlahTerbayar: 30000000,
-    lastPaymentDate: '2026-10-05',
-    notes: 'Menunggak >30 hari untuk sisa pelunasan Rp 37,5 Jt'
+    id: 'CUST-COD-003',
+    customerCode: 'PLG-COD-003',
+    customerName: 'TOKO BERKAH KEMASAN MUNCAR',
+    region: 'MUNCAR',
+    contactPhone: '0822-3190-5501',
+    paymentCategory: 'COD',
+    tempoDays: 0,
+    creditLimit: 0,
+    notes: 'Pelanggan COD Area Muncar'
   }
 ];
 
-const LS_KEY_FINANCE_UNPAID = 'akk_finance_unpaid_invoices_v2';
+export const INITIAL_UNPAID_INVOICES: CustomerUnpaidInvoice[] = [
+  // === WILAYAH: ROGOJAMPI ===
+  // 1. BP H KHOLIK (5 Faktur -> Total Terutang: 13.920.738 | Limit: 2.000.000)
+  {
+    id: 'INV-RGJ-001',
+    noInvoice: 'FJ02-1126-0615',
+    noSuratJalan: 'SJ-RGJ-1126-0615',
+    customerName: 'BP H KHOLIK',
+    contactPhone: '0812-3456-7801',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-07',
+    dueDate: '2026-11-14',
+    itemSummary: 'Karton Box & Kemasan Plastik Grosir',
+    totalTagihan: 1295050,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-002',
+    noInvoice: 'FJ02-1126-0635',
+    noSuratJalan: 'SJ-RGJ-1126-0635',
+    customerName: 'BP H KHOLIK',
+    contactPhone: '0812-3456-7801',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-07',
+    dueDate: '2026-11-14',
+    itemSummary: 'Kemasan Box Makanan & Lakban',
+    totalTagihan: 485826,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-003',
+    noInvoice: 'FJ02BS-1126-007',
+    noSuratJalan: 'SJ-RGJ-1126-007',
+    customerName: 'BP H KHOLIK',
+    contactPhone: '0812-3456-7801',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-07',
+    dueDate: '2026-11-14',
+    itemSummary: 'Karton Box Tambahan BS',
+    totalTagihan: 140844,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-004',
+    noInvoice: 'FJ02-1126-0782',
+    noSuratJalan: 'SJ-RGJ-1126-0782',
+    customerName: 'BP H KHOLIK',
+    contactPhone: '0812-3456-7801',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-10',
+    dueDate: '2026-11-17',
+    itemSummary: 'Karton Box Corrugated Partai Besar',
+    totalTagihan: 8735018,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-005',
+    noInvoice: 'FJ02-1126-0883',
+    noSuratJalan: 'SJ-RGJ-1126-0883',
+    customerName: 'BP H KHOLIK',
+    contactPhone: '0812-3456-7801',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-11',
+    dueDate: '2026-11-18',
+    itemSummary: 'Kemasan Karton Box & Plastik HD',
+    totalTagihan: 3264000,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
 
-function computeInvoiceAgingDays(dueDateStr: string): number {
-  // Reference current operational date (or today)
-  const today = new Date('2026-10-29T00:00:00');
+  // 2. BP HERU ROGOJAMPI (1 Faktur -> Total Terutang: 2.406.355 | Limit: 5.000.000)
+  {
+    id: 'INV-RGJ-006',
+    noInvoice: 'FJ02-1026-1508',
+    noSuratJalan: 'SJ-RGJ-1026-1508',
+    customerName: 'BP HERU ROGOJAMPI',
+    contactPhone: '0813-3390-1120',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-10-20',
+    dueDate: '2026-10-27',
+    itemSummary: 'Karton Box & Plastik Kemasan',
+    totalTagihan: 2406355,
+    jumlahTerbayar: 0,
+    limitPelanggan: 5000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+
+  // 3. BP SUKRI (2 Faktur -> Total Terutang: 1.999.217 | Limit: 4.500.000)
+  {
+    id: 'INV-RGJ-007',
+    noInvoice: 'FJ03-1126-1894',
+    noSuratJalan: 'SJ-RGJ-1126-1894',
+    customerName: 'BP SUKRI',
+    contactPhone: '0812-5900-4411',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-09',
+    dueDate: '2026-11-16',
+    itemSummary: 'Kemasan Box & Paper Cup',
+    totalTagihan: 511050,
+    jumlahTerbayar: 0,
+    limitPelanggan: 4500000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    isBoldHighlight: true,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-008',
+    noInvoice: 'FJ02-1126-0787',
+    noSuratJalan: 'SJ-RGJ-1126-0787',
+    customerName: 'BP SUKRI',
+    contactPhone: '0812-5900-4411',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-10',
+    dueDate: '2026-11-17',
+    itemSummary: 'Karton Box Reguler & Tali Rafia',
+    totalTagihan: 1488167,
+    jumlahTerbayar: 0,
+    limitPelanggan: 4500000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+
+  // 4. BU ARISTA (4 Faktur -> Total Terutang: 2.518.825 | Limit: 2.000.000)
+  {
+    id: 'INV-RGJ-009',
+    noInvoice: 'FJ02-1126-0183',
+    noSuratJalan: 'SJ-RGJ-1126-0183',
+    customerName: 'BU ARISTA',
+    contactPhone: '0852-3109-8821',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-04',
+    dueDate: '2026-11-11',
+    itemSummary: 'Karton Box Makanan & Mika',
+    totalTagihan: 1095750,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-010',
+    noInvoice: 'FJ03-1126-0511',
+    noSuratJalan: 'SJ-RGJ-1126-0511',
+    customerName: 'BU ARISTA',
+    contactPhone: '0852-3109-8821',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-03',
+    dueDate: '2026-11-10',
+    itemSummary: 'Kemasan Plastik PE/HD',
+    totalTagihan: 149975,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    isBoldHighlight: true,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-011',
+    noInvoice: 'FJ03-1126-2103',
+    noSuratJalan: 'SJ-RGJ-1126-2103',
+    customerName: 'BU ARISTA',
+    contactPhone: '0852-3109-8821',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-10',
+    dueDate: '2026-11-17',
+    itemSummary: 'Lakban & Sendok Plastik',
+    totalTagihan: 146750,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    isBoldHighlight: true,
+    notes: ''
+  },
+  {
+    id: 'INV-RGJ-012',
+    noInvoice: 'FJ02-1126-0855',
+    noSuratJalan: 'SJ-RGJ-1126-0855',
+    customerName: 'BU ARISTA',
+    contactPhone: '0852-3109-8821',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-11',
+    dueDate: '2026-11-18',
+    itemSummary: 'Karton Box Duplex & Ivory',
+    totalTagihan: 1126350,
+    jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    notes: ''
+  },
+
+  // 5. BU TUTIK ROGOJAMPI (1 Faktur -> Total Terutang: 405.750 | Limit: 1.500.000)
+  {
+    id: 'INV-RGJ-013',
+    noInvoice: 'FJ02-1026-1586',
+    noSuratJalan: 'SJ-RGJ-1026-1586',
+    customerName: 'BU TUTIK ROGOJAMPI',
+    contactPhone: '0821-4099-3312',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-10-21',
+    dueDate: '2026-11-04',
+    itemSummary: 'Kemasan Box Kue & Plastik Opp',
+    totalTagihan: 405750,
+    jumlahTerbayar: 0,
+    limitPelanggan: 1500000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    notes: ''
+  },
+
+  // 6. TK WIGEN (1 Faktur -> Total Terutang: 3.938.375 | Limit: 3.500.000)
+  {
+    id: 'INV-RGJ-014',
+    noInvoice: 'FJ02-1126-0671',
+    noSuratJalan: 'SJ-RGJ-1126-0671',
+    customerName: 'TK WIGEN',
+    contactPhone: '0811-3509-7741',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-09',
+    dueDate: '2026-11-23',
+    itemSummary: 'Karton Box Corrugated & Kemasan Grosir',
+    totalTagihan: 3938375,
+    jumlahTerbayar: 0,
+    limitPelanggan: 3500000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    notes: ''
+  },
+
+  // === WILAYAH: SUMBER AYU ===
+  // 7. BU IIS (2 Faktur -> Total Terutang: 2.696.568 | Limit: 15.000.000)
+  {
+    id: 'INV-SBA-001',
+    noInvoice: 'FJ03-1126-0950',
+    noSuratJalan: 'SJ-SBA-1126-0950',
+    customerName: 'BU IIS',
+    contactPhone: '0813-5801-9920',
+    region: 'SUMBER AYU',
+    invoiceDate: '2026-11-05',
+    dueDate: '2026-11-12',
+    itemSummary: 'Kemasan Box & Plastik Grosir',
+    totalTagihan: 452505,
+    jumlahTerbayar: 0,
+    limitPelanggan: 15000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    isBoldHighlight: true,
+    notes: ''
+  },
+  {
+    id: 'INV-SBA-002',
+    noInvoice: 'FJ02B-1126-0111',
+    noSuratJalan: 'SJ-SBA-1126-0111',
+    customerName: 'BU IIS',
+    contactPhone: '0813-5801-9920',
+    region: 'SUMBER AYU',
+    invoiceDate: '2026-11-06',
+    dueDate: '2026-11-13',
+    itemSummary: 'Karton Box B-Flute & Paper Bowl',
+    totalTagihan: 2244063,
+    jumlahTerbayar: 0,
+    limitPelanggan: 15000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    billingTeam: 'SALES',
+    salesPersonName: 'Rendra Saputra',
+    notes: 'Tagihan Khusus Sales Area Sumber Ayu'
+  },
+  // === TAGIHAN KHUSUS SALES (TERINTEGRASI APLIKASI PENAGIHAN PELANGGAN) ===
+  {
+    id: 'INV-SLS-001',
+    noInvoice: 'FJ02-1126-0912',
+    noSuratJalan: 'SJ-BWI-1126-0912',
+    customerName: 'TK ANUGRAH SEKAR WANGI',
+    contactPhone: '0812-3456-7811',
+    region: 'BANYUWANGI KOTA',
+    invoiceDate: '2026-11-08',
+    dueDate: '2026-11-22',
+    itemSummary: 'Karton Box Corrugated B-Flute 60x40x40 cm (1.500 Pcs)',
+    totalTagihan: 9900000,
+    jumlahTerbayar: 2500000,
+    limitPelanggan: 20000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    billingTeam: 'SALES',
+    salesPersonName: 'Rendra Saputra',
+    notes: 'Tagihan Khusus Sales — Kunjungan rutin Rendra Saputra'
+  },
+  {
+    id: 'INV-SLS-002',
+    noInvoice: 'FJ02-1126-0945',
+    noSuratJalan: 'SJ-GTG-1126-0945',
+    customerName: 'UD MAKMUR PLASTIK GENTENG',
+    contactPhone: '0853-3011-7762',
+    region: 'GENTENG',
+    invoiceDate: '2026-11-09',
+    dueDate: '2026-11-16',
+    itemSummary: 'Lunch Box Paper Eco Kraft Size L & Paper Bowl',
+    totalTagihan: 6450000,
+    jumlahTerbayar: 0,
+    limitPelanggan: 10000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 7,
+    billingTeam: 'SALES',
+    salesPersonName: 'Dina Mariana',
+    notes: 'Tagihan Khusus Sales — Penagihan saat repeat order Genteng'
+  },
+  {
+    id: 'INV-SLS-003',
+    noInvoice: 'FJ02-1126-0988',
+    noSuratJalan: 'SJ-JBR-1126-0988',
+    customerName: 'UD SUMBER REJEKI JEMBER',
+    contactPhone: '0811-3490-221',
+    region: 'JEMBER',
+    invoiceDate: '2026-11-05',
+    dueDate: '2026-11-19',
+    itemSummary: 'Lakban OPP Coklat Heavy Duty & Stretch Film Pallet',
+    totalTagihan: 12400000,
+    jumlahTerbayar: 4000000,
+    limitPelanggan: 50000000,
+    paymentCategory: 'TEMPO',
+    tempoDays: 14,
+    billingTeam: 'SALES',
+    salesPersonName: 'Bagus Setiawan',
+    notes: 'Tagihan Khusus Sales — Follow up pelunasan area Jember'
+  }
+];
+
+export const LS_KEY_FINANCE_UNPAID = 'akk_finance_unpaid_invoices_v4';
+export const FINANCE_INVOICES_EVENT = 'akk-finance-invoices-updated';
+
+export const LS_KEY_FINANCE_CUSTOMERS = 'akk_finance_master_customers_v1';
+export const FINANCE_CUSTOMERS_EVENT = 'akk-finance-customers-updated';
+
+export function loadSharedCustomerMasters(): CustomerMasterRecord[] {
+  try {
+    const saved = localStorage.getItem(LS_KEY_FINANCE_CUSTOMERS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return INITIAL_MASTER_CUSTOMERS;
+}
+
+export function saveSharedCustomerMasters(list: CustomerMasterRecord[]): void {
+  try {
+    localStorage.setItem(LS_KEY_FINANCE_CUSTOMERS, JSON.stringify(list));
+  } catch {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(FINANCE_CUSTOMERS_EVENT));
+    fetch('/api/app-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entries: {
+          [LS_KEY_FINANCE_CUSTOMERS]: list
+        }
+      })
+    }).catch(() => {});
+  }
+}
+
+export function normalizeInvoiceBillingTeam(inv: CustomerUnpaidInvoice, idx = 0): CustomerUnpaidInvoice {
+  if (inv.billingTeam === 'FINANCE' || inv.billingTeam === 'SALES') {
+    return inv;
+  }
+  const noteLower = (inv.notes || '').toLowerCase();
+  const isSales =
+    noteLower.includes('sales') ||
+    noteLower.includes('marketing') ||
+    inv.customerName.includes('BU ARISTA') ||
+    inv.customerName.includes('TK WIGEN') ||
+    inv.customerName.includes('BU IIS') ||
+    idx % 3 === 2;
+  return {
+    ...inv,
+    billingTeam: isSales ? 'SALES' : 'FINANCE',
+    salesPersonName:
+      inv.salesPersonName ||
+      (isSales ? (idx % 2 === 0 ? 'Rendra Saputra' : 'Dina Mariana') : undefined)
+  };
+}
+
+export function loadSharedCustomerInvoices(): CustomerUnpaidInvoice[] {
+  try {
+    const saved = localStorage.getItem(LS_KEY_FINANCE_UNPAID);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((item, idx) => normalizeInvoiceBillingTeam(item, idx));
+      }
+    }
+  } catch {}
+  return INITIAL_UNPAID_INVOICES.map((item, idx) => normalizeInvoiceBillingTeam(item, idx));
+}
+
+export function saveSharedCustomerInvoices(list: CustomerUnpaidInvoice[]): void {
+  try {
+    localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(list));
+  } catch {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(FINANCE_INVOICES_EVENT));
+    fetch('/api/app-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entries: {
+          [LS_KEY_FINANCE_UNPAID]: list
+        }
+      })
+    }).catch(() => {});
+  }
+}
+
+export async function hydrateSharedCustomerInvoicesFromServer(): Promise<CustomerUnpaidInvoice[] | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch(
+      `/api/app-state?keys=${encodeURIComponent(LS_KEY_FINANCE_UNPAID)},${encodeURIComponent(LS_KEY_FINANCE_CUSTOMERS)}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const remoteCustomers = data?.entries?.[LS_KEY_FINANCE_CUSTOMERS];
+    if (Array.isArray(remoteCustomers) && remoteCustomers.length > 0) {
+      try {
+        localStorage.setItem(LS_KEY_FINANCE_CUSTOMERS, JSON.stringify(remoteCustomers));
+      } catch {}
+      window.dispatchEvent(new CustomEvent(FINANCE_CUSTOMERS_EVENT));
+    }
+    const remoteList = data?.entries?.[LS_KEY_FINANCE_UNPAID];
+    if (Array.isArray(remoteList) && remoteList.length > 0) {
+      try {
+        localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(remoteList));
+      } catch {}
+      window.dispatchEvent(new CustomEvent(FINANCE_INVOICES_EVENT));
+      return remoteList;
+    }
+  } catch {}
+  return null;
+}
+
+export function computeInvoiceAgingDays(dueDateStr: string): number {
+  // Reference operational date matching November 2026 ledger context
+  const today = new Date('2026-11-14T00:00:00');
   const due = new Date(`${dueDateStr}T00:00:00`);
   if (isNaN(due.getTime())) return 0;
   return Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function getInvoiceStatus(inv: CustomerUnpaidInvoice): 'Lunas' | 'Jatuh Tempo (Overdue)' | 'Cicilan / Sebagian' | 'Belum Jatuh Tempo' {
+export function formatIndonesianShortDate(isoDateStr: string): string {
+  if (!isoDateStr) return '-';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nop', 'Des'];
+  const parts = isoDateStr.split('-');
+  if (parts.length !== 3) return isoDateStr;
+  const year = parts[0];
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const day = parts[2];
+  return `${day} ${months[monthIdx] || parts[1]} ${year}`;
+}
+
+export function getInvoiceStatus(inv: CustomerUnpaidInvoice): 'Lunas' | 'Jatuh Tempo (Overdue)' | 'Cicilan / Sebagian' | 'Belum Jatuh Tempo' {
   const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
   if (sisa <= 0) return 'Lunas';
   const overdueDays = computeInvoiceAgingDays(inv.dueDate);
@@ -1207,8 +1737,13 @@ function createSampleBillingPhotoDataUrl(
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }> = ({ initialMode = 'monitoring' }) => {
-  const [financeMode, setFinanceMode] = useState<'monitoring' | 'billing_app'>(initialMode);
+const FinanceDashboard: React.FC<{
+  initialMode?: 'monitoring' | 'customer_mapping' | 'billing_app';
+  initialBillingTeamFilter?: 'ALL' | 'FINANCE' | 'SALES';
+  onNavigateTab?: (tab: string) => void;
+}> = ({ initialMode = 'monitoring', initialBillingTeamFilter = 'ALL', onNavigateTab }) => {
+  const [financeMode, setFinanceMode] = useState<'monitoring' | 'customer_mapping' | 'billing_app'>(initialMode);
+  const [billingTeamFilter, setBillingTeamFilter] = useState<'ALL' | 'FINANCE' | 'SALES'>(initialBillingTeamFilter);
   const currentUser = logisticsStore.getCurrentUser();
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
 
@@ -1226,29 +1761,51 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
     setFinanceMode(initialMode);
   }, [initialMode]);
 
-  const [invoices, setInvoices] = useState<CustomerUnpaidInvoice[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_FINANCE_UNPAID);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return INITIAL_UNPAID_INVOICES;
-  });
+  useEffect(() => {
+    setBillingTeamFilter(initialBillingTeamFilter);
+  }, [initialBillingTeamFilter]);
+
+  const [invoices, setInvoicesState] = useState<CustomerUnpaidInvoice[]>(() => loadSharedCustomerInvoices());
+  const [masterCustomers, setMasterCustomersState] = useState<CustomerMasterRecord[]>(() => loadSharedCustomerMasters());
+
+  const setInvoices = (updater: CustomerUnpaidInvoice[] | ((prev: CustomerUnpaidInvoice[]) => CustomerUnpaidInvoice[])) => {
+    setInvoicesState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveSharedCustomerInvoices(next);
+      return next;
+    });
+  };
+
+  const setMasterCustomers = (
+    updater: CustomerMasterRecord[] | ((prev: CustomerMasterRecord[]) => CustomerMasterRecord[])
+  ) => {
+    setMasterCustomersState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveSharedCustomerMasters(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(invoices));
-    } catch {}
-  }, [invoices]);
+    const syncInvoices = () => {
+      setInvoicesState(loadSharedCustomerInvoices());
+    };
+    const syncCustomers = () => {
+      setMasterCustomersState(loadSharedCustomerMasters());
+    };
+    window.addEventListener(FINANCE_INVOICES_EVENT, syncInvoices);
+    window.addEventListener(FINANCE_CUSTOMERS_EVENT, syncCustomers);
+    void hydrateSharedCustomerInvoicesFromServer();
+    return () => {
+      window.removeEventListener(FINANCE_INVOICES_EVENT, syncInvoices);
+      window.removeEventListener(FINANCE_CUSTOMERS_EVENT, syncCustomers);
+    };
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('UNPAID_ONLY');
   const [agingFilter, setAgingFilter] = useState<string>('ALL');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
 
   // Mobile Billing App State (Tampilan HP seperti Admin Penjualan & Portal Driver)
   const [mobileNavTab, setMobileNavTab] = useState<'form_tagih' | 'daftar_toko' | 'riwayat_bukti'>('form_tagih');
@@ -1286,16 +1843,20 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
   }, [popupModal]);
 
   const [newInvForm, setNewInvForm] = useState({
-    noInvoice: `INV/AKK/2026/10/${String(invoices.length + 210).padStart(4, '0')}`,
-    noSuratJalan: `SJ-AKK-2610-${String(invoices.length + 155)}`,
+    noInvoice: `FJ02-1126-${String(invoices.length + 890).padStart(4, '0')}`,
+    noSuratJalan: `SJ-RGJ-1126-${String(invoices.length + 890).padStart(4, '0')}`,
     customerName: '',
     contactPhone: '',
-    region: 'Banyuwangi Kota',
-    invoiceDate: '2026-10-29',
-    dueDate: '2026-11-12',
+    region: 'ROGOJAMPI',
+    invoiceDate: '2026-11-11',
+    dueDate: '2026-11-18',
     itemSummary: '',
-    totalTagihan: 15000000,
+    totalTagihan: 1500000,
     jumlahTerbayar: 0,
+    limitPelanggan: 2000000,
+    paymentCategory: 'TEMPO' as 'TEMPO' | 'COD',
+    billingTeam: (initialBillingTeamFilter === 'SALES' ? 'SALES' : 'FINANCE') as 'FINANCE' | 'SALES',
+    salesPersonName: 'Rendra Saputra',
     notes: ''
   });
 
@@ -1355,12 +1916,16 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
     });
   }, [invoices, searchQuery, statusFilter, agingFilter, branchFilter, branches]);
 
-  // Invoices filtered by Master Cabang for Mobile App
+  // Invoices filtered by Master Cabang & Tim Penagihan (Finance vs Sales) for Mobile App
   const mobileBranchInvoices = useMemo(() => {
     const selectedMasterBranch = branches.find(
       b => b.name.toLowerCase() === branchFilter.toLowerCase() || b.slug.toLowerCase() === branchFilter.toLowerCase()
     );
     return invoices.filter(inv => {
+      const team = inv.billingTeam || 'FINANCE';
+      if (billingTeamFilter !== 'ALL' && team !== billingTeamFilter) {
+        return false;
+      }
       if (branchFilter === 'ALL') return true;
       const regLower = inv.region.toLowerCase();
       const bfLower = branchFilter.toLowerCase();
@@ -1374,7 +1939,7 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
         )
       );
     });
-  }, [invoices, branchFilter, branches]);
+  }, [invoices, branchFilter, branches, billingTeamFilter]);
 
   const activeMobileInvoice = useMemo(() => {
     return (
@@ -1510,27 +2075,6 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
     });
   };
 
-  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const paginatedInvoices = filteredInvoices.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
-
-  // KPI Metrics
-  const unpaidInvoices = invoices.filter(inv => inv.totalTagihan - inv.jumlahTerbayar > 0);
-  const totalUnpaidAmount = unpaidInvoices.reduce(
-    (sum, inv) => sum + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
-    0
-  );
-  const overdueInvoices = unpaidInvoices.filter(inv => computeInvoiceAgingDays(inv.dueDate) > 0);
-  const totalOverdueAmount = overdueInvoices.reduce(
-    (sum, inv) => sum + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
-    0
-  );
-  const partialInvoices = unpaidInvoices.filter(inv => inv.jumlahTerbayar > 0);
-  const totalCollectedFromUnpaid = invoices.reduce((sum, inv) => sum + inv.jumlahTerbayar, 0);
-
   const handleOpenPaymentModal = (inv: CustomerUnpaidInvoice) => {
     const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
     setPaymentModalInvoice(inv);
@@ -1581,27 +2125,57 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
     e.preventDefault();
     if (!newInvForm.customerName.trim() || !newInvForm.noInvoice.trim()) return;
 
+    const custUpper = newInvForm.customerName.trim().toUpperCase();
+    const regUpper = newInvForm.region.trim().toUpperCase() || 'ROGOJAMPI';
+    const limitVal =
+      newInvForm.paymentCategory === 'COD' ? 0 : Math.max(0, Number(newInvForm.limitPelanggan) || 2000000);
+
     const newItem: CustomerUnpaidInvoice = {
       id: `INV-${Date.now()}`,
       noInvoice: newInvForm.noInvoice.trim().toUpperCase(),
       noSuratJalan: newInvForm.noSuratJalan.trim().toUpperCase() || '-',
-      customerName: newInvForm.customerName.trim().toUpperCase(),
+      customerName: custUpper,
       contactPhone: newInvForm.contactPhone.trim() || '-',
-      region: newInvForm.region.trim() || 'Banyuwangi',
+      region: regUpper,
       invoiceDate: newInvForm.invoiceDate,
       dueDate: newInvForm.dueDate,
       itemSummary: newInvForm.itemSummary.trim() || 'Pesanan Kemasan Karton Box AKK',
       totalTagihan: Math.max(0, Number(newInvForm.totalTagihan) || 0),
       jumlahTerbayar: Math.max(0, Number(newInvForm.jumlahTerbayar) || 0),
-      notes: newInvForm.notes.trim() || 'Tagihan pelanggan terdaftar'
+      limitPelanggan: limitVal,
+      paymentCategory: newInvForm.paymentCategory,
+      tempoDays: newInvForm.paymentCategory === 'COD' ? 0 : 7,
+      billingTeam: newInvForm.billingTeam,
+      salesPersonName: newInvForm.billingTeam === 'SALES' ? newInvForm.salesPersonName.trim() || 'Sales AKK' : undefined,
+      notes: newInvForm.notes.trim()
     };
 
     setInvoices([newItem, ...invoices]);
+    // Also ensure customer exists in masterCustomers
+    setMasterCustomers(prev => {
+      const exists = prev.some(c => c.customerName.trim().toUpperCase() === custUpper);
+      if (exists) return prev;
+      return [
+        ...prev,
+        {
+          id: `CUST-${Date.now()}`,
+          customerCode: `PLG-${String(prev.length + 1).padStart(3, '0')}`,
+          customerName: custUpper,
+          region: regUpper,
+          contactPhone: newItem.contactPhone,
+          paymentCategory: newInvForm.paymentCategory,
+          tempoDays: newInvForm.paymentCategory === 'COD' ? 0 : 7,
+          creditLimit: limitVal,
+          notes: 'Terdaftar dari input tagihan'
+        }
+      ];
+    });
+    setSelectedMobileInvoiceId(newItem.id);
     setIsAddModalOpen(false);
     setNewInvForm({
       ...newInvForm,
-      noInvoice: `INV/AKK/2026/10/${String(invoices.length + 215).padStart(4, '0')}`,
-      noSuratJalan: `SJ-AKK-2610-${String(invoices.length + 160)}`,
+      noInvoice: `FJ02-1126-${String(invoices.length + 895).padStart(4, '0')}`,
+      noSuratJalan: `SJ-RGJ-1126-${String(invoices.length + 895).padStart(4, '0')}`,
       customerName: '',
       contactPhone: '',
       itemSummary: '',
@@ -1609,7 +2183,7 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
     });
     setPopupModal({
       title: 'Data Tagihan Pelanggan Disimpan',
-      message: `Tagihan ${newItem.noInvoice} atas nama "${newItem.customerName}" berhasil ditambahkan.`
+      message: `Tagihan ${newItem.noInvoice} atas nama "${newItem.customerName}" berhasil ditambahkan ke Buku Besar Daftar Tagihan.`
     });
   };
 
@@ -1700,14 +2274,6 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     Online
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddModalOpen(true)}
-                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black cursor-pointer"
-                    title="Tambah Tagihan Baru"
-                  >
-                    + Tagihan
-                  </button>
                 </div>
               </div>
 
@@ -1743,9 +2309,10 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                   >
                     {mobileBranchInvoices.map(inv => {
                       const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                      const teamTag = inv.billingTeam === 'SALES' ? '[SALES]' : '[FINANCE]';
                       return (
                         <option key={inv.id} value={inv.id} className="bg-slate-900 text-white">
-                          {inv.customerName} — {sisa > 0 ? `Sisa Rp ${sisa.toLocaleString('id-ID')}` : '✓ LUNAS'}
+                          {teamTag} {inv.customerName} — {sisa > 0 ? `Sisa Rp ${sisa.toLocaleString('id-ID')}` : '✓ LUNAS'}
                         </option>
                       );
                     })}
@@ -1771,8 +2338,21 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                     <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-2.5">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="text-[10px] font-mono font-black text-indigo-600 dark:text-indigo-400">
-                            {activeMobileInvoice.noInvoice} &bull; SJ: {activeMobileInvoice.noSuratJalan}
+                          <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                            <span className="text-[10px] font-mono font-black text-indigo-600 dark:text-indigo-400">
+                              {activeMobileInvoice.noInvoice} &bull; SJ: {activeMobileInvoice.noSuratJalan}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
+                                activeMobileInvoice.billingTeam === 'SALES'
+                                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                                  : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30'
+                              }`}
+                            >
+                              {activeMobileInvoice.billingTeam === 'SALES'
+                                ? `Tagihan Khusus Sales${activeMobileInvoice.salesPersonName ? ` • ${activeMobileInvoice.salesPersonName}` : ''}`
+                                : 'Tim Penagihan Finance'}
+                            </span>
                           </div>
                           <h3 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
                             {activeMobileInvoice.customerName}
@@ -2122,7 +2702,14 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                     <h4 className="text-xs font-black uppercase text-slate-700 dark:text-slate-300">
                       Daftar Pelanggan ({mobileBranchInvoices.length} Toko)
                     </h4>
-                    <span className="text-[11px] text-slate-500">Klik toko untuk menagih</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddModalOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black cursor-pointer flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Input Tagihan</span>
+                    </button>
                   </div>
                   {mobileBranchInvoices.map(inv => {
                     const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
@@ -2142,13 +2729,27 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <div className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                              {inv.noInvoice}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                {inv.noInvoice}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                  inv.billingTeam === 'SALES'
+                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                    : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                                }`}
+                              >
+                                {inv.billingTeam === 'SALES' ? 'Khusus Sales' : 'Tim Finance'}
+                              </span>
                             </div>
                             <div className="text-xs font-black text-slate-900 dark:text-white">
                               {inv.customerName}
                             </div>
-                            <div className="text-[10px] text-slate-500">{inv.region}</div>
+                            <div className="text-[10px] text-slate-500">
+                              {inv.region}
+                              {inv.billingTeam === 'SALES' && inv.salesPersonName ? ` • Sales: ${inv.salesPersonName}` : ''}
+                            </div>
                           </div>
                           <span
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
@@ -2288,388 +2889,100 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
             </div>
           </div>
         </div>
+      ) : financeMode === 'customer_mapping' ? (
+        <CustomerMasterMappingView
+          invoices={invoices}
+          masterCustomers={masterCustomers}
+          onSaveMasterCustomers={next => {
+            setMasterCustomers(next);
+            setPopupModal({
+              title: 'Mapping Master Pelanggan Diperbarui',
+              message: 'Kategori Pelanggan (TEMPO / COD), Plafon Limit Piutang, dan Tenor Jatuh Tempo berhasil disimpan.'
+            });
+          }}
+          onUpdateCustomerInvoicesMeta={(customerName, updates) => {
+            setInvoices(prev =>
+              prev.map(inv =>
+                inv.customerName.trim().toUpperCase() === customerName.trim().toUpperCase()
+                  ? {
+                      ...inv,
+                      limitPelanggan: updates.limitPelanggan,
+                      paymentCategory: updates.paymentCategory,
+                      tempoDays: updates.tempoDays,
+                      region: updates.region
+                    }
+                  : inv
+              )
+            );
+          }}
+          onSwitchToLedger={() => {
+            if (onNavigateTab) {
+              onNavigateTab('finance_dashboard');
+            } else {
+              setFinanceMode('monitoring');
+            }
+          }}
+        />
       ) : (
-        <>
-          {/* Header Simple Finance & Tax (Monitoring Desktop) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                Monitoring Tagihan &amp; Piutang Pelanggan
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Rekapitulasi faktur tagihan toko/mitra dan pencatatan pelunasan per cabang
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5">
-                <MapPin className="w-3.5 h-3.5 text-amber-500" />
-                <select
-                  value={branchFilter}
-                  onChange={e => {
-                    setBranchFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-                >
-                  <option value="ALL">Semua Cabang ({branches.length})</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.name}>
-                      Cabang {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleExportUnpaidExcel}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Ekspor Excel</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Tambah Tagihan</span>
-              </button>
-            </div>
-          </div>
-
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Total Tagihan Belum Lunas
-            </span>
-            <DollarSign className="w-4 h-4 text-rose-500" />
-          </div>
-          <div className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
-            Rp {totalUnpaidAmount.toLocaleString('id-ID')}
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Dari {unpaidInvoices.length} faktur pelanggan yang belum lunas
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Lewat Jatuh Tempo (Overdue)
-            </span>
-            <AlertCircle className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
-            Rp {totalOverdueAmount.toLocaleString('id-ID')}
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            {overdueInvoices.length} faktur melewati tanggal jatuh tempo
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Tagihan Dicicil / Sebagian
-            </span>
-            <CreditCard className="w-4 h-4 text-blue-500" />
-          </div>
-          <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
-            {partialInvoices.length} Faktur
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Sudah masuk pembayaran sebagian / DP
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Pembayaran Masuk Terkumpul
-            </span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-            Rp {totalCollectedFromUnpaid.toLocaleString('id-ID')}
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Total cicilan &amp; pelunasan yang telah diterima
-          </p>
-        </div>
-      </div>
-
-      {/* Filter & Search Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => {
-              setSearchQuery(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Cari No. Invoice, Nama Pelanggan / Toko, Wilayah, atau Item Pesanan..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={e => {
-              setStatusFilter(e.target.value);
-              setPage(1);
-            }}
-            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-          >
-            <option value="UNPAID_ONLY">Semua Belum Terlunasi ({unpaidInvoices.length})</option>
-            <option value="Jatuh Tempo (Overdue)">Jatuh Tempo / Menunggak ({overdueInvoices.length})</option>
-            <option value="Cicilan / Sebagian">Cicilan / Bayar Sebagian</option>
-            <option value="Belum Jatuh Tempo">Belum Jatuh Tempo</option>
-            <option value="Lunas">Sudah Lunas (Arsip)</option>
-            <option value="ALL">Tampilkan Semua Faktur ({invoices.length})</option>
-          </select>
-
-          <select
-            value={agingFilter}
-            onChange={e => {
-              setAgingFilter(e.target.value);
-              setPage(1);
-            }}
-            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-          >
-            <option value="ALL">Semua Umur Piutang</option>
-            <option value="NOT_DUE">Belum Jatuh Tempo</option>
-            <option value="OVERDUE_1_14">Terlambat 1 &ndash; 14 Hari</option>
-            <option value="OVERDUE_15_30">Terlambat 15 &ndash; 30 Hari</option>
-            <option value="OVERDUE_30_PLUS">Menunggak &gt; 30 Hari</option>
-          </select>
-
-          <select
-            value={pageSize}
-            onChange={e => {
-              setPageSize(Number(e.target.value));
-              setPage(1);
-            }}
-            className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-          >
-            <option value={5}>5 / Hal</option>
-            <option value={10}>10 / Hal</option>
-            <option value={20}>20 / Hal</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Table of Unpaid Customer Invoices */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-black text-slate-900 dark:text-white">
-              Daftar Tagihan Pelanggan yang Belum Terlunasi
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Klik tombol <strong>Catat Bayar / Cicil</strong> pada baris pelanggan untuk menginput pembayaran masuk atau pelunasan faktur.
-            </p>
-          </div>
-          <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
-            Sisa Piutang Terfilter:{' '}
-            <span className="font-mono font-black text-rose-600 dark:text-rose-400">
-              Rp{' '}
-              {filteredInvoices
-                .reduce((acc, inv) => acc + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar), 0)
-                .toLocaleString('id-ID')}
-            </span>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th className="py-3 px-4">No. Invoice &amp; SJ</th>
-                <th className="py-3 px-4">Nama Pelanggan / Toko</th>
-                <th className="py-3 px-4">Rincian Pesanan</th>
-                <th className="py-3 px-4">Jatuh Tempo &amp; Umur</th>
-                <th className="py-3 px-4 text-right">Total Tagihan</th>
-                <th className="py-3 px-4 text-right">Sudah Dibayar</th>
-                <th className="py-3 px-4 text-right">Sisa Belum Lunas</th>
-                <th className="py-3 px-4">Status Tagihan</th>
-                <th className="py-3 px-4 text-right">Aksi Penagihan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
-              {paginatedInvoices.length > 0 ? (
-                paginatedInvoices.map(inv => {
-                  const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
-                  const st = getInvoiceStatus(inv);
-                  const agingDays = computeInvoiceAgingDays(inv.dueDate);
-
-                  return (
-                    <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {inv.noInvoice}
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                          SJ: {inv.noSuratJalan} &bull; Tgl: {inv.invoiceDate}
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 dark:text-white">{inv.customerName}</div>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{inv.region} &bull; {inv.contactPhone}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 max-w-[230px]">
-                        <div className="font-medium text-slate-800 dark:text-slate-200 leading-snug">
-                          {inv.itemSummary}
-                        </div>
-                        {inv.notes && (
-                          <div className="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title={inv.notes}>
-                            {inv.notes}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-slate-900 dark:text-white">
-                          {inv.dueDate}
-                        </div>
-                        {sisa > 0 ? (
-                          agingDays > 0 ? (
-                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-mono font-black text-[10px]">
-                              Lewat {agingDays} Hari
-                            </span>
-                          ) : (
-                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-[10px]">
-                              {Math.abs(agingDays)} Hari Lagi
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-[10px] text-emerald-500 font-bold">Selesai</span>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                        Rp {inv.totalTagihan.toLocaleString('id-ID')}
-                      </td>
-
-                      <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        Rp {inv.jumlahTerbayar.toLocaleString('id-ID')}
-                        {inv.lastPaymentDate && (
-                          <div className="text-[9px] text-slate-500 font-normal">
-                            Tgl: {inv.lastPaymentDate}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-4 text-right font-mono font-black">
-                        {sisa > 0 ? (
-                          <span className="text-rose-600 dark:text-rose-400 text-xs">
-                            Rp {sisa.toLocaleString('id-ID')}
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600 dark:text-emerald-400">Rp 0</span>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-1 rounded-lg font-bold text-[10px] inline-block border ${
-                            st === 'Lunas'
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                              : st === 'Jatuh Tempo (Overdue)'
-                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                              : st === 'Cicilan / Sebagian'
-                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                              : 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                          }`}
-                        >
-                          {st}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {sisa > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPaymentModal(inv)}
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition cursor-pointer shadow-xs whitespace-nowrap"
-                            >
-                              Catat Bayar / Cicil
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteInvoice(inv.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
-                            title="Hapus Data Tagihan"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400 text-xs">
-                    Tidak ada data tagihan pelanggan yang sesuai dengan filter pencarian.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="text-slate-500 dark:text-slate-400">
-            Menampilkan{' '}
-            <strong className="text-slate-900 dark:text-white">
-              {filteredInvoices.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-            </strong>{' '}
-            &ndash;{' '}
-            <strong className="text-slate-900 dark:text-white">
-              {Math.min(currentPage * pageSize, filteredInvoices.length)}
-            </strong>{' '}
-            dari <strong className="text-slate-900 dark:text-white">{filteredInvoices.length}</strong> faktur tagihan
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={currentPage <= 1}
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Sebelumnya</span>
-            </button>
-            <button
-              type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-        </>
+        <FinanceMonitoringLedgerView
+          invoices={invoices}
+          masterCustomers={masterCustomers}
+          branches={branches}
+          branchFilter={branchFilter}
+          setBranchFilter={setBranchFilter}
+          billingTeamFilter={billingTeamFilter}
+          setBillingTeamFilter={setBillingTeamFilter}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          agingFilter={agingFilter}
+          setAgingFilter={setAgingFilter}
+          onOpenAddModal={prefill => {
+            if (prefill) {
+              setNewInvForm(prev => ({
+                ...prev,
+                customerName: prefill.customerName,
+                region: prefill.region,
+                limitPelanggan: prefill.limitPelanggan,
+                paymentCategory: prefill.paymentCategory,
+                billingTeam: prefill.billingTeam || (billingTeamFilter === 'SALES' ? 'SALES' : 'FINANCE')
+              }));
+            } else if (billingTeamFilter === 'SALES' || billingTeamFilter === 'FINANCE') {
+              setNewInvForm(prev => ({
+                ...prev,
+                billingTeam: billingTeamFilter
+              }));
+            }
+            setIsAddModalOpen(true);
+          }}
+          onOpenPaymentModal={handleOpenPaymentModal}
+          onDeleteInvoice={handleDeleteInvoice}
+          onOpenWaModal={inv => setWaBillingInvoice(inv)}
+          onOpenPrintModal={inv => setPrintSuratTagihanInvoice(inv)}
+          onImportInvoices={imported => {
+            setInvoices(prev => [...imported, ...prev]);
+            setPopupModal({
+              title: 'Import Excel Daftar Tagihan Berhasil',
+              message: `${imported.length} baris faktur tagihan pelanggan berhasil diunggah ke Buku Besar Piutang.`
+            });
+          }}
+          onSwitchToMapping={() => {
+            if (onNavigateTab) {
+              onNavigateTab('finance_customer_mapping');
+            } else {
+              setFinanceMode('customer_mapping');
+            }
+          }}
+          onOpenBillingApp={team => {
+            if (team) setBillingTeamFilter(team);
+            if (onNavigateTab) {
+              onNavigateTab(team === 'SALES' ? 'marketing_billing_app' : 'finance_billing_app');
+            } else {
+              setFinanceMode('billing_app');
+            }
+          }}
+        />
       )}
 
       {/* ============================================================ */}
@@ -2917,7 +3230,7 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    Total Nilai Tagihan (Rp) *
+                    Total Nilai Tagihan / Terutang (Rp) *
                   </label>
                   <input
                     type="number"
@@ -2930,7 +3243,7 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    DP / Sudah Dibayar Awal (Rp)
+                    Sudah Dibayar / Bayar (Rp)
                   </label>
                   <input
                     type="number"
@@ -2942,18 +3255,98 @@ const FinanceDashboard: React.FC<{ initialMode?: 'monitoring' | 'billing_app' }>
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Catatan Penagihan
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Jatuh tempo 14 hari setelah barang diterima..."
-                  value={newInvForm.notes}
-                  onChange={e => setNewInvForm({ ...newInvForm, notes: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Kategori Pelanggan (TEMPO / COD)
+                  </label>
+                  <select
+                    value={newInvForm.paymentCategory}
+                    onChange={e =>
+                      setNewInvForm({
+                        ...newInvForm,
+                        paymentCategory: e.target.value as 'TEMPO' | 'COD',
+                        limitPelanggan: e.target.value === 'COD' ? 0 : newInvForm.limitPelanggan || 2000000
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  >
+                    <option value="TEMPO">Pelanggan TEMPO</option>
+                    <option value="COD">Pelanggan COD (Tunai)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Limit Pelanggan (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={newInvForm.paymentCategory === 'COD'}
+                    value={newInvForm.paymentCategory === 'COD' ? 0 : newInvForm.limitPelanggan}
+                    onChange={e => setNewInvForm({ ...newInvForm, limitPelanggan: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold disabled:opacity-50"
+                  />
+                </div>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Tim Penagihan (Finance / Khusus Sales) *
+                  </label>
+                  <select
+                    value={newInvForm.billingTeam}
+                    onChange={e =>
+                      setNewInvForm({
+                        ...newInvForm,
+                        billingTeam: e.target.value as 'FINANCE' | 'SALES'
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  >
+                    <option value="FINANCE">Tagihan Tim Penagihan (Finance)</option>
+                    <option value="SALES">Tagihan Khusus Sales (Marketing)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    {newInvForm.billingTeam === 'SALES' ? 'Nama Sales Penagih (PIC Sales)' : 'Catatan Penagihan'}
+                  </label>
+                  {newInvForm.billingTeam === 'SALES' ? (
+                    <input
+                      type="text"
+                      placeholder="Contoh: Rendra Saputra / Dina Mariana"
+                      value={newInvForm.salesPersonName}
+                      onChange={e => setNewInvForm({ ...newInvForm, salesPersonName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Contoh: Jatuh tempo 14 hari setelah barang diterima..."
+                      value={newInvForm.notes}
+                      onChange={e => setNewInvForm({ ...newInvForm, notes: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {newInvForm.billingTeam === 'SALES' && (
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Catatan Penagihan Sales
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Ditagih langsung oleh Sales saat kunjungan..."
+                    value={newInvForm.notes}
+                    onChange={e => setNewInvForm({ ...newInvForm, notes: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
@@ -3249,8 +3642,10 @@ const PurchasingDashboard = () => (
 export const DepartmentDashboard: React.FC<{ 
   dashboardType?: 'hr' | 'finance' | 'warehouse' | 'purchasing';
   initialHrTab?: HrSubTab;
-  initialFinanceMode?: 'monitoring' | 'billing_app';
-}> = ({ dashboardType, initialHrTab, initialFinanceMode = 'monitoring' }) => {
+  initialFinanceMode?: 'monitoring' | 'customer_mapping' | 'billing_app';
+  initialBillingTeamFilter?: 'ALL' | 'FINANCE' | 'SALES';
+  onNavigateTab?: (tab: string) => void;
+}> = ({ dashboardType, initialHrTab, initialFinanceMode = 'monitoring', initialBillingTeamFilter = 'ALL', onNavigateTab }) => {
   const user = logisticsStore.getCurrentUser();
   
   // Use dashboardType prop if provided, otherwise fallback to user's department role
@@ -3260,7 +3655,7 @@ export const DepartmentDashboard: React.FC<{
     switch (typeToRender) {
       case 'hr': return <HRDashboard activeHrTab={initialHrTab} />;
       case 'warehouse': return <WarehouseDashboard />;
-      case 'finance': return <FinanceDashboard initialMode={initialFinanceMode} />;
+      case 'finance': return <FinanceDashboard initialMode={initialFinanceMode} initialBillingTeamFilter={initialBillingTeamFilter} onNavigateTab={onNavigateTab} />;
       case 'purchasing': return <PurchasingDashboard />;
       default: return <div className="text-slate-400">Dashboard tidak tersedia untuk role ini.</div>;
     }

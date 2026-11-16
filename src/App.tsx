@@ -10,9 +10,9 @@ import { AkkLogo } from './components/AkkLogo';
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
-import { Clock, ChevronDown, Bell, Lock } from 'lucide-react';
+import { Clock, ChevronDown, Bell, Lock, User, KeyRound, X, CheckCircle2, Mail, Phone, ShieldCheck } from 'lucide-react';
 import { useToast } from './context/ToastContext';
-import { canAccess, getFirstAccessibleTabForUser } from './utils/rbac';
+import { canAccess, getFirstAccessibleTabForUser, getUserRoleDisplayTitle } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
@@ -344,8 +344,127 @@ export default function App() {
     }
   });
 
-  const { notifications, setOnNavigateCallback, setIsDrawerOpen } = useToast();
+  const { notifications, setOnNavigateCallback, setIsDrawerOpen, addNotification } = useToast();
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  // Profile Dropdown & Account Modals State
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isAccountProfileOpen, setIsAccountProfileOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    department: ''
+  });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  useEffect(() => {
+    const handleClickOutsideProfile = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutsideProfile);
+    return () => document.removeEventListener('mousedown', handleClickOutsideProfile);
+  }, []);
+
+  const handleOpenAccountProfileModal = () => {
+    setIsProfileMenuOpen(false);
+    setProfileForm({
+      fullName: currentUser.fullName || '',
+      email: currentUser.email || '',
+      phone: currentUser.phone || '',
+      department: currentUser.department || getUserRoleDisplayTitle(currentUser.role)
+    });
+    setIsAccountProfileOpen(true);
+  };
+
+  const handleOpenChangePasswordModal = () => {
+    setIsProfileMenuOpen(false);
+    setPasswordForm({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setIsChangePasswordOpen(true);
+  };
+
+  const handleSaveAccountProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileForm.fullName.trim()) {
+      addNotification('sla_warning', 'Validasi Profil', 'Nama lengkap tidak boleh kosong.');
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          userId: currentUser.id,
+          fullName: profileForm.fullName.trim(),
+          email: profileForm.email.trim(),
+          phone: profileForm.phone.trim(),
+          department: profileForm.department.trim()
+        })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || 'Gagal menyimpan perubahan profil.');
+      }
+      await logisticsStore.restoreServerSession().catch(() => {});
+      addNotification('schedule', 'Profil Diperbarui', 'Data profil akun berhasil disimpan ke database MySQL.');
+      setIsAccountProfileOpen(false);
+    } catch (err: any) {
+      addNotification('sla_warning', 'Gagal Menyimpan', err?.message || 'Terjadi kesalahan saat menyimpan profil.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleSaveChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordForm.newPassword.trim().length < 4) {
+      addNotification('sla_warning', 'Validasi Password', 'Password baru minimal 4 karakter.');
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      addNotification('sla_warning', 'Konfirmasi Tidak Cocok', 'Konfirmasi password baru harus sama dengan password baru.');
+      return;
+    }
+    setIsSavingPassword(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          userId: currentUser.id,
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword
+        })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || 'Gagal mengubah password.');
+      }
+      addNotification('schedule', 'Password Berhasil Diubah', 'Password akun Anda telah diperbarui di database MySQL.');
+      setIsChangePasswordOpen(false);
+    } catch (err: any) {
+      addNotification('sla_warning', 'Gagal Ganti Password', err?.message || 'Terjadi kesalahan saat mengganti password.');
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
 
   const [activeNavTab, setActiveNavTab] = useState<NavTab>(currentTab);
 
@@ -514,7 +633,7 @@ export default function App() {
       case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
       case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
       case 'fleet_forms': return 'Formulir Pengadaan Armada';
-      case 'sales_dashboard': return 'Sales Hub: Dashboard & SLA Penjualan';
+      case 'sales_dashboard': return 'Dashboard Admin Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
       case 'sales_schedules': return 'Sales Hub: Jadwal Produksi & Kirim';
       case 'sales_loading_duration': return 'Sales Hub: Durasi Muat Real-Time';
@@ -548,6 +667,10 @@ export default function App() {
       case 'purchasing_stock_forecast': return 'Analisa Stok: Prediksi Kebutuhan';
       case 'marketing_online': return 'Departemen Marketing: Prospek & Proaktif Online';
       case 'marketing_offline': return 'Departemen Marketing: Laporan Kunjungan & Laporan Penjualan';
+      case 'marketing_invoice_validation': return 'Departemen Marketing: Validasi Faktur & Integrasi WA Sales';
+      case 'marketing_to_vo_ro': return 'Departemen Marketing: Prosentase TO, VO & RO';
+      case 'marketing_billing_app': return 'Departemen Marketing: Aplikasi Penagihan Pelanggan';
+      case 'finance_billing_app': return 'Finance & Tax: Aplikasi Penagihan Pelanggan';
       case 'activity_log': return 'Audit Log & Aktivitas Sistem';
       case 'customer_map': return 'Pemetaan Toko Retail & Mitra';
       case 'branches': return 'Master Cabang (Multi-Store)';
@@ -588,6 +711,19 @@ export default function App() {
       }
     } catch {}
   }, [currentTab, isAuthenticated, isAuthChecking]);
+
+  // Dukungan navigasi lintas komponen (mis. klik Simpan Form Kirim -> langsung buka Portal Driver)
+  useEffect(() => {
+    const handleNavigateEvent = (evt: Event) => {
+      const customEvt = evt as CustomEvent<{ tab?: NavTab; subTab?: string; formKirimId?: string }>;
+      const targetTab = customEvt.detail?.tab;
+      if (targetTab) {
+        setCurrentTab(targetTab);
+      }
+    };
+    window.addEventListener('akk-navigate-tab', handleNavigateEvent);
+    return () => window.removeEventListener('akk-navigate-tab', handleNavigateEvent);
+  }, []);
 
   // Dukungan tombol Back / Forward pada browser
   useEffect(() => {
@@ -680,25 +816,75 @@ export default function App() {
               </span>
             </button>
 
-            {/* User Profile Block (Avatar + Name + Role + ChevronDown) */}
-            <button
-              onClick={() => handleOpenAuth('login')}
-              className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/80 transition cursor-pointer text-left"
-              title="Ganti Akun atau Kelola Sesi"
-            >
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
-                {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'A'}
-              </div>
-              <div className="hidden sm:block min-w-0">
-                <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[130px]">
-                  {currentUser.fullName || 'Pengguna'}
+            {/* User Profile Dropdown (Profil Akun & Ganti Password) */}
+            <div ref={profileMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsProfileMenuOpen(prev => !prev)}
+                className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200/80 dark:hover:border-slate-700/80 transition cursor-pointer text-left"
+                title="Menu Profil Akun & Ganti Password"
+              >
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+                  {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'A'}
                 </div>
-                <div className="text-[11px] text-slate-500 dark:text-slate-400 capitalize truncate">
-                  {String(currentUser.role || 'unassigned').replace(/_/g, ' ')}
+                <div className="hidden sm:block min-w-0">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[130px]">
+                    {currentUser.fullName || 'Pengguna'}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 capitalize truncate">
+                    {String(currentUser.role || 'unassigned').replace(/_/g, ' ')}
+                  </div>
                 </div>
-              </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            </button>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180 text-blue-600' : ''}`} />
+              </button>
+
+              {isProfileMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/20 py-2 z-[1200] animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                      {currentUser.fullName || 'Pengguna'}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                      {currentUser.email || 'user@akk-logistics.co.id'}
+                    </div>
+                    <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-500/15 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                      <ShieldCheck className="w-3 h-3" />
+                      {getUserRoleDisplayTitle(currentUser.role)}
+                    </span>
+                  </div>
+
+                  <div className="p-1.5 space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={handleOpenAccountProfileModal}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400 transition cursor-pointer text-left"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold">Profil Akun</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Lihat & perbarui informasi akun</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenChangePasswordModal}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 transition cursor-pointer text-left"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                        <KeyRound className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold">Ganti Password</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Ubah kata sandi keamanan akun</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -834,8 +1020,9 @@ export default function App() {
 
           {currentTab === 'sales_dashboard' && (
             <SalesAdminHub
-              activeSubTab="activities"
+              activeSubTab="dashboard"
               onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
             />
           )}
 
@@ -916,13 +1103,29 @@ export default function App() {
             />
           )}
           {currentTab === 'finance_dashboard' && (
-            <DepartmentDashboard dashboardType="finance" initialFinanceMode="monitoring" />
+            <DepartmentDashboard
+              dashboardType="finance"
+              initialFinanceMode="monitoring"
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
+            />
+          )}
+          {currentTab === 'finance_customer_mapping' && (
+            <DepartmentDashboard
+              dashboardType="finance"
+              initialFinanceMode="customer_mapping"
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
+            />
           )}
           {currentTab === 'finance_validasi_form_kirim' && (
             <FinanceValidasiFormKirimTab />
           )}
-          {currentTab === 'finance_billing_app' && (
-            <DepartmentDashboard dashboardType="finance" initialFinanceMode="billing_app" />
+          {(currentTab === 'finance_billing_app' || currentTab === 'marketing_billing_app') && (
+            <DepartmentDashboard
+              dashboardType="finance"
+              initialFinanceMode="billing_app"
+              initialBillingTeamFilter={currentTab === 'marketing_billing_app' ? 'SALES' : 'FINANCE'}
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
+            />
           )}
           {(currentTab === 'warehouse_dashboard' ||
             currentTab === 'warehouse_inventory' ||
@@ -951,22 +1154,23 @@ export default function App() {
                   ? 'cubication'
                   : currentTab === 'warehouse_fleet_cubication'
                   ? 'fleet_cubication'
-                  : 'overview'
+                  : 'scanner'
               }
               onNavigateTab={(tab: WmsSubTab) => {
                 const map: Record<WmsSubTab, NavTab> = {
-                  overview: 'warehouse_dashboard',
-                  inventory: 'warehouse_inventory',
+                  overview: 'warehouse_scanner',
+                  inventory: 'warehouse_scanner',
                   inbound: 'warehouse_inbound',
                   outbound: 'warehouse_outbound',
                   scanner: 'warehouse_scanner',
                   slotting: 'warehouse_slotting',
                   opname: 'warehouse_opname',
-                  kartu_stok: 'purchasing_stok_opname',
+                  purchasing_opname: 'purchasing_stok_opname',
+                  kartu_stok: 'purchasing_kartu_stok',
                   cubication: 'warehouse_cubication',
                   fleet_cubication: 'warehouse_fleet_cubication'
                 };
-                setCurrentTab(map[tab] || 'warehouse_dashboard');
+                setCurrentTab(map[tab] || 'warehouse_scanner');
               }}
             />
           )}
@@ -975,10 +1179,24 @@ export default function App() {
           )}
           {currentTab === 'purchasing_stok_opname' && (
             <WarehouseManagementSystem
+              initialTab="purchasing_opname"
+              onNavigateTab={(tab: WmsSubTab) => {
+                if (tab === 'opname') {
+                  setCurrentTab('warehouse_opname');
+                } else if (tab === 'kartu_stok') {
+                  setCurrentTab('purchasing_kartu_stok');
+                }
+              }}
+            />
+          )}
+          {currentTab === 'purchasing_kartu_stok' && (
+            <WarehouseManagementSystem
               initialTab="kartu_stok"
               onNavigateTab={(tab: WmsSubTab) => {
                 if (tab === 'opname') {
                   setCurrentTab('warehouse_opname');
+                } else if (tab === 'purchasing_opname') {
+                  setCurrentTab('purchasing_stok_opname');
                 }
               }}
             />
@@ -990,8 +1208,14 @@ export default function App() {
             <PurchasingStockAnalysis tab="forecast" />
           )}
 
-          {(currentTab === 'marketing_online' || currentTab === 'marketing_offline' || currentTab === 'marketing_to_vo_ro') && (
-            <MarketingDashboard activeTab={currentTab} />
+          {(currentTab === 'marketing_online' ||
+            currentTab === 'marketing_offline' ||
+            currentTab === 'marketing_to_vo_ro' ||
+            currentTab === 'marketing_invoice_validation') && (
+            <MarketingDashboard
+              activeTab={currentTab}
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
+            />
           )}
 
           {currentTab === 'driver_portal' && (
@@ -1027,6 +1251,200 @@ export default function App() {
           </footer>
         )}
       </div>
+
+      {/* Modal Profil Akun */}
+      {isAccountProfileOpen && (
+        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                  <User className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold">Profil Akun Pengguna</h3>
+                  <p className="text-[11px] text-blue-100">Informasi identitas & kontak akun aktif</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAccountProfileOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/15 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAccountProfile} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Nama Lengkap *
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={profileForm.fullName}
+                    onChange={e => setProfileForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Nama Lengkap"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Alamat Email
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={profileForm.email}
+                    onChange={e => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="email@perusahaan.com"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Nomor Telepon / WhatsApp
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={profileForm.phone}
+                    onChange={e => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0812xxxxxxxx"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Jabatan / Role Sistem
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={getUserRoleDisplayTitle(currentUser.role)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/40 text-xs font-bold text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsAccountProfileOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-500/20 transition cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{isSavingProfile ? 'Menyimpan...' : 'Simpan Profil'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ganti Password */}
+      {isChangePasswordOpen && (
+        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold">Ganti Password Akun</h3>
+                  <p className="text-[11px] text-amber-100">Perbarui kata sandi keamanan akun Anda</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/15 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveChangePassword} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Password Saat Ini (Opsional)
+                </label>
+                <input
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={e => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Masukkan password saat ini"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Password Baru *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passwordForm.newPassword}
+                  onChange={e => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Minimal 4 karakter"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  Konfirmasi Password Baru *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passwordForm.confirmPassword}
+                  onChange={e => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Ulangi password baru"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsChangePasswordOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPassword}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center gap-2 shadow-md shadow-amber-500/20 transition cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{isSavingPassword ? 'Menyimpan...' : 'Simpan Password'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Authentication Modal (Login & Register) */}
       <AuthModal

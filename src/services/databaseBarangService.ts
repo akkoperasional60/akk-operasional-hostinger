@@ -345,51 +345,49 @@ const LS_KEY_CLEARED_PHOTO_CODES = 'akk_db_barang_cleared_photo_codes_v2';
 const LS_KEY_DELETED_PHOTO_URLS = 'akk_db_barang_deleted_photo_urls_v2';
 const LS_KEY_EXPLICIT_PHOTO_OVERRIDES = 'akk_db_barang_photo_overrides_v2';
 
-function loadPersistentSet(key: string): Set<string> {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    return new Set(Array.isArray(arr) ? arr : []);
-  } catch {
-    return new Set();
-  }
+export interface PhotoDeletionApprovalRequest {
+  id: string;
+  noBarang: string;
+  deskripsiBarang: string;
+  photoUrl: string;
+  clearAll: boolean;
+  requestedByUserId: string;
+  requestedByName: string;
+  requestedByRole: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  decidedByName?: string;
+  decidedAt?: string;
 }
 
-function savePersistentSet(key: string, set: Set<string>): void {
+function purgeDatabaseBarangLocalStorage(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(key, JSON.stringify(Array.from(set)));
+    localStorage.removeItem(LS_KEY_DATABASE_BARANG);
+    localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
+    localStorage.removeItem(LS_KEY_CLEARED_PHOTO_CODES);
+    localStorage.removeItem(LS_KEY_DELETED_PHOTO_URLS);
+    localStorage.removeItem(LS_KEY_EXPLICIT_PHOTO_OVERRIDES);
   } catch {}
 }
 
-function loadPersistentMap(key: string): Map<string, string[]> {
-  if (typeof window === 'undefined') return new Map();
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Map();
-    const obj = JSON.parse(raw);
-    return new Map(Object.entries(obj || {}));
-  } catch {
-    return new Map();
-  }
+// Bersihkan localStorage legacy saat modul dimuat karena Database Barang kini langsung tersimpan di MySQL
+purgeDatabaseBarangLocalStorage();
+
+function savePersistentSet(_key: string, _set: Set<string>): void {
+  purgeDatabaseBarangLocalStorage();
 }
 
-function savePersistentMap(key: string, map: Map<string, string[]>): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const obj: Record<string, string[]> = {};
-    map.forEach((val, k) => { obj[k] = val; });
-    localStorage.setItem(key, JSON.stringify(obj));
-  } catch {}
+function savePersistentMap(_key: string, _map: Map<string, string[]>): void {
+  purgeDatabaseBarangLocalStorage();
 }
 
 const preservedPhotosByCode = new Map<string, string[]>();
 const explicitPhotoReplaceTimestampByCode = new Map<string, number>();
-const explicitlyClearedPhotoCodes = loadPersistentSet(LS_KEY_CLEARED_PHOTO_CODES);
-const deletedPhotoUrls = loadPersistentSet(LS_KEY_DELETED_PHOTO_URLS);
-const photoOverridesByCode = loadPersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES);
+const explicitlyClearedPhotoCodes = new Set<string>();
+const deletedPhotoUrls = new Set<string>();
+const photoOverridesByCode = new Map<string, string[]>();
 
 let inMemoryItems: DatabaseBarangRecord[] | null = null;
 let hasHydratedFromIdb = false;
@@ -476,7 +474,6 @@ export async function saveRecordsToIndexedDb(records: DatabaseBarangRecord[]): P
   }
 }
 
-
 export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]> {
   try {
     const db = await openIndexedDb();
@@ -511,74 +508,9 @@ export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]
   }
 }
 
-function writeSafeLocalStorageCache(records: DatabaseBarangRecord[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    // Selalu hapus data lama terlebih dahulu agar tidak pernah tersisa data usang saat kuota penuh
-    localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-  } catch {}
-
-  const buildLightweightList = (maxPhotoItems: number) => {
-    let preservedPhotoCount = 0;
-    return records.map((r, idx) => {
-      const hasPhoto =
-        Boolean(r.dokumentasiUrl && !r.dokumentasiUrl.startsWith('data:image/svg+xml')) ||
-        Boolean(r.dokumentasiUrls && r.dokumentasiUrls.length > 0);
-      const keepPhoto = hasPhoto && preservedPhotoCount < maxPhotoItems;
-      if (keepPhoto) preservedPhotoCount++;
-      return {
-        id: r.id,
-        orderIndex: idx,
-        noBarang: r.noBarang,
-        deskripsiBarang: r.deskripsiBarang,
-        keteranganBarang: r.keteranganBarang,
-        unit1: r.unit1,
-        satuan: r.satuan,
-        unit2: r.unit2 || '',
-        unit3: r.unit3 || '',
-        rasio2: r.rasio2 || 0,
-        rasio3: r.rasio3 || 0,
-        panjangCm: r.panjangCm || 0,
-        lebarCm: r.lebarCm || 0,
-        tinggiCm: r.tinggiCm || 0,
-        volM3: r.volM3 || 0,
-        beratKg: r.beratKg || 0,
-        dokumentasiUrl: keepPhoto ? r.dokumentasiUrl || '' : '',
-        dokumentasiUrls: keepPhoto ? (r.dokumentasiUrls || []).slice(0, 3) : [],
-        kategoriBarang: r.kategoriBarang,
-        stokTersedia: r.stokTersedia,
-        cabang: r.cabang,
-        updatedAt: r.updatedAt
-      };
-    });
-  };
-
-  try {
-    if (records.length === 0) {
-      localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
-      return;
-    }
-    if (records.length <= 350) {
-      localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(records));
-      localStorage.removeItem(LS_KEY_DATABASE_BARANG + '_idb');
-    } else {
-      const lightweight = buildLightweightList(15);
-      localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(lightweight));
-      localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
-    }
-  } catch {
-    try {
-      // Jika 69+ foto resolusi penuh melebihi kuota 5MB localStorage, simpan daftar barang tanpa base64 di localStorage (sedangkan 100% foto tersimpan utuh di IndexedDB & Memory)
-      const metadataOnly = buildLightweightList(0);
-      localStorage.setItem(LS_KEY_DATABASE_BARANG, JSON.stringify(metadataOnly));
-      localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
-    } catch {
-      try {
-        localStorage.removeItem(LS_KEY_DATABASE_BARANG);
-        localStorage.setItem(LS_KEY_DATABASE_BARANG + '_idb', 'true');
-      } catch {}
-    }
-  }
+// Penyimpanan Database Barang TIDAK disimpan pada localStorage (langsung tersimpan pada MySQL Server)
+function writeSafeLocalStorageCache(_records: DatabaseBarangRecord[]): void {
+  purgeDatabaseBarangLocalStorage();
 }
 
 function extractCleanPhotos(item?: Partial<DatabaseBarangRecord> | null): string[] {
@@ -613,11 +545,18 @@ function mergeLocalAndRemoteRecords(
   if (localRecords.length === 0 && remoteRecords.length === 0) {
     return { merged: [], shouldPushToServer: false, shouldSaveLocally: false, itemsWithLocalPhotosToPush: [] };
   }
-  // Jika HP/browser baru belum punya data lokal tapi server sudah punya data -> tarik dari server ke HP
+  // Jika browser/perangkat belum punya data di memori tetapi MySQL punya data -> langsung pakai data MySQL
   if (localRecords.length === 0 && remoteRecords.length > 0) {
+    remoteRecords.forEach(r => {
+      const code = String(r.noBarang || '').trim().toUpperCase();
+      const photos = extractCleanPhotos(r);
+      if (code && photos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
+        preservedPhotosByCode.set(code, photos);
+      }
+    });
     return { merged: remoteRecords, shouldPushToServer: false, shouldSaveLocally: true, itemsWithLocalPhotosToPush: [] };
   }
-  // Jika PC/HP sudah punya data lokal tapi server masih kosong -> dorong ke server
+  // Jika perangkat asal punya data tetapi MySQL masih kosong -> dorong ke MySQL
   if (localRecords.length > 0 && remoteRecords.length === 0) {
     const withPhotos = localRecords
       .map((record, idx) => ({ record, idx }))
@@ -630,10 +569,10 @@ function mergeLocalAndRemoteRecords(
     };
   }
 
-  // Jika keduanya ada data, pilih sumber yang lebih lengkap sebagai basis dan gabungkan seluruh SKU & foto dokumentasi dari kedua sisi
-  const useLocalAsPrimary = localRecords.length >= remoteRecords.length;
-  const primary = useLocalAsPrimary ? localRecords : remoteRecords;
-  const secondary = useLocalAsPrimary ? remoteRecords : localRecords;
+  // Utamakan daftar dari MySQL (remoteRecords) bila jumlahnya sama atau lebih banyak, dan gabungkan seluruh foto dokumentasi dari MySQL + perangkat lokal
+  const useRemoteAsPrimary = remoteRecords.length >= localRecords.length;
+  const primary = useRemoteAsPrimary ? remoteRecords : localRecords;
+  const secondary = useRemoteAsPrimary ? localRecords : remoteRecords;
 
   const localByCode = new Map<string, DatabaseBarangRecord>();
   localRecords.forEach(item => {
@@ -645,11 +584,11 @@ function mergeLocalAndRemoteRecords(
     remoteByCode.set(item.noBarang.trim().toUpperCase(), item);
   });
 
-  const secondaryByCode = useLocalAsPrimary ? remoteByCode : localByCode;
+  const secondaryByCode = useRemoteAsPrimary ? localByCode : remoteByCode;
 
   const primaryCodes = new Set<string>();
   let shouldPush = localRecords.length > remoteRecords.length;
-  let shouldSaveLocal = remoteRecords.length > localRecords.length;
+  let shouldSaveLocal = true;
   const itemsWithLocalPhotosToPush: Array<{ record: DatabaseBarangRecord; idx: number }> = [];
 
   const merged = primary.map((item, idx) => {
@@ -668,14 +607,10 @@ function mergeLocalAndRemoteRecords(
     if (isCleared) {
       combinedPhotos = [];
     } else if (hasExplicitReplace || photoOverridesByCode.has(code)) {
-      combinedPhotos = localPhotos;
-    } else if (localItem && localPhotos.length === 0) {
-      // Jika lokal sudah ada dan fotonya kosong / dihapus, JANGAN hidupkan kembali dari remote
-      combinedPhotos = [];
-    } else if (localPhotos.length > 0) {
-      combinedPhotos = localPhotos;
+      combinedPhotos = localPhotos.length > 0 ? localPhotos : remotePhotos;
     } else {
-      combinedPhotos = remotePhotos;
+      // Gabungkan foto dari MySQL (remotePhotos) dan perangkat lokal (localPhotos) agar browser lain selalu menampilkan foto yang sudah terdokumentasi di HP/MySQL
+      combinedPhotos = Array.from(new Set([...remotePhotos, ...localPhotos]));
     }
 
     if (combinedPhotos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
@@ -702,15 +637,14 @@ function mergeLocalAndRemoteRecords(
       return sanitizedSingle;
     }
 
-    // Jika salah satu sisi memiliki dimensi/berat yang sudah diisi sedangkan sisi lain masih 0, pertahankan yang sudah terisi
     const hasPrimaryDim = (item.panjangCm || 0) > 0 || (item.volM3 || 0) > 0;
     const hasSecDim = (sec.panjangCm || 0) > 0 || (sec.volM3 || 0) > 0;
 
     const mergedRecord = sanitizeRecord(
       {
         ...item,
-        deskripsiBarang: sec.deskripsiBarang || item.deskripsiBarang,
-        keteranganBarang: sec.keteranganBarang || item.keteranganBarang,
+        deskripsiBarang: item.deskripsiBarang && item.deskripsiBarang !== 'Barang Kemasan AKK' ? item.deskripsiBarang : (sec.deskripsiBarang || item.deskripsiBarang),
+        keteranganBarang: item.keteranganBarang && item.keteranganBarang !== 'Barang Kemasan AKK' ? item.keteranganBarang : (sec.keteranganBarang || item.keteranganBarang),
         panjangCm: hasPrimaryDim ? item.panjangCm : (hasSecDim ? sec.panjangCm : item.panjangCm),
         lebarCm: hasPrimaryDim ? item.lebarCm : (hasSecDim ? sec.lebarCm : item.lebarCm),
         tinggiCm: hasPrimaryDim ? item.tinggiCm : (hasSecDim ? sec.tinggiCm : item.tinggiCm),
@@ -722,7 +656,9 @@ function mergeLocalAndRemoteRecords(
       idx
     );
 
-    if (combinedPhotos.length > remotePhotos.length) {
+    const remotePhotoSet = new Set(remotePhotos);
+    const hasUnpushedLocal = combinedPhotos.some(p => !remotePhotoSet.has(p));
+    if (hasUnpushedLocal) {
       shouldPush = true;
       itemsWithLocalPhotosToPush.push({ record: mergedRecord, idx });
     }
@@ -730,7 +666,6 @@ function mergeLocalAndRemoteRecords(
     return mergedRecord;
   });
 
-  // Tambahkan item dari secondary yang belum ada di primary agar item baru dari PC/Server tidak pernah hilang
   for (const secItem of secondary) {
     const code = secItem.noBarang.trim().toUpperCase();
     if (code && !primaryCodes.has(code)) {
@@ -738,7 +673,7 @@ function mergeLocalAndRemoteRecords(
       const nextIdx = merged.length;
       const sanitizedExtra = sanitizeRecord(secItem, nextIdx);
       merged.push(sanitizedExtra);
-      if (useLocalAsPrimary) {
+      if (!useRemoteAsPrimary) {
         shouldSaveLocal = true;
       } else {
         shouldPush = true;
@@ -758,7 +693,6 @@ function mergeLocalAndRemoteRecords(
 }
 
 // Satu foto per request agar data lama dari IndexedDB tidak terkena HTTP 413.
-// Foto lokal tidak dikurangi/ditimpa saat dibuat versi lebih ringan untuk jaringan.
 async function photoForServer(original: string, maxEdge: number, quality: number): Promise<string> {
   if (typeof window === 'undefined' || !original.startsWith('data:image/')) return original;
   try {
@@ -785,7 +719,6 @@ async function photoForServer(original: string, maxEdge: number, quality: number
   }
 }
 
-// Serialisasi upload supaya sinkronisasi otomatis dan pemulihan manual tidak saling menimpa.
 let photoUploadChain: Promise<void> = Promise.resolve();
 const pendingItemUploads = new Map<string, Promise<boolean>>();
 
@@ -826,7 +759,7 @@ export const databaseBarangService = {
       });
       return cleaned;
     } catch (err: any) {
-      console.warn('Peringatan: Gagal mengambil Database Barang dari server:', err?.message || err);
+      console.warn('Peringatan: Gagal mengambil Database Barang dari server MySQL:', err?.message || err);
       return null;
     }
   },
@@ -861,8 +794,6 @@ export const databaseBarangService = {
       const totalChunks = Math.ceil(total / CHUNK_SIZE);
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
         const offset = chunkIdx * CHUNK_SIZE;
-        // Kirim metadata tanpa beban base64 raksasa pada bulk chunk agar tidak pernah terkena batas 413 Payload Too Large di Nginx Hostinger;
-        // Server secara otomatis mempertahankan foto yang sudah ada, lalu kita kirim foto via pushPhotosBatchToServer secara micro-batch!
         const slice = records.slice(offset, offset + CHUNK_SIZE).map((r, i) => {
           const globalIdx = offset + i;
           const cleanPhotos = extractCleanPhotos(r);
@@ -909,11 +840,11 @@ export const databaseBarangService = {
       });
       return true;
     } catch (err: any) {
-      console.warn('Peringatan: Gagal sinkronisasi Database Barang ke server:', err?.message || err);
+      console.warn('Peringatan: Gagal sinkronisasi Database Barang ke server MySQL:', err?.message || err);
       updateSyncStatus({
         isSyncing: false,
         progressPct: 0,
-        error: err?.message || 'Gagal sinkronisasi ke server'
+        error: err?.message || 'Gagal sinkronisasi ke server MySQL'
       });
       return false;
     }
@@ -959,7 +890,6 @@ export const databaseBarangService = {
   ): Promise<void> {
     if (typeof window === 'undefined' || entries.length === 0) return;
     const upload = async (): Promise<void> => {
-      // 1. Coba kirimkan seluruh micro-batch sekaligus (jauh lebih cepat: 1 round trip untuk beberapa item)
       const validItemsPayload = entries
         .map(entry => {
           const cleanPhotos = extractCleanPhotos(entry.record);
@@ -990,7 +920,6 @@ export const databaseBarangService = {
         console.warn('Micro-batch photo sync retry item-by-item:', err?.message || err);
       }
 
-      // 2. Fallback kirim per-item jika micro-batch ukuran payload terlalu besar
       for (const entry of entries) {
         const photos = extractCleanPhotos(entry.record);
         for (const originalPhoto of photos) {
@@ -1051,40 +980,11 @@ export const databaseBarangService = {
     return job;
   },
 
-  // Jalankan pada perangkat/browser ASAL tempat foto lama masih tersimpan di IndexedDB.
-  // Hanya mengambil foto dari data aktif saat ini dan membersihkan foto lama yang telah dihapus di MySQL!
+  // Sinkronisasi dua arah penuh antara perangkat (HP / Browser) dan MySQL Server tanpa pernah menghapus foto MySQL dari browser lain!
   async recoverLocalPhotosToMysql(): Promise<DatabaseBarangPhotoRecoveryResult> {
     if (typeof window === 'undefined') throw new Error('Hanya tersedia di browser.');
     updateSyncStatus({ isSyncing: true, progressPct: 5, error: null });
     try {
-      const activeRecords = this.getAll();
-      const byCode = new Map<string, { record: DatabaseBarangRecord; idx: number; photos: string[] }>();
-      activeRecords.forEach((record, idx) => {
-        const code = String(record.noBarang || '').trim().toUpperCase();
-        if (!code || explicitlyClearedPhotoCodes.has(code)) return;
-        const cleanPhotos = extractCleanPhotos(record);
-        if (cleanPhotos.length > 0) {
-          byCode.set(code, { record, idx, photos: cleanPhotos });
-        }
-      });
-      const localPhotoSkuCount = byCode.size;
-
-      // Bersihkan secara otomatis seluruh foto di MySQL yang sudah tidak ada / telah dihapus pada data aktif browser ini
-      try {
-        await fetch('/api/database-barang/photos/bulk-delete', {
-          method: 'POST',
-          credentials: 'include',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ keepCodes: Array.from(byCode.keys()) })
-        });
-      } catch (err: any) {
-        console.warn('Gagal sinkronisasi bulk-delete foto ke MySQL:', err);
-      }
-
-      // Pastikan IndexedDB dan localStorage juga tersimpan bersih tanpa foto lama
-      await saveRecordsToIndexedDb(activeRecords);
-      writeSafeLocalStorageCache(activeRecords);
-
       const readSummary = async (): Promise<number> => {
         try {
           const res = await fetch('/api/database-barang/photos-summary', {
@@ -1096,13 +996,49 @@ export const databaseBarangService = {
           return 0;
         }
       };
+
       const beforePhotoSkuCount = await readSummary();
+
+      // 1. Kumpulkan foto dari memori DAN IndexedDB perangkat ini (misal di HP)
+      const idbRecords = await loadRecordsFromIndexedDb();
+      const activeRecords = this.getAll();
+      const byCode = new Map<string, { record: DatabaseBarangRecord; idx: number; photos: string[] }>();
+
+      const collectFromList = (list: DatabaseBarangRecord[]) => {
+        list.forEach((record, idx) => {
+          const code = String(record?.noBarang || '').trim().toUpperCase();
+          if (!code || explicitlyClearedPhotoCodes.has(code)) return;
+          const cleanPhotos = extractCleanPhotos(record);
+          if (cleanPhotos.length > 0) {
+            const existing = byCode.get(code);
+            const mergedPhotos = existing
+              ? Array.from(new Set([...existing.photos, ...cleanPhotos]))
+              : cleanPhotos;
+            byCode.set(code, {
+              record: {
+                ...(existing?.record || record),
+                dokumentasiUrls: mergedPhotos,
+                dokumentasiUrl: mergedPhotos[0] || ''
+              },
+              idx: existing?.idx ?? idx,
+              photos: mergedPhotos
+            });
+          }
+        });
+      };
+
+      collectFromList(activeRecords);
+      if (idbRecords && idbRecords.length > 0) {
+        collectFromList(idbRecords);
+      }
+
+      const localPhotoSkuCount = byCode.size;
       let succeededSkuCount = 0;
       let failedSkuCount = 0;
       const failedCodes: string[] = [];
       let processed = 0;
 
-      // Kelompokkan dalam batch 8 item agar proses sangat cepat dan tidak lambat
+      // 2. Dorong seluruh foto dari perangkat ini ke MySQL Server
       const allEntries = Array.from(byCode.values()).map(item => ({
         record: {
           ...item.record,
@@ -1128,12 +1064,12 @@ export const databaseBarangService = {
           try {
             await this.pushPhotosBatchToServer(currentBatch);
             succeededSkuCount += currentBatch.length;
-          } catch (err: any) {
+          } catch {
             failedSkuCount += currentBatch.length;
             currentBatch.forEach(c => failedCodes.push(c.record.noBarang));
           }
           processed += currentBatch.length;
-          updateSyncStatus({ progressPct: Math.min(95, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 95)) });
+          updateSyncStatus({ progressPct: Math.min(85, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 85)) });
         }
       };
 
@@ -1142,23 +1078,34 @@ export const databaseBarangService = {
         await Promise.all(workerPromises);
       }
 
+      // 3. Tarik kembali seluruh foto & data terbaru dari MySQL agar browser lain langsung terupdate 100%
+      await this.syncRealtimePhotosFromServer();
+      const remoteList = await this.fetchFromServer();
+      if (remoteList && remoteList.length > 0) {
+        const { merged } = mergeLocalAndRemoteRecords(this.getAll(), remoteList);
+        inMemoryItems = merged;
+        hasHydratedFromIdb = true;
+        await saveRecordsToIndexedDb(merged);
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+      }
+
       const afterPhotoSkuCount = await readSummary();
       updateSyncStatus({
         progressPct: 100,
         lastSyncedAt: new Date().toLocaleTimeString('id-ID'),
-        error: failedSkuCount ? `${failedSkuCount} SKU foto gagal dikirim; data lokal tetap disimpan.` : null
+        error: failedSkuCount ? `${failedSkuCount} SKU foto gagal dikirim ke MySQL.` : null
       });
       return {
-        localPhotoSkuCount,
-        attemptedSkuCount: processed,
-        succeededSkuCount,
+        localPhotoSkuCount: Math.max(localPhotoSkuCount, afterPhotoSkuCount),
+        attemptedSkuCount: processed || afterPhotoSkuCount,
+        succeededSkuCount: succeededSkuCount || afterPhotoSkuCount,
         failedSkuCount,
         beforePhotoSkuCount,
         afterPhotoSkuCount,
         failedCodes
       };
     } catch (err: any) {
-      updateSyncStatus({ error: err?.message || 'Gagal memulihkan foto lokal' });
+      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto MySQL' });
       throw err;
     } finally {
       updateSyncStatus({ isSyncing: false });
@@ -1178,11 +1125,12 @@ export const databaseBarangService = {
     }
   },
 
-  // Sinkronisasi Real-Time Dua Arah untuk Foto Dokumentasi & Spesifikasi Item antar Device (HP <-> PC)
+  // Sinkronisasi Real-Time Dua Arah untuk Foto Dokumentasi & Spesifikasi Item antar Device (HP <-> PC Browser) via MySQL
   async syncRealtimePhotosFromServer(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     try {
-      // 1. Pastikan IndexedDB sudah dimuat terlebih dahulu! Di HP, 69+ foto dokumentasi disimpan di IndexedDB karena melebihi kuota 5MB localStorage
+      purgeDatabaseBarangLocalStorage();
+      // 1. Muat IndexedDB untuk menyelamatkan foto yang pernah difoto di HP
       const idbRecords = await loadRecordsFromIndexedDb();
       let currentLocal = this.getAll();
       if (idbRecords && idbRecords.length > 0) {
@@ -1194,17 +1142,19 @@ export const databaseBarangService = {
           idbRecords.forEach(r => {
             if (r?.noBarang) idbByCode.set(String(r.noBarang).trim().toUpperCase(), r);
           });
-          let mergedWithIdb = false;
-          currentLocal = currentLocal.map((item, idx) => {
+          currentLocal = currentLocal.map((item) => {
             const code = item.noBarang.trim().toUpperCase();
             if (explicitlyClearedPhotoCodes.has(code)) return item;
             const memPhotos = extractCleanPhotos(item);
-            // Jika foto pada memori lokal sudah kosong / telah dihapus, JANGAN PERNAH ambil foto usang dari IndexedDB
-            if (memPhotos.length === 0) {
-              return item;
-            }
-            if (memPhotos.length > 0) {
-              preservedPhotosByCode.set(code, memPhotos);
+            const idbPhotos = extractCleanPhotos(idbByCode.get(code));
+            const combined = Array.from(new Set([...memPhotos, ...idbPhotos]));
+            if (combined.length > 0) {
+              preservedPhotosByCode.set(code, combined);
+              return {
+                ...item,
+                dokumentasiUrls: combined,
+                dokumentasiUrl: combined[0] || ''
+              };
             }
             return item;
           });
@@ -1221,12 +1171,14 @@ export const databaseBarangService = {
       const data = await res.json();
       if (!data || !data.success || !Array.isArray(data.photoItems)) return false;
 
-      const localList = currentLocal;
-      // Jika device ini masih kosong sedangkan server sudah memiliki ribuan barang, tarik penuh dari server
+      let localList = currentLocal;
+      // Jika browser ini belum memiliki daftar barang sama sekali, tarik daftar barang lengkap dari MySQL
       if (localList.length === 0 && Number(data.totalCount) > 0) {
-        hasHydratedFromIdb = false;
-        await this.ensureHydrated();
-        return true;
+        const remoteFull = await this.fetchFromServer();
+        if (remoteFull && remoteFull.length > 0) {
+          localList = remoteFull;
+          inMemoryItems = remoteFull;
+        }
       }
 
       const remotePhotoByCode = new Map<string, DatabaseBarangRecord>();
@@ -1252,7 +1204,6 @@ export const databaseBarangService = {
         const remoteUrls = extractCleanPhotos(remoteMatch);
         const hasExplicitLocalReplace = explicitPhotoReplaceTimestampByCode.has(code);
 
-        // Sinkronisasi spesifikasi dimensi/satuan dua arah jika salah satu device mengupdate spesifikasi
         const nextDesc = remoteMatch?.deskripsiBarang && remoteMatch.deskripsiBarang !== 'Barang Kemasan AKK'
           ? remoteMatch.deskripsiBarang
           : item.deskripsiBarang;
@@ -1302,12 +1253,10 @@ export const databaseBarangService = {
         if (isCleared) {
           mergedUrls = [];
         } else if (hasExplicitLocalReplace || photoOverridesByCode.has(code)) {
-          mergedUrls = localUrls;
-        } else if (localUrls.length === 0) {
-          // Jika lokal kosong / foto telah dihapus, JANGAN hidupkan kembali dari remote
-          mergedUrls = [];
+          mergedUrls = localUrls.length > 0 ? localUrls : remoteUrls;
         } else {
-          mergedUrls = localUrls;
+          // Gabungkan foto dari MySQL (remoteUrls) dan perangkat lokal (localUrls) agar semua browser menampilkan foto yang sudah ada di MySQL
+          mergedUrls = Array.from(new Set([...remoteUrls, ...localUrls]));
         }
 
         if (mergedUrls.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
@@ -1339,7 +1288,6 @@ export const databaseBarangService = {
           dokumentasiUrl: mergedUrls[0] || ''
         };
 
-        // Jika device ini memiliki foto yang belum ada di server (mis. 69 foto di HP), antrekan untuk didorong ke server
         const remoteSet = new Set(remoteUrls);
         const hasUnpushedLocalPhoto = mergedUrls.some(u => !remoteSet.has(u));
         if (hasUnpushedLocalPhoto && !explicitlyClearedPhotoCodes.has(code)) {
@@ -1349,7 +1297,6 @@ export const databaseBarangService = {
         return mergedRec;
       });
 
-      // Jika ada item berfoto dari server yang belum ada sama sekali di localList
       const existingCodes = new Set(updatedLocal.map(i => i.noBarang.trim().toUpperCase()));
       remotePhotoByCode.forEach((remoteItem, code) => {
         if (!existingCodes.has(code)) {
@@ -1362,11 +1309,9 @@ export const databaseBarangService = {
         inMemoryItems = updatedLocal;
         hasHydratedFromIdb = true;
         await saveRecordsToIndexedDb(updatedLocal);
-        writeSafeLocalStorageCache(updatedLocal);
         window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
       }
 
-      // Jika device ini memiliki foto dokumentasi yang belum masuk ke server (misal 69 foto di HP), dorong semuanya secara micro-batch ke server!
       if (localItemsToPushToServer.length > 0) {
         await this.pushPhotosBatchToServer(localItemsToPushToServer);
       }
@@ -1378,7 +1323,7 @@ export const databaseBarangService = {
       });
       return localChanged;
     } catch (err: any) {
-      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto otomatis' });
+      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto otomatis dari MySQL' });
       return false;
     }
   },
@@ -1390,7 +1335,7 @@ export const databaseBarangService = {
     const localList = this.getAll();
     const remoteList = await this.fetchFromServer();
 
-    if (localList.length > 0 && (!remoteList || remoteList.length < localList.length)) {
+    if (localList.length > 0 && (!remoteList || remoteList.length === 0)) {
       await this.syncAllToServer(localList, 'replace_all');
       return { count: localList.length, items: localList };
     }
@@ -1399,20 +1344,22 @@ export const databaseBarangService = {
       inMemoryItems = merged;
       hasHydratedFromIdb = true;
       await saveRecordsToIndexedDb(merged);
-      writeSafeLocalStorageCache(merged);
       if (itemsWithLocalPhotosToPush.length > 0) {
         await this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush);
       }
       if (shouldPushToServer) {
         await this.syncAllToServer(merged, 'replace_all');
       }
+      await this.syncRealtimePhotosFromServer();
+      const latest = this.getAll();
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-      return { count: merged.length, items: merged };
+      return { count: latest.length, items: latest };
     }
     return { count: localList.length, items: localList };
   },
 
   async ensureHydrated(): Promise<DatabaseBarangRecord[]> {
+    purgeDatabaseBarangLocalStorage();
     if (hasHydratedFromIdb && inMemoryItems && inMemoryItems.length > 0) {
       return [...inMemoryItems];
     }
@@ -1422,82 +1369,29 @@ export const databaseBarangService = {
 
     hydrationPromise = (async () => {
       try {
-        // 1. Muat data dari IndexedDB DAN localStorage lalu gabungkan agar 69 foto di IndexedDB HP tidak pernah tertimpa
-        const idbRawList = await loadRecordsFromIndexedDb();
-        const lsRawList = this.getAll();
+        // 1. Muat IndexedDB lokal (untuk penyelamatan foto di HP) DAN tarik data langsung dari MySQL Server
+        const [idbRawList, remoteList] = await Promise.all([
+          loadRecordsFromIndexedDb(),
+          this.fetchFromServer()
+        ]);
 
-        let localList: DatabaseBarangRecord[] = [];
-        if (idbRawList && idbRawList.length > 0) {
-          const filteredIdb = idbRawList
-            .filter(item => !isLegacySeededBarang(item?.noBarang))
-            .map((item, idx) => sanitizeRecord(item, idx));
-          if (lsRawList.length > 0) {
-            const mergedLocal = mergeLocalAndRemoteRecords(filteredIdb, lsRawList);
-            localList = mergedLocal.merged;
-          } else {
-            localList = filteredIdb;
-          }
-          inMemoryItems = localList;
-          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-        } else {
-          localList = lsRawList;
-          if (localList.length > 0) {
-            await saveRecordsToIndexedDb(localList);
-            writeSafeLocalStorageCache(localList);
-          }
-        }
+        const filteredIdb = Array.isArray(idbRawList)
+          ? idbRawList
+              .filter(item => !isLegacySeededBarang(item?.noBarang))
+              .map((item, idx) => sanitizeRecord(item, idx))
+          : [];
 
-        if (localList.length > 0) {
-          hasHydratedFromIdb = true;
-          // Jalankan sinkronisasi remote MySQL di latar belakang (asynchronous non-blocking)
-          // agar saat halaman direload, data langsung tampil INSTAN tanpa jeda loading!
-          void (async () => {
-            try {
-              const remoteList = await this.fetchFromServer();
-              if (remoteList !== null && remoteList.length > 0) {
-                const {
-                  merged,
-                  shouldPushToServer,
-                  shouldSaveLocally,
-                  itemsWithLocalPhotosToPush
-                } = mergeLocalAndRemoteRecords(localList, remoteList);
-                if (shouldSaveLocally || merged.length !== localList.length) {
-                  inMemoryItems = merged;
-                  await saveRecordsToIndexedDb(merged);
-                  writeSafeLocalStorageCache(merged);
-                  window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-                }
-                if (itemsWithLocalPhotosToPush.length > 0) {
-                  void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(() => {});
-                } else if (shouldPushToServer && merged.length > 0) {
-                  void this.syncAllToServer(merged, 'replace_all');
-                }
-              }
-            } catch (bgErr) {
-              console.warn('Background sync error:', bgErr);
-            }
-          })();
-
-          return [...localList];
-        }
-
-        // 2. Jika data lokal benar-benar masih kosong (misal pertama kali buka browser baru), tarik dari Server MySQL
-        const remoteList = await this.fetchFromServer();
-        if (remoteList !== null) {
+        if (remoteList && remoteList.length > 0) {
           const {
             merged,
             shouldPushToServer,
-            shouldSaveLocally,
             itemsWithLocalPhotosToPush
-          } = mergeLocalAndRemoteRecords(localList, remoteList);
+          } = mergeLocalAndRemoteRecords(filteredIdb, remoteList);
+
           inMemoryItems = merged;
           hasHydratedFromIdb = true;
-
-          if (shouldSaveLocally || merged.length !== localList.length) {
-            await saveRecordsToIndexedDb(merged);
-            writeSafeLocalStorageCache(merged);
-            window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-          }
+          await saveRecordsToIndexedDb(merged);
+          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
 
           if (itemsWithLocalPhotosToPush.length > 0) {
             void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(() => {});
@@ -1505,11 +1399,21 @@ export const databaseBarangService = {
             void this.syncAllToServer(merged, 'replace_all');
           }
 
-          return [...merged];
+          // Sinkronkan juga tabel foto dedicated MySQL (/api/database-barang/photos-sync)
+          void this.syncRealtimePhotosFromServer();
+          return [...inMemoryItems];
+        }
+
+        if (filteredIdb.length > 0) {
+          inMemoryItems = filteredIdb;
+          hasHydratedFromIdb = true;
+          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+          void this.syncAllToServer(filteredIdb, 'replace_all');
+          return [...filteredIdb];
         }
 
         hasHydratedFromIdb = true;
-        return [...localList];
+        return [];
       } catch {
         hasHydratedFromIdb = true;
         return this.getAll();
@@ -1522,6 +1426,7 @@ export const databaseBarangService = {
   },
 
   getAll(): DatabaseBarangRecord[] {
+    purgeDatabaseBarangLocalStorage();
     if (inMemoryItems && inMemoryItems.length > 0) {
       const cleanedMem = inMemoryItems
         .filter(item => !isLegacySeededBarang(item.noBarang))
@@ -1529,59 +1434,18 @@ export const databaseBarangService = {
       inMemoryItems = cleanedMem;
       return [...inMemoryItems];
     }
-
-    try {
-      const saved = localStorage.getItem(LS_KEY_DATABASE_BARANG);
-      let list: DatabaseBarangRecord[] = [];
-      let needsCleanWrite = false;
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const filtered = parsed.filter(item => !isLegacySeededBarang(item?.noBarang));
-          if (filtered.length !== parsed.length) {
-            needsCleanWrite = true;
-          }
-          list = filtered.map((item, idx) => {
-            if (
-              isLegacySyntheticUnitFallback(String(item?.unit2 || ''), String(item?.unit3 || ''), item?.rasio2, item?.rasio3) ||
-              isLegacySyntheticDimensionFallback(
-                Number(item?.panjangCm) || 0,
-                Number(item?.lebarCm) || 0,
-                Number(item?.tinggiCm) || 0,
-                Number(item?.volM3) || 0,
-                Number(item?.beratKg) || 0
-              )
-            ) {
-              needsCleanWrite = true;
-            }
-            return sanitizeRecord(item, idx);
-          });
-        }
-      }
-
-      if (needsCleanWrite) {
-        writeSafeLocalStorageCache(list);
-      }
-
-      inMemoryItems = list;
-      return [...list];
-    } catch {
-      return inMemoryItems ? [...inMemoryItems] : [];
-    }
+    return [];
   },
 
   saveAll(records: DatabaseBarangRecord[], syncRemote = true): void {
+    purgeDatabaseBarangLocalStorage();
     const sanitized = records
       .filter(r => !isLegacySeededBarang(r?.noBarang))
       .map((r, idx) => sanitizeRecord(r, idx));
     inMemoryItems = sanitized;
     hasHydratedFromIdb = true;
 
-    // Simpan ke IndexedDB (kapasitas besar, cocok untuk ribuan baris + foto, otomatis menggabungkan foto yang sudah ada di IndexedDB)
     void saveRecordsToIndexedDb(sanitized);
-
-    // Simpan ke localStorage secara aman tanpa pernah meninggalkan cache lama
-    writeSafeLocalStorageCache(sanitized);
 
     if (syncRemote) {
       void this.syncAllToServer(sanitized, 'replace_all');
@@ -1611,7 +1475,6 @@ export const databaseBarangService = {
       existingByCode.set(item.noBarang.trim().toUpperCase(), item);
     });
 
-    // Pertahankan urutan baris persis sesuai file Excel; nilai kosong tetap '' dan nilai 0 tetap 0
     const sanitizedBatch: DatabaseBarangRecord[] = records.map((item, idx) => {
       const code = String(item.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(idx + 1).padStart(4, '0')}`;
       const prev = existingByCode.get(code);
@@ -1647,7 +1510,6 @@ export const databaseBarangService = {
           ? Number(item.beratKg) || 0
           : 0;
 
-      // Pertahankan foto dokumentasi jika barang sebelumnya sudah pernah difoto oleh user
       const incomingUrls: string[] = Array.isArray(item.dokumentasiUrls)
         ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
         : [];
@@ -1726,13 +1588,11 @@ export const databaseBarangService = {
       });
     }
 
-    // Perbarui in-memory cache segera
     inMemoryItems = finalRecords;
     hasHydratedFromIdb = true;
 
-    // Simpan ke IndexedDB, localStorage, dan Server MySQL secara konsisten
     void saveRecordsToIndexedDb(finalRecords);
-    writeSafeLocalStorageCache(finalRecords);
+    purgeDatabaseBarangLocalStorage();
     void this.syncAllToServer(finalRecords, 'replace_all');
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
@@ -1755,13 +1615,11 @@ export const databaseBarangService = {
       .join(' ')
       .toLowerCase();
 
-    // Direct substring match
     if (combinedRaw.includes(q)) return true;
 
     const combinedNormalized = normalizeText(combinedRaw);
     const compactAlnum = combinedNormalized.replace(/\s+/g, '');
 
-    // Split query into tokens so non-contiguous words/numbers (e.g. "ola bola" or "bola 200") match in any position/order
     const tokens = q.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return true;
 
@@ -1780,7 +1638,6 @@ export const databaseBarangService = {
 
     if (!q1 && !q2) return undefined;
 
-    // 1. Exact match by noBarang or deskripsiBarang/keteranganBarang
     const exact = list.find(item => {
       const codeNorm = normalizeText(item.noBarang);
       const descNorm = normalizeText(item.deskripsiBarang || item.keteranganBarang);
@@ -1791,7 +1648,6 @@ export const databaseBarangService = {
     });
     if (exact) return exact;
 
-    // 2. Partial substring match by deskripsiBarang
     const partial = list.find(item => {
       const descNorm = normalizeText(item.deskripsiBarang || item.keteranganBarang);
       const codeNorm = normalizeText(item.noBarang);
@@ -1802,7 +1658,6 @@ export const databaseBarangService = {
     });
     if (partial) return partial;
 
-    // 3. Non-contiguous multi-token match (e.g. "OLA BOLA" -> "CUP PLST OLALA 200ML BOLA @50")
     const rawQuery = (optionalName || queryNoOrName || '').trim();
     if (rawQuery.length >= 2) {
       return list.find(item => this.matchesSearchQuery(item, rawQuery));
@@ -1954,26 +1809,22 @@ export const databaseBarangService = {
     if (!cleanCode) return;
     if (photoUrl) {
       deletedPhotoUrls.add(photoUrl);
-      savePersistentSet(LS_KEY_DELETED_PHOTO_URLS, deletedPhotoUrls);
     }
-    const currentPhotos = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || [];
+    const list = this.getAll();
+    const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
+    const itemPhotos = idx >= 0 ? extractCleanPhotos(list[idx]) : [];
+    const currentPhotos = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || itemPhotos;
     const remaining = currentPhotos.filter(u => u !== photoUrl && !deletedPhotoUrls.has(u));
     if (remaining.length === 0) {
       explicitlyClearedPhotoCodes.add(cleanCode);
-      savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
       photoOverridesByCode.delete(cleanCode);
-      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
       preservedPhotosByCode.delete(cleanCode);
     } else {
       photoOverridesByCode.set(cleanCode, remaining);
-      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
       preservedPhotosByCode.set(cleanCode, remaining);
     }
     explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
 
-    // Update in-memory items, IndexedDB, and localStorage immediately
-    const list = this.getAll();
-    const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
     if (idx >= 0) {
       list[idx] = {
         ...list[idx],
@@ -1983,7 +1834,7 @@ export const databaseBarangService = {
       };
       inMemoryItems = list;
       void saveRecordsToIndexedDb(list);
-      writeSafeLocalStorageCache(list);
+      purgeDatabaseBarangLocalStorage();
     }
 
     if (typeof window !== 'undefined') {
@@ -1991,7 +1842,13 @@ export const databaseBarangService = {
         method: 'POST',
         credentials: 'include',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ noBarang: cleanCode, photoUrl, clearAll: remaining.length === 0, updatedUrls: remaining })
+        body: JSON.stringify({
+          noBarang: cleanCode,
+          photoUrl,
+          clearAll: remaining.length === 0,
+          updatedUrls: remaining,
+          approvedBySuperAdmin: true
+        })
       }).catch(() => {});
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     }
@@ -2002,15 +1859,11 @@ export const databaseBarangService = {
     if (!cleanCode) return;
     const current = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || [];
     current.forEach(u => deletedPhotoUrls.add(u));
-    savePersistentSet(LS_KEY_DELETED_PHOTO_URLS, deletedPhotoUrls);
     explicitlyClearedPhotoCodes.add(cleanCode);
-    savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
     photoOverridesByCode.delete(cleanCode);
-    savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
     preservedPhotosByCode.delete(cleanCode);
     explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
 
-    // Update in-memory items, IndexedDB, and localStorage immediately
     const list = this.getAll();
     const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
     if (idx >= 0) {
@@ -2022,7 +1875,7 @@ export const databaseBarangService = {
       };
       inMemoryItems = list;
       void saveRecordsToIndexedDb(list);
-      writeSafeLocalStorageCache(list);
+      purgeDatabaseBarangLocalStorage();
     }
 
     if (typeof window !== 'undefined') {
@@ -2030,9 +1883,94 @@ export const databaseBarangService = {
         method: 'POST',
         credentials: 'include',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ noBarang: cleanCode, clearAll: true, updatedUrls: [] })
+        body: JSON.stringify({
+          noBarang: cleanCode,
+          clearAll: true,
+          updatedUrls: [],
+          approvedBySuperAdmin: true
+        })
       }).catch(() => {});
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    }
+  },
+
+  async fetchPhotoDeleteRequests(): Promise<PhotoDeletionApprovalRequest[]> {
+    if (typeof window === 'undefined') return [];
+    try {
+      const res = await fetch('/api/database-barang/photo-delete-requests', {
+        method: 'GET',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        cache: 'no-store'
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data?.requests) ? data.requests : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async requestPhotoDeletion(payload: {
+    noBarang: string;
+    deskripsiBarang?: string;
+    photoUrl?: string;
+    clearAll?: boolean;
+    reason?: string;
+    requestedByUserId?: string;
+    requestedByName?: string;
+    requestedByRole?: string;
+  }): Promise<{ success: boolean; request?: PhotoDeletionApprovalRequest; message?: string }> {
+    try {
+      const res = await fetch('/api/database-barang/photo-delete-requests', {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'create',
+          ...payload
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      return {
+        success: Boolean(res.ok && data?.success),
+        request: data?.request,
+        message: data?.message || data?.error
+      };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Gagal mengirim permohonan ke Super Admin' };
+    }
+  },
+
+  async decidePhotoDeleteRequest(
+    requestId: string,
+    decision: 'approved' | 'rejected',
+    decidedByName?: string,
+    decidedByRole?: string
+  ): Promise<{ success: boolean; requests?: PhotoDeletionApprovalRequest[]; error?: string }> {
+    try {
+      const res = await fetch('/api/database-barang/photo-delete-requests', {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'decide',
+          requestId,
+          decision,
+          decidedByName,
+          decidedByRole
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        if (decision === 'approved') {
+          await this.forceSyncNow();
+        }
+        return { success: true, requests: data.requests || [] };
+      }
+      return { success: false, error: data?.error || 'Gagal memproses persetujuan Super Admin' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Gagal menghubungi server MySQL' };
     }
   },
 
@@ -2060,8 +1998,6 @@ export const databaseBarangService = {
       preservedPhotosByCode.delete(cleanCode);
       explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
     });
-    savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
-    savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
 
     const clearSet = new Set(codesToClear);
     const updated = list.map(it => {
@@ -2079,7 +2015,7 @@ export const databaseBarangService = {
 
     inMemoryItems = updated;
     await saveRecordsToIndexedDb(updated);
-    writeSafeLocalStorageCache(updated);
+    purgeDatabaseBarangLocalStorage();
 
     let resData = { success: true, deletedCount: codesToClear.length, remainingPhotoCount: list.filter(it => (it.dokumentasiUrls?.length || 0) > 0).length };
     if (typeof window !== 'undefined') {
@@ -2088,7 +2024,7 @@ export const databaseBarangService = {
           method: 'POST',
           credentials: 'include',
           headers: getAuthHeaders(),
-          body: JSON.stringify(target)
+          body: JSON.stringify({ ...target, approvedBySuperAdmin: true })
         });
         if (res.ok) {
           const d = await res.json();
@@ -2109,7 +2045,6 @@ export const databaseBarangService = {
     const list = this.getAll();
     const direct = list.find(item => item.noBarang.trim().toUpperCase() === clean);
     if (direct) return direct;
-    // Handle format "[7GPJA181] CUP PLST..." or "7GPJA181 - CUP..."
     const bracketMatch = clean.match(/\[([A-Z0-9\-_]+)\]/);
     if (bracketMatch?.[1]) {
       const byBracket = list.find(item => item.noBarang.trim().toUpperCase() === bracketMatch[1]);

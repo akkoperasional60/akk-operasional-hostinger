@@ -100,7 +100,7 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
     case 'finance_tax_admin':
       return 'finance_dashboard';
     case 'warehouse_admin':
-      return 'warehouse_dashboard';
+      return 'warehouse_scanner';
     case 'marketing_online':
       return 'marketing_online';
     case 'marketing_offline':
@@ -197,8 +197,10 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       subMenus: {
         marketing_online: isAll || isMktOnline ? 'full_access' : 'none',
         marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
+        marketing_invoice_validation: isAll || isMktOffline || isMktOnline || isSales ? 'full_access' : 'none',
         marketing_to_vo_ro: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
+        marketing_billing_app: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
         // Legacy keys
         kampanye: isAll || isMktOnline ? 'full_access' : 'none',
         leads_pipeline: isAll || isMktOffline ? 'full_access' : 'none',
@@ -210,6 +212,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       subMenus: {
         purchasing_dashboard: isAll || isPurchasing ? 'full_access' : 'none',
         purchasing_stok_opname: isAll || isPurchasing ? 'full_access' : 'none',
+        purchasing_kartu_stok: isAll || isPurchasing ? 'full_access' : 'none',
         purchasing_stock_overview: isAll || isPurchasing ? 'full_access' : 'none',
         purchasing_stock_forecast: isAll || isPurchasing ? 'full_access' : 'none',
         // Legacy keys
@@ -222,6 +225,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       enabled: isAll || isFinance,
       subMenus: {
         finance_dashboard: isAll || isFinance ? 'full_access' : 'none',
+        finance_customer_mapping: isAll || isFinance ? 'full_access' : 'none',
         finance_validasi_form_kirim: isAll || isFinance ? 'full_access' : 'none',
         finance_billing_app: isAll || isFinance ? 'full_access' : 'none',
         // Legacy keys
@@ -363,12 +367,16 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'warehouse_fleet_cubication' },
   marketing_online: { moduleId: 'marketing', subMenuId: 'marketing_online' },
   marketing_offline: { moduleId: 'marketing', subMenuId: 'marketing_offline' },
+  marketing_invoice_validation: { moduleId: 'marketing', subMenuId: 'marketing_invoice_validation' },
   marketing_to_vo_ro: { moduleId: 'marketing', subMenuId: 'marketing_to_vo_ro' },
+  marketing_billing_app: { moduleId: 'marketing', subMenuId: 'marketing_billing_app' },
   purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'purchasing_dashboard' },
   purchasing_stok_opname: { moduleId: 'purchasing', subMenuId: 'purchasing_stok_opname' },
+  purchasing_kartu_stok: { moduleId: 'purchasing', subMenuId: 'purchasing_kartu_stok' },
   purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_overview' },
   purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_forecast' },
   finance_dashboard: { moduleId: 'finance_tax', subMenuId: 'finance_dashboard' },
+  finance_customer_mapping: { moduleId: 'finance_tax', subMenuId: 'finance_customer_mapping' },
   finance_validasi_form_kirim: { moduleId: 'finance_tax', subMenuId: 'finance_validasi_form_kirim' },
   finance_billing_app: { moduleId: 'finance_tax', subMenuId: 'finance_billing_app' },
   hr_dashboard: { moduleId: 'hr', subMenuId: 'hr_dashboard' },
@@ -418,13 +426,17 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   tracking_eval: ['monitoring_sla'],
   marketing_online: ['kampanye'],
   marketing_offline: ['leads_pipeline'],
+  marketing_invoice_validation: ['marketing_offline', 'leads_pipeline', 'laporan_kunjungan'],
   marketing_to_vo_ro: ['leads_pipeline', 'laporan_kunjungan', 'marketing_offline', 'marketing_online'],
   customer_map: ['laporan_kunjungan'],
+  marketing_billing_app: ['leads_pipeline', 'laporan_kunjungan', 'marketing_offline', 'finance_billing_app'],
   purchasing_dashboard: ['permintaan_pembelian'],
   purchasing_stok_opname: ['permintaan_pembelian', 'po_vendor', 'purchasing_dashboard', 'warehouse_opname'],
+  purchasing_kartu_stok: ['purchasing_stok_opname', 'permintaan_pembelian', 'po_vendor', 'purchasing_dashboard', 'warehouse_opname'],
   purchasing_stock_overview: ['po_vendor'],
   purchasing_stock_forecast: ['po_vendor'],
   finance_dashboard: ['kas_bank', 'faktur_pajak'],
+  finance_customer_mapping: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   finance_validasi_form_kirim: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   finance_billing_app: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   hr_dashboard: ['hr_data_karyawan'],
@@ -478,13 +490,11 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'warehouse',
     name: 'Gudang (WMS)',
-    description: 'Database barang, dashboard gudang, master SKU & stok bin, denah rak, inbound/outbound, dan opname gudang integrasi pembelian.',
+    description: 'Database barang, denah rak, inbound/outbound, dan opname gudang integrasi pembelian.',
     borderClass: 'border-emerald-500/30',
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     subMenus: [
       { id: 'warehouse_scanner', name: 'Database Barang' },
-      { id: 'warehouse_dashboard', name: 'Ringkasan Gudang' },
-      { id: 'warehouse_inventory', name: 'Master SKU & Stok Bin' },
       { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
       { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
       { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
@@ -494,19 +504,16 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'sales_admin',
     name: 'Admin Penjualan',
-    description: 'Aktivitas harian admin, jadwal & penugasan admin, durasi muat, pengeluaran & scan barang muat, matriks skill, dan data KPI penjualan.',
+    description: 'Dashboard Admin Penjualan, jadwal & penugasan admin, durasi muat, pengeluaran & scan barang muat, dan data KPI penjualan.',
     borderClass: 'border-indigo-500/30',
     iconBgClass: 'bg-indigo-500/15 text-indigo-400',
     subMenus: [
-      { id: 'sales_dashboard', name: 'Dashboard Sales Hub' },
-      { id: 'sales_activities', name: 'Checklist Aktivitas Harian' },
+      { id: 'sales_dashboard', name: 'Dashboard Admin Penjualan' },
       { id: 'sales_schedules', name: 'Jadwal & Penugasan Admin' },
       { id: 'sales_loading_duration', name: 'Durasi & Kecepatan Muat' },
       { id: 'sales_invoice_so', name: 'Input Faktur / Sales Order (SO)' },
       { id: 'sales_form_kirim', name: 'Form Kirim (Integrasi Finance & Portal Driver)' },
       { id: 'sales_rfid_scanner', name: 'Aplikasi Scan & Foto Muat' },
-      { id: 'sales_skill_matrix', name: 'Matriks Skill Admin' },
-      { id: 'sales_jobdesk', name: 'Pengaturan SOP & Jobdesk' },
       { id: 'sales_kpi_individual', name: 'KPI Individu Staff' },
       { id: 'sales_kpi_fines', name: 'Akumulasi Denda' },
       { id: 'sales_kpi_nusantara', name: 'Persentase Kiriman' },
@@ -516,12 +523,13 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'purchasing',
     name: 'Adm Pembelian (Purchasing)',
-    description: 'Dashboard pembelian, stok opname & kartu stok digital (integrasi gudang), ringkasan stok bahan, dan prediksi kebutuhan reorder.',
+    description: 'Dashboard pembelian, stok opname (integrasi gudang), kartu stok digital, ringkasan stok bahan, dan prediksi kebutuhan reorder.',
     borderClass: 'border-purple-500/30',
     iconBgClass: 'bg-purple-500/15 text-purple-400',
     subMenus: [
       { id: 'purchasing_dashboard', name: 'Dashboard Pembelian' },
-      { id: 'purchasing_stok_opname', name: 'Stok Opname & Kartu Stok' },
+      { id: 'purchasing_stok_opname', name: 'Stok Opname' },
+      { id: 'purchasing_kartu_stok', name: 'Kartu Stok' },
       { id: 'purchasing_stock_overview', name: 'Ringkasan Stok Bahan' },
       { id: 'purchasing_stock_forecast', name: 'Prediksi Kebutuhan Stok' }
     ]
@@ -529,24 +537,27 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'marketing',
     name: 'Marketing',
-    description: 'Marketing online, marketing offline/kunjungan, prosentase TO/VO/RO, serta jaringan toko & wilayah mitra per cabang.',
+    description: 'Marketing online, marketing offline/kunjungan, validasi faktur WA Sales, prosentase TO/VO/RO, serta jaringan toko & wilayah mitra per cabang.',
     borderClass: 'border-amber-500/30',
     iconBgClass: 'bg-amber-500/15 text-amber-400',
     subMenus: [
       { id: 'marketing_online', name: 'Marketing Online & Ads' },
       { id: 'marketing_offline', name: 'Marketing Offline / Kunjungan' },
+      { id: 'marketing_invoice_validation', name: 'Validasi Faktur' },
       { id: 'marketing_to_vo_ro', name: 'Prosentase TO, VO & RO' },
-      { id: 'customer_map', name: 'Jaringan Toko & Wilayah Mitra' }
+      { id: 'customer_map', name: 'Jaringan Toko & Wilayah Mitra' },
+      { id: 'marketing_billing_app', name: 'Aplikasi Penagihan Pelanggan' }
     ]
   },
   {
     id: 'finance_tax',
     name: 'Finance & Tax',
-    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan Aplikasi Mobile Penagihan Pelanggan per cabang.',
+    description: 'Monitoring tagihan & piutang pelanggan, mapping master pelanggan Tempo & COD, validasi form kirim, dan Aplikasi Penagihan Pelanggan.',
     borderClass: 'border-cyan-500/30',
     iconBgClass: 'bg-cyan-500/15 text-cyan-400',
     subMenus: [
       { id: 'finance_dashboard', name: 'Finance & Tagihan Pelanggan' },
+      { id: 'finance_customer_mapping', name: 'Mapping Master Pelanggan' },
       { id: 'finance_validasi_form_kirim', name: 'Validasi Form Kirim' },
       { id: 'finance_billing_app', name: 'Aplikasi Penagihan Pelanggan (Mobile)' }
     ]

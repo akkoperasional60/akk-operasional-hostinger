@@ -676,6 +676,7 @@ html.light .bg-slate-700 {
   border-color: #cbd5e1 !important;
 }
 
+html.light .bg-slate-800\/95,
 html.light .bg-slate-800\/90,
 html.light .bg-slate-800\/80,
 html.light .bg-slate-800\/75,
@@ -686,6 +687,14 @@ html.light .bg-slate-800\/40,
 html.light .bg-slate-800\/30 {
   background-color: #f1f5f9 !important;
   border-color: #cbd5e1 !important;
+}
+
+html.light .from-slate-900.to-indigo-950,
+html.light .from-slate-900.via-slate-900.to-indigo-950,
+html.light .from-slate-950.to-slate-900 {
+  background-image: linear-gradient(to bottom right, #ffffff, #f8fafc, #eef2ff) !important;
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
 }
 
 html.light .bg-slate-50 {

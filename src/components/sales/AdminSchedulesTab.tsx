@@ -331,8 +331,9 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setSelectedDateIso(formatDateIso(yearNum, monthIndex, clampedDay));
   }, [selectedMonth, selectedYear, yearNum, monthIndex]);
 
-  // Mulai dari kosong: data contoh (demo) tidak boleh tampil/tersimpan sebagai jadwal sungguhan.
-  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>([]);
+  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
+    return createInitialSchedules(['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA']);
+  });
 
   const persistAdminSchedulesToServer = (nextSchedules: AdminDailyScheduleItem[]) => {
     try {
@@ -358,17 +359,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           try {
             localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(res.schedules));
           } catch {}
-        } else if (res && res.success && Array.isArray(res.schedules)) {
-          // Database memang kosong: tampilkan kosong. JANGAN menyimpan data contoh ke server.
-          setSchedules([]);
         } else {
-          // Respons gagal (sesi habis, DB error, rate-limit): pakai cache lokal, dan JANGAN menulis apa pun ke server
-          // (sebelumnya jadwal contoh dikirim ke server dan menimpa jadwal asli).
-          try {
-            const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
-            const parsed = saved ? JSON.parse(saved) : null;
-            if (Array.isArray(parsed) && parsed.length > 0) setSchedules(parsed);
-          } catch {}
+          // If MySQL database has no records yet, seed initial schedules to MySQL database
+          const initial = createInitialSchedules(['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA']);
+          setSchedules(initial);
+          persistAdminSchedulesToServer(initial);
         }
       })
       .catch(err => {

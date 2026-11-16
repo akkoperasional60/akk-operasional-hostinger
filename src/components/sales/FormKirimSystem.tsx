@@ -683,8 +683,10 @@ export const SalesFormKirimTab: React.FC = () => {
   }, [records]);
 
   useEffect(() => {
+    void formKirimStore.hydrateFromServer(true);
     const unsubForm = formKirimStore.subscribe(() => {
-      setRecords(formKirimStore.getAll());
+      const latest = formKirimStore.getAll();
+      setRecords(latest);
     });
     const unsubBranch = branchStore.subscribe(() => {
       setBranches(branchStore.getBranches());
@@ -789,16 +791,34 @@ export const SalesFormKirimTab: React.FC = () => {
     return sortItemsList(rawTempo);
   }, [invoiceItems, sortField, sortDirection, tableSearch]);
 
-  // Perhitungan SUM / Jumlah COLY dari seluruh faktur di area tersebut
+  const countUniqueCustomers = (list: FormKirimInvoiceItem[]): number => {
+    const uniqueSet = new Set<string>();
+    list.forEach(it => {
+      const normalized = String(it.namaPelanggan || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toUpperCase();
+      if (normalized) uniqueSet.add(normalized);
+    });
+    return uniqueSet.size;
+  };
+
+  // Perhitungan SUM / Jumlah COLY & Jumlah Pelanggan Unik (Remove Duplicate)
   const summaryTotals = useMemo(() => {
     const codColy = codItems.reduce((acc, it) => acc + (Number(it.coly) || 0), 0);
     const tempoColy = tempoItems.reduce((acc, it) => acc + (Number(it.coly) || 0), 0);
     const codNilai = codItems.reduce((acc, it) => acc + (Number(it.nilaiFaktur) || 0), 0);
     const tempoNilai = tempoItems.reduce((acc, it) => acc + (Number(it.nilaiFaktur) || 0), 0);
+    const uniqueCodCustomers = countUniqueCustomers(codItems);
+    const uniqueTempoCustomers = countUniqueCustomers(tempoItems);
+    const uniqueTotalCustomers = countUniqueCustomers([...codItems, ...tempoItems]);
     return {
       codCount: codItems.length,
       tempoCount: tempoItems.length,
       totalInvoices: codItems.length + tempoItems.length,
+      uniqueCodCustomers,
+      uniqueTempoCustomers,
+      uniqueTotalCustomers,
       codColy,
       tempoColy,
       totalColy: codColy + tempoColy,
@@ -823,6 +843,16 @@ export const SalesFormKirimTab: React.FC = () => {
     [previewSourceRows]
   );
 
+  const previewUniqueStats = useMemo(() => {
+    const totalUniqueCustomers = countUniqueCustomers(previewSourceRows);
+    return {
+      totalUniqueCustomers,
+      codUniqueCustomers: countUniqueCustomers(previewCodRows),
+      tempoUniqueCustomers: countUniqueCustomers(previewTempoRows),
+      duplicateInvoicesMerged: Math.max(0, previewSourceRows.length - totalUniqueCustomers)
+    };
+  }, [previewSourceRows, previewCodRows, previewTempoRows]);
+
   // Handler baca file Excel / CSV sesuai Format Gambar ke-2
   const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -841,7 +871,6 @@ export const SalesFormKirimTab: React.FC = () => {
       }
 
       let headerRowIndex = -1;
-      // Default sesuai Gambar ke-2: No. Faktur | Tgl Faktur | Nama Pelanggan | Nilai Faktur | COLY | BAYAR | Alamat 1 | Keterangan | Net Days Syarat Pelanggan
       let colMap = {
         noFaktur: 0,
         tglFaktur: 1,
@@ -871,7 +900,6 @@ export const SalesFormKirimTab: React.FC = () => {
           if (idxPelanggan !== -1) usedIndices.add(idxPelanggan);
 
           const findIdx = (patterns: string[], fallback: number): number => {
-            // 1. Cek kecocokan persis (exact match) sesuai urutan prioritas pattern
             for (const p of patterns) {
               const idx = lowerCells.findIndex((c: string, i: number) => !usedIndices.has(i) && c === p);
               if (idx !== -1) {
@@ -879,7 +907,6 @@ export const SalesFormKirimTab: React.FC = () => {
                 return idx;
               }
             }
-            // 2. Cek kecocokan sebagian (substring) sesuai urutan prioritas pattern
             for (const p of patterns) {
               const idx = lowerCells.findIndex((c: string, i: number) => !usedIndices.has(i) && c.includes(p));
               if (idx !== -1) {
@@ -939,12 +966,9 @@ export const SalesFormKirimTab: React.FC = () => {
         const rawNetDaysStr = String(row[colMap.netDays] ?? '').trim();
         const netDaysVal = parseNumericValue(rawNetDaysStr);
 
-        // Pelanggan COD: Net Days Syarat Pelanggan bernilai 0
-        // Pelanggan TEMPO: memiliki nilai pada Net Days Syarat Pelanggan (> 0)
         const paymentCategory: 'COD' | 'TEMPO' = netDaysVal > 0 ? 'TEMPO' : 'COD';
         const isOtherSbu = isNonGudangFaktur(rawNoFaktur);
 
-        // Kolom COLY dikosongi (0) terlebih dahulu agar diisi oleh Admin per faktur
         parsedItems.push({
           id: `fki-${Date.now()}-${r}`,
           noFaktur: rawNoFaktur.toUpperCase() || `FK-${r}`,
@@ -966,21 +990,29 @@ export const SalesFormKirimTab: React.FC = () => {
         return;
       }
 
+      const uniqueCount = countUniqueCustomers(parsedItems);
       setExcelFileName(file.name);
       setExcelPreviewRows(parsedItems);
       setShowUploadPreview(true);
+      showToast(
+        `Berhasil membaca ${parsedItems.length} faktur (${uniqueCount} pelanggan).`
+      );
     } catch (err: any) {
       console.error('[Form Kirim Upload Error]', err);
       showToast(`Gagal membaca file: ${err?.message || 'Format tidak didukung'}`);
     }
   };
 
-  // Simpan Form Kirim dari halaman Upload & Preview (tanpa keterangan area kirim pada label tombol)
+  // Simpan Form Kirim dari halaman Upload & Preview lalu langsung buka Aplikasi Portal Driver
   const handleSaveFromUploadPage = () => {
-    if (!uploadDraftAreaKirim.trim()) {
-      showToast('Silakan pilih Area Kirim terlebih dahulu sebelum menyimpan.');
-      return;
-    }
+    const resolvedArea = (
+      uploadDraftAreaKirim ||
+      selectedAreaKirim ||
+      deliveryAreaOptions[0] ||
+      'ROGOJAMPI'
+    )
+      .trim()
+      .toUpperCase();
 
     const targetItems =
       excelPreviewRows.length > 0
@@ -989,10 +1021,10 @@ export const SalesFormKirimTab: React.FC = () => {
           : [...invoiceItems, ...excelPreviewRows]
         : invoiceItems;
 
-    const saved = persistFormKirimToStore(targetItems, uploadDraftAreaKirim, uploadDraftTanggalKirim);
+    const saved = persistFormKirimToStore(targetItems, resolvedArea, uploadDraftTanggalKirim);
     if (!saved) return;
 
-    setSelectedAreaKirim(uploadDraftAreaKirim);
+    setSelectedAreaKirim(resolvedArea);
     setTanggalKirim(uploadDraftTanggalKirim);
     if (excelPreviewRows.length > 0) {
       setInvoiceItems(targetItems);
@@ -1002,87 +1034,6 @@ export const SalesFormKirimTab: React.FC = () => {
     setExcelFileName('');
     setExcelPreviewRows([]);
     setShowUploadPreview(false);
-  };
-
-  // Download Template Excel persis sesuai Gambar ke-2 (9 kolom: No. Faktur .. Net Days Syarat Pelanggan)
-  const handleDownloadUploadTemplate = () => {
-    const sampleDate = formatExcelDateValue(uploadDraftTanggalKirim || tanggalKirim);
-    const sourceRows =
-      invoiceItems.length > 0
-        ? invoiceItems
-        : [
-            {
-              noFaktur: 'FJ02-1126-0799',
-              tglFaktur: sampleDate,
-              namaPelanggan: 'BP FREDDY KTPNG',
-              nilaiFaktur: 2746062,
-              bayar: '',
-              alamatPelanggan: 'JL RAYA',
-              keterangan: '',
-              netDays: 30
-            },
-            {
-              noFaktur: 'FJ02-1126-1080',
-              tglFaktur: sampleDate,
-              namaPelanggan: 'TK BELLIA',
-              nilaiFaktur: 2725370,
-              bayar: '',
-              alamatPelanggan: 'SUMBER AYU',
-              keterangan: '',
-              netDays: 0
-            },
-            {
-              noFaktur: 'FJ02-1126-1092',
-              tglFaktur: sampleDate,
-              namaPelanggan: 'TK ANEKA BARU',
-              nilaiFaktur: 4741801,
-              bayar: '',
-              alamatPelanggan: 'JLN',
-              keterangan: '',
-              netDays: 7
-            }
-          ];
-
-    const wsData: any[][] = [
-      [
-        'No. Faktur',
-        'Tgl Faktur',
-        'Nama Pelanggan',
-        'Nilai Faktur',
-        'COLY',
-        'BAYAR',
-        'Alamat 1',
-        'Keterangan',
-        'Net Days Syarat Pelanggan'
-      ],
-      ...sourceRows.map(it => [
-        it.noFaktur,
-        it.tglFaktur,
-        it.namaPelanggan,
-        it.nilaiFaktur,
-        '',
-        it.bayar,
-        it.alamatPelanggan,
-        it.keterangan,
-        formatNetDaysDisplay(it.netDays)
-      ])
-    ];
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 14 },
-      { wch: 30 },
-      { wch: 16 },
-      { wch: 8 },
-      { wch: 14 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 24 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Template Form Kirim');
-    XLSX.writeFile(wb, 'Template_Form_Kirim.xlsx');
   };
 
   // Tambah baris manual tepat di bawah baris yang diklik tombol "+" pada kolom NO
@@ -1111,7 +1062,6 @@ export const SalesFormKirimTab: React.FC = () => {
     });
   };
 
-  // Tambah baris manual di dalam kelompok COD atau TEMPO dari sel NO pada baris header grup
   const handleInsertManualRowInSection = (category: 'COD' | 'TEMPO') => {
     const newRow: FormKirimInvoiceItem = {
       id: `fki-manual-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1158,43 +1108,137 @@ export const SalesFormKirimTab: React.FC = () => {
     setInvoiceItems(prev => prev.filter(item => item.id !== id));
   };
 
+  // Pindah baris ke atas: mendukung perpindahan lintas grup (dari TEMPO naik ke COD)
   const handleMoveItemUp = (id: string) => {
+    if (sortField !== 'default') {
+      setSortField('default');
+    }
     setInvoiceItems(prev => {
-      const idx = prev.findIndex(item => item.id === id);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      const temp = next[idx];
-      next[idx] = next[idx - 1];
-      next[idx - 1] = temp;
-      return next;
+      const currentCod = prev.filter(it => {
+        const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+        return cat === 'COD';
+      });
+      const currentTempo = prev.filter(it => {
+        const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+        return cat === 'TEMPO';
+      });
+
+      const codIdx = currentCod.findIndex(item => item.id === id);
+      if (codIdx !== -1) {
+        if (codIdx === 0) return prev;
+        const nextCod = [...currentCod];
+        const temp = nextCod[codIdx];
+        nextCod[codIdx] = nextCod[codIdx - 1];
+        nextCod[codIdx - 1] = temp;
+        return [...nextCod, ...currentTempo];
+      }
+
+      const tempoIdx = currentTempo.findIndex(item => item.id === id);
+      if (tempoIdx !== -1) {
+        if (tempoIdx === 0) {
+          // Baris teratas TEMPO naik menjadi baris terakhir di kelompok COD
+          const targetItem = currentTempo[0];
+          const promotedToCod: FormKirimInvoiceItem = {
+            ...targetItem,
+            paymentCategory: 'COD',
+            netDays: 0
+          };
+          const remainingTempo = currentTempo.slice(1);
+          showToast(
+            `${targetItem.namaPelanggan || 'Pelanggan'} dinaikkan dari TEMPO ke kategori COD.`
+          );
+          return [...currentCod, promotedToCod, ...remainingTempo];
+        }
+        const nextTempo = [...currentTempo];
+        const temp = nextTempo[tempoIdx];
+        nextTempo[tempoIdx] = nextTempo[tempoIdx - 1];
+        nextTempo[tempoIdx - 1] = temp;
+        return [...currentCod, ...nextTempo];
+      }
+
+      return prev;
     });
   };
 
+  // Pindah baris ke bawah: mendukung perpindahan lintas grup (dari COD turun ke TEMPO)
   const handleMoveItemDown = (id: string) => {
+    if (sortField !== 'default') {
+      setSortField('default');
+    }
     setInvoiceItems(prev => {
-      const idx = prev.findIndex(item => item.id === id);
-      if (idx === -1 || idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      const temp = next[idx];
-      next[idx] = next[idx + 1];
-      next[idx + 1] = temp;
-      return next;
+      const currentCod = prev.filter(it => {
+        const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+        return cat === 'COD';
+      });
+      const currentTempo = prev.filter(it => {
+        const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
+        return cat === 'TEMPO';
+      });
+
+      const codIdx = currentCod.findIndex(item => item.id === id);
+      if (codIdx !== -1) {
+        if (codIdx === currentCod.length - 1) {
+          // Baris terbawah COD turun menjadi baris pertama di kelompok TEMPO
+          const targetItem = currentCod[codIdx];
+          const movedToTempo: FormKirimInvoiceItem = {
+            ...targetItem,
+            paymentCategory: 'TEMPO',
+            netDays: targetItem.netDays > 0 ? targetItem.netDays : 7
+          };
+          const remainingCod = currentCod.slice(0, codIdx);
+          showToast(
+            `${targetItem.namaPelanggan || 'Pelanggan'} dipindahkan dari COD ke kategori TEMPO.`
+          );
+          return [...remainingCod, movedToTempo, ...currentTempo];
+        }
+        const nextCod = [...currentCod];
+        const temp = nextCod[codIdx];
+        nextCod[codIdx] = nextCod[codIdx + 1];
+        nextCod[codIdx + 1] = temp;
+        return [...nextCod, ...currentTempo];
+      }
+
+      const tempoIdx = currentTempo.findIndex(item => item.id === id);
+      if (tempoIdx !== -1) {
+        if (tempoIdx >= currentTempo.length - 1) return prev;
+        const nextTempo = [...currentTempo];
+        const temp = nextTempo[tempoIdx];
+        nextTempo[tempoIdx] = nextTempo[tempoIdx + 1];
+        nextTempo[tempoIdx + 1] = temp;
+        return [...currentCod, ...nextTempo];
+      }
+
+      return prev;
     });
   };
 
   const handleToggleCategory = (id: string) => {
-    setInvoiceItems(prev =>
-      prev.map(item => {
-        if (item.id !== id) return item;
-        const currentCat = item.paymentCategory || (Number(item.netDays) > 0 ? 'TEMPO' : 'COD');
-        const nextCat = currentCat === 'COD' ? 'TEMPO' : 'COD';
-        return {
-          ...item,
-          paymentCategory: nextCat,
-          netDays: nextCat === 'TEMPO' && item.netDays <= 0 ? 7 : (nextCat === 'COD' ? 0 : item.netDays)
-        };
-      })
-    );
+    if (sortField !== 'default') {
+      setSortField('default');
+    }
+    setInvoiceItems(prev => {
+      const target = prev.find(item => item.id === id);
+      if (!target) return prev;
+      const currentCat = target.paymentCategory || (Number(target.netDays) > 0 ? 'TEMPO' : 'COD');
+      const nextCat: 'COD' | 'TEMPO' = currentCat === 'COD' ? 'TEMPO' : 'COD';
+      const updatedItem: FormKirimInvoiceItem = {
+        ...target,
+        paymentCategory: nextCat,
+        netDays: nextCat === 'TEMPO' && target.netDays <= 0 ? 7 : nextCat === 'COD' ? 0 : target.netDays
+      };
+
+      const others = prev.filter(item => item.id !== id);
+      const otherCod = others.filter(it => (it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD')) === 'COD');
+      const otherTempo = others.filter(it => (it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD')) === 'TEMPO');
+
+      if (nextCat === 'COD') {
+        showToast(`${target.namaPelanggan || 'Pelanggan'} dipindahkan ke kelompok COD.`);
+        return [...otherCod, updatedItem, ...otherTempo];
+      } else {
+        showToast(`${target.namaPelanggan || 'Pelanggan'} dipindahkan ke kelompok TEMPO.`);
+        return [...otherCod, updatedItem, ...otherTempo];
+      }
+    });
   };
 
   const persistFormKirimToStore = (
@@ -1202,23 +1246,28 @@ export const SalesFormKirimTab: React.FC = () => {
     areaName: string,
     deliveryDate: string
   ): boolean => {
-    const cleanArea = (areaName || '').trim().toUpperCase();
-    if (!cleanArea) {
-      showToast('Silakan pilih Area Kirim terlebih dahulu sebelum menyimpan.');
-      return false;
-    }
+    const cleanArea = (areaName || selectedAreaKirim || deliveryAreaOptions[0] || 'ROGOJAMPI')
+      .trim()
+      .toUpperCase();
 
     if (itemsToSave.length === 0) {
       showToast('Tabel Form Kirim masih kosong. Silakan upload file atau tambah faktur manual terlebih dahulu.');
       return false;
     }
 
-    const codRows = itemsToSave.filter(i => Number(i.netDays) <= 0);
-    const tempoRows = itemsToSave.filter(i => Number(i.netDays) > 0);
+    const codRows = itemsToSave.filter(i => {
+      const cat = i.paymentCategory || (Number(i.netDays) > 0 ? 'TEMPO' : 'COD');
+      return cat === 'COD';
+    });
+    const tempoRows = itemsToSave.filter(i => {
+      const cat = i.paymentCategory || (Number(i.netDays) > 0 ? 'TEMPO' : 'COD');
+      return cat === 'TEMPO';
+    });
     const totalColy = itemsToSave.reduce((acc, i) => acc + (Number(i.coly) || 0), 0);
     const codNilai = codRows.reduce((acc, i) => acc + (Number(i.nilaiFaktur) || 0), 0);
     const tempoNilai = tempoRows.reduce((acc, i) => acc + (Number(i.nilaiFaktur) || 0), 0);
     const totalNilai = codNilai + tempoNilai;
+    const uniqueCustomers = countUniqueCustomers(itemsToSave);
 
     const liveSchedules = logisticsStore.getSchedules();
     const matchedScheduleForPayload = liveSchedules.find(s => {
@@ -1271,7 +1320,7 @@ export const SalesFormKirimTab: React.FC = () => {
       periodLabel: periodText,
       areaKirim: cleanArea,
       tanggalKirim: deliveryDate,
-      storeName: `AREA ${cleanArea} (${codRows.length} COD • ${tempoRows.length} TEMPO)`,
+      storeName: `AREA ${cleanArea} (${uniqueCustomers} Pelanggan • ${codRows.length} COD • ${tempoRows.length} TEMPO)`,
       storeAddress:
         uniqueAddresses.length > 0
           ? `Rute ${cleanArea}: ${uniqueAddresses.join(', ')}`
@@ -1283,7 +1332,7 @@ export const SalesFormKirimTab: React.FC = () => {
       vehicleType: selectedFleet?.vehicleType || 'CDD Long Box',
       driverName: resolvedDriver,
       helperName: resolvedHelper,
-      itemsSummary: `${itemsToSave.length} Faktur Sales (${codRows.length} Faktur COD • ${tempoRows.length} Faktur TEMPO)`,
+      itemsSummary: `${uniqueCustomers} Pelanggan (${itemsToSave.length} Faktur: ${codRows.length} COD • ${tempoRows.length} TEMPO)`,
       totalColli: totalColy,
       totalNominalFaktur: totalNilai,
       sisaPiutangToko: tempoNilai,
@@ -1294,7 +1343,7 @@ export const SalesFormKirimTab: React.FC = () => {
           ? ('COD (Bayar di Tempat)' as const)
           : ('Kredit / Tempo' as const),
       createdByAdmin: currentUser?.fullName || 'Admin Penjualan',
-      salesNotes: `Form Pengiriman/Sales Area ${cleanArea} (${codRows.length} COD, ${tempoRows.length} TEMPO, Total ${totalColy} COLY)`,
+      salesNotes: `Form Pengiriman/Sales Area ${cleanArea} (${uniqueCustomers} Pelanggan, ${codRows.length} COD, ${tempoRows.length} TEMPO, Total ${totalColy} COLY)`,
       invoiceItems: itemsToSave.map(it => ({ ...it })),
       codCount: codRows.length,
       tempoCount: tempoRows.length,
@@ -1304,22 +1353,43 @@ export const SalesFormKirimTab: React.FC = () => {
       driverStatus: 'ready_for_driver' as const
     };
 
+    let savedRecordId = activeSavedRecordId;
     if (activeSavedRecordId) {
       formKirimStore.updateFormKirim(activeSavedRecordId, payload);
       setViewMode('saved_preview');
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (${itemsToSave.length} Faktur • Total COLY: ${totalColy}).`);
+      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur). Membuka Portal Driver...`);
     } else {
       const created = formKirimStore.addFormKirim(payload);
+      savedRecordId = created.id;
       setActiveSavedRecordId(created.id);
       setViewMode('saved_preview');
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (Total COLY: ${totalColy}).`);
+      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (${uniqueCustomers} Pelanggan). Membuka Portal Driver...`);
     }
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('akk-navigate-tab', {
+          detail: {
+            tab: 'driver_portal',
+            subTab: 'form_kirim',
+            formKirimId: savedRecordId
+          }
+        })
+      );
+    } catch {
+      // ignore navigation dispatch errors
+    }
+
     return true;
   };
 
-  // Simpan Form Kirim dari halaman tabel utama
+  // Simpan Form Kirim dari halaman tabel utama -> langsung masuk ke Aplikasi Portal Driver
   const handleSaveFormKirim = () => {
-    persistFormKirimToStore(invoiceItems, selectedAreaKirim, tanggalKirim);
+    const resolvedArea = selectedAreaKirim || uploadDraftAreaKirim || deliveryAreaOptions[0] || 'ROGOJAMPI';
+    if (!selectedAreaKirim) {
+      setSelectedAreaKirim(resolvedArea);
+    }
+    persistFormKirimToStore(invoiceItems, resolvedArea, tanggalKirim);
   };
 
   // Toggle header column sort
@@ -1357,7 +1427,7 @@ export const SalesFormKirimTab: React.FC = () => {
                   Upload File Excel Form Kirim
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Pilih area kirim & tanggal pengiriman, lalu unggah file Excel faktur
+                  Pilih area kirim &amp; tanggal pengiriman, lalu unggah file Excel faktur
                 </p>
               </div>
             </div>
@@ -1433,20 +1503,12 @@ export const SalesFormKirimTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Input File Excel */}
+          {/* Input File Excel (Tanpa Tombol Template Excel) */}
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 FILE EXCEL FORM KIRIM (.XLSX / .XLS / .CSV)
               </label>
-              <button
-                type="button"
-                onClick={handleDownloadUploadTemplate}
-                className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Template Form Kirim</span>
-              </button>
             </div>
 
             <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 bg-slate-50/60 dark:bg-slate-950/50 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1461,10 +1523,49 @@ export const SalesFormKirimTab: React.FC = () => {
                 <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>
-                    {excelFileName} ({excelPreviewRows.length} baris terbaca)
+                    {excelFileName} ({excelPreviewRows.length} Faktur • {previewUniqueStats.totalUniqueCustomers} Pelanggan)
                   </span>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Ringkasan Otomatis Total Customer */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60">
+              <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                Total Customer
+              </div>
+              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.totalUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Total {previewSourceRows.length} nomor faktur
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60">
+              <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                Pelanggan COD
+              </div>
+              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.codUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {previewCodRows.length} Faktur COD (Net Days = 0)
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60">
+              <div className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">
+                Pelanggan TEMPO
+              </div>
+              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.tempoUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {previewTempoRows.length} Faktur TEMPO (Net Days &gt; 0)
+              </div>
             </div>
           </div>
 
@@ -1483,37 +1584,40 @@ export const SalesFormKirimTab: React.FC = () => {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="text-sm font-black text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
                   <span>Preview Sebelum Simpan</span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs bg-yellow-300 text-[#000080] font-bold">
-                    COD: {previewCodRows.length} (Net Days = 0)
+                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-indigo-600 text-white font-bold">
+                    {previewUniqueStats.totalUniqueCustomers} Pelanggan
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-300 font-bold border border-amber-300 dark:border-amber-700">
-                    TEMPO: {previewTempoRows.length} (Net Days &gt; 0)
+                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-amber-300 text-slate-900 font-bold">
+                    COD: {previewUniqueStats.codUniqueCustomers} Pelanggan ({previewCodRows.length} Faktur)
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-red-600 text-white font-bold">
+                    TEMPO: {previewUniqueStats.tempoUniqueCustomers} Pelanggan ({previewTempoRows.length} Faktur)
                   </span>
                 </h4>
               </div>
 
-              <div className="overflow-x-auto rounded-2xl border border-slate-300 dark:border-slate-700 max-h-[420px]">
-                <table className="w-full text-xs text-left border-collapse bg-white text-slate-900">
-                  <thead className="bg-slate-50 text-[#000080] font-bold text-[11px] sticky top-0 z-10 border-b-2 border-slate-400">
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 max-h-[420px]">
+                <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-[11px] sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="py-2 px-2 text-center border border-slate-300 w-10">NO</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[125px]">No. Faktur</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[96px]">Tgl Faktur</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[170px]">Nama Pelanggan</th>
-                      <th className="py-2 px-2.5 text-right border border-slate-300 min-w-[125px]">Nilai Faktur</th>
-                      <th className="py-2 px-2 text-center border border-slate-300 w-16">COLY</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[90px]">BAYAR</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[150px]">Alamat 1</th>
-                      <th className="py-2 px-2.5 border border-slate-300 min-w-[140px]">Keterangan</th>
-                      <th className="py-2 px-2 text-center border border-slate-300 w-24">Net Days Syarat Pelanggan</th>
-                      <th className="py-2 px-2 text-center border border-slate-300 w-20">Kategori</th>
+                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-10">NO</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[125px]">No. Faktur</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[96px]">Tgl Faktur</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[170px]">Nama Pelanggan</th>
+                      <th className="py-2.5 px-3 text-right border-r border-slate-200 dark:border-slate-700 min-w-[125px]">Nilai Faktur</th>
+                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-16">COLY</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[90px]">BAYAR</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[150px]">Alamat 1</th>
+                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[140px]">Keterangan</th>
+                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-24">Net Days</th>
+                      <th className="py-2.5 px-2.5 text-center w-20">Kategori</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {previewCodRows.length > 0 && (
                       <tr>
-                        <td colSpan={11} className="py-1 px-3 font-bold text-[#000080] bg-[#FFFF00] border border-slate-300">
-                          COD (Net Days Syarat Pelanggan = 0)
+                        <td colSpan={11} className="py-2 px-3 font-black text-amber-950 bg-amber-300/90 dark:bg-amber-500/30 dark:text-amber-200">
+                          COD — {previewUniqueStats.codUniqueCustomers} PELANGGAN ({previewCodRows.length} FAKTUR)
                         </td>
                       </tr>
                     )}
@@ -1523,42 +1627,42 @@ export const SalesFormKirimTab: React.FC = () => {
                       return (
                         <tr
                           key={row.id || `cod-${idx}`}
-                          className={`hover:bg-blue-50/40 ${isRowBold ? 'font-bold' : 'font-normal'}`}
+                          className={`hover:bg-blue-50/40 dark:hover:bg-slate-800/50 ${isRowBold ? 'font-bold' : 'font-normal'}`}
                         >
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">{idx + 1}</td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">{idx + 1}</td>
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.noFaktur}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.tglFaktur}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.namaPelanggan}
                           </td>
-                          <td className="py-1.5 px-2.5 text-right border border-slate-300 whitespace-nowrap tabular-nums align-middle">
+                          <td className="py-2 px-3 text-right border-r border-slate-200 dark:border-slate-800 whitespace-nowrap tabular-nums align-middle">
                             Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
                           </td>
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">
+                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
                             {row.coly > 0 ? row.coly : ''}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.bayar}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.alamatPelanggan}
                           </td>
                           <td
-                            className={`py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle ${
-                              hasKet ? 'bg-[#FFFF00] font-semibold text-slate-950' : ''
+                            className={`py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle ${
+                              hasKet ? 'bg-amber-100 dark:bg-amber-950/60 font-semibold text-amber-950 dark:text-amber-200' : ''
                             }`}
                           >
                             {row.keterangan}
                           </td>
-                          <td className="py-1.5 px-2 text-center font-mono border border-slate-300 align-middle">
+                          <td className="py-2 px-2.5 text-center font-mono border-r border-slate-200 dark:border-slate-800 align-middle">
                             {formatNetDaysDisplay(row.netDays)}
                           </td>
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">
-                            <span className="px-2 py-0.5 rounded bg-[#FFFF00] text-[#000080] font-bold text-[10px]">
+                          <td className="py-2 px-2.5 text-center align-middle">
+                            <span className="px-2 py-0.5 rounded-md bg-amber-300 text-slate-900 font-black text-[10px]">
                               COD
                             </span>
                           </td>
@@ -1568,8 +1672,8 @@ export const SalesFormKirimTab: React.FC = () => {
 
                     {previewTempoRows.length > 0 && (
                       <tr>
-                        <td colSpan={11} className="py-1 px-3 font-bold text-[#000080] bg-[#FFFF00] border border-slate-300">
-                          TEMPO (Net Days Syarat Pelanggan &gt; 0)
+                        <td colSpan={11} className="py-2 px-3 font-black text-white bg-red-600">
+                          TEMPO — {previewUniqueStats.tempoUniqueCustomers} PELANGGAN ({previewTempoRows.length} FAKTUR)
                         </td>
                       </tr>
                     )}
@@ -1579,44 +1683,44 @@ export const SalesFormKirimTab: React.FC = () => {
                       return (
                         <tr
                           key={row.id || `tempo-${idx}`}
-                          className={`hover:bg-blue-50/40 ${isRowBold ? 'font-bold' : 'font-normal'}`}
+                          className={`hover:bg-rose-50/40 dark:hover:bg-slate-800/50 ${isRowBold ? 'font-bold' : 'font-normal'}`}
                         >
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">
+                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
                             {previewCodRows.length + idx + 1}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.noFaktur}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.tglFaktur}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.namaPelanggan}
                           </td>
-                          <td className="py-1.5 px-2.5 text-right border border-slate-300 whitespace-nowrap tabular-nums align-middle">
+                          <td className="py-2 px-3 text-right border-r border-slate-200 dark:border-slate-800 whitespace-nowrap tabular-nums align-middle">
                             Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
                           </td>
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">
+                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
                             {row.coly > 0 ? row.coly : ''}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.bayar}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle">
+                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
                             {row.alamatPelanggan}
                           </td>
                           <td
-                            className={`py-1.5 px-2.5 border border-slate-300 whitespace-normal break-words align-middle ${
-                              hasKet ? 'bg-[#FFFF00] font-semibold text-slate-950' : ''
+                            className={`py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle ${
+                              hasKet ? 'bg-amber-100 dark:bg-amber-950/60 font-semibold text-amber-950 dark:text-amber-200' : ''
                             }`}
                           >
                             {row.keterangan}
                           </td>
-                          <td className="py-1.5 px-2 text-center font-mono border border-slate-300 align-middle">
+                          <td className="py-2 px-2.5 text-center font-mono border-r border-slate-200 dark:border-slate-800 align-middle">
                             {formatNetDaysDisplay(row.netDays)}
                           </td>
-                          <td className="py-1.5 px-2 text-center border border-slate-300 align-middle">
-                            <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-950 font-bold text-[10px]">
+                          <td className="py-2 px-2.5 text-center align-middle">
+                            <span className="px-2 py-0.5 rounded-md bg-red-600 text-white font-black text-[10px]">
                               TEMPO
                             </span>
                           </td>
@@ -1677,24 +1781,23 @@ export const SalesFormKirimTab: React.FC = () => {
         </div>
       )}
 
-      {/* Header Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xs">
+      {/* Executive Header Tanpa Logo + Ringkasan Total Customer */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 space-y-5 shadow-sm">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
-              <Send className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+          <div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
                 Form Kirim Barang
               </h1>
-              <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
-                <span>
-                  {summaryTotals.codCount} COD &bull; {summaryTotals.tempoCount} TEMPO &bull; Total COLY:{' '}
-                  <strong className="text-slate-900 dark:text-white">{summaryTotals.totalColy}</strong>
+              {selectedAreaKirim && (
+                <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[11px] font-black uppercase">
+                  AREA {selectedAreaKirim}
                 </span>
-              </div>
+              )}
             </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Daftar faktur pengiriman COD &amp; Tempo per area kirim.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -1714,7 +1817,7 @@ export const SalesFormKirimTab: React.FC = () => {
                 setShowUploadPreview(false);
                 setIsUploadExcelOpen(true);
               }}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-sm"
             >
               <Upload className="w-4 h-4" />
               <span>Upload File Excel</span>
@@ -1722,22 +1825,78 @@ export const SalesFormKirimTab: React.FC = () => {
 
             <button
               type="button"
-              onClick={handleDownloadUploadTemplate}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-              title="Unduh template Excel"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Template Excel</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleSaveFormKirim}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black flex items-center gap-2 transition cursor-pointer shadow-md shadow-blue-600/20"
             >
               <Save className="w-4 h-4" />
               <span>Simpan Form Kirim</span>
             </button>
+          </div>
+        </div>
+
+        {/* KPI Cards: Total Customer, Pelanggan COD, Pelanggan TEMPO, Total COLY, Total Tagihan COD */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+          <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/25 border border-indigo-200/80 dark:border-indigo-800/60">
+            <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+              Total Customer
+            </div>
+            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+              {summaryTotals.uniqueTotalCustomers}{' '}
+              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              {summaryTotals.totalInvoices} Faktur Pengiriman
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-300/80 dark:border-amber-800/60">
+            <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+              Pelanggan COD
+            </div>
+            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+              {summaryTotals.uniqueCodCustomers}{' '}
+              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+            </div>
+            <div className="text-[11px] text-amber-900/80 dark:text-amber-300/80 font-semibold tabular-nums">
+              {summaryTotals.codCount} Faktur • Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-rose-50/70 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-800/60">
+            <div className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">
+              Pelanggan TEMPO
+            </div>
+            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+              {summaryTotals.uniqueTempoCustomers}{' '}
+              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+            </div>
+            <div className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold tabular-nums">
+              {summaryTotals.tempoCount} Faktur • Rp {formatNominalRibuan(summaryTotals.tempoNilai) || '0'}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200 dark:border-blue-800/60">
+            <div className="text-[10px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-400">
+              Total Muatan COLY
+            </div>
+            <div className="text-lg sm:text-xl font-black text-blue-700 dark:text-blue-300 mt-0.5 tabular-nums">
+              {summaryTotals.totalColy} <span className="text-xs font-bold">COLY</span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+              COD: {summaryTotals.codColy} • TEMPO: {summaryTotals.tempoColy}
+            </div>
+          </div>
+
+          <div className="col-span-2 lg:col-span-1 p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800/60">
+            <div className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+              Total Tagihan COD
+            </div>
+            <div className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300 mt-0.5 tabular-nums truncate">
+              Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums truncate">
+              Total Semua: Rp {formatNominalRibuan(summaryTotals.totalNilai) || '0'}
+            </div>
           </div>
         </div>
       </div>
@@ -1909,143 +2068,170 @@ export const SalesFormKirimTab: React.FC = () => {
       </div>
 
       {/* ===================================================================== */}
-      {/* TABEL TEMPLATE FORM KIRIM (ANUGRAH KEMASAN KREATIF)                    */}
+      {/* TABEL FORM KIRIM MODERN (ANUGRAH KEMASAN KREATIF)                     */}
       {/* ===================================================================== */}
-      <div className="bg-white text-slate-950 border-2 border-slate-400 rounded-xl shadow-sm overflow-hidden">
-        {/* Kop Judul Spreadsheet: ANUGRAH KEMASAN KREATIF & Tanggal Pengiriman */}
-        <div className="py-3 px-4 text-center border-b border-slate-300 bg-white space-y-0.5">
-          <div className="text-sm sm:text-base font-normal tracking-wide text-slate-900 uppercase">
-            ANUGRAH KEMASAN KREATIF
+      <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm overflow-hidden">
+        {/* Kop Judul Form Kirim dengan Kontras Tinggi di Mode Terang & Gelap */}
+        <div className="py-4 px-5 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-indigo-50/90 via-blue-50/60 to-slate-50 dark:from-slate-900 dark:via-indigo-950/40 dark:to-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="text-sm sm:text-base font-black tracking-wide text-slate-900 dark:text-white uppercase">
+              ANUGRAH KEMASAN KREATIF
+            </div>
+            <div className="text-xs text-slate-600 dark:text-slate-300 font-semibold mt-0.5">
+              {formattedPeriodLabel}
+            </div>
           </div>
-          <div className="text-xs text-slate-800 font-medium">{formattedPeriodLabel}</div>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+            <span className="px-3 py-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 shadow-2xs">
+              {summaryTotals.uniqueTotalCustomers} Pelanggan
+            </span>
+            <span className="px-3 py-1 rounded-xl bg-amber-300 text-slate-950 font-black shadow-2xs">
+              COD: {summaryTotals.uniqueCodCustomers} Pelanggan ({summaryTotals.codCount} Faktur)
+            </span>
+            <span className="px-3 py-1 rounded-xl bg-red-600 text-white font-black shadow-2xs">
+              TEMPO: {summaryTotals.uniqueTempoCustomers} Pelanggan ({summaryTotals.tempoCount} Faktur)
+            </span>
+          </div>
         </div>
 
-        {/* Tabel Spreadsheet: Mode Edit menampilkan Net Days Syarat Pelanggan; Mode Simpan menyembunyikan Net Days */}
+        {/* Tabel Form Kirim Modern & Rapi */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-xs font-sans">
             <thead>
-              <tr className="bg-white border-b-2 border-slate-800 text-[#000080] font-bold">
-                <th className="border border-slate-700 py-2 px-1.5 text-center w-11">NO</th>
+              <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-extrabold uppercase tracking-wider">
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-center w-12">
+                  NO
+                </th>
                 <th
                   onClick={() => handleColumnSortToggle('noFaktur')}
-                  className="border border-slate-700 py-2 px-2 text-center min-w-[132px] cursor-pointer hover:bg-blue-50/60 select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[132px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir No. Faktur"
                 >
-                  <div className="flex items-center justify-center gap-1">
+                  <div className="flex items-center justify-between gap-1">
                     <span>No. Faktur</span>
                     {sortField === 'noFaktur' && (
-                      <span className="text-[10px] text-blue-600">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
                     )}
                   </div>
                 </th>
-                <th className="border border-slate-700 py-2 px-2 text-center min-w-[96px]">Tgl Faktur</th>
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[100px]">
+                  Tgl Faktur
+                </th>
                 <th
                   onClick={() => handleColumnSortToggle('namaPelanggan')}
-                  className="border border-slate-700 py-2 px-2.5 text-center min-w-[180px] cursor-pointer hover:bg-blue-50/60 select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[185px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Nama Pelanggan (A-Z / Z-A)"
                 >
-                  <div className="flex items-center justify-center gap-1">
+                  <div className="flex items-center justify-between gap-1">
                     <span>Nama Pelanggan</span>
                     {sortField === 'namaPelanggan' && (
-                      <span className="text-[10px] text-blue-600">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
                     )}
                   </div>
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('nilaiFaktur')}
-                  className="border border-slate-700 py-2 px-2.5 text-center min-w-[135px] cursor-pointer hover:bg-blue-50/60 select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-right min-w-[138px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Nilai Faktur (Besar ke Kecil / Kecil ke Besar)"
                 >
-                  <div className="flex items-center justify-center gap-1">
+                  <div className="flex items-center justify-end gap-1">
                     <span>Nilai Faktur</span>
                     {sortField === 'nilaiFaktur' && (
-                      <span className="text-[10px] text-blue-600">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
                     )}
                   </div>
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('coly')}
-                  className="border border-slate-700 py-2 px-2 text-center w-16 cursor-pointer hover:bg-blue-50/60 select-none"
-                  title="Klik untuk sortir COLY (Besar ke Kecil / Kecil ke Besar)"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-center w-20 cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  title="Klik untuk sortir COLY"
                 >
                   <div className="flex items-center justify-center gap-1">
                     <span>COLY</span>
                     {sortField === 'coly' && (
-                      <span className="text-[10px] text-blue-600">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
                     )}
                   </div>
                 </th>
-                <th className="border border-slate-700 py-2 px-2.5 text-center min-w-[96px]">BAYAR</th>
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[96px]">
+                  BAYAR
+                </th>
                 <th
                   onClick={() => handleColumnSortToggle('alamatPelanggan')}
-                  className="border border-slate-700 py-2 px-2.5 text-center min-w-[160px] cursor-pointer hover:bg-blue-50/60 select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[160px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Alamat Pelanggan"
                 >
-                  <div className="flex items-center justify-center gap-1">
+                  <div className="flex items-center justify-between gap-1">
                     <span>Alamat 1</span>
                     {sortField === 'alamatPelanggan' && (
-                      <span className="text-[10px] text-blue-600">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
                     )}
                   </div>
                 </th>
-                <th className="border border-slate-700 py-2 px-2.5 text-center min-w-[155px]">Keterangan</th>
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[155px]">
+                  Keterangan
+                </th>
                 {viewMode === 'edit' && (
                   <>
-                    <th className="border border-slate-700 py-2 px-2 text-center w-24 whitespace-normal leading-tight">
-                      Net Days Syarat Pelanggan
+                    <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-center min-w-[118px] w-32 leading-tight">
+                      Syarat (Hari) &amp; Kategori
                     </th>
-                    <th className="border border-slate-700 py-2 px-2 text-center w-14 bg-slate-50 text-slate-700">
-                      Hapus
+                    <th className="py-3 px-2.5 text-center min-w-[108px] w-28 whitespace-nowrap">
+                      Urutan &amp; Aksi
                     </th>
                   </>
                 )}
               </tr>
             </thead>
 
-            <tbody className="text-slate-950">
+            <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
               {/* ========================================================= */}
-              {/* BAGIAN 1: KELOMPOK PELANGGAN COD (Net Days = 0,00)        */}
+              {/* BAGIAN 1: KELOMPOK PELANGGAN COD                          */}
               {/* ========================================================= */}
-              <tr className="bg-white">
-                <td className="border border-slate-600 py-1 px-1 text-center align-middle">
-                  {viewMode === 'edit' ? (
-                    <div className="group/secplus w-full h-5 flex items-center justify-center">
+              <tr className="bg-amber-50/90 dark:bg-amber-950/30 border-y border-amber-200 dark:border-amber-800/60">
+                <td colSpan={viewMode === 'edit' ? 11 : 9} className="py-2 px-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="px-2.5 py-1 rounded-lg font-black text-slate-950 bg-amber-300 tracking-wider uppercase text-[11px] shadow-2xs">
+                        COD
+                      </span>
+                      <span className="text-xs font-extrabold text-amber-950 dark:text-amber-200">
+                        {summaryTotals.uniqueCodCustomers} Pelanggan ({summaryTotals.codCount} Faktur)
+                      </span>
+                      <span className="text-[11px] font-semibold text-amber-800/80 dark:text-amber-300/80">
+                        • Total COD: Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
+                      </span>
+                    </div>
+                    {viewMode === 'edit' && (
                       <button
                         type="button"
                         onClick={() => handleInsertManualRowInSection('COD')}
-                        className="w-5 h-5 rounded-full bg-blue-600 text-white shadow-xs inline-flex items-center justify-center opacity-0 group-hover/secplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
+                        className="px-2.5 py-1 rounded-lg bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer shadow-2xs"
                         title="Tambah baris manual di kelompok COD"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Baris COD</span>
                       </button>
-                    </div>
-                  ) : (
-                    <span>&nbsp;</span>
-                  )}
+                    )}
+                  </div>
                 </td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-700 py-1 px-2 text-center font-bold text-[#000080] bg-[#FFFF00] tracking-wider uppercase">
-                  COD
-                </td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                {viewMode === 'edit' && (
-                  <>
-                    <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                    <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                  </>
-                )}
               </tr>
 
               {codItems.length === 0 ? (
                 <tr>
                   <td
                     colSpan={viewMode === 'edit' ? 11 : 9}
-                    className="border border-slate-600 py-3 px-3 text-center text-slate-400 italic"
+                    className="py-4 px-3 text-center text-slate-400 italic"
                   >
                     Tidak ada faktur pelanggan COD (Net Days = 0).
                   </td>
@@ -2056,9 +2242,11 @@ export const SalesFormKirimTab: React.FC = () => {
                   const boldClass = isNonGudangFaktur(item.noFaktur) ? 'font-bold' : 'font-normal';
                   const hasKeterangan = String(item.keterangan || '').trim().length > 0;
                   return (
-                    <tr key={item.id} className={`hover:bg-blue-50/40 ${boldClass}`}>
-                      {/* Kolom NO dengan tombol + tersamarkan: hanya muncul saat kursor diarahkan ke batas baris tersebut */}
-                      <td className="border border-slate-600 py-1.5 px-1.5 text-center relative align-middle">
+                    <tr
+                      key={item.id}
+                      className={`hover:bg-blue-50/50 dark:hover:bg-slate-800/50 transition-colors ${boldClass}`}
+                    >
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-2 px-2 text-center relative align-middle text-slate-500 dark:text-slate-400 font-semibold">
                         <span>{rowNum}</span>
                         {viewMode === 'edit' && (
                           <div className="group/rowplus absolute -bottom-2.5 inset-x-0 h-5 flex items-center justify-center z-20">
@@ -2066,26 +2254,26 @@ export const SalesFormKirimTab: React.FC = () => {
                               type="button"
                               onClick={() => handleInsertManualRowAfter(item.id, 'COD')}
                               className="w-4 h-4 rounded-full bg-blue-600 text-white shadow-sm flex items-center justify-center opacity-0 group-hover/rowplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
-                              title={`Tambah baris manual setelah nomor ${rowNum}`}
+                              title={`Sisipkan baris COD setelah nomor ${rowNum}`}
                             >
                               <Plus className="w-2.5 h-2.5" />
                             </button>
                           </div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle font-mono text-[11px]">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.noFaktur}
                             placeholder="No. Faktur..."
                             onChange={val => handleUpdateInvoiceCell(item.id, 'noFaktur', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
+                            className={`uppercase font-mono ${boldClass}`}
                           />
                         ) : (
                           <div className="whitespace-normal break-words leading-snug">{item.noFaktur}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle text-slate-600 dark:text-slate-300">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.tglFaktur}
@@ -2096,7 +2284,7 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.tglFaktur}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 text-left uppercase whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-900 dark:text-white">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.namaPelanggan}
@@ -2108,9 +2296,9 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.namaPelanggan}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 whitespace-nowrap align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-3 whitespace-nowrap align-middle">
                         <div className="flex items-center justify-between gap-2">
-                          <span>Rp</span>
+                          <span className="text-slate-400 dark:text-slate-500 text-[11px]">Rp</span>
                           {viewMode === 'edit' ? (
                             <RupiahCellInput
                               value={item.nilaiFaktur}
@@ -2118,31 +2306,35 @@ export const SalesFormKirimTab: React.FC = () => {
                               className={boldClass}
                             />
                           ) : (
-                            <span className="tabular-nums">{formatNominalRibuan(item.nilaiFaktur) || '0'}</span>
+                            <span className="tabular-nums font-semibold">
+                              {formatNominalRibuan(item.nilaiFaktur) || '0'}
+                            </span>
                           )}
                         </div>
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center align-middle">
                         {viewMode === 'edit' ? (
                           <input
                             type="number"
                             min={0}
                             value={item.coly > 0 ? item.coly : ''}
-                            placeholder=""
+                            placeholder="0"
                             onChange={e => {
                               const raw = e.target.value;
                               const num = raw === '' ? 0 : Math.max(0, Math.round(Number(raw) || 0));
                               handleUpdateInvoiceCell(item.id, 'coly', num);
                             }}
-                            className={`w-14 text-center bg-transparent focus:outline-none focus:bg-yellow-50 ${boldClass}`}
+                            className={`w-14 py-1 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center bg-slate-50/70 dark:bg-slate-800/70 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 tabular-nums ${boldClass}`}
                           />
                         ) : item.coly > 0 ? (
-                          item.coly
+                          <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold tabular-nums">
+                            {item.coly}
+                          </span>
                         ) : (
                           ''
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.bayar}
@@ -2153,7 +2345,7 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.bayar}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 text-left uppercase whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-700 dark:text-slate-300">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.alamatPelanggan}
@@ -2166,15 +2358,18 @@ export const SalesFormKirimTab: React.FC = () => {
                         )}
                       </td>
                       <td
-                        className={`border border-slate-600 py-1 px-2 text-left whitespace-normal break-words align-middle ${
-                          hasKeterangan ? 'bg-[#FFFF00] font-semibold text-slate-950' : ''
+                        className={`border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle ${
+                          hasKeterangan
+                            ? 'bg-amber-100/90 dark:bg-amber-950/50 font-semibold text-amber-950 dark:text-amber-200'
+                            : ''
                         }`}
                       >
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.keterangan}
+                            placeholder="Catatan..."
                             onChange={val => handleUpdateInvoiceCell(item.id, 'keterangan', val)}
-                            className={`${boldClass} ${hasKeterangan ? 'focus:bg-yellow-200 font-semibold' : ''}`}
+                            className={`${boldClass} ${hasKeterangan ? 'font-semibold' : ''}`}
                           />
                         ) : (
                           <div className="whitespace-normal break-words leading-snug">{item.keterangan}</div>
@@ -2182,53 +2377,53 @@ export const SalesFormKirimTab: React.FC = () => {
                       </td>
                       {viewMode === 'edit' && (
                         <>
-                          <td className="border border-slate-600 py-1 px-2 text-center font-mono align-middle">
-                            <div className="flex items-center justify-center gap-1">
+                          <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center font-mono align-middle">
+                            <div className="flex items-center justify-center gap-1.5">
                               <input
                                 type="number"
                                 min={0}
                                 step="1"
                                 value={item.netDays}
                                 onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                                className="w-10 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono text-xs"
+                                className="w-11 py-0.5 px-1 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-800 focus:outline-none focus:border-blue-500 font-mono text-xs"
                                 title="0 = COD, > 0 = TEMPO"
                               />
                               <button
                                 type="button"
                                 onClick={() => handleToggleCategory(item.id)}
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase transition cursor-pointer ${
-                                  (item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD')) === 'COD'
-                                    ? 'bg-yellow-200 text-yellow-900 hover:bg-yellow-300'
-                                    : 'bg-blue-200 text-blue-900 hover:bg-blue-300'
-                                }`}
-                                title="Klik untuk pindah kategori COD / TEMPO"
+                                className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase transition cursor-pointer bg-amber-300 text-slate-950 hover:bg-amber-400 shadow-2xs"
+                                title="Klik untuk ubah kategori ke TEMPO"
                               >
-                                {(item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD'))}
+                                COD
                               </button>
                             </div>
                           </td>
-                          <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
-                            <div className="flex items-center justify-center gap-0.5">
+                          <td className="py-1.5 px-2 text-center align-middle min-w-[105px]">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => handleMoveItemUp(item.id)}
-                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                                 title="Pindah baris ke atas"
                               >
-                                <ChevronUp className="w-3 h-3" />
+                                <ChevronUp className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleMoveItemDown(item.id)}
-                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
-                                title="Pindah baris ke bawah"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                title={
+                                  idx === codItems.length - 1
+                                    ? 'Pindah baris turun ke kelompok TEMPO'
+                                    : 'Pindah baris ke bawah'
+                                }
                               >
-                                <ChevronDown className="w-3 h-3" />
+                                <ChevronDown className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteInvoiceRow(item.id)}
-                                className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
                                 title="Hapus baris faktur"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2243,48 +2438,42 @@ export const SalesFormKirimTab: React.FC = () => {
               )}
 
               {/* ========================================================= */}
-              {/* BAGIAN 2: KELOMPOK PELANGGAN TEMPO (Net Days > 0)         */}
+              {/* BAGIAN 2: KELOMPOK PELANGGAN TEMPO (WARNA MERAH)          */}
               {/* ========================================================= */}
-              <tr className="bg-white">
-                <td className="border border-slate-600 py-1 px-1 text-center align-middle">
-                  {viewMode === 'edit' ? (
-                    <div className="group/secplus w-full h-5 flex items-center justify-center">
+              <tr className="bg-rose-50/90 dark:bg-rose-950/35 border-y border-rose-200 dark:border-rose-800/60">
+                <td colSpan={viewMode === 'edit' ? 11 : 9} className="py-2 px-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="px-2.5 py-1 rounded-lg font-black text-white bg-red-600 tracking-wider uppercase text-[11px] shadow-2xs">
+                        TEMPO
+                      </span>
+                      <span className="text-xs font-extrabold text-red-700 dark:text-red-300">
+                        {summaryTotals.uniqueTempoCustomers} Pelanggan ({summaryTotals.tempoCount} Faktur)
+                      </span>
+                      <span className="text-[11px] font-semibold text-rose-700/80 dark:text-rose-300/80">
+                        • Total TEMPO: Rp {formatNominalRibuan(summaryTotals.tempoNilai) || '0'}
+                      </span>
+                    </div>
+                    {viewMode === 'edit' && (
                       <button
                         type="button"
                         onClick={() => handleInsertManualRowInSection('TEMPO')}
-                        className="w-5 h-5 rounded-full bg-blue-600 text-white shadow-xs inline-flex items-center justify-center opacity-0 group-hover/secplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
+                        className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer shadow-2xs"
                         title="Tambah baris manual di kelompok TEMPO"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Baris TEMPO</span>
                       </button>
-                    </div>
-                  ) : (
-                    <span>&nbsp;</span>
-                  )}
+                    )}
+                  </div>
                 </td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-700 py-1 px-2 text-center font-bold text-[#000080] bg-[#FFFF00] tracking-wider uppercase">
-                  TEMPO
-                </td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                {viewMode === 'edit' && (
-                  <>
-                    <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                    <td className="border border-slate-600 py-1 px-2">&nbsp;</td>
-                  </>
-                )}
               </tr>
 
               {tempoItems.length === 0 ? (
                 <tr>
                   <td
                     colSpan={viewMode === 'edit' ? 11 : 9}
-                    className="border border-slate-600 py-3 px-3 text-center text-slate-400 italic"
+                    className="py-4 px-3 text-center text-slate-400 italic"
                   >
                     Tidak ada faktur pelanggan TEMPO (Net Days &gt; 0).
                   </td>
@@ -2295,36 +2484,38 @@ export const SalesFormKirimTab: React.FC = () => {
                   const boldClass = isNonGudangFaktur(item.noFaktur) ? 'font-bold' : 'font-normal';
                   const hasKeterangan = String(item.keterangan || '').trim().length > 0;
                   return (
-                    <tr key={item.id} className={`hover:bg-blue-50/40 ${boldClass}`}>
-                      {/* Kolom NO dengan tombol + tersamarkan: hanya muncul saat kursor diarahkan ke batas baris tersebut */}
-                      <td className="border border-slate-600 py-1.5 px-1.5 text-center relative align-middle">
+                    <tr
+                      key={item.id}
+                      className={`hover:bg-rose-50/40 dark:hover:bg-slate-800/50 transition-colors ${boldClass}`}
+                    >
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-2 px-2 text-center relative align-middle text-slate-500 dark:text-slate-400 font-semibold">
                         <span>{rowNum}</span>
                         {viewMode === 'edit' && (
                           <div className="group/rowplus absolute -bottom-2.5 inset-x-0 h-5 flex items-center justify-center z-20">
                             <button
                               type="button"
                               onClick={() => handleInsertManualRowAfter(item.id, 'TEMPO')}
-                              className="w-4 h-4 rounded-full bg-blue-600 text-white shadow-sm flex items-center justify-center opacity-0 group-hover/rowplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
-                              title={`Tambah baris manual setelah nomor ${rowNum}`}
+                              className="w-4 h-4 rounded-full bg-red-600 text-white shadow-sm flex items-center justify-center opacity-0 group-hover/rowplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
+                              title={`Sisipkan baris TEMPO setelah nomor ${rowNum}`}
                             >
                               <Plus className="w-2.5 h-2.5" />
                             </button>
                           </div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle font-mono text-[11px]">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.noFaktur}
                             placeholder="No. Faktur..."
                             onChange={val => handleUpdateInvoiceCell(item.id, 'noFaktur', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
+                            className={`uppercase font-mono ${boldClass}`}
                           />
                         ) : (
                           <div className="whitespace-normal break-words leading-snug">{item.noFaktur}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle text-slate-600 dark:text-slate-300">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.tglFaktur}
@@ -2335,7 +2526,7 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.tglFaktur}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 text-left uppercase whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-900 dark:text-white">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.namaPelanggan}
@@ -2347,9 +2538,9 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.namaPelanggan}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 whitespace-nowrap align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-3 whitespace-nowrap align-middle">
                         <div className="flex items-center justify-between gap-2">
-                          <span>Rp</span>
+                          <span className="text-slate-400 dark:text-slate-500 text-[11px]">Rp</span>
                           {viewMode === 'edit' ? (
                             <RupiahCellInput
                               value={item.nilaiFaktur}
@@ -2357,31 +2548,35 @@ export const SalesFormKirimTab: React.FC = () => {
                               className={boldClass}
                             />
                           ) : (
-                            <span className="tabular-nums">{formatNominalRibuan(item.nilaiFaktur) || '0'}</span>
+                            <span className="tabular-nums font-semibold">
+                              {formatNominalRibuan(item.nilaiFaktur) || '0'}
+                            </span>
                           )}
                         </div>
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center align-middle">
                         {viewMode === 'edit' ? (
                           <input
                             type="number"
                             min={0}
                             value={item.coly > 0 ? item.coly : ''}
-                            placeholder=""
+                            placeholder="0"
                             onChange={e => {
                               const raw = e.target.value;
                               const num = raw === '' ? 0 : Math.max(0, Math.round(Number(raw) || 0));
                               handleUpdateInvoiceCell(item.id, 'coly', num);
                             }}
-                            className={`w-14 text-center bg-transparent focus:outline-none focus:bg-yellow-50 ${boldClass}`}
+                            className={`w-14 py-1 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center bg-slate-50/70 dark:bg-slate-800/70 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 tabular-nums ${boldClass}`}
                           />
                         ) : item.coly > 0 ? (
-                          item.coly
+                          <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold tabular-nums">
+                            {item.coly}
+                          </span>
                         ) : (
                           ''
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-1.5 text-left whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.bayar}
@@ -2392,7 +2587,7 @@ export const SalesFormKirimTab: React.FC = () => {
                           <div className="whitespace-normal break-words leading-snug">{item.bayar}</div>
                         )}
                       </td>
-                      <td className="border border-slate-600 py-1 px-2 text-left uppercase whitespace-normal break-words align-middle">
+                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-700 dark:text-slate-300">
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.alamatPelanggan}
@@ -2405,15 +2600,18 @@ export const SalesFormKirimTab: React.FC = () => {
                         )}
                       </td>
                       <td
-                        className={`border border-slate-600 py-1 px-2 text-left whitespace-normal break-words align-middle ${
-                          hasKeterangan ? 'bg-[#FFFF00] font-semibold text-slate-950' : ''
+                        className={`border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle ${
+                          hasKeterangan
+                            ? 'bg-amber-100/90 dark:bg-amber-950/50 font-semibold text-amber-950 dark:text-amber-200'
+                            : ''
                         }`}
                       >
                         {viewMode === 'edit' ? (
                           <AutoWrapCellTextarea
                             value={item.keterangan}
+                            placeholder="Catatan..."
                             onChange={val => handleUpdateInvoiceCell(item.id, 'keterangan', val)}
-                            className={`${boldClass} ${hasKeterangan ? 'focus:bg-yellow-200 font-semibold' : ''}`}
+                            className={`${boldClass} ${hasKeterangan ? 'font-semibold' : ''}`}
                           />
                         ) : (
                           <div className="whitespace-normal break-words leading-snug">{item.keterangan}</div>
@@ -2421,53 +2619,53 @@ export const SalesFormKirimTab: React.FC = () => {
                       </td>
                       {viewMode === 'edit' && (
                         <>
-                          <td className="border border-slate-600 py-1 px-2 text-center font-mono align-middle">
-                            <div className="flex items-center justify-center gap-1">
+                          <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center font-mono align-middle">
+                            <div className="flex items-center justify-center gap-1.5">
                               <input
                                 type="number"
                                 min={0}
                                 step="1"
                                 value={item.netDays}
                                 onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                                className="w-10 text-center bg-transparent focus:outline-none focus:bg-yellow-50 font-mono text-xs"
+                                className="w-11 py-0.5 px-1 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-800 focus:outline-none focus:border-blue-500 font-mono text-xs"
                                 title="0 = COD, > 0 = TEMPO"
                               />
                               <button
                                 type="button"
                                 onClick={() => handleToggleCategory(item.id)}
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase transition cursor-pointer ${
-                                  (item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD')) === 'COD'
-                                    ? 'bg-yellow-200 text-yellow-900 hover:bg-yellow-300'
-                                    : 'bg-blue-200 text-blue-900 hover:bg-blue-300'
-                                }`}
-                                title="Klik untuk pindah kategori COD / TEMPO"
+                                className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase transition cursor-pointer bg-red-600 text-white hover:bg-red-500 shadow-2xs"
+                                title="Klik untuk naikkan pelanggan TEMPO ke COD"
                               >
-                                {(item.paymentCategory || (item.netDays > 0 ? 'TEMPO' : 'COD'))}
+                                TEMPO
                               </button>
                             </div>
                           </td>
-                          <td className="border border-slate-600 py-1 px-1.5 text-center align-middle">
-                            <div className="flex items-center justify-center gap-0.5">
+                          <td className="py-1.5 px-2 text-center align-middle min-w-[105px]">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => handleMoveItemUp(item.id)}
-                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
-                                title="Pindah baris ke atas"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                title={
+                                  idx === 0
+                                    ? 'Naikkan pelanggan dari TEMPO ke kategori COD'
+                                    : 'Pindah baris ke atas'
+                                }
                               >
-                                <ChevronUp className="w-3 h-3" />
+                                <ChevronUp className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleMoveItemDown(item.id)}
-                                className="p-0.5 rounded text-slate-600 hover:bg-slate-200 cursor-pointer"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                                 title="Pindah baris ke bawah"
                               >
-                                <ChevronDown className="w-3 h-3" />
+                                <ChevronDown className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteInvoiceRow(item.id)}
-                                className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
                                 title="Hapus baris faktur"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2484,24 +2682,19 @@ export const SalesFormKirimTab: React.FC = () => {
               {/* ========================================================= */}
               {/* BARIS JUMLAH / SUM COLY DI BAGIAN BAWAH TABEL             */}
               {/* ========================================================= */}
-              <tr className="bg-white font-bold">
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2.5">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2.5">&nbsp;</td>
-                <td className="border border-slate-700 py-1.5 px-2 text-center text-sm font-black text-slate-950">
+              <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700">
+                <td colSpan={4} className="border-r border-slate-200 dark:border-slate-700 py-3 px-4 text-right text-xs font-black text-slate-800 dark:text-slate-100 uppercase">
+                  Total ({summaryTotals.uniqueTotalCustomers} Pelanggan • {summaryTotals.totalInvoices} Faktur)
+                </td>
+                <td className="border-r border-slate-200 dark:border-slate-700 py-3 px-3 text-right text-xs font-black text-slate-900 dark:text-white tabular-nums">
+                  Rp {formatNominalRibuan(summaryTotals.totalNilai) || '0'}
+                </td>
+                <td className="border-r border-slate-200 dark:border-slate-700 py-3 px-2.5 text-center text-sm font-black text-blue-700 dark:text-blue-300 bg-blue-50/80 dark:bg-blue-950/40 tabular-nums">
                   {summaryTotals.totalColy}
                 </td>
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                {viewMode === 'edit' && (
-                  <>
-                    <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                    <td className="border border-slate-600 py-1.5 px-2">&nbsp;</td>
-                  </>
-                )}
+                <td colSpan={viewMode === 'edit' ? 5 : 3} className="py-3 px-3">
+                  &nbsp;
+                </td>
               </tr>
             </tbody>
           </table>
@@ -2556,9 +2749,16 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [signaturePreview, setSignaturePreview] = useState<DriverSignaturePreview | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const currentUser = logisticsStore.getCurrentUser();
+  const isSuperAdmin = currentUser?.role === 'super_admin';
   const validatorName = currentUser?.fullName || 'Finance & Tax AKK';
+
+  const showFinanceToast = (msg: string) => {
+    setToastMessage(msg);
+    window.setTimeout(() => setToastMessage(null), 4000);
+  };
   const fleets = logisticsStore.getFleets();
   const schedules = logisticsStore.getSchedules();
 
@@ -2869,6 +3069,13 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {toastMessage && (
+        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Header Utama + Kalender & Dropdown Area Kirim Sejajar di Bawah Judul */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3129,18 +3336,35 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(item.id)}
-                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-xs font-bold text-slate-700 dark:text-slate-200 inline-flex items-center justify-between gap-2 transition cursor-pointer shrink-0 shadow-2xs"
-                    >
-                      <span>
-                        {isExpanded
-                          ? `Tutup Rincian Faktur (${metrics.totalInvoiceCount})`
-                          : `Lihat Rincian Faktur (${metrics.totalInvoiceCount})`}
-                      </span>
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(item.id)}
+                        className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-xs font-bold text-slate-700 dark:text-slate-200 inline-flex items-center justify-between gap-2 transition cursor-pointer shrink-0 shadow-2xs"
+                      >
+                        <span>
+                          {isExpanded
+                            ? `Tutup Rincian Faktur (${metrics.totalInvoiceCount})`
+                            : `Lihat Rincian Faktur (${metrics.totalInvoiceCount})`}
+                        </span>
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            formKirimStore.deleteFormKirim(item.id);
+                            showFinanceToast(`Form Kirim "${item.storeName || item.noFormKirim}" berhasil dihapus.`);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800/70 text-xs font-bold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs"
+                          title="Hapus Form Kirim (Khusus Super Admin)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* 4 Kotak Ringkasan Per Form Kirim */}
@@ -3310,6 +3534,11 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
                             <th className="py-2 px-1.5 border-b border-slate-200 dark:border-slate-700 text-center w-px whitespace-nowrap">
                               Checklist Lunas Accurate
                             </th>
+                            {isSuperAdmin && (
+                              <th className="py-2 px-1.5 border-b border-slate-200 dark:border-slate-700 text-center w-px whitespace-nowrap">
+                                Aksi
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -3426,6 +3655,21 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
                                   )}
                                 </div>
                               </td>
+                              {isSuperAdmin && (
+                                <td className="py-2 px-1.5 text-center whitespace-nowrap w-px">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      formKirimStore.deleteFormKirim(item.id);
+                                      showFinanceToast(`Form Kirim "${item.noFaktur}" berhasil dihapus.`);
+                                    }}
+                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                    title="Hapus Faktur / Form Kirim (Super Admin)"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              )}
                             </tr>
                           ) : (
                             metrics.items.map((inv, invIdx) => {
@@ -3743,6 +3987,21 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
                                       )}
                                     </div>
                                   </td>
+                                  {isSuperAdmin && (
+                                    <td className="py-1.5 px-1.5 text-center whitespace-nowrap w-px">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          formKirimStore.deleteInvoiceFromFormKirim(item.id, inv.id);
+                                          showFinanceToast(`Faktur "${inv.noFaktur}" (${inv.namaPelanggan}) berhasil dihapus.`);
+                                        }}
+                                        className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                        title="Hapus Baris Faktur (Super Admin)"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  )}
                                 </tr>
                               );
                             })
@@ -3779,6 +4038,7 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
                             <td className="py-2 px-1.5 text-center text-emerald-600 dark:text-emerald-400 whitespace-nowrap w-px">
                               {metrics.settlementCheckedCount}/{metrics.totalInvoiceCount} Lunas Accurate
                             </td>
+                            {isSuperAdmin && <td className="py-2 px-1.5 w-px" />}
                           </tr>
                         </tfoot>
                       </table>

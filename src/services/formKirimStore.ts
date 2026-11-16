@@ -47,6 +47,8 @@ export interface FormKirimInvoiceItem {
   financeSettlementCheckedAt?: string;
   financeSettlementCheckedBy?: string;
   financeItemNote?: string;
+  driverEditCount?: number;
+  customerNote?: string;
 }
 
 export interface FormKirimRecord {
@@ -444,6 +446,7 @@ function preserveProgressWhenAdminUpdates(
 }
 
 class FormKirimStore {
+  private records: FormKirimRecord[] = INITIAL_FORM_KIRIM;
   private listeners: Set<() => void> = new Set();
   private hydratedFromServer = false;
   private isHydrating = false;
@@ -452,10 +455,15 @@ class FormKirimStore {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
       window.addEventListener(EVENT_NAME, () => {
         this.listeners.forEach(cb => cb());
       });
-      void this.hydrateFromServer();
+      void this.hydrateFromServer(true, true);
     }
   }
 
@@ -480,10 +488,8 @@ class FormKirimStore {
         const cleaned = data.records.filter(
           (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
         );
-        if (cleaned.length > 0 || data.records.length > 0) {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
-          } catch {}
+        if (Array.isArray(cleaned)) {
+          this.records = cleaned;
           this.listeners.forEach(cb => cb());
         }
       }
@@ -495,34 +501,13 @@ class FormKirimStore {
   }
 
   public getAll(): FormKirimRecord[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter(
-            (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
-          );
-          if (cleaned.length !== parsed.length) {
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
-            } catch {}
-          }
-          return cleaned;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_FORM_KIRIM;
+    return this.records;
   }
 
   private persistLocal(records: FormKirimRecord[]): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    } catch {
-      // ignore
-    }
+    this.records = records.filter(
+      (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+    );
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(EVENT_NAME));
     }
@@ -535,7 +520,7 @@ class FormKirimStore {
       fetch('/api/form-kirim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records })
+        body: JSON.stringify({ records: this.records })
       })
         .then(async res => {
           if (!res.ok) return;
@@ -1065,6 +1050,26 @@ class FormKirimStore {
   public deleteFormKirim(id: string): void {
     const existing = this.getAll();
     this.saveAll(existing.filter(item => item.id !== id));
+  }
+
+  public deleteInvoiceFromFormKirim(formKirimId: string, invoiceId: string): void {
+    const existing = this.getAll();
+    const updated = existing
+      .map(record => {
+        if (record.id !== formKirimId) return record;
+        const nextItems = (record.invoiceItems || []).filter(inv => inv.id !== invoiceId);
+        if (nextItems.length === 0) return null;
+        const nextTotalNilai = nextItems.reduce((sum, it) => sum + (Number(it.nilaiFaktur) || 0), 0);
+        const nextTotalDiterima = nextItems.reduce((sum, it) => sum + (Number(it.nominalDiterima) || 0), 0);
+        return {
+          ...record,
+          invoiceItems: nextItems,
+          totalNominalFaktur: nextTotalNilai,
+          totalNominalDiterima: nextTotalDiterima
+        };
+      })
+      .filter((r): r is FormKirimRecord => r !== null);
+    this.saveAll(updated);
   }
 }
 

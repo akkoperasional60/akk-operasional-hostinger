@@ -24,6 +24,16 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import {
+  CustomerUnpaidInvoice,
+  loadSharedCustomerInvoices,
+  saveSharedCustomerInvoices,
+  hydrateSharedCustomerInvoicesFromServer,
+  FINANCE_INVOICES_EVENT,
+  computeInvoiceAgingDays,
+  getInvoiceStatus
+} from './DepartmentDashboard';
+import { MarketingInvoiceValidationView } from './marketing/MarketingInvoiceValidationView';
 
 // ============================================================
 // TYPES
@@ -88,7 +98,8 @@ export interface ToVoRoRecord {
 }
 
 interface MarketingDashboardProps {
-  activeTab: 'marketing_online' | 'marketing_offline' | 'marketing_to_vo_ro';
+  activeTab: 'marketing_online' | 'marketing_offline' | 'marketing_to_vo_ro' | 'marketing_invoice_validation';
+  onNavigateTab?: (tab: string) => void;
 }
 
 const INITIAL_TO_VO_RO_DATA: ToVoRoRecord[] = [
@@ -375,9 +386,59 @@ const LS_KEY_ONLINE_LEADS = 'akk_marketing_online_leads_v2';
 const LS_KEY_VISIT_REPORTS = 'akk_marketing_offline_visit_reports_v2';
 const LS_KEY_SALES_REPORTS = 'akk_marketing_offline_sales_reports_v2';
 
-export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTab }) => {
-  // --- Sub-tab for Marketing Offline: 'kunjungan' | 'penjualan' ---
-  const [offlineSubTab, setOfflineSubTab] = useState<'kunjungan' | 'penjualan'>('kunjungan');
+export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTab, onNavigateTab }) => {
+  // --- Sub-tab for Marketing Offline: 'kunjungan' | 'penjualan' | 'tagihan' ---
+  const [offlineSubTab, setOfflineSubTab] = useState<'kunjungan' | 'penjualan' | 'tagihan'>('kunjungan');
+
+  // --- Shared Customer Billing State (Integrated with Finance & Aplikasi Penagihan Pelanggan) ---
+  const [customerInvoices, setCustomerInvoicesState] = useState<CustomerUnpaidInvoice[]>(() =>
+    loadSharedCustomerInvoices()
+  );
+  const [billingSearch, setBillingSearch] = useState('');
+  const [billingStatusFilter, setBillingStatusFilter] = useState<string>('UNPAID_ONLY');
+  const [showAddBillingModal, setShowAddBillingModal] = useState(false);
+  const [billingPayModalInvoice, setBillingPayModalInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [billingPayNominal, setBillingPayNominal] = useState<number>(0);
+  const [billingPayNotes, setBillingPayNotes] = useState<string>('');
+
+  const updateCustomerInvoices = (
+    updater: CustomerUnpaidInvoice[] | ((prev: CustomerUnpaidInvoice[]) => CustomerUnpaidInvoice[])
+  ) => {
+    setCustomerInvoicesState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveSharedCustomerInvoices(next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const syncBilling = () => {
+      setCustomerInvoicesState(loadSharedCustomerInvoices());
+    };
+    window.addEventListener(FINANCE_INVOICES_EVENT, syncBilling);
+    void hydrateSharedCustomerInvoicesFromServer();
+    return () => {
+      window.removeEventListener(FINANCE_INVOICES_EVENT, syncBilling);
+    };
+  }, []);
+
+  const [billingTeamTab, setBillingTeamTab] = useState<'ALL' | 'SALES' | 'FINANCE'>('SALES');
+
+  const [billingForm, setBillingForm] = useState({
+    noInvoice: `INV/AKK/2026/11/${String(customerInvoices.length + 220).padStart(4, '0')}`,
+    noSuratJalan: `SJ-AKK-2611-${String(customerInvoices.length + 165)}`,
+    customerName: '',
+    contactPhone: '',
+    region: 'Banyuwangi Kota',
+    invoiceDate: new Date().toISOString().split('T')[0],
+    dueDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+    itemSummary: '',
+    totalTagihan: 15000000,
+    jumlahTerbayar: 0,
+    billingTeam: 'SALES' as 'FINANCE' | 'SALES',
+    salesPersonName: 'Rendra Saputra',
+    notes: ''
+  });
 
   // --- Popup notification modal (supports Enter key) ---
   const [popupModal, setPopupModal] = useState<{ title: string; message: string } | null>(null);
@@ -704,6 +765,40 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
     };
 
     setSalesReports([newSale, ...salesReports]);
+
+    // Otomatis integrasikan ke Tagihan Pelanggan (Finance & Aplikasi Penagihan) bila Tempo / DP
+    if (newSale.statusPembayaran !== 'Lunas') {
+      const daysTempo = newSale.statusPembayaran === 'Tempo 30 Hari' ? 30 : 14;
+      const baseDate = new Date(`${newSale.tanggal}T00:00:00`);
+      const dueStr = isNaN(baseDate.getTime())
+        ? new Date(Date.now() + daysTempo * 86400000).toISOString().split('T')[0]
+        : new Date(baseDate.getTime() + daysTempo * 86400000).toISOString().split('T')[0];
+      const matchedVisit = visitReports.find(
+        v => v.storeName.toLowerCase() === newSale.storeName.toLowerCase()
+      );
+      const dpPaid = newSale.statusPembayaran === 'DP / Cicilan' ? Math.round(total * 0.5) : 0;
+
+      const autoInvoice: CustomerUnpaidInvoice = {
+        id: `INV-${Date.now()}`,
+        noInvoice: newSale.noNota.startsWith('INV')
+          ? newSale.noNota
+          : `INV/AKK/2026/11/${String(customerInvoices.length + 225).padStart(4, '0')}`,
+        noSuratJalan: newSale.noNota,
+        customerName: newSale.storeName,
+        contactPhone: matchedVisit?.contactPerson || '-',
+        region: newSale.region,
+        invoiceDate: newSale.tanggal,
+        dueDate: dueStr,
+        itemSummary: `${newSale.namaBarang} (${newSale.qty.toLocaleString('id-ID')} ${newSale.satuan})`,
+        totalTagihan: total,
+        jumlahTerbayar: dpPaid,
+        billingTeam: 'SALES',
+        salesPersonName: newSale.salesName,
+        notes: `[Marketing Offline - ${newSale.salesName}] ${newSale.statusPembayaran}${newSale.catatan ? ` • ${newSale.catatan}` : ''}`
+      };
+      updateCustomerInvoices(prev => [autoInvoice, ...prev]);
+    }
+
     setShowAddSalesModal(false);
     setSalesForm({
       ...salesForm,
@@ -714,8 +809,93 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
     });
     setPopupModal({
       title: 'Laporan Penjualan Disimpan',
-      message: `Penjualan ${newSale.noNota} untuk "${newSale.storeName}" senilai Rp ${total.toLocaleString('id-ID')} berhasil disimpan.`
+      message:
+        newSale.statusPembayaran !== 'Lunas'
+          ? `Penjualan ${newSale.noNota} untuk "${newSale.storeName}" senilai Rp ${total.toLocaleString('id-ID')} berhasil disimpan dan otomatis terintegrasi ke Daftar Tagihan Finance & Aplikasi Penagihan Pelanggan.`
+          : `Penjualan ${newSale.noNota} untuk "${newSale.storeName}" senilai Rp ${total.toLocaleString('id-ID')} berhasil disimpan.`
     });
+  };
+
+  const handleAddBillingInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!billingForm.customerName.trim() || !billingForm.noInvoice.trim()) return;
+
+    const newItem: CustomerUnpaidInvoice = {
+      id: `INV-${Date.now()}`,
+      noInvoice: billingForm.noInvoice.trim().toUpperCase(),
+      noSuratJalan: billingForm.noSuratJalan.trim().toUpperCase() || '-',
+      customerName: billingForm.customerName.trim().toUpperCase(),
+      contactPhone: billingForm.contactPhone.trim() || '-',
+      region: billingForm.region.trim() || 'Banyuwangi',
+      invoiceDate: billingForm.invoiceDate,
+      dueDate: billingForm.dueDate,
+      itemSummary: billingForm.itemSummary.trim() || 'Pesanan Kemasan Karton Box AKK',
+      totalTagihan: Math.max(0, Number(billingForm.totalTagihan) || 0),
+      jumlahTerbayar: Math.max(0, Number(billingForm.jumlahTerbayar) || 0),
+      billingTeam: billingForm.billingTeam,
+      salesPersonName: billingForm.billingTeam === 'SALES' ? billingForm.salesPersonName.trim() || 'Sales AKK' : undefined,
+      notes: billingForm.notes.trim() || 'Diinput dari Marketing Offline (Terintegrasi Finance)'
+    };
+
+    updateCustomerInvoices(prev => [newItem, ...prev]);
+    setShowAddBillingModal(false);
+    setOfflineSubTab('tagihan');
+    setBillingForm({
+      ...billingForm,
+      noInvoice: `INV/AKK/2026/11/${String(customerInvoices.length + 226).padStart(4, '0')}`,
+      noSuratJalan: `SJ-AKK-2611-${String(customerInvoices.length + 170)}`,
+      customerName: '',
+      contactPhone: '',
+      itemSummary: '',
+      notes: ''
+    });
+    setPopupModal({
+      title: 'Tagihan Pelanggan Terintegrasi Disimpan',
+      message: `Tagihan ${newItem.noInvoice} untuk "${newItem.customerName}" berhasil disimpan dan otomatis sinkron ke Finance & Aplikasi Penagihan Pelanggan.`
+    });
+  };
+
+  const handleSaveBillingPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!billingPayModalInvoice) return;
+    const bayar = Math.max(0, Number(billingPayNominal) || 0);
+    const updatedTerbayar = Math.min(
+      billingPayModalInvoice.totalTagihan,
+      billingPayModalInvoice.jumlahTerbayar + bayar
+    );
+    const sisaBaru = Math.max(0, billingPayModalInvoice.totalTagihan - updatedTerbayar);
+
+    updateCustomerInvoices(prev =>
+      prev.map(item =>
+        item.id === billingPayModalInvoice.id
+          ? {
+              ...item,
+              jumlahTerbayar: updatedTerbayar,
+              lastPaymentDate: new Date().toISOString().slice(0, 10),
+              notes:
+                billingPayNotes.trim() ||
+                (sisaBaru === 0
+                  ? 'Telah dilunasi penuh (Marketing Offline / Finance)'
+                  : `Pembayaran cicilan masuk Rp ${bayar.toLocaleString('id-ID')}`)
+            }
+          : item
+      )
+    );
+
+    const custName = billingPayModalInvoice.customerName;
+    const invNo = billingPayModalInvoice.noInvoice;
+    setBillingPayModalInvoice(null);
+    setPopupModal({
+      title: sisaBaru === 0 ? 'Tagihan Pelanggan Lunas' : 'Pembayaran Cicilan Dicatat',
+      message:
+        sisaBaru === 0
+          ? `Tagihan ${invNo} untuk "${custName}" telah dinyatakan LUNAS dan tersinkron ke Finance.`
+          : `Pembayaran Rp ${bayar.toLocaleString('id-ID')} untuk ${invNo} (${custName}) berhasil disimpan. Sisa tagihan: Rp ${sisaBaru.toLocaleString('id-ID')}.`
+    });
+  };
+
+  const handleDeleteBillingInvoice = (id: string) => {
+    updateCustomerInvoices(prev => prev.filter(item => item.id !== id));
   };
 
   const handleExportSalesExcel = () => {
@@ -858,6 +1038,10 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
   const visitOrderRate = totalVisitsCount > 0 ? ((orderVisitsCount / totalVisitsCount) * 100).toFixed(1) : '0';
   const totalOfflineSalesOmset = salesReports.reduce((sum, s) => sum + s.totalPenjualan, 0);
   const totalFilteredSalesOmset = filteredSales.reduce((sum, s) => sum + s.totalPenjualan, 0);
+
+  if (activeTab === 'marketing_invoice_validation') {
+    return <MarketingInvoiceValidationView />;
+  }
 
   // ============================================================
   // RENDER: PROSENTASE TO, VO & RO (TAKE ORDER, VISIT ORDER, REPEAT ORDER)
@@ -1348,6 +1532,14 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
               <Plus className="w-4 h-4" />
               <span>Input Laporan Penjualan</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setShowAddBillingModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Tagihan</span>
+            </button>
           </div>
         </div>
 
@@ -1401,20 +1593,20 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Perlu Tindak Lanjut (Follow-Up)
+                Tagihan Pelanggan (Finance)
               </span>
-              <Calendar className="w-4 h-4 text-amber-500" />
+              <DollarSign className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
-              {visitReports.filter(v => v.status === 'Menunggu Follow-Up').length} Toko
+              {customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length} Tagihan Aktif
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Menunggu konfirmasi PO atau negosiasi harga
+              Terintegrasi langsung dengan Finance &amp; Aplikasi Penagihan
             </p>
           </div>
         </div>
 
-        {/* SUB-NAVIGATION SWITCHER: LAPORAN KUNJUNGAN VS LAPORAN PENJUALAN */}
+        {/* SUB-NAVIGATION SWITCHER: LAPORAN KUNJUNGAN VS LAPORAN PENJUALAN VS TAGIHAN PELANGGAN */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2 flex flex-wrap items-center justify-between gap-3 shadow-xs">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1442,9 +1634,34 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
               <ShoppingBag className="w-4 h-4" />
               <span>2. Laporan Penjualan ({salesReports.length})</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setOfflineSubTab('tagihan')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                offlineSubTab === 'tagihan'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>
+                3. Tagihan Pelanggan ({customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length})
+              </span>
+            </button>
           </div>
 
-          <div className="flex items-center gap-2 pr-1">
+          <div className="flex flex-wrap items-center gap-2 pr-1">
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('marketing_billing_app')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>Aplikasi Penagihan Pelanggan</span>
+              </button>
+            )}
             {offlineSubTab === 'kunjungan' ? (
               <button
                 type="button"
@@ -1454,7 +1671,7 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
                 <Download className="w-3.5 h-3.5" />
                 <span>Ekspor Excel Kunjungan</span>
               </button>
-            ) : (
+            ) : offlineSubTab === 'penjualan' ? (
               <button
                 type="button"
                 onClick={handleExportSalesExcel}
@@ -1462,6 +1679,15 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Ekspor Excel Penjualan</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAddBillingModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Tagihan</span>
               </button>
             )}
           </div>
@@ -1991,6 +2217,243 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
         )}
 
         {/* ============================================================ */}
+        {/* SUB-TAB 3: TAGIHAN PELANGGAN (TERINTEGRASI FINANCE)          */}
+        {/* ============================================================ */}
+        {offlineSubTab === 'tagihan' && (() => {
+          const q = billingSearch.trim().toLowerCase();
+          const filteredBillingList = customerInvoices.filter(inv => {
+            const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+            const st = getInvoiceStatus(inv);
+            const invTeam = inv.billingTeam || 'FINANCE';
+            const matchTeam = billingTeamTab === 'ALL' || invTeam === billingTeamTab;
+            const matchSearch =
+              !q ||
+              inv.noInvoice.toLowerCase().includes(q) ||
+              inv.noSuratJalan.toLowerCase().includes(q) ||
+              inv.customerName.toLowerCase().includes(q) ||
+              inv.region.toLowerCase().includes(q) ||
+              inv.itemSummary.toLowerCase().includes(q);
+            let matchStatus = true;
+            if (billingStatusFilter === 'UNPAID_ONLY') {
+              matchStatus = sisa > 0;
+            } else if (billingStatusFilter !== 'ALL') {
+              matchStatus = st === billingStatusFilter;
+            }
+            return matchTeam && matchSearch && matchStatus;
+          });
+          const totalSisaFiltered = filteredBillingList.reduce(
+            (acc, inv) => acc + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
+            0
+          );
+
+          return (
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={billingSearch}
+                    onChange={e => setBillingSearch(e.target.value)}
+                    placeholder="Cari No. Invoice, Nama Pelanggan / Toko, Wilayah, atau Item Pesanan..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={billingStatusFilter}
+                    onChange={e => setBillingStatusFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value="UNPAID_ONLY">
+                      Semua Belum Terlunasi ({customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length})
+                    </option>
+                    <option value="Jatuh Tempo (Overdue)">Jatuh Tempo (Overdue)</option>
+                    <option value="Cicilan / Sebagian">Cicilan / Sebagian</option>
+                    <option value="Belum Jatuh Tempo">Belum Jatuh Tempo</option>
+                    <option value="Lunas">Sudah Lunas</option>
+                    <option value="ALL">Tampilkan Semua Faktur ({customerInvoices.length})</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddBillingModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Input Tagihan Baru</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                      Daftar Tagihan Pelanggan (Terintegrasi Finance &amp; Aplikasi Penagihan)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Setiap tagihan yang diinput dari Marketing Offline otomatis tersinkron dengan Finance &amp; Aplikasi Penagihan Pelanggan.
+                    </p>
+                  </div>
+                  <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Sisa Piutang Terfilter:{' '}
+                    <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                      Rp {totalSisaFiltered.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">No. Invoice &amp; SJ</th>
+                        <th className="py-3 px-4">Nama Pelanggan / Toko</th>
+                        <th className="py-3 px-4">Rincian Pesanan</th>
+                        <th className="py-3 px-4">Jatuh Tempo &amp; Umur</th>
+                        <th className="py-3 px-4 text-right">Total Tagihan</th>
+                        <th className="py-3 px-4 text-right">Sudah Dibayar</th>
+                        <th className="py-3 px-4 text-right">Sisa Belum Lunas</th>
+                        <th className="py-3 px-4">Status Tagihan</th>
+                        <th className="py-3 px-4 text-right">Aksi Penagihan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                      {filteredBillingList.length > 0 ? (
+                        filteredBillingList.map(inv => {
+                          const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                          const st = getInvoiceStatus(inv);
+                          const agingDays = computeInvoiceAgingDays(inv.dueDate);
+                          return (
+                            <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                    {inv.noInvoice}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                      inv.billingTeam === 'SALES'
+                                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                        : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                                    }`}
+                                  >
+                                    {inv.billingTeam === 'SALES' ? 'Khusus Sales' : 'Tim Finance'}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                  SJ: {inv.noSuratJalan} &bull; Tgl: {inv.invoiceDate}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-900 dark:text-white">{inv.customerName}</div>
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                  <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                  <span>{inv.region} &bull; {inv.contactPhone}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 max-w-[230px]">
+                                <div className="font-medium text-slate-800 dark:text-slate-200 leading-snug">
+                                  {inv.itemSummary}
+                                </div>
+                                {inv.notes && (
+                                  <div className="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title={inv.notes}>
+                                    {inv.notes}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-mono font-bold text-slate-900 dark:text-white">{inv.dueDate}</div>
+                                {sisa > 0 ? (
+                                  agingDays > 0 ? (
+                                    <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-mono font-black text-[10px]">
+                                      Lewat {agingDays} Hari
+                                    </span>
+                                  ) : (
+                                    <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-[10px]">
+                                      {Math.abs(agingDays)} Hari Lagi
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-[10px] text-emerald-500 font-bold">Selesai</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                                Rp {inv.totalTagihan.toLocaleString('id-ID')}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                Rp {inv.jumlahTerbayar.toLocaleString('id-ID')}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-black">
+                                {sisa > 0 ? (
+                                  <span className="text-rose-600 dark:text-rose-400">
+                                    Rp {sisa.toLocaleString('id-ID')}
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-600 dark:text-emerald-400">Rp 0</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold inline-block border ${
+                                    st === 'Lunas'
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                      : st === 'Jatuh Tempo (Overdue)'
+                                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                      : st === 'Cicilan / Sebagian'
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                                  }`}
+                                >
+                                  {st}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {sisa > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBillingPayModalInvoice(inv);
+                                        setBillingPayNominal(sisa);
+                                        setBillingPayNotes(inv.notes || '');
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition cursor-pointer shadow-xs whitespace-nowrap"
+                                    >
+                                      Catat Bayar / Cicil
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteBillingInvoice(inv.id)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                                    title="Hapus Data Tagihan"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="py-8 text-center text-slate-400 text-xs">
+                            Tidak ada data tagihan pelanggan yang sesuai dengan filter pencarian.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ============================================================ */}
         {/* MODAL: INPUT LAPORAN KUNJUNGAN BARU                          */}
         {/* ============================================================ */}
         {showAddVisitModal && (
@@ -2390,6 +2853,354 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
                     className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer"
                   >
                     Simpan Laporan Penjualan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* MODAL: INPUT TAGIHAN PELANGGAN (TERINTEGRASI FINANCE)        */}
+        {/* ============================================================ */}
+        {showAddBillingModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Input Tagihan Pelanggan (Terintegrasi Finance &amp; Marketing Offline)
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Otomatis tersinkron ke Monitoring Tagihan Finance &amp; Aplikasi Penagihan Pelanggan
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddBillingModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddBillingInvoice} className="space-y-3 text-xs">
+                {/* Quick-fill from Marketing Offline Sales / Visits */}
+                <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-1.5">
+                  <label className="block font-bold text-amber-800 dark:text-amber-300 text-[11px]">
+                    Ambil Cepat dari Data Toko Marketing Offline (Opsional):
+                  </label>
+                  <select
+                    defaultValue=""
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (!val) return;
+                      if (val.startsWith('SALE:')) {
+                        const sId = val.replace('SALE:', '');
+                        const s = salesReports.find(x => x.id === sId);
+                        if (s) {
+                          const v = visitReports.find(
+                            vr => vr.storeName.toLowerCase() === s.storeName.toLowerCase()
+                          );
+                          setBillingForm(prev => ({
+                            ...prev,
+                            noSuratJalan: s.noNota,
+                            customerName: s.storeName,
+                            contactPhone: v?.contactPerson || prev.contactPhone,
+                            region: s.region,
+                            invoiceDate: s.tanggal,
+                            itemSummary: `${s.namaBarang} (${s.qty} ${s.satuan})`,
+                            totalTagihan: s.totalPenjualan,
+                            notes: `Sales Offline: ${s.salesName} (${s.statusPembayaran})`
+                          }));
+                        }
+                      } else if (val.startsWith('VISIT:')) {
+                        const vId = val.replace('VISIT:', '');
+                        const v = visitReports.find(x => x.id === vId);
+                        if (v) {
+                          setBillingForm(prev => ({
+                            ...prev,
+                            customerName: v.storeName,
+                            contactPhone: v.contactPerson,
+                            region: v.region,
+                            itemSummary: v.outcome || prev.itemSummary,
+                            notes: `Kunjungan Sales: ${v.salesName}`
+                          }));
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">-- Pilih Nota Penjualan / Kunjungan Toko untuk Isi Otomatis --</option>
+                    <optgroup label="Dari Laporan Penjualan Marketing Offline">
+                      {salesReports.map(s => (
+                        <option key={s.id} value={`SALE:${s.id}`}>
+                          {s.noNota} — {s.storeName} (Rp {s.totalPenjualan.toLocaleString('id-ID')})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Dari Laporan Kunjungan Marketing Offline">
+                      {visitReports.map(v => (
+                        <option key={v.id} value={`VISIT:${v.id}`}>
+                          {v.id} — {v.storeName} ({v.region})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      No. Invoice / Faktur *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={billingForm.noInvoice}
+                      onChange={e => setBillingForm({ ...billingForm, noInvoice: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      No. Surat Jalan / SO
+                    </label>
+                    <input
+                      type="text"
+                      value={billingForm.noSuratJalan}
+                      onChange={e => setBillingForm({ ...billingForm, noSuratJalan: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Nama Pelanggan / Toko *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: TK ANUGRAH SEKAR WANGI"
+                      value={billingForm.customerName}
+                      onChange={e => setBillingForm({ ...billingForm, customerName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Wilayah / Cabang
+                    </label>
+                    <input
+                      type="text"
+                      value={billingForm.region}
+                      onChange={e => setBillingForm({ ...billingForm, region: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Kontak / WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="0812-..."
+                      value={billingForm.contactPhone}
+                      onChange={e => setBillingForm({ ...billingForm, contactPhone: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Invoice *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={billingForm.invoiceDate}
+                      onChange={e => setBillingForm({ ...billingForm, invoiceDate: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Jatuh Tempo *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={billingForm.dueDate}
+                      onChange={e => setBillingForm({ ...billingForm, dueDate: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Rincian Barang / Pesanan *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Karton Box Corrugated B-Flute 60x40x40 cm (2.000 Pcs)"
+                    value={billingForm.itemSummary}
+                    onChange={e => setBillingForm({ ...billingForm, itemSummary: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Total Nilai Tagihan (Rp) *
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      required
+                      value={billingForm.totalTagihan}
+                      onChange={e => setBillingForm({ ...billingForm, totalTagihan: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      DP / Sudah Dibayar Awal (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={billingForm.jumlahTerbayar}
+                      onChange={e => setBillingForm({ ...billingForm, jumlahTerbayar: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Catatan Penagihan / Sales PIC
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Jatuh tempo 14 hari setelah barang diterima..."
+                    value={billingForm.notes}
+                    onChange={e => setBillingForm({ ...billingForm, notes: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddBillingModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Tagihan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CATAT PEMBAYARAN / CICILAN DARI MARKETING OFFLINE */}
+        {billingPayModalInvoice && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Catat Pembayaran / Pelunasan Tagihan
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    {billingPayModalInvoice.noInvoice} &bull; {billingPayModalInvoice.customerName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBillingPayModalInvoice(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveBillingPayment} className="space-y-3.5 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Total Tagihan Faktur:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      Rp {billingPayModalInvoice.totalTagihan.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Sudah Terbayar Sebelumnya:</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      Rp {billingPayModalInvoice.jumlahTerbayar.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Sisa Tagihan Saat Ini:</span>
+                    <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                      Rp {Math.max(0, billingPayModalInvoice.totalTagihan - billingPayModalInvoice.jumlahTerbayar).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nominal Pembayaran Masuk (Rp) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(0, billingPayModalInvoice.totalTagihan - billingPayModalInvoice.jumlahTerbayar)}
+                    required
+                    value={billingPayNominal}
+                    onChange={e => setBillingPayNominal(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-sm font-black"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Catatan Pembayaran / Referensi
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Contoh: Pembayaran titipan sales / transfer BCA..."
+                    value={billingPayNotes}
+                    onChange={e => setBillingPayNotes(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBillingPayModalInvoice(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Pembayaran
                   </button>
                 </div>
               </form>

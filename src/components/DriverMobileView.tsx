@@ -341,9 +341,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [isSupabaseLive, setIsSupabaseLive] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'scheduled' | 'delivered'>('active');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [bottomNav, setBottomNav] = useState<DriverPortalTab>('deliveries');
+  const [bottomNav, setBottomNav] = useState<DriverPortalTab>(() => {
+    try {
+      const pendingTab = localStorage.getItem('akk_driver_portal_open_tab');
+      if (pendingTab === 'form_kirim') {
+        localStorage.removeItem('akk_driver_portal_open_tab');
+        return 'form_kirim';
+      }
+    } catch {}
+    return 'deliveries';
+  });
 
   useEffect(() => {
+    try {
+      const pendingTab = localStorage.getItem('akk_driver_portal_open_tab');
+      if (pendingTab === 'form_kirim') {
+        localStorage.removeItem('akk_driver_portal_open_tab');
+        setBottomNav('form_kirim');
+      }
+    } catch {}
     return formKirimStore.subscribe(() => {
       setFormKirimList(formKirimStore.getAll());
     });
@@ -2367,18 +2383,39 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
     const activeCrewName = currentDriver?.name || portalDisplayName || '';
 
+    // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim
+    let preferredId = '';
+    try {
+      preferredId = localStorage.getItem('akk_active_form_kirim_id') || '';
+    } catch {}
+    if (preferredId) {
+      const explicitRecord = formKirimList.find(
+        fk => fk.id === preferredId && (fk.invoiceItems?.length || 0) > 0
+      );
+      if (explicitRecord) {
+        return {
+          record: explicitRecord,
+          matchedArea: explicitRecord.areaKirim || primarySch?.areaName || ''
+        };
+      }
+    }
+
     // Filter hanya Form Kirim tanggal hari ini yang memiliki daftar faktur tersimpan dari Admin
     const todayForms = formKirimList.filter(
       fk => isTodayDate(fk.tanggalKirim) && (fk.invoiceItems?.length || 0) > 0
     );
-    if (todayForms.length === 0) {
+    const candidateForms =
+      todayForms.length > 0
+        ? todayForms
+        : formKirimList.filter(fk => (fk.invoiceItems?.length || 0) > 0);
+    if (candidateForms.length === 0) {
       return {
         record: null,
         matchedArea: primarySch?.areaName || ''
       };
     }
 
-    const scored = todayForms
+    const scored = candidateForms
       .map(fk => {
         const fkAreaStd = standardizeAreaName(fk.areaKirim || '');
         const matchesPrimaryArea = Boolean(primaryAreaStd && fkAreaStd === primaryAreaStd);
@@ -2405,16 +2442,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         return String(b.fk.createdAt || '').localeCompare(String(a.fk.createdAt || ''));
       });
 
-    // Untuk driver/helper wajib terintegrasi dengan jadwal hari ini;
-    // untuk Super Admin prioritaskan yang cocok jadwal hari ini (fallback form ber-faktur hari ini)
+    // Prioritaskan yang cocok jadwal hari ini, fallback ke Form Kirim ber-faktur terbaru
     const scheduleMatched = scored.find(s => s.isScheduleLinked);
     const chosen =
       scheduleMatched?.fk ||
-      (canManageAllPortalSchedules || isSuperAdminUser
-        ? scored.find(s => (s.fk.invoiceItems?.length || 0) > 0)?.fk || scored[0]?.fk || null
-        : todaySchedules.length === 0
-        ? null
-        : null);
+      scored.find(s => (s.fk.invoiceItems?.length || 0) > 0)?.fk ||
+      scored[0]?.fk ||
+      null;
 
     return {
       record: chosen || null,

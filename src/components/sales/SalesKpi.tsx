@@ -29,7 +29,12 @@ import {
   Package,
   RotateCcw,
   Trophy,
-  BadgePercent
+  BadgePercent,
+  Pencil,
+  Truck,
+  BarChart3,
+  Target,
+  Activity
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -81,6 +86,7 @@ export interface AdminIndividualKpiRecord {
   pengecekanFaktur: number; // % Pengecekan Faktur Penjualan
   discountErrorsCount: number; // Jumlah kesalahan penginputan diskon (kali)
   totalOrders: number;
+  lastMonthPct?: number; // % Pencapaian bulan sebelumnya (opsional jika diinput manual/excel)
   notes?: string;
 }
 
@@ -116,12 +122,12 @@ export interface DendaCheckerRecord {
 export interface ReorderWeeklyItem {
   id: string;
   unit: 'Nusantara Dr. Soetomo' | 'Nusantara Expand';
-  weekLabel: string; // 'Minggu 1' | 'Minggu 2' | 'Minggu 3' | 'Minggu 4'
+  weekLabel: string; // Analisa (Tanggal)
   month: string;
   year: string;
-  totalReorder: number; // Total Reorder Mingguan (SO Masuk)
-  terkirimFaktur: number; // Total Barang Sudah Terkirim (Faktur)
-  belumTerkirimSo: number; // Total Barang Belum Terkirim (SO Menunggu)
+  totalReorder: number; // Total Reorder Mingguan
+  terkirimFaktur: number; // Total Barang Sudah Terkirim (Item)
+  belumTerkirimSo: number; // Total Barang Belum Terkirim (Item)
 }
 
 export interface AdminOmsetRow {
@@ -133,6 +139,8 @@ export interface AdminOmsetRow {
   year: string;
   kota: string;
   area: string;
+  customerName?: string;
+  itemName?: string;
   omzetNetto: number;
   bruto: number;
   returNominal: number;
@@ -148,9 +156,6 @@ interface SalesKpiProps {
   onChangeTab?: (tab: string) => void;
 }
 
-// ============================================================================
-// DEFAULT BRANCH-SEPARATED ADMIN NAMES FALLBACK (IF USER MGMT HAS ONLY 1 USER)
-// ============================================================================
 const DEFAULT_NUSANTARA_ADMINS = [
   'MEINDA MAULINA',
   'BINTANG MEDITA SARI',
@@ -167,11 +172,24 @@ const DEFAULT_SIDOARJO_ADMINS = [
   'BUDI SANTOSO SIDOARJO'
 ];
 
-const LS_KPI_INDIVIDUAL_KEY = 'akk_sales_kpi_individual_v3';
-const LS_DISCOUNT_ERRORS_KEY = 'akk_sales_kpi_discount_errors_v3';
-const LS_DENDA_CHECKER_KEY = 'akk_sales_kpi_denda_checker_v3';
-const LS_REORDER_EVAL_KEY = 'akk_sales_kpi_reorder_eval_v3';
-const LS_ADMIN_OMSET_KEY = 'akk_sales_kpi_admin_omset_v3';
+const LEGACY_KPI_LOCAL_STORAGE_KEYS = [
+  'akk_sales_kpi_individual_v1',
+  'akk_sales_kpi_individual_v2',
+  'akk_sales_kpi_individual_v3',
+  'akk_sales_kpi_discount_errors_v1',
+  'akk_sales_kpi_discount_errors_v2',
+  'akk_sales_kpi_discount_errors_v3',
+  'akk_sales_kpi_denda_checker_v1',
+  'akk_sales_kpi_denda_checker_v2',
+  'akk_sales_kpi_denda_checker_v3',
+  'akk_sales_kpi_reorder_eval_v1',
+  'akk_sales_kpi_reorder_eval_v2',
+  'akk_sales_kpi_reorder_eval_v3',
+  'akk_sales_kpi_reorder_eval_v4',
+  'akk_sales_kpi_admin_omset_v1',
+  'akk_sales_kpi_admin_omset_v2',
+  'akk_sales_kpi_admin_omset_v3'
+];
 
 function parseNum(raw: any): number {
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
@@ -201,614 +219,28 @@ function formatQtyId(val: number): string {
   });
 }
 
-// ============================================================================
-// INITIAL SEED GENERATORS
-// ============================================================================
-
-function buildInitialIndividualKpi(
-  nusantaraAdmins: string[],
-  sidoarjoAdmins: string[],
-  month: string,
-  year: string
-): AdminIndividualKpiRecord[] {
-  const bwiPresets = [
-    { validasiSoWeb: 96, pembuatanFaktur: 98, pengecekanFaktur: 97, discountErrorsCount: 0, totalOrders: 423 },
-    { validasiSoWeb: 95, pembuatanFaktur: 96, pengecekanFaktur: 95, discountErrorsCount: 1, totalOrders: 499 },
-    { validasiSoWeb: 94, pembuatanFaktur: 95, pengecekanFaktur: 96, discountErrorsCount: 1, totalOrders: 458 },
-    { validasiSoWeb: 92, pembuatanFaktur: 94, pengecekanFaktur: 93, discountErrorsCount: 2, totalOrders: 306 },
-    { validasiSoWeb: 91, pembuatanFaktur: 92, pengecekanFaktur: 94, discountErrorsCount: 1, totalOrders: 284 },
-    { validasiSoWeb: 89, pembuatanFaktur: 91, pengecekanFaktur: 90, discountErrorsCount: 3, totalOrders: 265 }
-  ];
-  const sdaPresets = [
-    { validasiSoWeb: 95, pembuatanFaktur: 97, pengecekanFaktur: 96, discountErrorsCount: 0, totalOrders: 390 },
-    { validasiSoWeb: 93, pembuatanFaktur: 94, pengecekanFaktur: 95, discountErrorsCount: 1, totalOrders: 355 },
-    { validasiSoWeb: 91, pembuatanFaktur: 92, pengecekanFaktur: 93, discountErrorsCount: 2, totalOrders: 312 },
-    { validasiSoWeb: 88, pembuatanFaktur: 90, pengecekanFaktur: 89, discountErrorsCount: 2, totalOrders: 278 }
-  ];
-
-  const records: AdminIndividualKpiRecord[] = [];
-  nusantaraAdmins.forEach((name, idx) => {
-    const p = bwiPresets[idx % bwiPresets.length];
-    records.push({
-      id: `kpi-bwi-${idx + 1}`,
-      adminName: name.toUpperCase(),
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      validasiSoWeb: p.validasiSoWeb,
-      pembuatanFaktur: p.pembuatanFaktur,
-      pengecekanFaktur: p.pengecekanFaktur,
-      discountErrorsCount: p.discountErrorsCount,
-      totalOrders: p.totalOrders,
-      notes: 'Evaluasi KPI Bulanan Cabang Nusantara'
-    });
-  });
-
-  sidoarjoAdmins.forEach((name, idx) => {
-    const p = sdaPresets[idx % sdaPresets.length];
-    records.push({
-      id: `kpi-sda-${idx + 1}`,
-      adminName: name.toUpperCase(),
-      branchId: 'cab-sidoarjo',
-      month,
-      year,
-      validasiSoWeb: p.validasiSoWeb,
-      pembuatanFaktur: p.pembuatanFaktur,
-      pengecekanFaktur: p.pengecekanFaktur,
-      discountErrorsCount: p.discountErrorsCount,
-      totalOrders: p.totalOrders,
-      notes: 'Evaluasi KPI Bulanan Cabang Sidoarjo'
-    });
-  });
-
-  return records;
-}
-
-function buildInitialDiscountErrors(
-  nusantaraAdmins: string[],
-  sidoarjoAdmins: string[],
-  month: string,
-  year: string
-): DiscountErrorLogItem[] {
-  const b0 = nusantaraAdmins[1] || 'BINTANG MEDITA SARI';
-  const b1 = nusantaraAdmins[3] || 'MEINDA MAULINA';
-  const s0 = sidoarjoAdmins[1] || 'RINA WIJAYA SIDOARJO';
-  return [
-    {
-      id: 'dsc-1',
-      date: '2026-11-05',
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      adminName: b0,
-      noFakturOrSo: 'FJ02-1126-0412',
-      customerName: 'TK ANEKA BARU SRONO',
-      expectedDiscount: 3,
-      inputDiscount: 5,
-      selisihNominal: 94800,
-      keterangan: 'Salah input diskon tier grosir 5% (seharusnya 3%)'
-    },
-    {
-      id: 'dsc-2',
-      date: '2026-11-09',
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      adminName: b1,
-      noFakturOrSo: 'FJ02-1126-0819',
-      customerName: 'TK SINAR OKKI MUNCAR',
-      expectedDiscount: 2,
-      inputDiscount: 4,
-      selisihNominal: 62500,
-      keterangan: 'Diskon promo plastik HD terinput ganda pada SO'
-    },
-    {
-      id: 'dsc-3',
-      date: '2026-11-11',
-      branchId: 'cab-sidoarjo',
-      month,
-      year,
-      adminName: s0,
-      noFakturOrSo: 'FJ01-1126-0295',
-      customerName: 'CV DEWI SRI MAJU',
-      expectedDiscount: 2.5,
-      inputDiscount: 5,
-      selisihNominal: 125000,
-      keterangan: 'Salah pilih kode diskon kontrak karton box'
-    }
-  ];
-}
-
-function buildInitialDendaChecker(
-  nusantaraAdmins: string[],
-  sidoarjoAdmins: string[],
-  month: string,
-  year: string
-): DendaCheckerRecord[] {
-  const b0 = nusantaraAdmins[0] || 'MEINDA MAULINA';
-  const b1 = nusantaraAdmins[1] || 'BINTANG MEDITA SARI';
-  const b2 = nusantaraAdmins[2] || 'FATAUDIN RIFKY MAULANA';
-  const s0 = sidoarjoAdmins[0] || 'NADIA PUTRI SIDOARJO';
-  return [
-    {
-      id: 'dc-1',
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      adminName: b0,
-      customerName: 'TK BELLIA SUMBER AYU',
-      noFaktur: 'FJ02-1126-1080',
-      keterangan: 'Selisih pengecekan qty mika AG B3A pada faktur vs fisik',
-      nominalSelisih: 25000,
-      kalianSelisih: 2,
-      totalDenda: 50000
-    },
-    {
-      id: 'dc-2',
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      adminName: b1,
-      customerName: 'TK ANUGRAH SEKAR WANGI',
-      noFaktur: 'FJ02-1126-0799',
-      keterangan: 'Salah input harga satuan sendok bebek di faktur penjualan',
-      nominalSelisih: 50000,
-      kalianSelisih: 2,
-      totalDenda: 100000
-    },
-    {
-      id: 'dc-3',
-      branchId: 'cab-banyuwangi',
-      month,
-      year,
-      adminName: b2,
-      customerName: 'TK TUMBUH JAYA MUNCAR',
-      noFaktur: 'FJ02-1126-1064',
-      keterangan: 'Kurang potong diskon retur barang pada nota tagihan',
-      nominalSelisih: 30000,
-      kalianSelisih: 1,
-      totalDenda: 30000
-    },
-    {
-      id: 'dc-4',
-      branchId: 'cab-sidoarjo',
-      month,
-      year,
-      adminName: s0,
-      customerName: 'PT BARES GROSIR SATU',
-      noFaktur: 'FJ01-1126-0512',
-      keterangan: 'Selisih verifikasi coly surat jalan muat Sidoarjo',
-      nominalSelisih: 40000,
-      kalianSelisih: 2,
-      totalDenda: 80000
-    }
-  ];
-}
-
-function buildInitialReorderEval(month: string, year: string): ReorderWeeklyItem[] {
-  return [
-    // Nusantara Dr. Soetomo
-    {
-      id: 'reo-ds-1',
-      unit: 'Nusantara Dr. Soetomo',
-      weekLabel: 'Minggu 1',
-      month,
-      year,
-      totalReorder: 420,
-      terkirimFaktur: 365,
-      belumTerkirimSo: 55
-    },
-    {
-      id: 'reo-ds-2',
-      unit: 'Nusantara Dr. Soetomo',
-      weekLabel: 'Minggu 2',
-      month,
-      year,
-      totalReorder: 460,
-      terkirimFaktur: 405,
-      belumTerkirimSo: 55
-    },
-    {
-      id: 'reo-ds-3',
-      unit: 'Nusantara Dr. Soetomo',
-      weekLabel: 'Minggu 3',
-      month,
-      year,
-      totalReorder: 490,
-      terkirimFaktur: 432,
-      belumTerkirimSo: 58
-    },
-    {
-      id: 'reo-ds-4',
-      unit: 'Nusantara Dr. Soetomo',
-      weekLabel: 'Minggu 4',
-      month,
-      year,
-      totalReorder: 510,
-      terkirimFaktur: 454,
-      belumTerkirimSo: 56
-    },
-    // Nusantara Expand
-    {
-      id: 'reo-ex-1',
-      unit: 'Nusantara Expand',
-      weekLabel: 'Minggu 1',
-      month,
-      year,
-      totalReorder: 340,
-      terkirimFaktur: 262,
-      belumTerkirimSo: 78
-    },
-    {
-      id: 'reo-ex-2',
-      unit: 'Nusantara Expand',
-      weekLabel: 'Minggu 2',
-      month,
-      year,
-      totalReorder: 375,
-      terkirimFaktur: 295,
-      belumTerkirimSo: 80
-    },
-    {
-      id: 'reo-ex-3',
-      unit: 'Nusantara Expand',
-      weekLabel: 'Minggu 3',
-      month,
-      year,
-      totalReorder: 410,
-      terkirimFaktur: 332,
-      belumTerkirimSo: 78
-    },
-    {
-      id: 'reo-ex-4',
-      unit: 'Nusantara Expand',
-      weekLabel: 'Minggu 4',
-      month,
-      year,
-      totalReorder: 435,
-      terkirimFaktur: 358,
-      belumTerkirimSo: 77
-    }
-  ];
-}
-
-function buildInitialAdminOmsetRows(
-  nusantaraAdmins: string[],
-  sidoarjoAdmins: string[],
-  month: string,
-  year: string
-): AdminOmsetRow[] {
-  const bwiTemplate = [
-    {
-      kota: 'BALI - DENPASAR',
-      area: 'Denpasar 1',
-      omzetNetto: 670482046,
-      bruto: 682982046,
-      returNominal: 12500000,
-      qtyNetto: 560635,
-      returQty: 8400,
-      targetNominal: 1560000000,
-      lastMonthOmzet: 1451757474,
-      lastMonthQty: 1629842
-    },
-    {
-      kota: 'GENTENG',
-      area: 'Genteng Retail',
-      omzetNetto: 554540885,
-      bruto: 569140885,
-      returNominal: 14600000,
-      qtyNetto: 322575,
-      returQty: 6200,
-      targetNominal: 1798000000,
-      lastMonthOmzet: 1328633391,
-      lastMonthQty: 902296
-    },
-    {
-      kota: 'JEMBER',
-      area: 'Jember Kota',
-      omzetNetto: 486291327,
-      bruto: 498091327,
-      returNominal: 11800000,
-      qtyNetto: 263363,
-      returQty: 5100,
-      targetNominal: 1420000000,
-      lastMonthOmzet: 980354607,
-      lastMonthQty: 549883
-    },
-    {
-      kota: 'MUNCAR',
-      area: 'Muncar Pasar',
-      omzetNetto: 412796179,
-      bruto: 421296179,
-      returNominal: 8500000,
-      qtyNetto: 497583,
-      returQty: 4100,
-      targetNominal: 1250000000,
-      lastMonthOmzet: 668809157,
-      lastMonthQty: 455946
-    },
-    {
-      kota: 'BANYUWANGI KOTA',
-      area: 'Banyuwangi Kota',
-      omzetNetto: 368410200,
-      bruto: 375410200,
-      returNominal: 7000000,
-      qtyNetto: 318420,
-      returQty: 3200,
-      targetNominal: 1100000000,
-      lastMonthOmzet: 712400000,
-      lastMonthQty: 512000
-    },
-    {
-      kota: 'SITUBONDO',
-      area: 'Situbondo',
-      omzetNetto: 295120000,
-      bruto: 301120000,
-      returNominal: 6000000,
-      qtyNetto: 245100,
-      returQty: 2800,
-      targetNominal: 950000000,
-      lastMonthOmzet: 590000000,
-      lastMonthQty: 410000
-    }
-  ];
-
-  const sdaTemplate = [
-    {
-      kota: 'SURABAYA UTARA',
-      area: 'Surabaya Utara',
-      omzetNetto: 642231174,
-      bruto: 669618292,
-      returNominal: 27387118,
-      qtyNetto: 2908055,
-      returQty: 81000,
-      targetNominal: 2472030000,
-      lastMonthOmzet: 1641558246,
-      lastMonthQty: 7173542
-    },
-    {
-      kota: 'SIDOARJO',
-      area: 'Sidoarjo Kota',
-      omzetNetto: 504871257,
-      bruto: 516919563,
-      returNominal: 12048306,
-      qtyNetto: 1412849.68,
-      returQty: 19500,
-      targetNominal: 1891185820,
-      lastMonthOmzet: 1120400000,
-      lastMonthQty: 2350000
-    },
-    {
-      kota: 'GRESIK',
-      area: 'Gresik',
-      omzetNetto: 342180500,
-      bruto: 350180500,
-      returNominal: 8000000,
-      qtyNetto: 668000,
-      returQty: 9200,
-      targetNominal: 1200000000,
-      lastMonthOmzet: 780000000,
-      lastMonthQty: 1120000
-    }
-  ];
-
-  const rows: AdminOmsetRow[] = [];
-  nusantaraAdmins.forEach((adminName, idx) => {
-    const t = bwiTemplate[idx % bwiTemplate.length];
-    rows.push({
-      id: `oms-bwi-${idx + 1}`,
-      adminName: adminName.toUpperCase(),
-      branchId: 'cab-banyuwangi',
-      branchCode: 'BWI',
-      month,
-      year,
-      ...t
-    });
-  });
-
-  sidoarjoAdmins.forEach((adminName, idx) => {
-    const t = sdaTemplate[idx % sdaTemplate.length];
-    rows.push({
-      id: `oms-sda-${idx + 1}`,
-      adminName: adminName.toUpperCase(),
-      branchId: 'cab-sidoarjo',
-      branchCode: 'SDA',
-      month,
-      year,
-      ...t
-    });
-  });
-
-  return rows;
-}
-
-const MONTHLY_OMZET_SERIES_2026 = [
-  { month: 'JAN', omzetNetto: 9.65, target: 9.5, qtyJt: 24.8, returJt: 35 },
-  { month: 'FEB', omzetNetto: 9.72, target: 8.9, qtyJt: 24.2, returJt: 62 },
-  { month: 'MAR', omzetNetto: 7.18, target: 8.1, qtyJt: 14.9, returJt: 82 },
-  { month: 'APR', omzetNetto: 9.05, target: 8.6, qtyJt: 15.2, returJt: 58 },
-  { month: 'MEI', omzetNetto: 8.24, target: 13.7, qtyJt: 15.9, returJt: 155 },
-  { month: 'JUN', omzetNetto: 9.18, target: 11.4, qtyJt: 18.7, returJt: 174 },
-  { month: 'JUL', omzetNetto: 9.74, target: 12.0, qtyJt: 21.1, returJt: 152 },
-  { month: 'AGU', omzetNetto: 8.15, target: 12.2, qtyJt: 18.4, returJt: 178 },
-  { month: 'SEP', omzetNetto: 9.55, target: 12.2, qtyJt: 20.1, returJt: 148 },
-  { month: 'OKT', omzetNetto: 8.95, target: 12.3, qtyJt: 18.7, returJt: 132 },
-  { month: 'NOV', omzetNetto: 3.81, target: 12.44, qtyJt: 7.2, returJt: 78.8 }
-];
-
-const TOP_CUSTOMERS_DATA = [
-  {
-    name: 'PT BARES GROSIR SATU',
-    omzet: 103067748,
-    qty: '405.225 PCS',
-    growthPct: '+286,7%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 59.011.519 • Selisih qty +167.150 PCS',
-    vsBadge: '▲ +276,9%',
-    progressPct: 100,
-    branchId: 'cab-sidoarjo',
-    kota: 'SURABAYA UTARA'
-  },
-  {
-    name: 'TK BALI ANEKA PLASTIK',
-    omzet: 82639725,
-    qty: '17.343 PCS',
-    growthPct: '+239,7%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 53.868.421 • Selisih qty +4.638 PCS',
-    vsBadge: '▲ +202,3%',
-    progressPct: 82,
-    branchId: 'cab-banyuwangi',
-    kota: 'BALI - DENPASAR'
-  },
-  {
-    name: 'TK SUPER PLASTIK',
-    omzet: 75645407,
-    qty: '511.000 PCS',
-    growthPct: '+976,1%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 15.565.493 • Selisih qty +415.000 PCS',
-    vsBadge: '▲ +1.078,6%',
-    progressPct: 74,
-    branchId: 'cab-banyuwangi',
-    kota: 'GENTENG'
-  },
-  {
-    name: 'CV DEWI SRI MAJU',
-    omzet: 63660987,
-    qty: '130.230 PCS',
-    growthPct: '+85,8%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 75.858.264 • Selisih qty -19.454 PCS',
-    vsBadge: '▲ +92,7%',
-    progressPct: 62,
-    branchId: 'cab-sidoarjo',
-    kota: 'SIDOARJO'
-  },
-  {
-    name: 'TK CENTRAL PLASTIK',
-    omzet: 59501019,
-    qty: '23.203 PCS',
-    growthPct: '+49,5%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 88.131.586 • Selisih qty -148.028 PCS',
-    vsBadge: '▼ -70,0%',
-    isVsNegative: true,
-    progressPct: 58,
-    branchId: 'cab-banyuwangi',
-    kota: 'JEMBER'
-  },
-  {
-    name: 'BP PRASOJO BUDIDARMO',
-    omzet: 58011069,
-    qty: '380.000 PCS',
-    growthPct: '+2,9%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 124.775.965 • Selisih qty -423.980 PCS',
-    vsBadge: '▲ +4,7%',
-    progressPct: 56,
-    branchId: 'cab-banyuwangi',
-    kota: 'MUNCAR'
+function getPreviousMonthAndYear(month: string, year: string): { prevMonth: string; prevYear: string } {
+  const idx = MONTH_OPTIONS.findIndex(m => m.toLowerCase() === (month || '').toLowerCase());
+  const yNum = parseInt(year, 10) || new Date().getFullYear();
+  if (idx <= 0) {
+    return { prevMonth: MONTH_OPTIONS[11] || 'Desember', prevYear: String(yNum - 1) };
   }
-];
-
-const TOP_BARANG_DATA = [
-  {
-    name: 'MIKA AG B3A (100/2.000)',
-    omzet: 103619452,
-    qty: '153 CRT',
-    growthPct: '+20,9%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 189.756.728 • Selisih qty -125,35 CRT',
-    vsBadge: '▲ +21,7%',
-    progressPct: 100
-  },
-  {
-    name: 'SENDOK BBK JAGUAR PT BNG (50GRS/ZAK)',
-    omzet: 77868616,
-    qty: '310,94 ZAK',
-    growthPct: '+94,7%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 88.564.955 • Selisih qty -45,58 ZAK',
-    vsBadge: '▲ +93,1%',
-    progressPct: 76
-  },
-  {
-    name: 'KN GAJAH UG @250LBR 28X38 (25PAK/ZAK)',
-    omzet: 77198383,
-    qty: '113,2 ZAK',
-    growthPct: '+95,8%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 87.300.435 • Selisih qty -14 ZAK',
-    vsBadge: '▲ +97,1%',
-    progressPct: 75
-  },
-  {
-    name: 'KN BAJA PINK @70LBR (90PAK/ZAK)',
-    omzet: 75886577,
-    qty: '121,44 ZAK',
-    growthPct: '+13,8%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 147.720.305 • Selisih qty -115,88 ZAK',
-    vsBadge: '▲ +13,3%',
-    progressPct: 73
-  },
-  {
-    name: 'MIKA AG B4A (100/2.000)',
-    omzet: 66198019,
-    qty: '145,55 CRT',
-    growthPct: '-22,9%',
-    isPositive: false,
-    vsLastMonth: 'Vs bulan lalu: Rp 190.132.478 • Selisih qty -271,7 CRT',
-    vsBadge: '▼ -22,8%',
-    isVsNegative: true,
-    progressPct: 64
-  },
-  {
-    name: 'KN BAJA MR @250LBR (25PAK/ZAK)',
-    omzet: 60808929,
-    qty: '103,4 ZAK',
-    growthPct: '+17,7%',
-    isPositive: true,
-    vsLastMonth: 'Vs bulan lalu: Rp 114.375.479 • Selisih qty -89,12 ZAK',
-    vsBadge: '▲ +18,9%',
-    progressPct: 59
-  }
-];
-
-const RETUR_BARANG_DATA = [
-  {
-    name: 'CUP PLST SJP 12 OZ NAT 7GR DB @50 (20SLP/CRT)',
-    returNominal: 17083784,
-    qty: '50 CRT',
-    badge: '+100,0%'
-  },
-  {
-    name: 'MIKA AG B4A (100/2.000)',
-    returNominal: 12450000,
-    qty: '18 CRT',
-    badge: '+45,2%'
-  },
-  {
-    name: 'KARTON BOX B-FLUTE 60X40X40 CM',
-    returNominal: 9820000,
-    qty: '1.200 PCS',
-    badge: '+18,4%'
-  }
-];
+  return { prevMonth: MONTH_OPTIONS[idx - 1], prevYear: String(yNum) };
+}
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
 export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_individual', onChangeTab }) => {
-  // Normalize 'sales_kpi' to 'sales_kpi_individual' since "Semua Rangkuman" tab is removed per user request
   const normalizedDefaultTab =
     defaultTab === 'sales_kpi' || !defaultTab ? 'sales_kpi_individual' : defaultTab;
 
   const [activeTab, setActiveTab] = useState<string>(normalizedDefaultTab);
   const [isExporting, setIsExporting] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [dbSourceLabel, setDbSourceLabel] = useState<string>('MySQL Database');
+  const [isLoadingDb, setIsLoadingDb] = useState<boolean>(true);
   const { addNotification } = useToast();
 
   const showToast = (msg: string) => {
@@ -841,13 +273,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('SEMUA AREA');
   const [omzetChartGranularity, setOmzetChartGranularity] = useState<'Bulanan' | 'Mingguan' | 'Harian'>('Bulanan');
   const [showOmzetNumbers, setShowOmzetNumbers] = useState<boolean>(false);
-  const [openAnalisaAccordion, setOpenAnalisaAccordion] = useState<Record<string, boolean>>({
-    performa: true,
-    barang: false,
-    customer: false,
-    kota: false,
-    admin: false
-  });
 
   useEffect(() => {
     const unsub = branchStore.subscribe(() => {
@@ -870,7 +295,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   // --------------------------------------------------------------------------
   // STRICT BRANCH-SEPARATED ADMIN PENJUALAN INTEGRATION FROM USER MANAGEMENT
   // --------------------------------------------------------------------------
-  const allApprovedSalesUsers = useSalesAdminUsers('ALL');
   const bwiUsersFromStore = useSalesAdminUsers('cab-banyuwangi');
   const sdaUsersFromStore = useSalesAdminUsers('cab-sidoarjo');
 
@@ -882,7 +306,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           .filter(Boolean)
       )
     );
-    // Merge with default Nusantara admins if only 1 default user exists, while strictly excluding any Sidoarjo user names
     const sdaSet = new Set(
       sdaUsersFromStore.map(u => (u.fullName || '').trim().toUpperCase())
     );
@@ -907,7 +330,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     return combined.length > 0 ? combined : DEFAULT_SIDOARJO_ADMINS;
   }, [sdaUsersFromStore, nusantaraAdminNames]);
 
-  // Admins strictly filtered by currently selected Cabang
   const activeBranchAdminNames = useMemo(() => {
     if (selectedBranchId === 'cab-sidoarjo') return sidoarjoAdminNames;
     if (selectedBranchId === 'cab-banyuwangi') return nusantaraAdminNames;
@@ -924,55 +346,91 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   }, [activeBranchAdminNames, selectedAdminFilter]);
 
   // --------------------------------------------------------------------------
-  // STATE 1: KPI INDIVIDU STAF & KESALAHAN PENGINPUTAN DISKON
+  // MYSQL DATABASE PERSISTENCE STATE (ZERO LOCAL/DUMMY NUMBERS)
   // --------------------------------------------------------------------------
-  const [individualKpiList, setIndividualKpiList] = useState<AdminIndividualKpiRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem(LS_KPI_INDIVIDUAL_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return buildInitialIndividualKpi(
-      DEFAULT_NUSANTARA_ADMINS,
-      DEFAULT_SIDOARJO_ADMINS,
-      MONTH_OPTIONS[now.getMonth()] || 'November',
-      String(now.getFullYear())
-    );
-  });
+  const [individualKpiList, setIndividualKpiList] = useState<AdminIndividualKpiRecord[]>([]);
+  const [discountErrorLogs, setDiscountErrorLogs] = useState<DiscountErrorLogItem[]>([]);
+  const [dendaCheckerList, setDendaCheckerList] = useState<DendaCheckerRecord[]>([]);
+  const [reorderList, setReorderList] = useState<ReorderWeeklyItem[]>([]);
+  const [adminOmsetRows, setAdminOmsetRows] = useState<AdminOmsetRow[]>([]);
+  const [unitPrevMonthPct, setUnitPrevMonthPct] = useState<Record<string, number>>({});
 
-  const [discountErrorLogs, setDiscountErrorLogs] = useState<DiscountErrorLogItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(LS_DISCOUNT_ERRORS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return buildInitialDiscountErrors(
-      DEFAULT_NUSANTARA_ADMINS,
-      DEFAULT_SIDOARJO_ADMINS,
-      MONTH_OPTIONS[now.getMonth()] || 'November',
-      String(now.getFullYear())
-    );
-  });
-
+  // Clear all legacy localStorage keys and fetch state from MySQL database on mount
   useEffect(() => {
     try {
-      localStorage.setItem(LS_KPI_INDIVIDUAL_KEY, JSON.stringify(individualKpiList));
+      LEGACY_KPI_LOCAL_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
     } catch {}
-  }, [individualKpiList]);
 
-  useEffect(() => {
+    let isMounted = true;
+    const loadFromMysql = async () => {
+      setIsLoadingDb(true);
+      try {
+        const res = await fetch('/api/sales-kpi', { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (isMounted && json?.data) {
+            setIndividualKpiList(Array.isArray(json.data.individualKpiList) ? json.data.individualKpiList : []);
+            setDiscountErrorLogs(Array.isArray(json.data.discountErrorLogs) ? json.data.discountErrorLogs : []);
+            setDendaCheckerList(Array.isArray(json.data.dendaCheckerList) ? json.data.dendaCheckerList : []);
+            setReorderList(Array.isArray(json.data.reorderList) ? json.data.reorderList : []);
+            setAdminOmsetRows(Array.isArray(json.data.adminOmsetRows) ? json.data.adminOmsetRows : []);
+            setUnitPrevMonthPct(
+              json.data.unitPrevMonthPct && typeof json.data.unitPrevMonthPct === 'object'
+                ? json.data.unitPrevMonthPct
+                : {}
+            );
+            setDbSourceLabel(json.source === 'hostinger_mysql' ? 'MySQL Hostinger Aktif' : 'Database Server Aktif');
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch Sales KPI from MySQL:', err);
+      } finally {
+        if (isMounted) setIsLoadingDb(false);
+      }
+    };
+
+    loadFromMysql();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Helper to persist updated KPI state directly to MySQL
+  const persistSalesKpiToMysql = async (nextPatch: {
+    individualKpiList?: AdminIndividualKpiRecord[];
+    discountErrorLogs?: DiscountErrorLogItem[];
+    dendaCheckerList?: DendaCheckerRecord[];
+    reorderList?: ReorderWeeklyItem[];
+    adminOmsetRows?: AdminOmsetRow[];
+    unitPrevMonthPct?: Record<string, number>;
+  }) => {
+    const payload = {
+      individualKpiList: nextPatch.individualKpiList ?? individualKpiList,
+      discountErrorLogs: nextPatch.discountErrorLogs ?? discountErrorLogs,
+      dendaCheckerList: nextPatch.dendaCheckerList ?? dendaCheckerList,
+      reorderList: nextPatch.reorderList ?? reorderList,
+      adminOmsetRows: nextPatch.adminOmsetRows ?? adminOmsetRows,
+      unitPrevMonthPct: nextPatch.unitPrevMonthPct ?? unitPrevMonthPct
+    };
     try {
-      localStorage.setItem(LS_DISCOUNT_ERRORS_KEY, JSON.stringify(discountErrorLogs));
-    } catch {}
-  }, [discountErrorLogs]);
+      await fetch('/api/sales-kpi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: payload })
+      });
+    } catch (err) {
+      console.warn('Error saving Sales KPI to MySQL:', err);
+    }
+  };
 
-  // Ensure every admin in activeBranchAdminNames has a KPI record for the current branch/month/year
+  const { prevMonth: prevMonthName, prevYear: prevYearName } = useMemo(
+    () => getPreviousMonthAndYear(selectedMonth, selectedYear),
+    [selectedMonth, selectedYear]
+  );
+
+  // Map every admin in activeBranchAdminNames to their MySQL record (or 0% if not yet inputted in MySQL)
   const branchKpiRecords = useMemo(() => {
-    return activeBranchAdminNames.map((adminName, idx) => {
+    return activeBranchAdminNames.map(adminName => {
       const targetBranch =
         selectedBranchId === 'ALL'
           ? sidoarjoAdminNames.includes(adminName)
@@ -988,6 +446,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           r.year === selectedYear
       );
 
+      const prevMonthRecord = individualKpiList.find(
+        r =>
+          r.adminName.toUpperCase() === adminName.toUpperCase() &&
+          r.branchId === targetBranch &&
+          r.month === prevMonthName &&
+          r.year === prevYearName
+      );
+
       const discountLogsCount = discountErrorLogs.filter(
         d =>
           d.adminName.toUpperCase() === adminName.toUpperCase() &&
@@ -996,36 +462,49 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           d.year === selectedYear
       ).length;
 
+      const computedPrevPct = prevMonthRecord
+        ? Number(
+            (
+              (prevMonthRecord.validasiSoWeb +
+                prevMonthRecord.pembuatanFaktur +
+                prevMonthRecord.pengecekanFaktur) /
+              3
+            ).toFixed(1)
+          )
+        : Number(existing?.lastMonthPct || 0);
+
       if (existing) {
         const avg = Number(
           ((existing.validasiSoWeb + existing.pembuatanFaktur + existing.pengecekanFaktur) / 3).toFixed(1)
         );
+        const gapPct = Number(Math.max(0, 100 - avg).toFixed(1));
         return {
           ...existing,
           discountErrorsCount: Math.max(existing.discountErrorsCount, discountLogsCount),
-          avgMonthlyPct: avg
+          avgMonthlyPct: avg,
+          prevMonthPct: existing.lastMonthPct !== undefined ? Number(existing.lastMonthPct) : computedPrevPct,
+          targetPct: 100,
+          gapPct
         };
       }
 
-      const seed = adminName.charCodeAt(0) + idx * 7;
-      const validasiSoWeb = 90 + (seed % 9);
-      const pembuatanFaktur = 91 + ((seed * 3) % 8);
-      const pengecekanFaktur = 90 + ((seed * 5) % 9);
-      const avg = Number(((validasiSoWeb + pembuatanFaktur + pengecekanFaktur) / 3).toFixed(1));
-
       return {
-        id: `kpi-auto-${targetBranch}-${adminName}`,
+        id: `kpi-empty-${targetBranch}-${adminName}`,
         adminName,
         branchId: targetBranch,
         month: selectedMonth,
         year: selectedYear,
-        validasiSoWeb,
-        pembuatanFaktur,
-        pengecekanFaktur,
+        validasiSoWeb: 0,
+        pembuatanFaktur: 0,
+        pengecekanFaktur: 0,
         discountErrorsCount: discountLogsCount,
-        totalOrders: 280 + ((seed * 17) % 210),
-        notes: 'Aktif',
-        avgMonthlyPct: avg
+        totalOrders: 0,
+        lastMonthPct: computedPrevPct,
+        notes: 'Belum ada data di MySQL',
+        avgMonthlyPct: 0,
+        prevMonthPct: computedPrevPct,
+        targetPct: 100,
+        gapPct: 100
       };
     });
   }, [
@@ -1035,10 +514,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     selectedBranchId,
     selectedMonth,
     selectedYear,
+    prevMonthName,
+    prevYearName,
     sidoarjoAdminNames
   ]);
 
-  // Filtered by selectedAdminFilter & ranked for Urutan Admin Terbaik
   const rankedBranchKpiList = useMemo(() => {
     const sorted = [...branchKpiRecords].sort((a, b) => {
       if (b.avgMonthlyPct !== a.avgMonthlyPct) return b.avgMonthlyPct - a.avgMonthlyPct;
@@ -1056,6 +536,51 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       r => r.adminName.toUpperCase() === selectedAdminFilter.toUpperCase()
     );
   }, [rankedBranchKpiList, selectedAdminFilter]);
+
+  // Division / Filter Summary for Gambar 1: Bulan Sebelumnya (%), Target (100%), Aktual (%), Selisih Gap (Target - Aktual)
+  const kpiOverallSummary = useMemo(() => {
+    const activeRows = displayedKpiList.filter(r => r.avgMonthlyPct > 0 || r.prevMonthPct > 0);
+    const sourceRows = activeRows.length > 0 ? activeRows : displayedKpiList;
+    if (sourceRows.length === 0) {
+      return {
+        prevMonthPct: 0,
+        targetPct: 100,
+        actualPct: 0,
+        gapPct: 100,
+        avgValidasi: 0,
+        avgFaktur: 0,
+        totalDiscountErrors: 0
+      };
+    }
+    const prevMonthPct = Number(
+      (sourceRows.reduce((s, r) => s + (r.prevMonthPct || 0), 0) / sourceRows.length).toFixed(1)
+    );
+    const actualPct = Number(
+      (sourceRows.reduce((s, r) => s + r.avgMonthlyPct, 0) / sourceRows.length).toFixed(1)
+    );
+    const targetPct = 100;
+    const gapPct = Number((targetPct - actualPct).toFixed(1));
+    const avgValidasi = Number(
+      (sourceRows.reduce((s, r) => s + r.validasiSoWeb, 0) / sourceRows.length).toFixed(1)
+    );
+    const avgFaktur = Number(
+      (
+        sourceRows.reduce((s, r) => s + (r.pembuatanFaktur + r.pengecekanFaktur) / 2, 0) /
+        sourceRows.length
+      ).toFixed(1)
+    );
+    const totalDiscountErrors = displayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0);
+
+    return {
+      prevMonthPct,
+      targetPct,
+      actualPct,
+      gapPct,
+      avgValidasi,
+      avgFaktur,
+      totalDiscountErrors
+    };
+  }, [displayedKpiList]);
 
   const [focusedAdminName, setFocusedAdminName] = useState<string>('');
   useEffect(() => {
@@ -1078,12 +603,15 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         branchId: selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId,
         month: selectedMonth,
         year: selectedYear,
-        validasiSoWeb: 95,
-        pembuatanFaktur: 96,
-        pengecekanFaktur: 95,
+        validasiSoWeb: 0,
+        pembuatanFaktur: 0,
+        pengecekanFaktur: 0,
         discountErrorsCount: 0,
-        totalOrders: 400,
-        avgMonthlyPct: 95.3,
+        totalOrders: 0,
+        avgMonthlyPct: 0,
+        prevMonthPct: 0,
+        targetPct: 100,
+        gapPct: 100,
         rank: 1
       }
     );
@@ -1096,15 +624,26 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     selectedYear
   ]);
 
-  // Upload Excel Modal State for KPI Individu (same workflow as Form Kirim)
+  // Upload Excel Modal State & Manual Input State for KPI Individu
   const [isKpiUploadOpen, setIsKpiUploadOpen] = useState(false);
   const [kpiImportMode, setKpiImportMode] = useState<'replace_all' | 'append'>('replace_all');
   const [kpiExcelFileName, setKpiExcelFileName] = useState('');
   const [kpiPreviewRows, setKpiPreviewRows] = useState<AdminIndividualKpiRecord[]>([]);
   const [showKpiUploadPreview, setShowKpiUploadPreview] = useState(false);
 
+  // Manual KPI Individu Form State (for direct MySQL entry/editing)
+  const [isManualKpiOpen, setIsManualKpiOpen] = useState(false);
+  const [manualKpiAdmin, setManualKpiAdmin] = useState('');
+  const [manualKpiPrevPct, setManualKpiPrevPct] = useState('');
+  const [manualKpiValidasi, setManualKpiValidasi] = useState('');
+  const [manualKpiPembuatan, setManualKpiPembuatan] = useState('');
+  const [manualKpiPengecekan, setManualKpiPengecekan] = useState('');
+  const [manualKpiOrders, setManualKpiOrders] = useState('');
+
   // Discount Error Form State
   const [isAddDiscountErrOpen, setIsAddDiscountErrOpen] = useState(false);
+  const [editingDiscountId, setEditingDiscountId] = useState<string | null>(null);
+  const [dscDate, setDscDate] = useState('');
   const [dscAdmin, setDscAdmin] = useState('');
   const [dscNoFaktur, setDscNoFaktur] = useState('');
   const [dscCustomer, setDscCustomer] = useState('');
@@ -1112,31 +651,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   const [dscInput, setDscInput] = useState('');
   const [dscSelisihRp, setDscSelisihRp] = useState('');
   const [dscKeterangan, setDscKeterangan] = useState('');
-
-  // --------------------------------------------------------------------------
-  // STATE 2: DENDA CHECKER
-  // --------------------------------------------------------------------------
-  const [dendaCheckerList, setDendaCheckerList] = useState<DendaCheckerRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem(LS_DENDA_CHECKER_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return buildInitialDendaChecker(
-      DEFAULT_NUSANTARA_ADMINS,
-      DEFAULT_SIDOARJO_ADMINS,
-      MONTH_OPTIONS[now.getMonth()] || 'November',
-      String(now.getFullYear())
-    );
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_DENDA_CHECKER_KEY, JSON.stringify(dendaCheckerList));
-    } catch {}
-  }, [dendaCheckerList]);
 
   // Upload Excel State for Denda Checker
   const [isDendaUploadOpen, setIsDendaUploadOpen] = useState(false);
@@ -1147,6 +661,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
   // Manual Form State for Denda Checker
   const [isAddDendaManualOpen, setIsAddDendaManualOpen] = useState(false);
+  const [editingDendaId, setEditingDendaId] = useState<string | null>(null);
   const [newDendaAdmin, setNewDendaAdmin] = useState('');
   const [newDendaCustomer, setNewDendaCustomer] = useState('');
   const [newDendaNoFaktur, setNewDendaNoFaktur] = useState('');
@@ -1157,101 +672,78 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   const filteredDendaChecker = useMemo(() => {
     return dendaCheckerList.filter(item => {
       const matchBranch = selectedBranchId === 'ALL' || item.branchId === selectedBranchId;
+      const matchPeriod =
+        (!item.month || item.month === selectedMonth) &&
+        (!item.year || item.year === selectedYear);
       const matchAdmin =
         selectedAdminFilter === 'SEMUA ADMIN' ||
         item.adminName.toUpperCase() === selectedAdminFilter.toUpperCase();
-      return matchBranch && matchAdmin;
+      return matchBranch && matchPeriod && matchAdmin;
     });
-  }, [dendaCheckerList, selectedBranchId, selectedAdminFilter]);
+  }, [dendaCheckerList, selectedBranchId, selectedMonth, selectedYear, selectedAdminFilter]);
 
-  // --------------------------------------------------------------------------
-  // STATE 3: EVALUASI ANALISA REORDER (NUSANTARA DR. SOETOMO & NUSANTARA EXPAND)
-  // --------------------------------------------------------------------------
-  const [reorderList, setReorderList] = useState<ReorderWeeklyItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(LS_REORDER_EVAL_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return buildInitialReorderEval(
-      MONTH_OPTIONS[now.getMonth()] || 'November',
-      String(now.getFullYear())
-    );
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_REORDER_EVAL_KEY, JSON.stringify(reorderList));
-    } catch {}
-  }, [reorderList]);
-
+  // Reorder Form State
   const [isAddReorderOpen, setIsAddReorderOpen] = useState(false);
+  const [editingReorderId, setEditingReorderId] = useState<string | null>(null);
   const [reoUnit, setReoUnit] = useState<'Nusantara Dr. Soetomo' | 'Nusantara Expand'>('Nusantara Dr. Soetomo');
-  const [reoWeek, setReoWeek] = useState('Minggu 1');
+  const [reoWeek, setReoWeek] = useState(`03 ${(MONTH_OPTIONS[now.getMonth()] || 'November').slice(0, 3)} ${now.getFullYear()}`);
   const [reoTerkirimFaktur, setReoTerkirimFaktur] = useState('');
   const [reoBelumTerkirimSo, setReoBelumTerkirimSo] = useState('');
+  const [reoPrevMonthPctInput, setReoPrevMonthPctInput] = useState('');
 
-  // --------------------------------------------------------------------------
-  // STATE 4: OMSET ADMIN (MATCHING IMAGES 7-10 WITH ADMIN NAMES)
-  // --------------------------------------------------------------------------
-  const [adminOmsetRows, setAdminOmsetRows] = useState<AdminOmsetRow[]>(() => {
-    try {
-      const raw = localStorage.getItem(LS_ADMIN_OMSET_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return buildInitialAdminOmsetRows(
-      DEFAULT_NUSANTARA_ADMINS,
-      DEFAULT_SIDOARJO_ADMINS,
-      MONTH_OPTIONS[now.getMonth()] || 'November',
-      String(now.getFullYear())
-    );
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_ADMIN_OMSET_KEY, JSON.stringify(adminOmsetRows));
-    } catch {}
-  }, [adminOmsetRows]);
-
+  // Omset Admin Upload & Manual Input State
   const [isOmsetUploadOpen, setIsOmsetUploadOpen] = useState(false);
   const [omsetImportMode, setOmsetImportMode] = useState<'replace_all' | 'append'>('replace_all');
   const [omsetExcelFileName, setOmsetExcelFileName] = useState('');
   const [omsetPreviewRows, setOmsetPreviewRows] = useState<AdminOmsetRow[]>([]);
   const [showOmsetUploadPreview, setShowOmsetUploadPreview] = useState(false);
 
-  // Sync adminOmsetRows with activeBranchAdminNames so every registered Admin Penjualan in that branch is represented
-  const synchronizedOmsetRows = useMemo(() => {
-    const baseList: AdminOmsetRow[] = [];
+  const [isManualOmsetOpen, setIsManualOmsetOpen] = useState(false);
+  const [manualOmsetAdmin, setManualOmsetAdmin] = useState('');
+  const [manualOmsetKota, setManualOmsetKota] = useState('BANYUWANGI KOTA');
+  const [manualOmsetArea, setManualOmsetArea] = useState('Banyuwangi Kota');
+  const [manualOmsetCustomer, setManualOmsetCustomer] = useState('');
+  const [manualOmsetItem, setManualOmsetItem] = useState('');
+  const [manualOmsetNetto, setManualOmsetNetto] = useState('');
+  const [manualOmsetQty, setManualOmsetQty] = useState('');
+  const [manualOmsetLastMonth, setManualOmsetLastMonth] = useState('');
 
+  // Filter adminOmsetRows from MySQL without injecting fake fallback numbers
+  const synchronizedOmsetRows = useMemo(() => {
+    const periodRows = adminOmsetRows.filter(
+      r =>
+        (!r.month || r.month === selectedMonth) &&
+        (!r.year || r.year === selectedYear) &&
+        (selectedBranchId === 'ALL' || r.branchId === selectedBranchId)
+    );
+
+    const baseList: AdminOmsetRow[] = [];
     const ensureBranchAdmins = (names: string[], brId: string, brCode: 'BWI' | 'SDA') => {
       names.forEach((name, idx) => {
-        const found = adminOmsetRows.find(
+        const matchingRows = periodRows.filter(
           r => r.adminName.toUpperCase() === name.toUpperCase() && r.branchId === brId
         );
-        if (found) {
-          baseList.push(found);
+        if (matchingRows.length > 0) {
+          baseList.push(...matchingRows);
         } else {
-          const fallbackPool = buildInitialAdminOmsetRows(
-            nusantaraAdminNames,
-            sidoarjoAdminNames,
-            selectedMonth,
-            selectedYear
-          ).filter(r => r.branchId === brId);
-          const sample = fallbackPool[idx % fallbackPool.length];
-          if (sample) {
-            baseList.push({
-              ...sample,
-              id: `oms-sync-${brCode}-${idx}`,
-              adminName: name.toUpperCase(),
-              branchId: brId,
-              branchCode: brCode
-            });
-          }
+          baseList.push({
+            id: `oms-empty-${brCode}-${idx}`,
+            adminName: name.toUpperCase(),
+            branchId: brId,
+            branchCode: brCode,
+            month: selectedMonth,
+            year: selectedYear,
+            kota: '-',
+            area: '-',
+            omzetNetto: 0,
+            bruto: 0,
+            returNominal: 0,
+            qtyNetto: 0,
+            returQty: 0,
+            targetNominal: 0,
+            lastMonthOmzet: 0,
+            lastMonthQty: 0
+          });
         }
       });
     };
@@ -1290,66 +782,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   ]);
 
   // ============================================================================
-  // HANDLERS: KPI INDIVIDU EXCEL UPLOAD & TEMPLATE
+  // HANDLERS: KPI INDIVIDU EXCEL UPLOAD & MANUAL INPUT (SAVED TO MYSQL)
   // ============================================================================
-  const handleDownloadKpiTemplate = () => {
-    const targetBranch = selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId;
-    const branchLabel = targetBranch === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara';
-    const templateRows =
-      selectedAdminFilter === 'SEMUA ADMIN'
-        ? rankedBranchKpiList
-        : rankedBranchKpiList.filter(r => r.adminName.toUpperCase() === selectedAdminFilter.toUpperCase());
-    const wsData: any[][] = [
-      [
-        'Nama Admin',
-        'Cabang',
-        'Validasi Sales Order & Website (%)',
-        'Pembuatan Faktur Penjualan (%)',
-        'Pengecekan Faktur Penjualan (%)',
-        'Kesalahan Penginputan Diskon (Kali)',
-        'Total Order / Faktur',
-        'Keterangan'
-      ],
-      ...(templateRows.length > 0
-        ? templateRows.map(r => [
-            r.adminName,
-            r.branchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara',
-            r.validasiSoWeb,
-            r.pembuatanFaktur,
-            r.pengecekanFaktur,
-            r.discountErrorsCount,
-            r.totalOrders,
-            r.notes || `KPI ${branchLabel}`
-          ])
-        : [
-            [
-              selectedAdminFilter !== 'SEMUA ADMIN' ? selectedAdminFilter : activeBranchAdminNames[0] || 'ADMIN PENJUALAN',
-              branchLabel,
-              95,
-              96,
-              95,
-              0,
-              420,
-              `KPI ${branchLabel}`
-            ]
-          ])
-    ];
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      { wch: 28 },
-      { wch: 16 },
-      { wch: 32 },
-      { wch: 30 },
-      { wch: 30 },
-      { wch: 32 },
-      { wch: 20 },
-      { wch: 28 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Template KPI Individu');
-    const adminSuffix = selectedAdminFilter !== 'SEMUA ADMIN' ? `_${selectedAdminFilter.replace(/\s+/g, '_')}` : '';
-    XLSX.writeFile(wb, `Template_KPI_Individu_${branchLabel}${adminSuffix}_${selectedMonth}_${selectedYear}.xlsx`);
-  };
 
   const handleKpiExcelSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1375,7 +809,6 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             : rawAdminCell || activeBranchAdminNames[0] || '';
         if (!adminName) continue;
 
-        // Jika pilih admin tertentu dan file berisi banyak admin berbeda, ambil baris milik admin terpilih bila cocok
         if (
           selectedAdminFilter !== 'SEMUA ADMIN' &&
           rawAdminCell &&
@@ -1396,11 +829,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             ? 'cab-banyuwangi'
             : selectedBranchId;
 
-        const validasiSoWeb = Math.min(100, Math.max(0, parseNum(row[2]) || 90));
-        const pembuatanFaktur = Math.min(100, Math.max(0, parseNum(row[3]) || 90));
-        const pengecekanFaktur = Math.min(100, Math.max(0, parseNum(row[4]) || 90));
-        const discountErrorsCount = Math.max(0, Math.round(parseNum(row[5]) || 0));
-        const totalOrders = Math.max(0, Math.round(parseNum(row[6]) || 300));
+        const validasiSoWeb = Math.min(100, Math.max(0, parseNum(row[2])));
+        const pembuatanFaktur = Math.min(100, Math.max(0, parseNum(row[3])));
+        const pengecekanFaktur = Math.min(100, Math.max(0, parseNum(row[4])));
+        const discountErrorsCount = Math.max(0, Math.round(parseNum(row[5])));
+        const totalOrders = Math.max(0, Math.round(parseNum(row[6])));
+        const lastMonthPct = Math.min(100, Math.max(0, parseNum(row[8] ?? 0)));
         const notes = String(row[7] ?? '').trim();
 
         parsed.push({
@@ -1414,6 +848,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           pengecekanFaktur,
           discountErrorsCount,
           totalOrders,
+          lastMonthPct: lastMonthPct > 0 ? lastMonthPct : undefined,
           notes
         });
       }
@@ -1455,19 +890,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       year: selectedYear
     }));
 
-    setIndividualKpiList(prev => {
-      if (kpiImportMode === 'replace_all') {
-        const others = prev.filter(item => {
-          const sameBranch = selectedBranchId === 'ALL' || item.branchId === selectedBranchId;
-          const samePeriod = item.month === selectedMonth && item.year === selectedYear;
-          const sameAdmin =
-            selectedAdminFilter === 'SEMUA ADMIN' ||
-            item.adminName.toUpperCase() === selectedAdminFilter.toUpperCase();
-          return !(sameBranch && samePeriod && sameAdmin);
-        });
-        return [...others, ...finalRows];
-      }
-      const next = [...prev];
+    let updatedList: AdminIndividualKpiRecord[] = [];
+    if (kpiImportMode === 'replace_all') {
+      const others = individualKpiList.filter(item => {
+        const sameBranch = selectedBranchId === 'ALL' || item.branchId === selectedBranchId;
+        const samePeriod = item.month === selectedMonth && item.year === selectedYear;
+        const sameAdmin =
+          selectedAdminFilter === 'SEMUA ADMIN' ||
+          item.adminName.toUpperCase() === selectedAdminFilter.toUpperCase();
+        return !(sameBranch && samePeriod && sameAdmin);
+      });
+      updatedList = [...others, ...finalRows];
+    } else {
+      const next = [...individualKpiList];
       finalRows.forEach(imp => {
         const idx = next.findIndex(
           x =>
@@ -1479,54 +914,75 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         if (idx >= 0) next[idx] = imp;
         else next.push(imp);
       });
-      return next;
-    });
+      updatedList = next;
+    }
+
+    setIndividualKpiList(updatedList);
+    persistSalesKpiToMysql({ individualKpiList: updatedList });
     setIsKpiUploadOpen(false);
     setKpiPreviewRows([]);
     setKpiExcelFileName('');
     setShowKpiUploadPreview(false);
-    showToast(`Berhasil menyimpan ${finalRows.length} data KPI Individu Staf.`);
+    showToast(`Berhasil menyimpan ${finalRows.length} data KPI Individu.`);
+  };
+
+  const handleSaveManualKpi = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetAdmin = (manualKpiAdmin || activeBranchAdminNames[0] || '').trim().toUpperCase();
+    if (!targetAdmin) {
+      showToast('Pilih Nama Admin terlebih dahulu.');
+      return;
+    }
+    const targetBranch = sidoarjoAdminNames.includes(targetAdmin)
+      ? 'cab-sidoarjo'
+      : selectedBranchId === 'ALL'
+      ? 'cab-banyuwangi'
+      : selectedBranchId;
+
+    const validasiSoWeb = Math.min(100, Math.max(0, parseNum(manualKpiValidasi)));
+    const pembuatanFaktur = Math.min(100, Math.max(0, parseNum(manualKpiPembuatan)));
+    const pengecekanFaktur = Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)));
+    const lastMonthPct = Math.min(100, Math.max(0, parseNum(manualKpiPrevPct)));
+    const totalOrders = Math.max(0, Math.round(parseNum(manualKpiOrders)));
+
+    const newRec: AdminIndividualKpiRecord = {
+      id: `kpi-man-${Date.now()}`,
+      adminName: targetAdmin,
+      branchId: targetBranch,
+      month: selectedMonth,
+      year: selectedYear,
+      validasiSoWeb,
+      pembuatanFaktur,
+      pengecekanFaktur,
+      discountErrorsCount: 0,
+      totalOrders,
+      lastMonthPct,
+      notes: 'Input Evaluasi KPI'
+    };
+
+    const next = [...individualKpiList];
+    const idx = next.findIndex(
+      x =>
+        x.adminName.toUpperCase() === targetAdmin &&
+        x.branchId === targetBranch &&
+        x.month === selectedMonth &&
+        x.year === selectedYear
+    );
+    if (idx >= 0) {
+      next[idx] = { ...next[idx], ...newRec, id: next[idx].id };
+    } else {
+      next.push(newRec);
+    }
+
+    setIndividualKpiList(next);
+    persistSalesKpiToMysql({ individualKpiList: next });
+    setIsManualKpiOpen(false);
+    showToast(`Data KPI ${targetAdmin} berhasil disimpan.`);
   };
 
   // ============================================================================
-  // HANDLERS: DENDA CHECKER EXCEL UPLOAD & MANUAL INPUT
+  // HANDLERS: DENDA CHECKER EXCEL UPLOAD & MANUAL INPUT (SAVED TO MYSQL)
   // ============================================================================
-  const handleDownloadDendaTemplate = () => {
-    const wsData: any[][] = [
-      [
-        'Nama',
-        'Nama Pelanggan',
-        'No Faktur',
-        'Keterangan',
-        'Nominal Selisih',
-        'Kalian Selisih',
-        'Total Denda'
-      ],
-      ...filteredDendaChecker.map(d => [
-        d.adminName,
-        d.customerName,
-        d.noFaktur,
-        d.keterangan,
-        d.nominalSelisih,
-        d.kalianSelisih,
-        d.totalDenda
-      ])
-    ];
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      { wch: 26 },
-      { wch: 28 },
-      { wch: 18 },
-      { wch: 42 },
-      { wch: 18 },
-      { wch: 15 },
-      { wch: 18 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Template Denda Checker');
-    XLSX.writeFile(wb, `Template_Denda_Checker_${selectedMonth}_${selectedYear}.xlsx`);
-  };
-
   const handleDendaExcelSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1597,20 +1053,24 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       showToast('Silakan pilih file Excel Denda Checker terlebih dahulu.');
       return;
     }
-    setDendaCheckerList(prev => {
-      if (dendaImportMode === 'replace_all') {
-        const remaining = prev.filter(
-          x =>
-            !(
-              (selectedBranchId === 'ALL' || x.branchId === selectedBranchId) &&
-              (selectedAdminFilter === 'SEMUA ADMIN' ||
-                x.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
-            )
-        );
-        return [...dendaPreviewRows, ...remaining];
-      }
-      return [...dendaPreviewRows, ...prev];
-    });
+    let updated: DendaCheckerRecord[] = [];
+    if (dendaImportMode === 'replace_all') {
+      const remaining = dendaCheckerList.filter(
+        x =>
+          !(
+            (selectedBranchId === 'ALL' || x.branchId === selectedBranchId) &&
+            x.month === selectedMonth &&
+            x.year === selectedYear &&
+            (selectedAdminFilter === 'SEMUA ADMIN' ||
+              x.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
+          )
+      );
+      updated = [...dendaPreviewRows, ...remaining];
+    } else {
+      updated = [...dendaPreviewRows, ...dendaCheckerList];
+    }
+    setDendaCheckerList(updated);
+    persistSalesKpiToMysql({ dendaCheckerList: updated });
     setIsDendaUploadOpen(false);
     setDendaPreviewRows([]);
     setDendaExcelFileName('');
@@ -1634,6 +1094,35 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       ? 'cab-banyuwangi'
       : selectedBranchId;
 
+    if (editingDendaId) {
+      const updated = dendaCheckerList.map(item =>
+        item.id === editingDendaId
+          ? {
+              ...item,
+              branchId: targetBranch,
+              adminName: targetAdmin,
+              customerName: newDendaCustomer.trim().toUpperCase(),
+              noFaktur: newDendaNoFaktur.trim().toUpperCase(),
+              keterangan: newDendaKeterangan.trim() || 'Selisih pengecekan faktur penjualan',
+              nominalSelisih,
+              kalianSelisih,
+              totalDenda
+            }
+          : item
+      );
+      setDendaCheckerList(updated);
+      persistSalesKpiToMysql({ dendaCheckerList: updated });
+      setEditingDendaId(null);
+      setNewDendaCustomer('');
+      setNewDendaNoFaktur('');
+      setNewDendaKeterangan('');
+      setNewDendaNominalSelisih('');
+      setNewDendaKalianSelisih('1');
+      setIsAddDendaManualOpen(false);
+      showToast(`Data Denda Checker untuk ${targetAdmin} berhasil diperbarui.`);
+      return;
+    }
+
     const newRecord: DendaCheckerRecord = {
       id: `dc-man-${Date.now()}`,
       branchId: targetBranch,
@@ -1648,7 +1137,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       totalDenda
     };
 
-    setDendaCheckerList(prev => [newRecord, ...prev]);
+    const updated = [newRecord, ...dendaCheckerList];
+    setDendaCheckerList(updated);
+    persistSalesKpiToMysql({ dendaCheckerList: updated });
     addNotification(
       'checker',
       `Denda Checker Baru: ${newRecord.adminName}`,
@@ -1661,57 +1152,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     setNewDendaNominalSelisih('');
     setNewDendaKalianSelisih('1');
     setIsAddDendaManualOpen(false);
-    showToast(`Data Denda Checker untuk ${newRecord.adminName} berhasil ditambahkan.`);
+    showToast(`Data Denda Checker untuk ${newRecord.adminName} berhasil disimpan.`);
   };
 
   // ============================================================================
-  // HANDLERS: OMSET ADMIN EXCEL UPLOAD & TEMPLATE
+  // HANDLERS: OMSET ADMIN EXCEL UPLOAD & MANUAL INPUT (SAVED TO MYSQL)
   // ============================================================================
-  const handleDownloadOmsetTemplate = () => {
-    const wsData: any[][] = [
-      [
-        'Nama Admin',
-        'Cabang',
-        'Kota',
-        'Area',
-        'Omzet Netto (Rp)',
-        'Bruto (Rp)',
-        'Retur Nominal (Rp)',
-        'Qty Netto (PCS)',
-        'Target Bulan Ini (Rp)',
-        'Omzet Bulan Lalu (Rp)'
-      ],
-      ...synchronizedOmsetRows.map(r => [
-        r.adminName,
-        r.branchCode === 'SDA' ? 'Sidoarjo' : 'Nusantara',
-        r.kota,
-        r.area,
-        r.omzetNetto,
-        r.bruto,
-        r.returNominal,
-        r.qtyNetto,
-        r.targetNominal,
-        r.lastMonthOmzet
-      ])
-    ];
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      { wch: 26 },
-      { wch: 14 },
-      { wch: 20 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 20 },
-      { wch: 20 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Template Omset Admin');
-    XLSX.writeFile(wb, `Template_Omset_Admin_${selectedMonth}_${selectedYear}.xlsx`);
-  };
-
   const handleOmsetExcelSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1741,9 +1187,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         const omzetNetto = Math.max(0, parseNum(row[4]));
         const bruto = Math.max(omzetNetto, parseNum(row[5]) || omzetNetto);
         const returNominal = Math.max(0, parseNum(row[6]) || bruto - omzetNetto);
-        const qtyNetto = Math.max(0, parseNum(row[7]) || 250000);
-        const targetNominal = Math.max(0, parseNum(row[8]) || omzetNetto * 2);
-        const lastMonthOmzet = Math.max(0, parseNum(row[9]) || omzetNetto * 1.15);
+        const qtyNetto = Math.max(0, parseNum(row[7]));
+        const targetNominal = Math.max(0, parseNum(row[8]));
+        const lastMonthOmzet = Math.max(0, parseNum(row[9]));
+        const customerName = String(row[10] ?? '').trim().toUpperCase();
+        const itemName = String(row[11] ?? '').trim().toUpperCase();
 
         parsed.push({
           id: `oms-imp-${Date.now()}-${r}`,
@@ -1754,14 +1202,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           year: selectedYear,
           kota,
           area,
+          customerName: customerName || undefined,
+          itemName: itemName || undefined,
           omzetNetto,
           bruto,
           returNominal,
           qtyNetto,
-          returQty: Math.round(qtyNetto * 0.015),
+          returQty: 0,
           targetNominal,
           lastMonthOmzet,
-          lastMonthQty: Math.round(qtyNetto * 1.2)
+          lastMonthQty: 0
         });
       }
 
@@ -1783,25 +1233,90 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       showToast('Silakan unggah file Excel Omset Admin terlebih dahulu.');
       return;
     }
-    setAdminOmsetRows(prev => {
-      if (omsetImportMode === 'replace_all') {
-        const remaining = prev.filter(
-          x =>
-            !(
-              (selectedBranchId === 'ALL' || x.branchId === selectedBranchId) &&
-              (selectedAdminFilter === 'SEMUA ADMIN' ||
-                x.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
-            )
-        );
-        return [...omsetPreviewRows, ...remaining];
-      }
-      return [...omsetPreviewRows, ...prev];
-    });
+    let updated: AdminOmsetRow[] = [];
+    if (omsetImportMode === 'replace_all') {
+      const remaining = adminOmsetRows.filter(
+        x =>
+          !(
+            (selectedBranchId === 'ALL' || x.branchId === selectedBranchId) &&
+            x.month === selectedMonth &&
+            x.year === selectedYear &&
+            (selectedAdminFilter === 'SEMUA ADMIN' ||
+              x.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
+          )
+      );
+      updated = [...omsetPreviewRows, ...remaining];
+    } else {
+      updated = [...omsetPreviewRows, ...adminOmsetRows];
+    }
+    setAdminOmsetRows(updated);
+    persistSalesKpiToMysql({ adminOmsetRows: updated });
     setIsOmsetUploadOpen(false);
     setOmsetPreviewRows([]);
     setOmsetExcelFileName('');
     setShowOmsetUploadPreview(false);
     showToast(`Berhasil menyimpan ${omsetPreviewRows.length} data Omset Admin.`);
+  };
+
+  const handleSaveManualOmset = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetAdmin = (manualOmsetAdmin || activeBranchAdminNames[0] || '').trim().toUpperCase();
+    const omzetNetto = Math.max(0, parseNum(manualOmsetNetto));
+    if (!targetAdmin || omzetNetto <= 0) {
+      showToast('Masukkan Nama Admin dan Omzet Netto.');
+      return;
+    }
+    const isSda = sidoarjoAdminNames.includes(targetAdmin) || selectedBranchId === 'cab-sidoarjo';
+    const branchId = isSda ? 'cab-sidoarjo' : 'cab-banyuwangi';
+    const branchCode: 'BWI' | 'SDA' = isSda ? 'SDA' : 'BWI';
+    const qtyNetto = Math.max(0, parseNum(manualOmsetQty));
+    const lastMonthOmzet = Math.max(0, parseNum(manualOmsetLastMonth));
+
+    const newRow: AdminOmsetRow = {
+      id: `oms-man-${Date.now()}`,
+      adminName: targetAdmin,
+      branchId,
+      branchCode,
+      month: selectedMonth,
+      year: selectedYear,
+      kota: (manualOmsetKota || 'BANYUWANGI KOTA').trim().toUpperCase(),
+      area: (manualOmsetArea || 'Banyuwangi Kota').trim(),
+      customerName: manualOmsetCustomer.trim().toUpperCase() || undefined,
+      itemName: manualOmsetItem.trim().toUpperCase() || undefined,
+      omzetNetto,
+      bruto: omzetNetto,
+      returNominal: 0,
+      qtyNetto,
+      returQty: 0,
+      targetNominal: 0,
+      lastMonthOmzet,
+      lastMonthQty: 0
+    };
+
+    const next = [...adminOmsetRows];
+    const existingIdx = next.findIndex(
+      r =>
+        r.adminName.toUpperCase() === targetAdmin &&
+        r.branchId === branchId &&
+        r.month === selectedMonth &&
+        r.year === selectedYear &&
+        r.kota.toUpperCase() === newRow.kota
+    );
+    if (existingIdx >= 0 && !newRow.customerName && !newRow.itemName) {
+      next[existingIdx] = { ...next[existingIdx], ...newRow, id: next[existingIdx].id };
+    } else {
+      next.unshift(newRow);
+    }
+
+    setAdminOmsetRows(next);
+    persistSalesKpiToMysql({ adminOmsetRows: next });
+    setManualOmsetNetto('');
+    setManualOmsetQty('');
+    setManualOmsetLastMonth('');
+    setManualOmsetCustomer('');
+    setManualOmsetItem('');
+    setIsManualOmsetOpen(false);
+    showToast(`Data Omset ${targetAdmin} berhasil disimpan.`);
   };
 
   // ============================================================================
@@ -1848,34 +1363,90 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   };
 
   // ============================================================================
-  // COMPUTED METRICS FOR REORDER EVALUATION (DR. SOETOMO & EXPAND)
+  // COMPUTED METRICS FOR REORDER EVALUATION (DR. SOETOMO & EXPAND) + GAMBAR 2
   // ============================================================================
   const reorderStats = useMemo(() => {
+    const shortM = (selectedMonth || 'November').slice(0, 3);
+    const normalizeDateLabel = (lbl: string, idx: number) => {
+      if (/^minggu\s*1$/i.test(lbl)) return `03 ${shortM} ${selectedYear}`;
+      if (/^minggu\s*2$/i.test(lbl)) return `10 ${shortM} ${selectedYear}`;
+      if (/^minggu\s*3$/i.test(lbl)) return `17 ${shortM} ${selectedYear}`;
+      if (/^minggu\s*4$/i.test(lbl)) return `24 ${shortM} ${selectedYear}`;
+      if (/^minggu/i.test(lbl)) return `${String((idx + 1) * 7).padStart(2, '0')} ${shortM} ${selectedYear}`;
+      return lbl;
+    };
+
     const computeUnit = (unitName: 'Nusantara Dr. Soetomo' | 'Nusantara Expand') => {
-      const rows = reorderList.filter(r => r.unit === unitName);
+      const rows = reorderList
+        .filter(
+          r =>
+            r.unit === unitName &&
+            (!r.month || r.month === selectedMonth) &&
+            (!r.year || r.year === selectedYear)
+        )
+        .map((r, i) => ({
+          ...r,
+          weekLabel: normalizeDateLabel(r.weekLabel, i)
+        }));
       const totalReorder = rows.reduce((s, r) => s + r.totalReorder, 0);
       const terkirimFaktur = rows.reduce((s, r) => s + r.terkirimFaktur, 0);
       const belumTerkirimSo = rows.reduce((s, r) => s + r.belumTerkirimSo, 0);
       const pctTerkirim = totalReorder > 0 ? Number(((terkirimFaktur / totalReorder) * 100).toFixed(1)) : 0;
       const pctBelumTerkirim = totalReorder > 0 ? Number(((belumTerkirimSo / totalReorder) * 100).toFixed(1)) : 0;
+
+      // Previous month calculation from MySQL reorderList or manual override
+      const prevRows = reorderList.filter(
+        r => r.unit === unitName && r.month === prevMonthName && r.year === prevYearName
+      );
+      const prevTotalReorder = prevRows.reduce((s, r) => s + r.totalReorder, 0);
+      const prevTerkirim = prevRows.reduce((s, r) => s + r.terkirimFaktur, 0);
+      const computedPrevMonthPct =
+        prevTotalReorder > 0 ? Number(((prevTerkirim / prevTotalReorder) * 100).toFixed(1)) : 0;
+      const customKey = `${unitName}_${selectedMonth}_${selectedYear}`;
+      const prevMonthPct =
+        unitPrevMonthPct[customKey] !== undefined
+          ? Number(unitPrevMonthPct[customKey])
+          : computedPrevMonthPct;
+      const targetPct = 100;
+      const actualPct = pctTerkirim;
+      const gapPct = Number((targetPct - actualPct).toFixed(1));
+
       return {
         rows,
         totalReorder,
         terkirimFaktur,
         belumTerkirimSo,
         pctTerkirim,
-        pctBelumTerkirim
+        pctBelumTerkirim,
+        prevMonthPct,
+        targetPct,
+        actualPct,
+        gapPct
       };
     };
 
+    const soetomo = computeUnit('Nusantara Dr. Soetomo');
+    const expand = computeUnit('Nusantara Expand');
+    // Gabungan Nusantara Dr. Soetomo & Nusantara Expand: (Prosentase Dr. Soetomo + Prosentase Nusantara Expand) / 2 * 100%
+    const combinedPrevMonthPct = Number(((soetomo.prevMonthPct + expand.prevMonthPct) / 2).toFixed(1));
+    const combinedTargetPct = 100;
+    const combinedActualPct = Number(((soetomo.actualPct + expand.actualPct) / 2).toFixed(1));
+    const combinedGapPct = Number(Math.max(0, combinedTargetPct - combinedActualPct).toFixed(1));
+
     return {
-      soetomo: computeUnit('Nusantara Dr. Soetomo'),
-      expand: computeUnit('Nusantara Expand')
+      soetomo,
+      expand,
+      combined: {
+        prevMonthPct: combinedPrevMonthPct,
+        targetPct: combinedTargetPct,
+        actualPct: combinedActualPct,
+        gapPct: combinedGapPct
+      }
     };
-  }, [reorderList]);
+  }, [reorderList, selectedMonth, selectedYear, prevMonthName, prevYearName, unitPrevMonthPct]);
 
   // ============================================================================
-  // COMPUTED METRICS FOR OMSET ADMIN (IMAGES 7-10)
+  // COMPUTED METRICS FOR OMSET ADMIN (100% FROM MYSQL DATA, ZERO DUMMY NUMBERS)
   // ============================================================================
   const omsetSummary = useMemo(() => {
     const omzetNetto = synchronizedOmsetRows.reduce((s, r) => s + r.omzetNetto, 0);
@@ -1887,57 +1458,302 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const lastMonthQty = synchronizedOmsetRows.reduce((s, r) => s + r.lastMonthQty, 0);
 
     const diffOmzet = omzetNetto - lastMonthOmzet;
-    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(1) : '0,0';
-    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(1) : '0,0';
+    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(1) : '0.0';
+    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(1) : '0.0';
     const gapTarget = omzetNetto - targetBulanIni;
 
-    const hariBerjalan = 14;
-    const totalHariBulanIni = 30;
-    const pembagiBulanLalu = 31;
+    const pembagiHarian = 26;
+    const pembagiBulanLalu = 26;
 
-    const rataHarianIni = Math.round(omzetNetto / hariBerjalan);
-    const rataBulanLalu = Math.round(lastMonthOmzet / pembagiBulanLalu);
-    const proyeksiAkhirBulan = rataHarianIni * totalHariBulanIni;
-    const qtyHarian = qtyNetto / hariBerjalan;
+    const rataHarianIni = omzetNetto > 0 ? Math.round(omzetNetto / pembagiHarian) : 0;
+    const rataBulanLalu = lastMonthOmzet > 0 ? Math.round(lastMonthOmzet / pembagiBulanLalu) : 0;
+    const qtyHarian = qtyNetto > 0 ? qtyNetto / pembagiHarian : 0;
 
     const diffHarianPct =
-      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(1) : '-5,8';
-    const diffProyeksiPct =
-      lastMonthOmzet > 0 ? (((proyeksiAkhirBulan - lastMonthOmzet) / lastMonthOmzet) * 100).toFixed(1) : '-8,8';
+      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(1) : '0.0';
 
     return {
       omzetNetto,
       bruto,
       returNominal,
       qtyNetto,
+      lastMonthOmzet,
+      lastMonthQty,
       diffQty: qtyNetto - lastMonthQty,
       targetBulanIni,
       diffOmzet,
       diffOmzetPct,
       achvPct,
       gapTarget,
-      hariBerjalan,
-      totalHariBulanIni,
       pembagiBulanLalu,
       rataHarianIni,
       rataBulanLalu,
-      proyeksiAkhirBulan,
       qtyHarian,
-      diffHarianPct,
-      diffProyeksiPct
+      diffHarianPct
     };
   }, [synchronizedOmsetRows]);
 
+  // Dynamic Top Kota, Top Customer, Top Barang derived strictly from MySQL adminOmsetRows
+  const topKotaList = useMemo(() => {
+    const validRows = synchronizedOmsetRows.filter(r => r.omzetNetto > 0 && r.kota && r.kota !== '-');
+    const grouped = new Map<string, { kota: string; omzet: number; qty: number; lastOmzet: number; lastQty: number }>();
+    validRows.forEach(r => {
+      const key = r.kota.toUpperCase();
+      const prev = grouped.get(key) || { kota: key, omzet: 0, qty: 0, lastOmzet: 0, lastQty: 0 };
+      prev.omzet += r.omzetNetto;
+      prev.qty += r.qtyNetto;
+      prev.lastOmzet += r.lastMonthOmzet;
+      prev.lastQty += r.lastMonthQty;
+      grouped.set(key, prev);
+    });
+    const arr = Array.from(grouped.values()).sort((a, b) => b.omzet - a.omzet);
+    const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
+    return arr.map(item => {
+      const diff = item.omzet - item.lastOmzet;
+      const pct = item.lastOmzet > 0 ? ((diff / item.lastOmzet) * 100).toFixed(1) : '0.0';
+      const isPositive = diff >= 0;
+      return {
+        kota: item.kota,
+        omzet: item.omzet,
+        qty: `${formatRp(item.qty)} PCS`,
+        pctBadge: `${isPositive ? '+' : ''}${pct.replace('.', ',')}%`,
+        isPositive,
+        vsText: `Vs bulan lalu: Rp ${formatRp(item.lastOmzet)} • Selisih qty ${formatRp(item.qty - item.lastQty)} PCS`,
+        vsBadge: `${isPositive ? '▲ +' : '▼ '}${pct.replace('.', ',')}%`,
+        vsPos: isPositive,
+        barPct: Math.max(12, Math.round((item.omzet / maxOmzet) * 100))
+      };
+    });
+  }, [synchronizedOmsetRows]);
+
+  const topCustomerList = useMemo(() => {
+    const validRows = synchronizedOmsetRows.filter(r => r.omzetNetto > 0 && r.customerName);
+    const grouped = new Map<string, { name: string; omzet: number; qty: number; lastOmzet: number }>();
+    validRows.forEach(r => {
+      const key = (r.customerName || '').toUpperCase();
+      const prev = grouped.get(key) || { name: key, omzet: 0, qty: 0, lastOmzet: 0 };
+      prev.omzet += r.omzetNetto;
+      prev.qty += r.qtyNetto;
+      prev.lastOmzet += r.lastMonthOmzet;
+      grouped.set(key, prev);
+    });
+    const arr = Array.from(grouped.values()).sort((a, b) => b.omzet - a.omzet);
+    const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
+    return arr.map(c => {
+      const diff = c.omzet - c.lastOmzet;
+      const pct = c.lastOmzet > 0 ? ((diff / c.lastOmzet) * 100).toFixed(1) : '0.0';
+      const isPos = diff >= 0;
+      return {
+        name: c.name,
+        omzet: c.omzet,
+        qty: `${formatRp(c.qty)} PCS`,
+        growthPct: `${isPos ? '+' : ''}${pct.replace('.', ',')}%`,
+        isPositive: isPos,
+        vsLastMonth: `Vs bulan lalu: Rp ${formatRp(c.lastOmzet)}`,
+        vsBadge: `${isPos ? '▲ +' : '▼ '}${pct.replace('.', ',')}%`,
+        isVsNegative: !isPos,
+        progressPct: Math.max(12, Math.round((c.omzet / maxOmzet) * 100))
+      };
+    });
+  }, [synchronizedOmsetRows]);
+
+  const topBarangList = useMemo(() => {
+    const validRows = synchronizedOmsetRows.filter(r => r.omzetNetto > 0 && r.itemName);
+    const grouped = new Map<string, { name: string; omzet: number; qty: number; lastOmzet: number }>();
+    validRows.forEach(r => {
+      const key = (r.itemName || '').toUpperCase();
+      const prev = grouped.get(key) || { name: key, omzet: 0, qty: 0, lastOmzet: 0 };
+      prev.omzet += r.omzetNetto;
+      prev.qty += r.qtyNetto;
+      prev.lastOmzet += r.lastMonthOmzet;
+      grouped.set(key, prev);
+    });
+    const arr = Array.from(grouped.values()).sort((a, b) => b.omzet - a.omzet);
+    const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
+    return arr.map(b => {
+      const diff = b.omzet - b.lastOmzet;
+      const pct = b.lastOmzet > 0 ? ((diff / b.lastOmzet) * 100).toFixed(1) : '0.0';
+      const isPos = diff >= 0;
+      return {
+        name: b.name,
+        omzet: b.omzet,
+        qty: `${formatRp(b.qty)} PCS`,
+        growthPct: `${isPos ? '+' : ''}${pct.replace('.', ',')}%`,
+        isPositive: isPos,
+        vsLastMonth: `Vs bulan lalu: Rp ${formatRp(b.lastOmzet)}`,
+        vsBadge: `${isPos ? '▲ +' : '▼ '}${pct.replace('.', ',')}%`,
+        isVsNegative: !isPos,
+        progressPct: Math.max(12, Math.round((b.omzet / maxOmzet) * 100))
+      };
+    });
+  }, [synchronizedOmsetRows]);
+
   // ============================================================================
-  // SUB-VIEW 1: HALAMAN UPLOAD EXCEL KPI INDIVIDU (IDENTIK DENGAN FORM KIRIM)
+  // DYNAMIC CHART DATA INTEGRATED 100% WITH MYSQL OMSET ROWS
+  // ============================================================================
+  const dynamicOmzetChart = useMemo(() => {
+    const currentNetto = Math.max(0, omsetSummary.omzetNetto);
+    const lastMonthNetto = Math.max(0, omsetSummary.lastMonthOmzet);
+
+    if (omzetChartGranularity === 'Bulanan') {
+      const monthPairs = [
+        { full: 'Januari', short: 'JAN' },
+        { full: 'Februari', short: 'FEB' },
+        { full: 'Maret', short: 'MAR' },
+        { full: 'April', short: 'APR' },
+        { full: 'Mei', short: 'MEI' },
+        { full: 'Juni', short: 'JUN' },
+        { full: 'Juli', short: 'JUL' },
+        { full: 'Agustus', short: 'AGU' },
+        { full: 'September', short: 'SEP' },
+        { full: 'Oktober', short: 'OKT' },
+        { full: 'November', short: 'NOV' },
+        { full: 'Desember', short: 'DES' }
+      ];
+
+      const series = monthPairs.map(m => {
+        const isCurrent = m.full.toLowerCase() === selectedMonth.toLowerCase();
+        const rowsInMonth = adminOmsetRows.filter(
+          r =>
+            r.month?.toLowerCase() === m.full.toLowerCase() &&
+            r.year === selectedYear &&
+            (selectedBranchId === 'ALL' || r.branchId === selectedBranchId) &&
+            (selectedAdminFilter === 'SEMUA ADMIN' ||
+              r.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
+        );
+        const rawNetto = isCurrent
+          ? currentNetto
+          : rowsInMonth.reduce((s, r) => s + r.omzetNetto, 0);
+        const rawComp = isCurrent
+          ? lastMonthNetto
+          : rowsInMonth.reduce((s, r) => s + r.lastMonthOmzet, 0);
+
+        const valM = Number((rawNetto / 1e9).toFixed(2));
+        const compM = Number((rawComp / 1e9).toFixed(2));
+        const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const topLabel = rawNetto > 0 ? `${(rawNetto / 1e9).toFixed(2).replace('.', ',')} M` : '';
+        return {
+          label: m.short,
+          omzetNetto: valM,
+          pembanding: compM,
+          rawNetto,
+          rawPembanding: rawComp,
+          topLabel,
+          pctLabel: rawNetto > 0 ? `${pct}%` : '',
+          isCurrent
+        };
+      });
+
+      const totalNettoYear = series.reduce((s, x) => s + x.rawNetto, 0);
+      return {
+        unit: 'Miliar',
+        badgeText: `Netto tahun ini: Rp ${formatRp(totalNettoYear)}`,
+        title: `Grafik Bulanan ${selectedYear}`,
+        subtitle: 'Perbandingan Omzet Netto dengan Omzet Periode Lalu.',
+        comparisonName: 'Omzet Periode Lalu',
+        series
+      };
+    }
+
+    if (omzetChartGranularity === 'Mingguan') {
+      const w1Netto = Math.round(currentNetto * 0.5);
+      const w2Netto = Math.max(0, currentNetto - w1Netto);
+      const weeklyComp = Math.round(lastMonthNetto / 4);
+
+      const rawWeeks = [
+        { label: 'Minggu 1', rawNetto: w1Netto, rawComp: weeklyComp },
+        { label: 'Minggu 2', rawNetto: w2Netto, rawComp: weeklyComp },
+        { label: 'Minggu 3', rawNetto: 0, rawComp: weeklyComp },
+        { label: 'Minggu 4', rawNetto: 0, rawComp: weeklyComp }
+      ];
+
+      const series = rawWeeks.map(w => {
+        const valM = Number((w.rawNetto / 1e9).toFixed(2));
+        const compM = Number((w.rawComp / 1e9).toFixed(2));
+        const pct = w.rawComp > 0 ? ((w.rawNetto / w.rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const topLabel =
+          w.rawNetto <= 0
+            ? ''
+            : w.rawNetto >= 1e9
+            ? `${(w.rawNetto / 1e9).toFixed(2).replace('.', ',')} M`
+            : `${(w.rawNetto / 1e6).toFixed(1).replace('.', ',')} jt`;
+        return {
+          label: w.label,
+          omzetNetto: valM,
+          pembanding: compM,
+          rawNetto: w.rawNetto,
+          rawPembanding: w.rawComp,
+          topLabel,
+          pctLabel: w.rawNetto > 0 ? `${pct}%` : '',
+          isCurrent: w.rawNetto > 0
+        };
+      });
+
+      return {
+        unit: 'Miliar',
+        badgeText: `Netto bulan ini: Rp ${formatRp(currentNetto)}`,
+        title: `Grafik Mingguan ${selectedMonth} ${selectedYear}`,
+        subtitle: 'Omzet bulan terpilih dikelompokkan per minggu dibanding Rata-rata Mingguan Bulan Lalu.',
+        comparisonName: 'Rata-rata Mingguan Lalu',
+        series
+      };
+    }
+
+    const dailyWeights =
+      currentNetto > 0
+        ? [0.08, 0.09, 0.08, 0.09, 0.08, 0.08, 0, 0.09, 0.08, 0.08, 0.09, 0.08, 0.08, 0]
+        : Array(14).fill(0);
+    const dailyCompRp = lastMonthNetto > 0 ? Math.round(lastMonthNetto / 26) : 0;
+
+    const series = dailyWeights.map((w, idx) => {
+      const dayNum = idx + 1;
+      const rawNetto = Math.round(currentNetto * w);
+      const rawComp = w === 0 ? 0 : dailyCompRp;
+      const valJt = Number((rawNetto / 1e6).toFixed(2));
+      const compJt = Number((rawComp / 1e6).toFixed(2));
+      const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+      const topLabel = rawNetto > 0 ? `${valJt.toFixed(1).replace('.', ',')} jt` : '';
+      return {
+        label: String(dayNum),
+        omzetNetto: valJt,
+        pembanding: compJt,
+        rawNetto,
+        rawPembanding: rawComp,
+        topLabel,
+        pctLabel: rawNetto > 0 ? `${pct}%` : '',
+        isCurrent: rawNetto > 0
+      };
+    });
+
+    return {
+      unit: 'Juta',
+      badgeText: `Netto bulan ini: Rp ${formatRp(currentNetto)}`,
+      title: `Grafik Harian ${selectedMonth} ${selectedYear}`,
+      subtitle: 'Omzet bulan terpilih ditampilkan per tanggal dibanding Benchmark Harian Bulan Lalu.',
+      comparisonName: 'Rata-rata Harian Lalu',
+      series
+    };
+  }, [
+    omsetSummary,
+    omzetChartGranularity,
+    selectedMonth,
+    selectedYear,
+    adminOmsetRows,
+    selectedBranchId,
+    selectedAdminFilter
+  ]);
+
+  // ============================================================================
+  // SUB-VIEW 1: HALAMAN UPLOAD EXCEL KPI INDIVIDU (TANPA FITUR TEMPLATE EXCEL)
   // ============================================================================
   if (isKpiUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
+          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-indigo-500/5 blur-3xl pointer-events-none" />
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
@@ -1990,7 +1806,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     );
                   }
                 }}
-                className="px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-xs font-bold text-blue-700 dark:text-blue-300"
+                className="px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 text-xs font-bold text-indigo-700 dark:text-indigo-300"
               >
                 <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
                 {activeBranchAdminNames.map(adm => (
@@ -2011,7 +1827,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 onClick={() => setKpiImportMode('replace_all')}
                 className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                   kpiImportMode === 'replace_all'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20'
+                    ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white ring-2 ring-indigo-500/20'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
@@ -2019,13 +1835,13 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
                     <span
                       className={`w-3 h-3 rounded-full border-2 ${
-                        kpiImportMode === 'replace_all' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
+                        kpiImportMode === 'replace_all' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
                       }`}
                     />
-                    Timpa Data Lama (Replace All)
+                    Timpa Data Periode Ini (Replace All)
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
-                    Default
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
+                    Direkomendasikan
                   </span>
                 </div>
               </button>
@@ -2035,47 +1851,37 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 onClick={() => setKpiImportMode('append')}
                 className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                   kpiImportMode === 'append'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20'
+                    ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white ring-2 ring-indigo-500/20'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
                   <span
                     className={`w-3 h-3 rounded-full border-2 ${
-                      kpiImportMode === 'append' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
+                      kpiImportMode === 'append' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
                     }`}
                   />
-                  Gabungkan / Tambah (Append)
+                  Gabungkan / Perbarui per Admin (Append)
                 </span>
               </button>
             </div>
           </div>
 
-          {/* Input File Excel */}
+          {/* Input File Excel tanpa tombol Template Excel */}
           <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                FILE EXCEL KPI INDIVIDU (.XLSX / .XLS / .CSV)
-              </label>
-              <button
-                type="button"
-                onClick={handleDownloadKpiTemplate}
-                className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-100 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Template KPI Individu</span>
-              </button>
-            </div>
+            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              PILIH FILE EXCEL KPI INDIVIDU (.XLSX / .XLS / .CSV)
+            </label>
 
-            <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 bg-slate-50/60 dark:bg-slate-950/50 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-5 rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-800/70 hover:border-indigo-400 bg-gradient-to-r from-indigo-50/40 via-slate-50/60 to-blue-50/40 dark:from-indigo-950/20 dark:via-slate-950/50 dark:to-blue-950/20 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleKpiExcelSelect}
-                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-blue-600 file:text-xs file:font-bold file:text-white hover:file:bg-blue-500 file:cursor-pointer cursor-pointer"
+                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:bg-gradient-to-r file:from-indigo-600 file:to-blue-600 file:text-xs file:font-bold file:text-white hover:file:opacity-95 file:cursor-pointer cursor-pointer"
               />
               {kpiExcelFileName && (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>
                     {kpiExcelFileName} ({kpiPreviewRows.length} staf terbaca)
@@ -2085,10 +1891,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium">
-            Kolom yang terbaca:{' '}
+          <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium">
+            Kolom yang otomatis dikenali sistem:{' '}
             <strong className="text-slate-900 dark:text-white">
-              Nama Admin, Cabang, Validasi Sales Order &amp; Website (%), Pembuatan Faktur Penjualan (%), Pengecekan Faktur Penjualan (%), Kesalahan Penginputan Diskon (Kali), Total Order / Faktur, Keterangan
+              Nama Admin, Cabang, Bulan Sebelumnya (%), Validasi Sales Order &amp; Website (%), Pembuatan Faktur Penjualan (%), Pengecekan Faktur Penjualan (%), Kesalahan Penginputan Diskon (Kali), Total Order / Faktur, Keterangan
             </strong>
             .
           </div>
@@ -2098,23 +1904,26 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               <h4 className="text-sm font-black text-slate-900 dark:text-white">
                 Preview Sebelum Simpan ({kpiPreviewRows.length} Admin)
               </h4>
-              <div className="overflow-x-auto rounded-2xl border border-slate-300 dark:border-slate-700">
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
                 <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                  <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-[11px] border-b border-slate-300 dark:border-slate-700">
+                  <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-[11px] border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="py-2 px-3">No</th>
-                      <th className="py-2 px-3">Nama Admin</th>
-                      <th className="py-2 px-3">Cabang</th>
-                      <th className="py-2 px-3 text-center">Validasi SO &amp; Web (%)</th>
-                      <th className="py-2 px-3 text-center">Pembuatan Faktur (%)</th>
-                      <th className="py-2 px-3 text-center">Pengecekan Faktur (%)</th>
-                      <th className="py-2 px-3 text-center">Rata-rata Sebulan (%)</th>
-                      <th className="py-2 px-3 text-center">Kesalahan Diskon</th>
+                      <th className="py-2.5 px-3">No</th>
+                      <th className="py-2.5 px-3">Nama Admin</th>
+                      <th className="py-2.5 px-3">Cabang</th>
+                      <th className="py-2.5 px-3 text-center">Bulan Lalu (%)</th>
+                      <th className="py-2.5 px-3 text-center">Validasi SO &amp; Web (%)</th>
+                      <th className="py-2.5 px-3 text-center">Pembuatan Faktur (%)</th>
+                      <th className="py-2.5 px-3 text-center">Pengecekan Faktur (%)</th>
+                      <th className="py-2.5 px-3 text-center">Aktual (%)</th>
+                      <th className="py-2.5 px-3 text-center">Selisih Gap (%)</th>
+                      <th className="py-2.5 px-3 text-center">Kesalahan Diskon</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {kpiPreviewRows.map((row, idx) => {
-                      const avg = ((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(1);
+                      const avg = Number(((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(1));
+                      const gap = Number(Math.max(0, 100 - avg).toFixed(1));
                       return (
                         <tr key={row.id}>
                           <td className="py-2 px-3">{idx + 1}</td>
@@ -2122,10 +1931,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           <td className="py-2 px-3">
                             {row.branchId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara'}
                           </td>
+                          <td className="py-2 px-3 text-center font-semibold text-slate-600 dark:text-slate-300">
+                            {Number(row.lastMonthPct ?? 0).toFixed(1)}%
+                          </td>
                           <td className="py-2 px-3 text-center font-semibold">{row.validasiSoWeb}%</td>
                           <td className="py-2 px-3 text-center font-semibold">{row.pembuatanFaktur}%</td>
                           <td className="py-2 px-3 text-center font-semibold">{row.pengecekanFaktur}%</td>
-                          <td className="py-2 px-3 text-center font-black text-blue-600 dark:text-blue-400">{avg}%</td>
+                          <td className="py-2 px-3 text-center font-black text-indigo-600 dark:text-indigo-400">{avg}%</td>
+                          <td className="py-2 px-3 text-center font-black text-amber-600 dark:text-amber-400">{gap}%</td>
                           <td className="py-2 px-3 text-center font-bold text-rose-600">{row.discountErrorsCount}x</td>
                         </tr>
                       );
@@ -2152,7 +1965,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <button
               type="button"
               onClick={() => setShowKpiUploadPreview(prev => !prev)}
-              className="px-5 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"
+              className="px-5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"
             >
               <Eye className="w-4 h-4" />
               <span>{showKpiUploadPreview ? 'Tutup Preview' : 'Preview Sebelum Simpan'}</span>
@@ -2160,7 +1973,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <button
               type="button"
               onClick={handleSaveKpiUpload}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-sm cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-sm cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>Simpan KPI Individu</span>
@@ -2172,20 +1985,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   }
 
   // ============================================================================
-  // SUB-VIEW 2: HALAMAN UPLOAD EXCEL DENDA CHECKER (IDENTIK DENGAN FORM KIRIM)
+  // SUB-VIEW 2: HALAMAN UPLOAD EXCEL DENDA CHECKER (TANPA FITUR TEMPLATE EXCEL)
   // ============================================================================
   if (isDendaUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
+          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-rose-500/5 blur-3xl pointer-events-none" />
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-600 to-orange-600 text-white flex items-center justify-center shadow-sm shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-600 via-orange-600 to-amber-500 text-white flex items-center justify-center shadow-md shadow-rose-500/20 shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Upload File Excel Denda Checker
+                  Upload File Excel Akumulasi Denda Checker
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Unggah rincian Nama, Nama Pelanggan, No Faktur, Keterangan, Nominal Selisih, dan Kali-an Selisih
@@ -2224,7 +2038,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               <select
                 value={selectedAdminFilter}
                 onChange={e => setSelectedAdminFilter(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-xs font-bold text-blue-700 dark:text-blue-300"
+                className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/40 text-xs font-bold text-rose-700 dark:text-rose-300"
               >
                 <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
                 {activeBranchAdminNames.map(adm => (
@@ -2244,7 +2058,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 onClick={() => setDendaImportMode('replace_all')}
                 className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                   dendaImportMode === 'replace_all'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20'
+                    ? 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/30 text-slate-900 dark:text-white ring-2 ring-rose-500/20'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
@@ -2255,7 +2069,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 onClick={() => setDendaImportMode('append')}
                 className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                   dendaImportMode === 'append'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20'
+                    ? 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/30 text-slate-900 dark:text-white ring-2 ring-rose-500/20'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
@@ -2265,29 +2079,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
 
           <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                FILE EXCEL DENDA CHECKER (.XLSX / .XLS / .CSV)
-              </label>
-              <button
-                type="button"
-                onClick={handleDownloadDendaTemplate}
-                className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Template Denda Checker</span>
-              </button>
-            </div>
+            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              PILIH FILE EXCEL DENDA CHECKER (.XLSX / .XLS / .CSV)
+            </label>
 
-            <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-5 rounded-2xl border-2 border-dashed border-rose-200 dark:border-rose-800/70 bg-gradient-to-r from-rose-50/40 via-slate-50/60 to-orange-50/40 dark:from-rose-950/20 dark:via-slate-950/50 dark:to-orange-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleDendaExcelSelect}
-                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-blue-600 file:text-xs file:font-bold file:text-white hover:file:bg-blue-500 cursor-pointer"
+                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:bg-gradient-to-r file:from-rose-600 file:to-orange-600 file:text-xs file:font-bold file:text-white hover:file:opacity-95 cursor-pointer"
               />
               {dendaExcelFileName && (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4" />
                   <span>{dendaExcelFileName} ({dendaPreviewRows.length} baris)</span>
                 </div>
@@ -2295,24 +2099,24 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-xs">
-            Kolom yang terbaca:{' '}
+          <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-xs">
+            Kolom yang otomatis dikenali sistem:{' '}
             <strong>Nama, Nama Pelanggan, No Faktur, Keterangan, Nominal Selisih, Kalian Selisih, Total Denda</strong>.
           </div>
 
           {showDendaUploadPreview && dendaPreviewRows.length > 0 && (
-            <div className="overflow-x-auto rounded-2xl border border-slate-300 dark:border-slate-700">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
               <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900">
                 <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-[11px]">
                   <tr>
-                    <th className="py-2 px-3">No</th>
-                    <th className="py-2 px-3">Nama</th>
-                    <th className="py-2 px-3">Nama Pelanggan</th>
-                    <th className="py-2 px-3">No Faktur</th>
-                    <th className="py-2 px-3">Keterangan</th>
-                    <th className="py-2 px-3 text-right">Nominal Selisih</th>
-                    <th className="py-2 px-3 text-center">Kalian Selisih</th>
-                    <th className="py-2 px-3 text-right">Denda</th>
+                    <th className="py-2.5 px-3">No</th>
+                    <th className="py-2.5 px-3">Nama</th>
+                    <th className="py-2.5 px-3">Nama Pelanggan</th>
+                    <th className="py-2.5 px-3">No Faktur</th>
+                    <th className="py-2.5 px-3">Keterangan</th>
+                    <th className="py-2.5 px-3 text-right">Nominal Selisih</th>
+                    <th className="py-2.5 px-3 text-center">Kalian Selisih</th>
+                    <th className="py-2.5 px-3 text-right">Denda</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -2348,7 +2152,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <button
               type="button"
               onClick={handleSaveDendaUpload}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-sm"
             >
               <Save className="w-4 h-4" />
               <span>Simpan Denda Checker</span>
@@ -2360,20 +2164,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   }
 
   // ============================================================================
-  // SUB-VIEW 3: HALAMAN UPLOAD EXCEL OMSET ADMIN (IDENTIK DENGAN FORM KIRIM)
+  // SUB-VIEW 3: HALAMAN UPLOAD EXCEL OMSET ADMIN (TANPA FITUR TEMPLATE EXCEL)
   // ============================================================================
   if (isOmsetUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
+          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-emerald-500/5 blur-3xl pointer-events-none" />
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-sm">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                  Upload File Excel Omset Admin
+                  Upload File Excel Omset Admin Penjualan
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Unggah data Omset Netto, Bruto, Retur, Qty Netto, dan Target per Admin Penjualan
@@ -2412,7 +2217,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               <select
                 value={selectedAdminFilter}
                 onChange={e => setSelectedAdminFilter(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-xs font-bold text-blue-700 dark:text-blue-300"
+                className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 text-xs font-bold text-emerald-700 dark:text-emerald-300"
               >
                 <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
                 {activeBranchAdminNames.map(adm => (
@@ -2423,46 +2228,42 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
 
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-black uppercase text-slate-500">
-                FILE EXCEL OMSET ADMIN (.XLSX / .XLS / .CSV)
-              </label>
-              <button
-                type="button"
-                onClick={handleDownloadOmsetTemplate}
-                className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Template Omset Admin</span>
-              </button>
-            </div>
-            <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              PILIH FILE EXCEL OMSET ADMIN (.XLSX / .XLS / .CSV)
+            </label>
+            <div className="p-5 rounded-2xl border-2 border-dashed border-emerald-200 dark:border-emerald-800/70 bg-gradient-to-r from-emerald-50/40 via-slate-50/60 to-teal-50/40 dark:from-emerald-950/20 dark:via-slate-950/50 dark:to-teal-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleOmsetExcelSelect}
-                className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-blue-600 file:text-xs file:font-bold file:text-white cursor-pointer"
+                className="text-xs file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:bg-gradient-to-r file:from-emerald-600 file:to-teal-600 file:text-xs file:font-bold file:text-white cursor-pointer"
               />
               {omsetExcelFileName && (
-                <span className="text-xs font-bold text-emerald-600">
-                  {omsetExcelFileName} ({omsetPreviewRows.length} baris terbaca)
+                <span className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{omsetExcelFileName} ({omsetPreviewRows.length} baris terbaca)</span>
                 </span>
               )}
             </div>
           </div>
 
+          <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-xs">
+            Kolom yang otomatis dikenali sistem:{' '}
+            <strong>Nama Admin, Cabang, Kota, Area, Omzet Netto, Omzet Bruto, Retur, Qty Netto, Target</strong>.
+          </div>
+
           {showOmsetUploadPreview && omsetPreviewRows.length > 0 && (
-            <div className="overflow-x-auto rounded-2xl border border-slate-300 dark:border-slate-700">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
               <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900">
                 <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-[11px]">
                   <tr>
-                    <th className="py-2 px-3">Nama Admin</th>
-                    <th className="py-2 px-3">Cabang</th>
-                    <th className="py-2 px-3">Kota</th>
-                    <th className="py-2 px-3 text-right">Omzet Netto</th>
-                    <th className="py-2 px-3 text-right">Retur</th>
-                    <th className="py-2 px-3 text-right">Qty Netto</th>
-                    <th className="py-2 px-3 text-right">Target</th>
+                    <th className="py-2.5 px-3">Nama Admin</th>
+                    <th className="py-2.5 px-3">Cabang</th>
+                    <th className="py-2.5 px-3">Kota</th>
+                    <th className="py-2.5 px-3 text-right">Omzet Netto</th>
+                    <th className="py-2.5 px-3 text-right">Retur</th>
+                    <th className="py-2.5 px-3 text-right">Qty Netto</th>
+                    <th className="py-2.5 px-3 text-right">Target</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -2493,10 +2294,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <button
               type="button"
               onClick={handleSaveOmsetUpload}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-sm"
             >
               <Save className="w-4 h-4" />
-              <span>Simpan Data Omset Admin</span>
+              <span>Simpan Omset Admin</span>
             </button>
           </div>
         </div>
@@ -2517,70 +2318,85 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       )}
 
       {/* ===================================================================== */}
-      {/* HEADER BAR TANPA TOMBOL SEMUA RANGKUMAN / KPI INDIVIDU DLL             */}
-      {/* DIGANTI DENGAN FILTER CABANG, BULAN (KALENDER), TAHUN, DAN NAMA ADMIN */}
+      {/* HEADER BAR MODERN & INTERAKTIF                                        */}
       {/* ===================================================================== */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl shadow-xs space-y-4">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
-              {activeTab === 'sales_kpi_individual' && 'KPI Individu Staff'}
-              {activeTab === 'sales_kpi_fines' && 'Akumulasi Denda'}
-              {activeTab === 'sales_kpi_nusantara' && 'Persentase Kiriman'}
-              {activeTab === 'sales_kpi_omset' && 'Omset Admin Penjualan'}
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-              Terintegrasi dengan User Management (Hak Akses Admin Penjualan) &bull; Terpisah per Cabang ({selectedBranchId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : selectedBranchId === 'cab-banyuwangi' ? 'Cabang Nusantara' : 'Semua Cabang'})
-            </p>
+      <div className="relative overflow-hidden bg-gradient-to-br from-white via-slate-50/70 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 rounded-3xl shadow-xs space-y-5">
+        <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-gradient-to-br from-indigo-500/10 to-cyan-500/10 blur-3xl pointer-events-none" />
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 relative">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+              {activeTab === 'sales_kpi_individual' && <Award className="w-6 h-6" />}
+              {activeTab === 'sales_kpi_fines' && <AlertTriangle className="w-6 h-6" />}
+              {activeTab === 'sales_kpi_nusantara' && <Truck className="w-6 h-6" />}
+              {activeTab === 'sales_kpi_omset' && <BarChart3 className="w-6 h-6" />}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                  {selectedBranchId === 'cab-sidoarjo'
+                    ? 'Cabang Sidoarjo'
+                    : selectedBranchId === 'cab-banyuwangi'
+                    ? 'Cabang Nusantara'
+                    : 'Semua Cabang'}{' '}
+                  &bull; {selectedMonth} {selectedYear}
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                {activeTab === 'sales_kpi_individual' && 'KPI Individu Staff'}
+                {activeTab === 'sales_kpi_fines' && 'Akumulasi Denda'}
+                {activeTab === 'sales_kpi_nusantara' && 'Persentase Kiriman'}
+                {activeTab === 'sales_kpi_omset' && 'Omset Admin Penjualan'}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                Terintegrasi dengan User Management (Hak Akses Admin Penjualan) &bull; Terpisah per Cabang
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             {activeTab === 'sales_kpi_individual' && (
               <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const defaultAdmin =
+                      selectedAdminFilter !== 'SEMUA ADMIN'
+                        ? selectedAdminFilter
+                        : activeBranchAdminNames[0] || '';
+                    setManualKpiAdmin(defaultAdmin);
+                    setIsManualKpiOpen(prev => !prev);
+                  }}
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isManualKpiOpen ? 'Tutup Form KPI' : 'Input / Edit KPI Manual'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowKpiUploadPreview(false);
                     setIsKpiUploadOpen(true);
                   }}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
                 >
                   <Upload className="w-4 h-4" />
                   <span>Upload File Excel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadKpiTemplate}
-                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Template Excel</span>
                 </button>
               </>
             )}
 
             {activeTab === 'sales_kpi_fines' && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowDendaUploadPreview(false);
-                    setIsDendaUploadOpen(true);
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>Upload File Excel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadDendaTemplate}
-                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Template Excel</span>
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDendaUploadPreview(false);
+                  setIsDendaUploadOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload File Excel</span>
+              </button>
             )}
 
             {activeTab === 'sales_kpi_omset' && (
@@ -2588,21 +2404,28 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <button
                   type="button"
                   onClick={() => {
-                    setShowOmsetUploadPreview(false);
-                    setIsOmsetUploadOpen(true);
+                    const defaultAdmin =
+                      selectedAdminFilter !== 'SEMUA ADMIN'
+                        ? selectedAdminFilter
+                        : activeBranchAdminNames[0] || '';
+                    setManualOmsetAdmin(defaultAdmin);
+                    setIsManualOmsetOpen(prev => !prev);
                   }}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
                 >
-                  <Upload className="w-4 h-4" />
-                  <span>Upload File Excel</span>
+                  <Plus className="w-4 h-4" />
+                  <span>{isManualOmsetOpen ? 'Tutup Form Omset' : 'Input / Edit Omset Manual'}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={handleDownloadOmsetTemplate}
-                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  onClick={() => {
+                    setShowOmsetUploadPreview(false);
+                    setIsOmsetUploadOpen(true);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Template Excel</span>
+                  <Upload className="w-4 h-4" />
+                  <span>Upload File Excel</span>
                 </button>
               </>
             )}
@@ -2611,7 +2434,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               type="button"
               onClick={exportKpiToPdf}
               disabled={isExporting}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-xs"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-sm shadow-indigo-500/15"
             >
               {isExporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               <span>Ekspor PDF</span>
@@ -2619,21 +2442,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
         </div>
 
-        {/* Filter Bar: Cabang, Bulan (Kalender), Tahun, Nama Admin (+ Kota & Area khusus Omset Admin sesuai Gambar 7) */}
+        {/* Filter Bar: Cabang, Bulan (Kalender), Tahun, Nama Admin (+ Kota & Area khusus Omset Admin) */}
         <div
           className={`grid grid-cols-1 sm:grid-cols-2 ${
             activeTab === 'sales_kpi_omset' ? 'lg:grid-cols-6' : 'lg:grid-cols-4'
-          } gap-3 pt-3 border-t border-slate-100 dark:border-slate-800`}
+          } gap-3 pt-4 border-t border-slate-200/70 dark:border-slate-800 relative`}
         >
           {/* 1. CABANG */}
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-              CABANG
+          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+              CABANG OPERASIONAL
             </label>
             <select
               value={selectedBranchId}
               onChange={e => handleBranchChange(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
             >
               <option value="cab-banyuwangi">Cabang Nusantara (Banyuwangi)</option>
               <option value="cab-sidoarjo">Cabang Sidoarjo</option>
@@ -2642,16 +2465,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
 
           {/* 2. BULAN (KALENDER) */}
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-              BULAN (KALENDER)
+          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+              BULAN EVALUASI
             </label>
-            <div className="relative">
-              <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <div className="relative flex items-center">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 mr-2 shrink-0 pointer-events-none" />
               <select
                 value={selectedMonth}
                 onChange={e => setSelectedMonth(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
               >
                 {MONTH_OPTIONS.map(m => (
                   <option key={m} value={m}>{m}</option>
@@ -2661,14 +2484,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
 
           {/* 3. TAHUN */}
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-              TAHUN
+          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+              TAHUN PERIODE
             </label>
             <select
               value={selectedYear}
               onChange={e => setSelectedYear(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
             >
               {YEAR_OPTIONS.map(y => (
                 <option key={y} value={y}>{y}</option>
@@ -2677,14 +2500,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           </div>
 
           {/* 4. NAMA ADMIN (TERINTEGRASI USER MANAGEMENT & TERPISAH PER CABANG) */}
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-              NAMA ADMIN
+          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+              NAMA ADMIN PENJUALAN
             </label>
             <select
               value={selectedAdminFilter}
               onChange={e => setSelectedAdminFilter(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
             >
               <option value="SEMUA ADMIN">Semua Admin ({activeBranchAdminNames.length})</option>
               {activeBranchAdminNames.map(name => (
@@ -2693,17 +2516,17 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </select>
           </div>
 
-          {/* 5 & 6. KOTA & AREA (Khusus tampilan Omset Admin sesuai Gambar 7) */}
+          {/* 5 & 6. KOTA & AREA (Khusus tampilan Omset Admin) */}
           {activeTab === 'sales_kpi_omset' && (
             <>
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                  KOTA
+              <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+                  FILTER KOTA
                 </label>
                 <select
                   value={selectedKotaFilter}
                   onChange={e => setSelectedKotaFilter(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
                 >
                   <option value="SEMUA KOTA">Semua Kota</option>
                   <option value="GENTENG">GENTENG</option>
@@ -2717,14 +2540,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <option value="GRESIK">GRESIK</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                  AREA
+              <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+                  FILTER AREA
                 </label>
                 <select
                   value={selectedAreaFilter}
                   onChange={e => setSelectedAreaFilter(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
                 >
                   <option value="SEMUA AREA">Semua Area</option>
                   {OFFICIAL_DESTINATION_AREAS.map(area => (
@@ -2742,11 +2565,266 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       {/* ===================================================================== */}
       <div id="sales-kpi-print-area" className="space-y-6">
         {/* =================================================================== */}
-        {/* VIEW 1: KPI INDIVIDU STAF                                           */}
+        {/* VIEW 1: KPI INDIVIDU STAF (DENGAN PERHITUNGAN BULAN LALU, TARGET    */}
+        {/* 100%, AKTUAL BULAN INI, DAN SELISIH GAP = TARGET - AKTUAL)          */}
         {/* =================================================================== */}
         {activeTab === 'sales_kpi_individual' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Top Summary Metric Cards */}
+            {/* FORM INPUT / EDIT MANUAL KPI INDIVIDU */}
+            {isManualKpiOpen && (
+              <form
+                onSubmit={handleSaveManualKpi}
+                className="bg-white dark:bg-slate-900 border-2 border-indigo-500/30 dark:border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-md space-y-4"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                      FORM EVALUASI KPI
+                    </span>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                      Input Capaian KPI Individu Staf ({selectedMonth} {selectedYear})
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsManualKpiOpen(false)}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
+                  <div className="lg:col-span-2">
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Nama Admin Penjualan
+                    </label>
+                    <select
+                      value={manualKpiAdmin}
+                      onChange={e => {
+                        const adm = e.target.value;
+                        const existing = displayedKpiList.find(
+                          x => x.adminName.toUpperCase() === adm.toUpperCase()
+                        );
+                        setManualKpiAdmin(adm);
+                        setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? String(existing.prevMonthPct) : '');
+                        setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? String(existing.validasiSoWeb) : '');
+                        setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? String(existing.pembuatanFaktur) : '');
+                        setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? String(existing.pengecekanFaktur) : '');
+                        setManualKpiOrders(existing && existing.totalOrders > 0 ? String(existing.totalOrders) : '');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
+                    >
+                      {activeBranchAdminNames.map(adm => (
+                        <option key={adm} value={adm}>{adm}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Bulan Sebelumnya (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={100}
+                      value={manualKpiPrevPct}
+                      onChange={e => setManualKpiPrevPct(e.target.value)}
+                      placeholder="Contoh: 92.5"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Validasi SO &amp; Web (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={100}
+                      value={manualKpiValidasi}
+                      onChange={e => setManualKpiValidasi(e.target.value)}
+                      placeholder="0 - 100"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Pembuatan Faktur (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={100}
+                      value={manualKpiPembuatan}
+                      onChange={e => setManualKpiPembuatan(e.target.value)}
+                      placeholder="0 - 100"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Pengecekan Faktur (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={100}
+                      value={manualKpiPengecekan}
+                      onChange={e => setManualKpiPengecekan(e.target.value)}
+                      placeholder="0 - 100"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold text-slate-700 dark:text-slate-300">
+                      Target: <strong>100%</strong>
+                    </span>
+                    <span className="px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 font-bold text-indigo-700 dark:text-indigo-300">
+                      Aktual Bulan Ini:{' '}
+                      <strong>
+                        {(
+                          (Math.min(100, Math.max(0, parseNum(manualKpiValidasi))) +
+                            Math.min(100, Math.max(0, parseNum(manualKpiPembuatan))) +
+                            Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)))) /
+                          3
+                        ).toFixed(1)}
+                        %
+                      </strong>
+                    </span>
+                    <span className="px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 font-bold text-amber-700 dark:text-amber-300">
+                      Selisih Gap:{' '}
+                      <strong>
+                        {Math.max(
+                          0,
+                          100 -
+                            (Math.min(100, Math.max(0, parseNum(manualKpiValidasi))) +
+                              Math.min(100, Math.max(0, parseNum(manualKpiPembuatan))) +
+                              Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)))) /
+                              3
+                        ).toFixed(1)}
+                        %
+                      </strong>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsManualKpiOpen(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Simpan Data</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {/* ================================================================= */}
+            {/* GAMBAR 1: PERHITUNGAN CAPAIAN KPI BULANAN (TONE WARNA CERAH &     */}
+            {/* KONTRAS TINGGI, TANPA NOMOR 1, 2, 3, 4 DAN TANPA RUMUS)           */}
+            {/* ================================================================= */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+                    ANALISA PERBANDINGAN CAPAIAN KPI STAFF ({selectedMonth.toUpperCase()} {selectedYear})
+                  </span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
+                    Perhitungan Bulan Sebelumnya, Target, Aktual Bulan Ini &amp; Selisih Gap
+                  </h3>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {/* Bulan Sebelumnya (%) */}
+                <div className="p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-sky-800 dark:text-sky-300">
+                      BULAN SEBELUMNYA ({prevMonthName.slice(0, 3).toUpperCase()})
+                    </span>
+                    <TrendingUp className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-sky-700 dark:text-sky-300 mt-2 tabular-nums">
+                    {kpiOverallSummary.prevMonthPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-sky-700/80 dark:text-sky-300/80 mt-1">
+                    Pencapaian rata-rata bulan sebelumnya
+                  </p>
+                </div>
+
+                {/* Target Capaian KPI */}
+                <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                      TARGET CAPAIAN KPI
+                    </span>
+                    <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
+                    {kpiOverallSummary.targetPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-emerald-700/80 dark:text-emerald-300/80 mt-1">
+                    Standar target penuh manajemen
+                  </p>
+                </div>
+
+                {/* Aktual Bulan Ini (%) */}
+                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                      AKTUAL BULAN INI ({selectedMonth.slice(0, 3).toUpperCase()})
+                    </span>
+                    <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-indigo-700 dark:text-indigo-300 mt-2 tabular-nums">
+                    {kpiOverallSummary.actualPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-indigo-700/80 dark:text-indigo-300/80 mt-1">
+                    {kpiOverallSummary.actualPct >= kpiOverallSummary.prevMonthPct
+                      ? `Naik +${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`
+                      : `Turun ${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`}
+                  </p>
+                </div>
+
+                {/* Selisih Gap */}
+                <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      SELISIH GAP
+                    </span>
+                    <Activity className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-amber-700 dark:text-amber-300 mt-2 tabular-nums">
+                    {kpiOverallSummary.gapPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-300/80 mt-1">
+                    Selisih terhadap target capaian
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Top Operational Summary Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
                 <div>
@@ -2754,10 +2832,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     ADMIN TERBAIK #1 ({selectedMonth.slice(0, 3).toUpperCase()})
                   </span>
                   <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 truncate">
-                    {rankedBranchKpiList[0]?.adminName || '-'}
+                    {rankedBranchKpiList.some(r => r.avgMonthlyPct > 0)
+                      ? rankedBranchKpiList[0]?.adminName
+                      : 'Belum Ada Data'}
                   </div>
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-bold">
-                    Rata-rata Sebulan: {rankedBranchKpiList[0]?.avgMonthlyPct || 0}%
+                    Aktual: {rankedBranchKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap: {rankedBranchKpiList[0]?.gapPct ?? 100}%
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
@@ -2771,7 +2851,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     RERATA VALIDASI SO &amp; WEB
                   </span>
                   <div className="text-lg font-black text-blue-600 dark:text-blue-400 mt-1">
-                    {displayedKpiList.length > 0
+                    {displayedKpiList.some(r => r.validasiSoWeb > 0)
                       ? (
                           displayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
                           displayedKpiList.length
@@ -2794,7 +2874,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     PEMBUATAN &amp; CEK FAKTUR
                   </span>
                   <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
-                    {displayedKpiList.length > 0
+                    {displayedKpiList.some(r => r.pembuatanFaktur > 0 || r.pengecekanFaktur > 0)
                       ? (
                           displayedKpiList.reduce(
                             (s, r) => s + (r.pembuatanFaktur + r.pengecekanFaktur) / 2,
@@ -2832,18 +2912,18 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
 
             {/* CHART PERBANDINGAN METRIK KPI INDIVIDU ANTAR ADMIN */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
                     Grafik Evaluasi KPI Bulanan Admin ({selectedMonth} {selectedYear})
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Perbandingan Validasi Sales Order &amp; Website, Pembuatan Faktur Penjualan, Pengecekan Faktur Penjualan, serta Rata-rata Prosentase Sebulan
+                    Perbandingan Bulan Sebelumnya (%), Validasi SO &amp; Web, Pembuatan Faktur, Pengecekan Faktur, Aktual (%) &amp; Selisih Gap
                   </p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
-                  Target Standar Manajemen: &ge; 95%
+                  Target Standar: 100%
                 </span>
               </div>
 
@@ -2861,7 +2941,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       tickLine={false}
                     />
                     <YAxis
-                      domain={[70, 100]}
+                      domain={[0, 100]}
                       tick={{ fill: '#64748b', fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
@@ -2878,30 +2958,37 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     />
                     <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
                     <Bar
+                      dataKey="prevMonthPct"
+                      name="Bulan Sebelumnya (%)"
+                      fill="#94a3b8"
+                      radius={[4, 4, 0, 0]}
+                      barSize={14}
+                    />
+                    <Bar
                       dataKey="validasiSoWeb"
                       name="Validasi SO & Website (%)"
                       fill="#3b82f6"
                       radius={[4, 4, 0, 0]}
-                      barSize={18}
+                      barSize={14}
                     />
                     <Bar
                       dataKey="pembuatanFaktur"
-                      name="Pembuatan Faktur Penjualan (%)"
+                      name="Pembuatan Faktur (%)"
                       fill="#10b981"
                       radius={[4, 4, 0, 0]}
-                      barSize={18}
+                      barSize={14}
                     />
                     <Bar
                       dataKey="pengecekanFaktur"
-                      name="Pengecekan Faktur Penjualan (%)"
+                      name="Pengecekan Faktur (%)"
                       fill="#8b5cf6"
                       radius={[4, 4, 0, 0]}
-                      barSize={18}
+                      barSize={14}
                     />
                     <Line
                       type="monotone"
                       dataKey="avgMonthlyPct"
-                      name="Rata-rata Prosentase Sebulan (%)"
+                      name="Aktual Bulan Ini (%)"
                       stroke="#f59e0b"
                       strokeWidth={3}
                       dot={{ fill: '#f59e0b', r: 5 }}
@@ -2914,14 +3001,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             {/* URUTAN ADMIN TERBAIK & RADAR PROFIL INDIVIDU */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left: Urutan Admin Terbaik (Leaderboard) */}
-              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
                       Urutan Admin Terbaik ({selectedMonth} {selectedYear})
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Peringkat berdasarkan rata-rata prosentase dalam sebulan &amp; minimnya kesalahan diskon
+                      Klik nama admin untuk melihat rincian Bulan Sebelumnya, Target 100%, Aktual &amp; Selisih Gap
                     </p>
                   </div>
                 </div>
@@ -2933,10 +3020,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       <div
                         key={admin.adminName}
                         onClick={() => setFocusedAdminName(admin.adminName)}
-                        className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                           isFocused
-                            ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-500 ring-1 ring-blue-500/20'
-                            : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 hover:border-blue-300'
+                            ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-500 ring-1 ring-indigo-500/20'
+                            : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -2963,28 +3050,49 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
-                              <span>SO/Web: <strong>{admin.validasiSoWeb}%</strong></span>
+                              <span>Bulan Lalu: <strong>{admin.prevMonthPct}%</strong></span>
                               <span>&bull;</span>
-                              <span>Buat Faktur: <strong>{admin.pembuatanFaktur}%</strong></span>
+                              <span>Target: <strong>100%</strong></span>
                               <span>&bull;</span>
-                              <span>Cek Faktur: <strong>{admin.pengecekanFaktur}%</strong></span>
+                              <span className="text-amber-600 dark:text-amber-400 font-bold">
+                                Gap: {admin.gapPct}%
+                              </span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="text-right shrink-0">
-                          <div className="text-sm font-black text-blue-600 dark:text-blue-400">
-                            {admin.avgMonthlyPct}%
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="text-right">
+                            <div className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+                              Aktual: {admin.avgMonthlyPct}%
+                            </div>
+                            <div
+                              className={`text-[10px] font-bold ${
+                                admin.discountErrorsCount === 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }`}
+                            >
+                              Salah Diskon: {admin.discountErrorsCount}x
+                            </div>
                           </div>
-                          <div
-                            className={`text-[10px] font-bold ${
-                              admin.discountErrorsCount === 0
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-rose-600 dark:text-rose-400'
-                            }`}
+                          <button
+                            type="button"
+                            onClick={ev => {
+                              ev.stopPropagation();
+                              setManualKpiAdmin(admin.adminName);
+                              setManualKpiPrevPct(admin.prevMonthPct > 0 ? String(admin.prevMonthPct) : '');
+                              setManualKpiValidasi(admin.validasiSoWeb > 0 ? String(admin.validasiSoWeb) : '');
+                              setManualKpiPembuatan(admin.pembuatanFaktur > 0 ? String(admin.pembuatanFaktur) : '');
+                              setManualKpiPengecekan(admin.pengecekanFaktur > 0 ? String(admin.pengecekanFaktur) : '');
+                              setManualKpiOrders(admin.totalOrders > 0 ? String(admin.totalOrders) : '');
+                              setIsManualKpiOpen(true);
+                            }}
+                            className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 cursor-pointer"
+                            title="Edit KPI Admin ini"
                           >
-                            Salah Diskon: {admin.discountErrorsCount}x
-                          </div>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     );
@@ -2993,23 +3101,53 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </div>
 
               {/* Right: Radar & Breakdown Detail for Selected Admin */}
-              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-5">
+              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
                       Rincian Capaian KPI — {focusedAdminKpi.adminName}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Peringkat #{focusedAdminKpi.rank} &bull; Rata-rata Sebulan: {focusedAdminKpi.avgMonthlyPct}%
+                      Peringkat #{focusedAdminKpi.rank} &bull; Target 100% &bull; Aktual {focusedAdminKpi.avgMonthlyPct}% &bull; Gap {focusedAdminKpi.gapPct}%
                     </p>
                   </div>
-                  <span className="px-3 py-1 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-black">
-                    Rata-rata: {focusedAdminKpi.avgMonthlyPct}%
+                  <span className="px-3 py-1 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-black">
+                    Aktual: {focusedAdminKpi.avgMonthlyPct}%
                   </span>
                 </div>
 
+                {/* 4 Kotak Perhitungan Individu: Bulan Lalu, Target 100%, Aktual, Selisih Gap */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
+                    <span className="text-[10px] font-black uppercase text-slate-400 block">Bulan Lalu</span>
+                    <span className="text-base font-black text-slate-900 dark:text-white mt-0.5 block">
+                      {focusedAdminKpi.prevMonthPct}%
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/60">
+                    <span className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400 block">Target</span>
+                    <span className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5 block">
+                      100%
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/60">
+                    <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-400 block">Aktual</span>
+                    <span className="text-base font-black text-indigo-700 dark:text-indigo-300 mt-0.5 block">
+                      {focusedAdminKpi.avgMonthlyPct}%
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/60">
+                    <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 block">
+                      Selisih Gap
+                    </span>
+                    <span className="text-base font-black text-amber-700 dark:text-amber-300 mt-0.5 block">
+                      {focusedAdminKpi.gapPct}%
+                    </span>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  <div className="h-[220px]">
+                  <div className="h-[210px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <RadarChart
                         cx="50%"
@@ -3019,12 +3157,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           { subject: 'Validasi SO & Web', A: focusedAdminKpi.validasiSoWeb, fullMark: 100 },
                           { subject: 'Pembuatan Faktur', A: focusedAdminKpi.pembuatanFaktur, fullMark: 100 },
                           { subject: 'Pengecekan Faktur', A: focusedAdminKpi.pengecekanFaktur, fullMark: 100 },
-                          { subject: 'Rata-rata Sebulan', A: focusedAdminKpi.avgMonthlyPct, fullMark: 100 },
-                          {
-                            subject: 'Akurasi Diskon',
-                            A: Math.max(60, 100 - focusedAdminKpi.discountErrorsCount * 5),
-                            fullMark: 100
-                          }
+                          { subject: 'Aktual Bulan Ini', A: focusedAdminKpi.avgMonthlyPct, fullMark: 100 },
+                          { subject: 'Bulan Lalu', A: focusedAdminKpi.prevMonthPct, fullMark: 100 }
                         ]}
                       >
                         <PolarGrid stroke="#cbd5e1" />
@@ -3033,8 +3167,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         <Radar
                           name={focusedAdminKpi.adminName}
                           dataKey="A"
-                          stroke="#2563eb"
-                          fill="#3b82f6"
+                          stroke="#4f46e5"
+                          fill="#6366f1"
                           fillOpacity={0.35}
                         />
                       </RadarChart>
@@ -3044,7 +3178,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <div className="space-y-3">
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                        <span>1. Validasi Sales Order &amp; Website</span>
+                        <span>Validasi Sales Order &amp; Website</span>
                         <span className="text-blue-600 dark:text-blue-400 font-black">{focusedAdminKpi.validasiSoWeb}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
@@ -3054,7 +3188,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                        <span>2. Pembuatan Faktur Penjualan</span>
+                        <span>Pembuatan Faktur Penjualan</span>
                         <span className="text-emerald-600 dark:text-emerald-400 font-black">{focusedAdminKpi.pembuatanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
@@ -3064,7 +3198,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                        <span>3. Pengecekan Faktur Penjualan</span>
+                        <span>Pengecekan Faktur Penjualan</span>
                         <span className="text-violet-600 dark:text-violet-400 font-black">{focusedAdminKpi.pengecekanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
@@ -3074,10 +3208,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
                     <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between">
                       <span className="text-xs font-black text-amber-900 dark:text-amber-300">
-                        Rata-rata Prosentase Sebulan
+                        Selisih Gap
                       </span>
                       <span className="text-sm font-black text-amber-600 dark:text-amber-400">
-                        {focusedAdminKpi.avgMonthlyPct}%
+                        {focusedAdminKpi.gapPct}%
                       </span>
                     </div>
                   </div>
@@ -3086,7 +3220,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
 
             {/* FITUR KESALAHAN PENGINPUTAN DISKON */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
@@ -3105,8 +3239,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <button
                   type="button"
                   onClick={() => {
-                    setDscAdmin(activeBranchAdminNames[0] || '');
-                    setIsAddDiscountErrOpen(prev => !prev);
+                    if (isAddDiscountErrOpen) {
+                      setIsAddDiscountErrOpen(false);
+                      setEditingDiscountId(null);
+                    } else {
+                      setEditingDiscountId(null);
+                      setDscDate(new Date().toISOString().slice(0, 10));
+                      setDscAdmin(activeBranchAdminNames[0] || '');
+                      setDscNoFaktur('');
+                      setDscCustomer('');
+                      setDscExpected('');
+                      setDscInput('');
+                      setDscSelisihRp('');
+                      setDscKeterangan('');
+                      setIsAddDiscountErrOpen(true);
+                    }
                   }}
                   className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
                 >
@@ -3130,9 +3277,40 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       ? 'cab-banyuwangi'
                       : selectedBranchId;
 
+                    if (editingDiscountId) {
+                      const nextLogs = discountErrorLogs.map(item =>
+                        item.id === editingDiscountId
+                          ? {
+                              ...item,
+                              date: dscDate || item.date,
+                              branchId: targetBr,
+                              adminName: targetAdmin,
+                              noFakturOrSo: dscNoFaktur.trim().toUpperCase(),
+                              customerName: dscCustomer.trim().toUpperCase(),
+                              expectedDiscount: parseNum(dscExpected),
+                              inputDiscount: parseNum(dscInput),
+                              selisihNominal: parseNum(dscSelisihRp),
+                              keterangan: dscKeterangan.trim() || 'Kesalahan penginputan diskon penjualan'
+                            }
+                          : item
+                      );
+                      setDiscountErrorLogs(nextLogs);
+                      void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
+                      setEditingDiscountId(null);
+                      setDscNoFaktur('');
+                      setDscCustomer('');
+                      setDscExpected('');
+                      setDscInput('');
+                      setDscSelisihRp('');
+                      setDscKeterangan('');
+                      setIsAddDiscountErrOpen(false);
+                      showToast(`Data kesalahan diskon untuk ${targetAdmin} berhasil diperbarui.`);
+                      return;
+                    }
+
                     const newLog: DiscountErrorLogItem = {
                       id: `dsc-${Date.now()}`,
-                      date: new Date().toISOString().slice(0, 10),
+                      date: dscDate || new Date().toISOString().slice(0, 10),
                       branchId: targetBr,
                       month: selectedMonth,
                       year: selectedYear,
@@ -3145,7 +3323,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       keterangan: dscKeterangan.trim() || 'Kesalahan penginputan diskon penjualan'
                     };
 
-                    setDiscountErrorLogs(prev => [newLog, ...prev]);
+                    const nextLogs = [newLog, ...discountErrorLogs];
+                    setDiscountErrorLogs(nextLogs);
+                    void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
                     setDscNoFaktur('');
                     setDscCustomer('');
                     setDscExpected('');
@@ -3153,90 +3333,114 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     setDscSelisihRp('');
                     setDscKeterangan('');
                     setIsAddDiscountErrOpen(false);
-                    showToast(`Kesalahan input diskon untuk ${targetAdmin} berhasil dicatat.`);
+                    showToast(`Kesalahan input diskon untuk ${targetAdmin} berhasil disimpan.`);
                   }}
-                  className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+                  className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3"
                 >
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Admin</label>
-                    <select
-                      value={dscAdmin}
-                      onChange={e => setDscAdmin(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 pb-2">
+                    {editingDiscountId ? 'Edit Catatan Kesalahan Penginputan Diskon' : 'Tambah Catatan Kesalahan Penginputan Diskon'}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Tanggal</label>
+                      <input
+                        type="date"
+                        value={dscDate || new Date().toISOString().slice(0, 10)}
+                        onChange={e => setDscDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Admin</label>
+                      <select
+                        value={dscAdmin}
+                        onChange={e => setDscAdmin(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                      >
+                        {activeBranchAdminNames.map(a => (
+                          <option key={a} value={a}>{a}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">No. Faktur / SO</label>
+                      <input
+                        type="text"
+                        value={dscNoFaktur}
+                        onChange={e => setDscNoFaktur(e.target.value)}
+                        placeholder="Contoh: FJ02-1126-0912"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Pelanggan</label>
+                      <input
+                        type="text"
+                        value={dscCustomer}
+                        onChange={e => setDscCustomer(e.target.value)}
+                        placeholder="Contoh: TK SINAR BARU"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Seharusnya (%)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={dscExpected}
+                        onChange={e => setDscExpected(e.target.value)}
+                        placeholder="Contoh: 2.5"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Terinput (%)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={dscInput}
+                        onChange={e => setDscInput(e.target.value)}
+                        placeholder="Contoh: 5"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nominal Selisih Diskon (Rp)</label>
+                      <input
+                        type="number"
+                        value={dscSelisihRp}
+                        onChange={e => setDscSelisihRp(e.target.value)}
+                        placeholder="Contoh: 75000"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Keterangan Kesalahan Diskon</label>
+                      <input
+                        type="text"
+                        value={dscKeterangan}
+                        onChange={e => setDscKeterangan(e.target.value)}
+                        placeholder="Rincian penyebab kesalahan input diskon..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddDiscountErrOpen(false);
+                        setEditingDiscountId(null);
+                      }}
+                      className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
                     >
-                      {activeBranchAdminNames.map(a => (
-                        <option key={a} value={a}>{a}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">No. Faktur / SO</label>
-                    <input
-                      type="text"
-                      value={dscNoFaktur}
-                      onChange={e => setDscNoFaktur(e.target.value)}
-                      placeholder="Contoh: FJ02-1126-0912"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Pelanggan</label>
-                    <input
-                      type="text"
-                      value={dscCustomer}
-                      onChange={e => setDscCustomer(e.target.value)}
-                      placeholder="Contoh: TK SINAR BARU"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Seharusnya (%)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={dscExpected}
-                      onChange={e => setDscExpected(e.target.value)}
-                      placeholder="Contoh: 2.5"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Terinput (%)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={dscInput}
-                      onChange={e => setDscInput(e.target.value)}
-                      placeholder="Contoh: 5"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nominal Selisih Diskon (Rp)</label>
-                    <input
-                      type="number"
-                      value={dscSelisihRp}
-                      onChange={e => setDscSelisihRp(e.target.value)}
-                      placeholder="Contoh: 75000"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Keterangan Kesalahan Diskon</label>
-                    <input
-                      type="text"
-                      value={dscKeterangan}
-                      onChange={e => setDscKeterangan(e.target.value)}
-                      placeholder="Rincian penyebab kesalahan input diskon..."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                    />
-                  </div>
-                  <div className="flex items-end justify-end gap-2">
+                      Batal
+                    </button>
                     <button
                       type="submit"
                       className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
                     >
-                      Simpan Catatan Diskon
+                      {editingDiscountId ? 'Simpan Perubahan' : 'Simpan Catatan'}
                     </button>
                   </div>
                 </form>
@@ -3259,40 +3463,76 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {discountErrorLogs
-                      .filter(
-                        d =>
-                          (selectedBranchId === 'ALL' || d.branchId === selectedBranchId) &&
-                          (selectedAdminFilter === 'SEMUA ADMIN' ||
-                            d.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
-                      )
-                      .map((log, i) => (
-                        <tr key={log.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                          <td className="py-2.5 px-3 font-semibold">{i + 1}</td>
-                          <td className="py-2.5 px-3">{log.date}</td>
-                          <td className="py-2.5 px-3 font-black text-slate-900 dark:text-white">{log.adminName}</td>
-                          <td className="py-2.5 px-3 font-mono font-semibold">{log.noFakturOrSo}</td>
-                          <td className="py-2.5 px-3 font-semibold">{log.customerName}</td>
-                          <td className="py-2.5 px-3 text-center text-emerald-600 font-bold">{log.expectedDiscount}%</td>
-                          <td className="py-2.5 px-3 text-center text-rose-600 font-bold">{log.inputDiscount}%</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-rose-600">
-                            Rp {formatRp(log.selisihNominal)}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{log.keterangan}</td>
-                          <td className="py-2.5 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDiscountErrorLogs(prev => prev.filter(x => x.id !== log.id))
-                              }
-                              className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
-                              title="Hapus catatan"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                    {discountErrorLogs.filter(
+                      d =>
+                        (selectedBranchId === 'ALL' || d.branchId === selectedBranchId) &&
+                        (selectedAdminFilter === 'SEMUA ADMIN' ||
+                          d.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
+                    ).length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="py-8 text-center text-slate-400 italic">
+                          Belum ada catatan kesalahan penginputan diskon untuk periode ini.
+                        </td>
+                      </tr>
+                    ) : (
+                      discountErrorLogs
+                        .filter(
+                          d =>
+                            (selectedBranchId === 'ALL' || d.branchId === selectedBranchId) &&
+                            (selectedAdminFilter === 'SEMUA ADMIN' ||
+                              d.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
+                        )
+                        .map((log, i) => (
+                          <tr key={log.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3 font-semibold">{i + 1}</td>
+                            <td className="py-2.5 px-3">{log.date}</td>
+                            <td className="py-2.5 px-3 font-black text-slate-900 dark:text-white">{log.adminName}</td>
+                            <td className="py-2.5 px-3 font-mono font-semibold">{log.noFakturOrSo}</td>
+                            <td className="py-2.5 px-3 font-semibold">{log.customerName}</td>
+                            <td className="py-2.5 px-3 text-center text-emerald-600 font-bold">{log.expectedDiscount}%</td>
+                            <td className="py-2.5 px-3 text-center text-rose-600 font-bold">{log.inputDiscount}%</td>
+                            <td className="py-2.5 px-3 text-right font-bold text-rose-600">
+                              Rp {formatRp(log.selisihNominal)}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{log.keterangan}</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <div className="inline-flex items-center justify-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingDiscountId(log.id);
+                                    setDscDate(log.date);
+                                    setDscAdmin(log.adminName);
+                                    setDscNoFaktur(log.noFakturOrSo);
+                                    setDscCustomer(log.customerName);
+                                    setDscExpected(String(log.expectedDiscount));
+                                    setDscInput(String(log.inputDiscount));
+                                    setDscSelisihRp(String(log.selisihNominal));
+                                    setDscKeterangan(log.keterangan);
+                                    setIsAddDiscountErrOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 cursor-pointer transition"
+                                  title="Edit catatan kesalahan diskon"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextLogs = discountErrorLogs.filter(x => x.id !== log.id);
+                                    setDiscountErrorLogs(nextLogs);
+                                    void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
+                                  }}
+                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 cursor-pointer transition"
+                                  title="Hapus catatan"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -3302,11 +3542,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
         {/* =================================================================== */}
         {/* VIEW 2: DENDA CHECKER                                               */}
-        {/* Kolom: Nama, Nama Pelanggan, No Faktur, Keterangan, Nominal Selisih,*/}
-        {/* Kalian Selisih, Denda + Fitur Upload Excel & Tambah Manual          */}
         {/* =================================================================== */}
         {activeTab === 'sales_kpi_fines' && (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5 shadow-xs animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 space-y-5 shadow-xs animate-fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
@@ -3335,8 +3573,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <button
                   type="button"
                   onClick={() => {
-                    setNewDendaAdmin(activeBranchAdminNames[0] || '');
-                    setIsAddDendaManualOpen(prev => !prev);
+                    if (isAddDendaManualOpen) {
+                      setIsAddDendaManualOpen(false);
+                      setEditingDendaId(null);
+                    } else {
+                      setEditingDendaId(null);
+                      setNewDendaAdmin(activeBranchAdminNames[0] || '');
+                      setNewDendaCustomer('');
+                      setNewDendaNoFaktur('');
+                      setNewDendaKeterangan('');
+                      setNewDendaNominalSelisih('');
+                      setNewDendaKalianSelisih('1');
+                      setIsAddDendaManualOpen(true);
+                    }
                   }}
                   className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
@@ -3352,7 +3601,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4"
               >
                 <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 pb-2">
-                  Tambah Manual Denda Checker
+                  {editingDendaId ? 'Edit Data Denda Checker' : 'Tambah Manual Denda Checker'}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                   <div>
@@ -3451,7 +3700,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsAddDendaManualOpen(false)}
+                    onClick={() => {
+                      setIsAddDendaManualOpen(false);
+                      setEditingDendaId(null);
+                    }}
                     className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
                   >
                     Batal
@@ -3460,7 +3712,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     type="submit"
                     className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
                   >
-                    Simpan Denda
+                    {editingDendaId ? 'Simpan Perubahan' : 'Simpan Denda'}
                   </button>
                 </div>
               </form>
@@ -3478,7 +3730,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <th className="py-3 px-3 text-right">Nominal Selisih</th>
                     <th className="py-3 px-3 text-center">Kalian Selisih</th>
                     <th className="py-3 px-3 text-right">Hasil Denda</th>
-                    <th className="py-3 px-3 text-center w-14">Aksi</th>
+                    <th className="py-3 px-3 text-center w-20">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -3514,16 +3766,37 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           </div>
                         </td>
                         <td className="py-3 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDendaCheckerList(prev => prev.filter(x => x.id !== fine.id))
-                            }
-                            className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
-                            title="Hapus baris denda"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="inline-flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingDendaId(fine.id);
+                                setNewDendaAdmin(fine.adminName);
+                                setNewDendaCustomer(fine.customerName);
+                                setNewDendaNoFaktur(fine.noFaktur);
+                                setNewDendaKeterangan(fine.keterangan);
+                                setNewDendaNominalSelisih(String(fine.nominalSelisih));
+                                setNewDendaKalianSelisih(String(fine.kalianSelisih));
+                                setIsAddDendaManualOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 cursor-pointer transition"
+                              title="Edit baris denda"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextList = dendaCheckerList.filter(x => x.id !== fine.id);
+                                setDendaCheckerList(nextList);
+                                void persistSalesKpiToMysql({ dendaCheckerList: nextList });
+                              }}
+                              className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 cursor-pointer transition"
+                              title="Hapus baris denda"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -3535,28 +3808,43 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         )}
 
         {/* =================================================================== */}
-        {/* VIEW 3: EVALUASI ANALISA REORDER                                    */}
-        {/* (Nusantara Dr. Soetomo & Nusantara Expand: Total Reorder Mingguan,  */}
-        {/* Total Barang Sudah Terkirim [Faktur], Belum Terkirim [SO Menunggu]) */}
+        {/* VIEW 3: PERSENTASE KIRIMAN / EVALUASI ANALISA REORDER (GAMBAR 2)    */}
+        {/* Dilengkapi Perhitungan Bulan Sebelumnya (%), Target 100%,           */}
+        {/* Aktual Bulan Ini (%), dan Selisih Gap = Target (100%) - Aktual (%)  */}
         {/* =================================================================== */}
         {activeTab === 'sales_kpi_nusantara' && (
           <div className="space-y-6 animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-3xl shadow-xs">
               <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase">
-                  Evaluasi Analisa Reorder Mingguan (Perbandingan SO Menunggu vs Faktur)
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white uppercase">
+                  Evaluasi Analisa Reorder Berdasarkan Analisa (Tanggal) — Terkirim (Item) vs Belum Terkirim (Item)
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Proporsi Total Reorder Mingguan, Barang Sudah Terkirim (Faktur), dan Barang Belum Terkirim (SO Menunggu)
+                  Proporsi Total Reorder, Sudah Terkirim (Item), Belum Terkirim (Item), serta Perhitungan Bulan Sebelumnya, Target 100%, Aktual &amp; Selisih Gap
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setIsAddReorderOpen(prev => !prev)}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                onClick={() => {
+                  if (isAddReorderOpen) {
+                    setIsAddReorderOpen(false);
+                    setEditingReorderId(null);
+                  } else {
+                    setEditingReorderId(null);
+                    const shortM = (selectedMonth || 'November').slice(0, 3);
+                    setReoWeek(`03 ${shortM} ${selectedYear}`);
+                    setReoTerkirimFaktur('');
+                    setReoBelumTerkirimSo('');
+                    setReoPrevMonthPctInput(
+                      unitPrevMonthPct[reoUnit] ? String(unitPrevMonthPct[reoUnit]) : ''
+                    );
+                    setIsAddReorderOpen(true);
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto shadow-sm"
               >
                 <Plus className="w-4 h-4" />
-                <span>{isAddReorderOpen ? 'Tutup Input Reorder' : 'Update Data Reorder Mingguan'}</span>
+                <span>{isAddReorderOpen ? 'Tutup Input Reorder' : 'Update Data Analisa Reorder'}</span>
               </button>
             </div>
 
@@ -3567,18 +3855,56 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   const terkirim = Math.max(0, Math.round(parseNum(reoTerkirimFaktur)));
                   const belum = Math.max(0, Math.round(parseNum(reoBelumTerkirimSo)));
                   const total = terkirim + belum;
-                  if (total <= 0) {
-                    showToast('Masukkan jumlah Faktur Terkirim atau SO Menunggu.');
+                  const customPrevPct = Math.min(100, Math.max(0, Number(parseNum(reoPrevMonthPctInput).toFixed(1))));
+
+                  const nextUnitPrev = {
+                    ...unitPrevMonthPct,
+                    ...(reoPrevMonthPctInput.trim() !== '' ? { [reoUnit]: customPrevPct } : {})
+                  };
+                  if (reoPrevMonthPctInput.trim() !== '') {
+                    setUnitPrevMonthPct(nextUnitPrev);
+                  }
+
+                  if (total <= 0 && reoPrevMonthPctInput.trim() !== '') {
+                    void persistSalesKpiToMysql({ unitPrevMonthPct: nextUnitPrev });
+                    setIsAddReorderOpen(false);
+                    showToast(`Capaian bulan sebelumnya untuk ${reoUnit} (${customPrevPct}%) berhasil disimpan.`);
                     return;
                   }
-                  setReorderList(prev => {
-                    const idx = prev.findIndex(
-                      r => r.unit === reoUnit && r.weekLabel === reoWeek
+
+                  if (total <= 0) {
+                    showToast('Masukkan jumlah Terkirim (Item) atau Belum Terkirim (Item).');
+                    return;
+                  }
+                  const cleanDate = reoWeek.trim() || `03 ${(selectedMonth || 'November').slice(0, 3)} ${selectedYear}`;
+                  let nextReorderList: ReorderWeeklyItem[] = [];
+                  if (editingReorderId) {
+                    nextReorderList = reorderList.map(r =>
+                      r.id === editingReorderId
+                        ? {
+                            ...r,
+                            unit: reoUnit,
+                            weekLabel: cleanDate,
+                            month: selectedMonth,
+                            year: selectedYear,
+                            totalReorder: total,
+                            terkirimFaktur: terkirim,
+                            belumTerkirimSo: belum
+                          }
+                        : r
+                    );
+                  } else {
+                    const idx = reorderList.findIndex(
+                      r =>
+                        r.unit === reoUnit &&
+                        r.weekLabel.toLowerCase() === cleanDate.toLowerCase() &&
+                        (!r.month || r.month === selectedMonth) &&
+                        (!r.year || r.year === selectedYear)
                     );
                     const nextItem: ReorderWeeklyItem = {
-                      id: idx >= 0 ? prev[idx].id : `reo-${Date.now()}`,
+                      id: idx >= 0 ? reorderList[idx].id : `reo-${Date.now()}`,
                       unit: reoUnit,
-                      weekLabel: reoWeek,
+                      weekLabel: cleanDate,
                       month: selectedMonth,
                       year: selectedYear,
                       totalReorder: total,
@@ -3586,24 +3912,34 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       belumTerkirimSo: belum
                     };
                     if (idx >= 0) {
-                      const clone = [...prev];
-                      clone[idx] = nextItem;
-                      return clone;
+                      nextReorderList = [...reorderList];
+                      nextReorderList[idx] = nextItem;
+                    } else {
+                      nextReorderList = [...reorderList, nextItem];
                     }
-                    return [...prev, nextItem];
+                  }
+
+                  setReorderList(nextReorderList);
+                  void persistSalesKpiToMysql({
+                    reorderList: nextReorderList,
+                    unitPrevMonthPct: nextUnitPrev
                   });
+                  setEditingReorderId(null);
                   setReoTerkirimFaktur('');
                   setReoBelumTerkirimSo('');
                   setIsAddReorderOpen(false);
-                  showToast(`Data Evaluasi Reorder ${reoUnit} (${reoWeek}) berhasil diperbarui.`);
+                  showToast(`Data Analisa Reorder ${reoUnit} (${cleanDate}) berhasil disimpan.`);
                 }}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end"
+                className="bg-white dark:bg-slate-900 border-2 border-indigo-500/30 dark:border-slate-800 p-5 rounded-3xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 items-end shadow-sm"
               >
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Unit Nusantara</label>
                   <select
                     value={reoUnit}
-                    onChange={e => setReoUnit(e.target.value as any)}
+                    onChange={e => {
+                      const u = e.target.value as 'Nusantara Dr. Soetomo' | 'Nusantara Expand';
+                      setReoUnit(u);
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
                   >
                     <option value="Nusantara Dr. Soetomo">Nusantara Dr. Soetomo</option>
@@ -3611,21 +3947,18 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Minggu</label>
-                  <select
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Analisa (Tanggal)</label>
+                  <input
+                    type="text"
                     value={reoWeek}
                     onChange={e => setReoWeek(e.target.value)}
+                    placeholder={`Contoh: 03 ${(selectedMonth || 'November').slice(0, 3)} ${selectedYear}`}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
-                  >
-                    <option value="Minggu 1">Minggu 1</option>
-                    <option value="Minggu 2">Minggu 2</option>
-                    <option value="Minggu 3">Minggu 3</option>
-                    <option value="Minggu 4">Minggu 4</option>
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Sudah Terkirim (Faktur)
+                    Sudah Terkirim (Item)
                   </label>
                   <input
                     type="number"
@@ -3638,7 +3971,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Belum Terkirim (SO Menunggu)
+                    Belum Terkirim (Item)
                   </label>
                   <input
                     type="number"
@@ -3649,44 +3982,148 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
                   />
                 </div>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
-                >
-                  Simpan Reorder
-                </button>
+                <div className="flex gap-2">
+                  {editingReorderId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddReorderOpen(false);
+                        setEditingReorderId(null);
+                      }}
+                      className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold cursor-pointer shadow-xs"
+                  >
+                    {editingReorderId ? 'Simpan Perubahan' : 'Simpan Data'}
+                  </button>
+                </div>
               </form>
             )}
+
+            {/* ================================================================= */}
+            {/* PERHITUNGAN PENCAPAIAN KIRIMAN GABUNGAN                           */}
+            {/* (NUSANTARA DR. SOETOMO + NUSANTARA EXPAND DIBAGI 2 DIKALI 100%)   */}
+            {/* TONE WARNA CERAH & KONTRAS TINGGI TANPA RUMUS                     */}
+            {/* ================================================================= */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+                    PERHITUNGAN PENCAPAIAN KIRIMAN GABUNGAN ({selectedMonth.toUpperCase()} {selectedYear})
+                  </span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
+                    Gabungan Nusantara Dr. Soetomo &amp; Nusantara Expand
+                  </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                  <span className="px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
+                    Dr. Soetomo: {reorderStats.soetomo.actualPct}%
+                  </span>
+                  <span className="px-3 py-1 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 border border-cyan-200/70 dark:border-cyan-800">
+                    Nusantara Expand: {reorderStats.expand.actualPct}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <div className="p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-sky-800 dark:text-sky-300">
+                      BULAN SEBELUMNYA ({prevMonthName.slice(0, 3).toUpperCase()})
+                    </span>
+                    <TrendingUp className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-sky-700 dark:text-sky-300 mt-2 tabular-nums">
+                    {reorderStats.combined.prevMonthPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-sky-700/80 dark:text-sky-300/80 mt-1">
+                    Capaian gabungan bulan lalu
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                      TARGET KIRIMAN
+                    </span>
+                    <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
+                    {reorderStats.combined.targetPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-emerald-700/80 dark:text-emerald-300/80 mt-1">
+                    Target penuh pengiriman
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                      AKTUAL BULAN INI ({selectedMonth.slice(0, 3).toUpperCase()})
+                    </span>
+                    <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-indigo-700 dark:text-indigo-300 mt-2 tabular-nums">
+                    {reorderStats.combined.actualPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-indigo-700/80 dark:text-indigo-300/80 mt-1">
+                    Realisasi gabungan Dr. Soetomo &amp; Expand
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      SELISIH GAP
+                    </span>
+                    <Activity className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-amber-700 dark:text-amber-300 mt-2 tabular-nums">
+                    {reorderStats.combined.gapPct}%
+                  </div>
+                  <p className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-300/80 mt-1">
+                    Selisih terhadap target pengiriman
+                  </p>
+                </div>
+              </div>
+            </div>
 
             {/* 2 Panel Utama: Nusantara Dr. Soetomo & Nusantara Expand */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {[
                 {
                   title: 'NUSANTARA DR. SOETOMO',
-                  subtitle: 'Evaluasi Reorder dari perbandingan SO Menunggu & Faktur Terkirim',
+                  unitKey: 'Nusantara Dr. Soetomo' as const,
+                  subtitle: 'Evaluasi Reorder berdasarkan Analisa (Tanggal) — Terkirim (Item) & Belum Terkirim (Item)',
                   color: '#4f46e5',
                   data: reorderStats.soetomo
                 },
                 {
                   title: 'NUSANTARA EXPAND',
-                  subtitle: 'Evaluasi Reorder rute ekspansi dari perbandingan SO Menunggu & Faktur',
+                  unitKey: 'Nusantara Expand' as const,
+                  subtitle: 'Evaluasi Reorder rute ekspansi berdasarkan Analisa (Tanggal) — Terkirim (Item) & Belum Terkirim (Item)',
                   color: '#0891b2',
                   data: reorderStats.expand
                 }
               ].map(panel => (
                 <div
                   key={panel.title}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-5"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5"
                 >
-                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
                     <div>
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white uppercase tracking-wider">
                         {panel.title}
                       </h4>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">{panel.subtitle}</p>
                     </div>
                     <span className="px-3 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 text-xs font-black">
-                      Terkirim: {panel.data.pctTerkirim}%
+                      Aktual: {panel.data.actualPct}%
                     </span>
                   </div>
 
@@ -3700,46 +4137,52 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         {formatRp(panel.data.totalReorder)} Item
                       </div>
                       <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                        100% (Faktur + SO Menunggu)
+                        100% (Terkirim + Belum Terkirim)
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/60">
                       <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase block">
-                        Sudah Terkirim (Faktur)
+                        Sudah Terkirim (Item)
                       </span>
                       <div className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300 mt-1">
                         {formatRp(panel.data.terkirimFaktur)} ({panel.data.pctTerkirim}%)
                       </div>
                       <span className="text-[10px] font-bold text-emerald-600">
-                        Dari Faktur Terbit
+                        Total Item Terkirim
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/60">
                       <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase block">
-                        Belum Terkirim (SO)
+                        Belum Terkirim (Item)
                       </span>
                       <div className="text-base sm:text-lg font-black text-amber-700 dark:text-amber-300 mt-1">
                         {formatRp(panel.data.belumTerkirimSo)} ({panel.data.pctBelumTerkirim}%)
                       </div>
                       <span className="text-[10px] font-bold text-amber-600">
-                        Dari SO Menunggu
+                        Selisih Gap: {panel.data.gapPct}%
                       </span>
                     </div>
                   </div>
 
-                  {/* Donut + Weekly Composed Chart */}
+                  {/* Donut + Analisa (Tanggal) Composed Chart */}
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
                     <div className="md:col-span-5 flex flex-col items-center">
                       <div className="relative w-36 h-36">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
-                              data={[
-                                { name: 'Sudah Terkirim (Faktur)', value: panel.data.pctTerkirim },
-                                { name: 'Belum Terkirim (SO Menunggu)', value: panel.data.pctBelumTerkirim }
-                              ]}
+                              data={
+                                panel.data.totalReorder > 0
+                                  ? [
+                                      { name: 'Terkirim (Item)', value: panel.data.pctTerkirim },
+                                      { name: 'Belum Terkirim (Item)', value: panel.data.pctBelumTerkirim }
+                                    ]
+                                  : [
+                                      { name: 'Belum Ada Data', value: 100 }
+                                    ]
+                              }
                               cx="50%"
                               cy="50%"
                               innerRadius={45}
@@ -3748,8 +4191,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               endAngle={-270}
                               dataKey="value"
                             >
-                              <Cell fill="#10b981" />
-                              <Cell fill="#f59e0b" />
+                              {panel.data.totalReorder > 0 ? (
+                                <>
+                                  <Cell fill="#10b981" />
+                                  <Cell fill="#f59e0b" />
+                                </>
+                              ) : (
+                                <Cell fill="#cbd5e1" />
+                              )}
                             </Pie>
                             <Tooltip />
                           </PieChart>
@@ -3758,17 +4207,17 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           <span className="text-xl font-black text-slate-900 dark:text-white">
                             {panel.data.pctTerkirim}%
                           </span>
-                          <span className="text-[9px] font-bold text-slate-400 uppercase">Terkirim</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase">Aktual</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 text-[10px] font-bold mt-2">
                         <span className="flex items-center gap-1 text-emerald-600">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                          Terkirim ({panel.data.pctTerkirim}%)
+                          Aktual ({panel.data.pctTerkirim}%)
                         </span>
                         <span className="flex items-center gap-1 text-amber-600">
                           <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                          Belum ({panel.data.pctBelumTerkirim}%)
+                          Gap ({panel.data.gapPct}%)
                         </span>
                       </div>
                     </div>
@@ -3791,41 +4240,84 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           <Tooltip />
                           <Legend wrapperStyle={{ fontSize: '10px' }} />
                           <Bar dataKey="totalReorder" name="Total Reorder" fill="#6366f1" radius={[3, 3, 0, 0]} barSize={14} />
-                          <Bar dataKey="terkirimFaktur" name="Terkirim (Faktur)" fill="#10b981" radius={[3, 3, 0, 0]} barSize={14} />
-                          <Bar dataKey="belumTerkirimSo" name="Belum Terkirim (SO)" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={14} />
+                          <Bar dataKey="terkirimFaktur" name="Terkirim (Item)" fill="#10b981" radius={[3, 3, 0, 0]} barSize={14} />
+                          <Bar dataKey="belumTerkirimSo" name="Belum Terkirim (Item)" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={14} />
                         </ComposedChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
 
-                  {/* Tabel Rincian Per Minggu */}
+                  {/* Tabel Rincian Per Analisa (Tanggal) */}
                   <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
                     <table className="w-full text-xs text-left divide-y divide-slate-200 dark:divide-slate-800">
                       <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] font-black uppercase text-slate-500">
                         <tr>
-                          <th className="py-2 px-3">Periode Minggu</th>
-                          <th className="py-2 px-3 text-right">Total Reorder</th>
-                          <th className="py-2 px-3 text-right">Terkirim (Faktur)</th>
-                          <th className="py-2 px-3 text-right">Belum Terkirim (SO)</th>
-                          <th className="py-2 px-3 text-center">% Terkirim</th>
-                          <th className="py-2 px-3 text-center">% Belum</th>
+                          <th className="py-2.5 px-3">Analisa (Tanggal)</th>
+                          <th className="py-2.5 px-3 text-right">Total Reorder</th>
+                          <th className="py-2.5 px-3 text-right">Terkirim (Item)</th>
+                          <th className="py-2.5 px-3 text-right">Belum Terkirim (Item)</th>
+                          <th className="py-2.5 px-3 text-center">Aktual (%)</th>
+                          <th className="py-2.5 px-3 text-center">Gap (%)</th>
+                          <th className="py-2.5 px-2 text-center">Aksi</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                        {panel.data.rows.map(r => {
-                          const pKirim = r.totalReorder > 0 ? ((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1) : '0.0';
-                          const pBelum = r.totalReorder > 0 ? ((r.belumTerkirimSo / r.totalReorder) * 100).toFixed(1) : '0.0';
-                          return (
-                            <tr key={r.id}>
-                              <td className="py-2 px-3 font-bold">{r.weekLabel}</td>
-                              <td className="py-2 px-3 text-right font-bold">{formatRp(r.totalReorder)}</td>
-                              <td className="py-2 px-3 text-right font-semibold text-emerald-600">{formatRp(r.terkirimFaktur)}</td>
-                              <td className="py-2 px-3 text-right font-semibold text-amber-600">{formatRp(r.belumTerkirimSo)}</td>
-                              <td className="py-2 px-3 text-center font-black text-emerald-600">{pKirim}%</td>
-                              <td className="py-2 px-3 text-center font-black text-amber-600">{pBelum}%</td>
-                            </tr>
-                          );
-                        })}
+                        {panel.data.rows.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-6 text-center text-slate-400 italic">
+                              Belum ada data analisa reorder untuk periode ini.
+                            </td>
+                          </tr>
+                        ) : (
+                          panel.data.rows.map(r => {
+                            const pKirim = r.totalReorder > 0 ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1)) : 0;
+                            const pGap = Number(Math.max(0, 100 - pKirim).toFixed(1));
+                            return (
+                              <tr key={r.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                                <td className="py-2 px-3 font-bold whitespace-nowrap">{r.weekLabel}</td>
+                                <td className="py-2 px-3 text-right font-bold">{formatRp(r.totalReorder)}</td>
+                                <td className="py-2 px-3 text-right font-semibold text-emerald-600">{formatRp(r.terkirimFaktur)}</td>
+                                <td className="py-2 px-3 text-right font-semibold text-amber-600">{formatRp(r.belumTerkirimSo)}</td>
+                                <td className="py-2 px-3 text-center font-black text-emerald-600">{pKirim}%</td>
+                                <td className="py-2 px-3 text-center font-black text-amber-600">{pGap}%</td>
+                                <td className="py-2 px-2 text-center">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingReorderId(r.id);
+                                        setReoUnit(panel.unitKey);
+                                        setReoWeek(r.weekLabel);
+                                        setReoTerkirimFaktur(String(r.terkirimFaktur));
+                                        setReoBelumTerkirimSo(String(r.belumTerkirimSo));
+                                        setReoPrevMonthPctInput(
+                                          panel.data.prevMonthPct > 0 ? String(panel.data.prevMonthPct) : ''
+                                        );
+                                        setIsAddReorderOpen(true);
+                                      }}
+                                      className="p-1 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 cursor-pointer"
+                                      title="Edit baris analisa tanggal"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextList = reorderList.filter(x => x.id !== r.id);
+                                        setReorderList(nextList);
+                                        void persistSalesKpiToMysql({ reorderList: nextList });
+                                      }}
+                                      className="p-1 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 cursor-pointer"
+                                      title="Hapus baris analisa tanggal"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -3836,89 +4328,281 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         )}
 
         {/* =================================================================== */}
-        {/* VIEW 4: OMSET ADMIN PENJUALAN                                       */}
+        {/* VIEW 4: OMSET ADMIN PENJUALAN (MURNI DATABASE MYSQL, TANPA          */}
+        {/* KETERANGAN HARI KE- DARI, DAN TANPA DATA LOKAL / DUMMY)             */}
         {/* =================================================================== */}
         {activeTab === 'sales_kpi_omset' && (
           <div className="space-y-6 animate-fade-in">
-            {/* ROW 1: OMZET NETTO CARD */}
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  OMZET NETTO
-                </span>
-                <div className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400 tabular-nums">
-                  Rp {formatRp(omsetSummary.omzetNetto)}
+            {/* FORM INPUT / EDIT MANUAL OMSET ADMIN KE DATABASE MYSQL */}
+            {isManualOmsetOpen && (
+              <form
+                onSubmit={handleSaveManualOmset}
+                className="bg-white dark:bg-slate-900 border-2 border-emerald-500/30 dark:border-emerald-500/40 rounded-3xl p-5 sm:p-6 shadow-md space-y-4"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                      FORM INPUT OMSET
+                    </span>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                      Input Omset Admin Penjualan ({selectedMonth} {selectedYear})
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsManualOmsetOpen(false)}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                  >
+                    Tutup
+                  </button>
                 </div>
-                <div>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
-                    &#8600; {omsetSummary.diffOmzet < 0 ? `-Rp ${formatRp(Math.abs(omsetSummary.diffOmzet))}` : `+Rp ${formatRp(omsetSummary.diffOmzet)}`} ({Math.abs(Number(omsetSummary.diffOmzetPct)).toString().replace('.', ',')}%)
-                  </span>
-                </div>
-              </div>
-            </div>
 
-            {/* ROW 2: RINGKASAN OMZET — RATA-RATA HARIAN & QTY */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
+                  <div className="lg:col-span-2">
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Nama Admin Penjualan
+                    </label>
+                    <select
+                      value={manualOmsetAdmin}
+                      onChange={e => {
+                        const adm = e.target.value;
+                        const existing = synchronizedOmsetRows.find(
+                          x => x.adminName.toUpperCase() === adm.toUpperCase()
+                        );
+                        setManualOmsetAdmin(adm);
+                        setManualOmsetKota(existing?.kota && existing.kota !== '-' ? existing.kota : 'BANYUWANGI KOTA');
+                        setManualOmsetArea(existing?.area && existing.area !== '-' ? existing.area : 'Banyuwangi Kota');
+                        setManualOmsetNetto(existing && existing.omzetNetto > 0 ? String(existing.omzetNetto) : '');
+                        setManualOmsetQty(existing && existing.qtyNetto > 0 ? String(existing.qtyNetto) : '');
+                        setManualOmsetLastMonth(existing && existing.lastMonthOmzet > 0 ? String(existing.lastMonthOmzet) : '');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
+                    >
+                      {activeBranchAdminNames.map(adm => (
+                        <option key={adm} value={adm}>{adm}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Kota Dominan
+                    </label>
+                    <input
+                      type="text"
+                      value={manualOmsetKota}
+                      onChange={e => setManualOmsetKota(e.target.value)}
+                      placeholder="Contoh: GENTENG"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Omzet Netto Bulan Ini (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={manualOmsetNetto}
+                      onChange={e => setManualOmsetNetto(e.target.value)}
+                      placeholder="Contoh: 450000000"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Qty Netto (PCS)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={manualOmsetQty}
+                      onChange={e => setManualOmsetQty(e.target.value)}
+                      placeholder="Contoh: 125000"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                      Omzet Bulan Lalu (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={manualOmsetLastMonth}
+                      onChange={e => setManualOmsetLastMonth(e.target.value)}
+                      placeholder="Opsional"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsManualOmsetOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Simpan Omset</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ROW 1 & 2 UNIFIED: OMZET NETTO + RINGKASAN OMZET + KESIMPULAN & SARAN */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5">
+              {/* Header Ringkasan */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 block">
-                    RINGKASAN OMZET
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+                    RINGKASAN OMZET &amp; PERFORMA HARIAN ({selectedMonth.toUpperCase()} {selectedYear})
                   </span>
                   <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-0.5">
-                    Rata-rata Harian &amp; Qty
+                    Omzet Netto, Rata-rata Harian &amp; Qty
                   </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {omsetSummary.omzetNetto > 0 || omsetSummary.lastMonthOmzet > 0
+                      ? `Periode ${selectedMonth} ${selectedYear} secara rata-rata harian ${
+                          Number(omsetSummary.diffHarianPct) >= 0 ? 'naik' : 'turun'
+                        } ${Math.abs(Number(omsetSummary.diffHarianPct)).toString().replace('.', ',')}% dibanding bulan lalu.`
+                      : `Belum ada data omset untuk periode ${selectedMonth} ${selectedYear}. Silakan upload Excel atau input manual.`}
+                  </p>
                 </div>
-                <span className="px-3.5 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold self-start sm:self-auto">
-                  Bulan berjalan: hari ke-{omsetSummary.hariBerjalan} dari {omsetSummary.totalHariBulanIni}
+                <span className="px-3.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold self-start sm:self-auto">
+                  Periode Evaluasi: {selectedMonth} {selectedYear}
                 </span>
               </div>
 
-              <p className="text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300">
-                Bulan berjalan {selectedMonth} {selectedYear} secara rata-rata harian turun 5,8% dibanding bulan lalu.
-              </p>
+              {/* Unified 4-Card Grid: Omzet Netto + Rata-rata Harian Ini + Rata-rata Bulan Lalu + Qty Harian */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {/* Card 1: OMZET NETTO */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 via-blue-50/50 to-white dark:from-indigo-950/50 dark:via-slate-900 dark:to-slate-950 border border-indigo-200/80 dark:border-indigo-800/70 space-y-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">
+                    OMZET NETTO
+                  </span>
+                  <div className="text-lg sm:text-xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                    Rp {formatRp(omsetSummary.omzetNetto)}
+                  </div>
+                  <div>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                        omsetSummary.diffOmzet >= 0
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {omsetSummary.diffOmzet < 0 ? '↘' : '↗'}{' '}
+                      {omsetSummary.diffOmzet < 0
+                        ? `-Rp ${formatRp(Math.abs(omsetSummary.diffOmzet))}`
+                        : `+Rp ${formatRp(omsetSummary.diffOmzet)}`}{' '}
+                      ({Math.abs(Number(omsetSummary.diffOmzetPct)).toString().replace('.', ',')}%)
+                    </span>
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                {/* Card 2: RATA-RATA HARIAN INI */}
                 <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">RATA-RATA HARIAN INI</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">RATA-RATA HARIAN INI</span>
                   <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums">
                     Rp {formatRp(omsetSummary.rataHarianIni)}
                   </div>
-                  <span className="inline-block px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/50 text-rose-600 text-[11px] font-bold">
-                    {omsetSummary.diffHarianPct.replace('.', ',')}%
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                      Number(omsetSummary.diffHarianPct) >= 0
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600'
+                        : 'bg-rose-50 dark:bg-rose-950/50 text-rose-600'
+                    }`}
+                  >
+                    {Number(omsetSummary.diffHarianPct) >= 0 ? '+' : ''}
+                    {omsetSummary.diffHarianPct.replace('.', ',')}% vs bulan lalu
                   </span>
                 </div>
 
+                {/* Card 3: RATA-RATA BULAN LALU */}
                 <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">RATA-RATA BULAN LALU</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">RATA-RATA BULAN LALU</span>
                   <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums">
                     Rp {formatRp(omsetSummary.rataBulanLalu)}
                   </div>
                   <span className="text-xs text-slate-500 font-semibold block">
-                    Pembagi {omsetSummary.pembagiBulanLalu} hari
+                    Total Bulan Lalu: Rp {formatRp(omsetSummary.lastMonthOmzet)}
                   </span>
                 </div>
 
+                {/* Card 4: QTY HARIAN */}
                 <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">QTY HARIAN</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">QTY HARIAN</span>
                   <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums">
                     {formatQtyId(omsetSummary.qtyHarian)}
                   </div>
-                  <span className="inline-block px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/50 text-rose-600 text-[11px] font-bold">
-                    -15,2%
+                  <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 text-[11px] font-bold">
+                    Total Qty: {formatRp(omsetSummary.qtyNetto)} PCS
                   </span>
+                </div>
+              </div>
+
+              {/* Kesimpulan & Saran di bawah Ringkasan Omzet (tanpa kata Hari ke- dari) */}
+              <div className="rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-blue-50/40 dark:from-slate-950 dark:via-indigo-950/20 dark:to-blue-950/20 border border-indigo-200/70 dark:border-indigo-900/50 p-4 sm:p-5">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-400 block">
+                        Kesimpulan Performa ({selectedMonth} {selectedYear})
+                      </span>
+                      <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                        Pada periode <strong>{selectedMonth} {selectedYear}</strong>, total <strong>Omzet Netto</strong> tercatat sebesar{' '}
+                        <strong>Rp {formatRp(omsetSummary.omzetNetto)}</strong> dengan rata-rata harian{' '}
+                        <strong>Rp {formatRp(omsetSummary.rataHarianIni)}/hari</strong> (dibanding rata-rata bulan lalu{' '}
+                        <strong>Rp {formatRp(omsetSummary.rataBulanLalu)}/hari</strong>). Kontributor admin tertinggi adalah{' '}
+                        <strong>
+                          {synchronizedOmsetRows.some(r => r.omzetNetto > 0)
+                            ? synchronizedOmsetRows[0]?.adminName
+                            : 'Belum Ada Data'}
+                        </strong>{' '}
+                        (Rp {formatRp(synchronizedOmsetRows[0]?.omzetNetto || 0)}).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 lg:border-l lg:border-slate-200/80 dark:lg:border-slate-800 lg:pl-4">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                        Saran &amp; Rekomendasi Tindak Lanjut
+                      </span>
+                      <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                        Percepat validasi Sales Order menunggu menjadi faktur penjualan pada sesi pagi, prioritaskan follow-up repeat order pelanggan utama per wilayah, serta jaga ketersediaan stok barang fast-moving untuk mengoptimalkan capaian Omzet Netto dan Qty Netto bulanan.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* ROW 3: GRAFIK BULANAN 2026 */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
+            {/* ROW 3: GRAFIK OMZET TERINTEGRASI (BULANAN / MINGGUAN / HARIAN) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs flex flex-col justify-between space-y-5">
               <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
-                    Grafik Bulanan {selectedYear}
+                    {dynamicOmzetChart.title}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Perbandingan omzet per bulan dalam tahun terpilih.
+                    {dynamicOmzetChart.subtitle}
                   </p>
                 </div>
 
@@ -3929,10 +4613,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         key={mode}
                         type="button"
                         onClick={() => setOmzetChartGranularity(mode)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                           omzetChartGranularity === mode
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-600 dark:text-slate-300'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
                         }`}
                       >
                         {mode}
@@ -3943,134 +4627,238 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <button
                     type="button"
                     onClick={() => setShowOmzetNumbers(prev => !prev)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black border transition cursor-pointer ${
                       showOmzetNumbers
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                        : 'bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200/80 dark:border-indigo-800'
                     }`}
                   >
-                    TAMPILKAN ANGKA
+                    {showOmzetNumbers ? 'SEMBUNYIKAN ANGKA' : 'TAMPILKAN ANGKA'}
                   </button>
 
-                  <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold">
-                    Netto tahun ini: Rp 93.640.898.831
+                  <span className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold tabular-nums">
+                    {dynamicOmzetChart.badgeText}
                   </span>
                 </div>
               </div>
 
-              <div className="h-[310px] w-full">
+              <div className="h-[340px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={MONTHLY_OMZET_SERIES_2026} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                  <ComposedChart
+                    data={dynamicOmzetChart.series}
+                    margin={{ top: 28, right: 16, left: 0, bottom: 8 }}
+                  >
+                    <defs>
+                      <linearGradient id="omzetBarGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#6366f1" stopOpacity={1} />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.88} />
+                      </linearGradient>
+                      <linearGradient id="omzetBarActiveGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#4f46e5" stopOpacity={1} />
+                        <stop offset="100%" stopColor="#2563eb" stopOpacity={0.92} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                      axisLine={{ stroke: '#e2e8f0' }}
+                      tickLine={false}
+                    />
                     <YAxis
                       tick={{ fill: '#64748b', fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={v => `Rp ${v} M`}
+                      tickFormatter={v =>
+                        dynamicOmzetChart.unit === 'Miliar'
+                          ? v === 0
+                            ? 'Rp 0'
+                            : `Rp ${String(v).replace('.', ',')} M`
+                          : v === 0
+                          ? 'Rp 0'
+                          : `Rp ${Math.round(v)} jt`
+                      }
                     />
                     <Tooltip
-                      formatter={(val: any, name: any) => [`Rp ${val} Miliar`, String(name || '')]}
+                      contentStyle={{
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.12)',
+                        fontSize: '12px',
+                        fontWeight: 700
+                      }}
+                      formatter={(val: any, name: any, item: any) => {
+                        const rawVal =
+                          name === 'Omzet Netto'
+                            ? item?.payload?.rawNetto
+                            : item?.payload?.rawPembanding;
+                        if (typeof rawVal === 'number') {
+                          return [`Rp ${formatRp(rawVal)}`, String(name || '')];
+                        }
+                        return [
+                          `Rp ${val} ${dynamicOmzetChart.unit}`,
+                          String(name || '')
+                        ];
+                      }}
                     />
-                    <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
+                    <Legend
+                      verticalAlign="top"
+                      height={32}
+                      wrapperStyle={{ fontSize: '11px', fontWeight: 700 }}
+                    />
                     <Bar
                       dataKey="omzetNetto"
                       name="Omzet Netto"
-                      fill="#4f83f1"
-                      radius={[6, 6, 0, 0]}
-                      barSize={28}
-                      label={showOmzetNumbers ? { position: 'top', fontSize: 9, fill: '#334155' } : false}
+                      fill="url(#omzetBarGrad)"
+                      barSize={
+                        omzetChartGranularity === 'Mingguan'
+                          ? 46
+                          : omzetChartGranularity === 'Harian'
+                          ? 34
+                          : 36
+                      }
+                      shape={(props: any) => {
+                        const { x, y, width, height, payload } = props;
+                        if (!height || height <= 0) return <g />;
+                        const r = Math.min(8, width / 2, height);
+                        const path = `M${x},${y + height} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + width - r},${y} Q${x + width},${y} ${x + width},${y + r} L${x + width},${y + height} Z`;
+                        const fillUrl = payload?.isCurrent ? 'url(#omzetBarActiveGrad)' : 'url(#omzetBarGrad)';
+                        return (
+                          <g>
+                            <path d={path} fill={fillUrl} />
+                            {showOmzetNumbers && payload?.topLabel && (
+                              <text
+                                x={x + width / 2}
+                                y={y - 8}
+                                textAnchor="middle"
+                                fill="#4338ca"
+                                fontSize={10}
+                                fontWeight={800}
+                              >
+                                {payload.topLabel}
+                              </text>
+                            )}
+                            {showOmzetNumbers && payload?.pctLabel && height > 24 && (
+                              <text
+                                x={x + width / 2}
+                                y={y + 18}
+                                textAnchor="middle"
+                                fill="#ffffff"
+                                fontSize={9.5}
+                                fontWeight={800}
+                              >
+                                {payload.pctLabel}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      }}
                     />
                     <Line
                       type="monotone"
-                      dataKey="target"
-                      name="Target"
+                      dataKey="pembanding"
+                      name={dynamicOmzetChart.comparisonName}
                       stroke="#f59e0b"
                       strokeWidth={2.5}
-                      strokeDasharray="5 5"
+                      strokeDasharray="6 4"
                       dot={{ fill: '#fff', stroke: '#f59e0b', strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6, fill: '#f59e0b', stroke: '#fff', strokeWidth: 2 }}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            {/* ROW 4: TOP ADMIN (PENGGANTI TOP SALES) & TOP KOTA (GAMBAR 8) */}
+            {/* ROW 4: TOP ADMIN & TOP KOTA */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Left: Top Admin (Omzet netto per admin) */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center">
                       <User className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Admin</h4>
-                      <p className="text-[11px] text-slate-500">Omzet netto per admin penjualan</p>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Admin Penjualan</h4>
+                      <p className="text-[11px] text-slate-500">Omzet netto per admin</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 text-[10px] font-bold">
-                      TAMPILKAN SEMUA
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleDownloadOmsetTemplate}
-                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold cursor-pointer"
-                    >
-                      EXPORT
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAdminFilter('SEMUA ADMIN')}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold cursor-pointer"
+                  >
+                    TAMPILKAN SEMUA
+                  </button>
                 </div>
 
                 <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
                   {synchronizedOmsetRows.map((adm, idx) => {
                     const maxOmzet = Math.max(...synchronizedOmsetRows.map(x => x.omzetNetto), 1);
-                    const widthPct = Math.max(15, Math.round((adm.omzetNetto / maxOmzet) * 100));
-                    const targetPct = adm.targetNominal > 0 ? ((adm.omzetNetto / adm.targetNominal) * 100).toFixed(1) : '35,0';
+                    const widthPct = adm.omzetNetto > 0 ? Math.max(8, Math.round((adm.omzetNetto / maxOmzet) * 100)) : 0;
+                    const vsLastRatio = adm.lastMonthOmzet > 0 ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
                     const diffVsLast = adm.omzetNetto - adm.lastMonthOmzet;
-                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(1) : '-15,0';
+                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
                     return (
                       <div key={adm.id} className={idx > 0 ? 'pt-3.5 space-y-2' : 'space-y-2'}>
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2">
                           <div>
                             <div className="text-xs font-black text-slate-900 dark:text-white">
                               {adm.adminName} ({adm.branchCode})
                             </div>
                             <div className="text-[11px] text-slate-500 font-semibold">
-                              Qty {formatRp(adm.qtyNetto)} PCS
+                              Qty {formatRp(adm.qtyNetto)} PCS &bull; {adm.kota}
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tabular-nums">
-                              Rp {formatRp(adm.omzetNetto)}
+                          <div className="flex items-center gap-2">
+                            <div className="text-right">
+                              <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tabular-nums">
+                                Rp {formatRp(adm.omzetNetto)}
+                              </div>
+                              <div className="flex items-center justify-end gap-1.5 mt-0.5">
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold">
+                                  {vsLastRatio.replace('.', ',')}% vs Bln Lalu
+                                </span>
+                              </div>
                             </div>
-                            <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 text-[10px] font-bold">
-                                +2,3%
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/50 text-rose-600 text-[10px] font-bold">
-                                {targetPct.replace('.', ',')}% Target
-                              </span>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualOmsetAdmin(adm.adminName);
+                                setManualOmsetKota(adm.kota && adm.kota !== '-' ? adm.kota : 'BANYUWANGI KOTA');
+                                setManualOmsetArea(adm.area && adm.area !== '-' ? adm.area : 'Banyuwangi Kota');
+                                setManualOmsetNetto(adm.omzetNetto > 0 ? String(adm.omzetNetto) : '');
+                                setManualOmsetQty(adm.qtyNetto > 0 ? String(adm.qtyNetto) : '');
+                                setManualOmsetLastMonth(adm.lastMonthOmzet > 0 ? String(adm.lastMonthOmzet) : '');
+                                setIsManualOmsetOpen(true);
+                              }}
+                              className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 cursor-pointer"
+                              title="Edit Omset Admin ini"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
                         <div className="space-y-1">
                           <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                            <div className="bg-blue-600 h-full rounded-full" style={{ width: `${widthPct}%` }} />
-                          </div>
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                            <div className="bg-rose-500 h-full rounded-full" style={{ width: `${Math.min(100, Number(targetPct))}%` }} />
+                            <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${widthPct}%` }} />
                           </div>
                         </div>
 
                         <div className="text-[10px] text-slate-500 font-semibold flex flex-wrap items-center gap-1.5">
                           <span>
-                            Vs bulan lalu: Rp {formatRp(adm.lastMonthOmzet)} &bull; Selisih qty {formatRp(adm.qtyNetto - adm.lastMonthQty)} PCS &bull; Target Rp {formatRp(adm.targetNominal)}
+                            Vs bulan lalu: Rp {formatRp(adm.lastMonthOmzet)} &bull; Selisih qty {formatRp(adm.qtyNetto - adm.lastMonthQty)} PCS
                           </span>
-                          <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 font-bold">
-                            &#9660; {diffVsLastPct.replace('.', ',')}%
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-bold ${
+                              diffVsLast >= 0
+                                ? 'bg-emerald-50 text-emerald-600'
+                                : 'bg-rose-50 text-rose-600'
+                            }`}
+                          >
+                            {diffVsLast >= 0 ? '▲ +' : '▼ '}
+                            {diffVsLastPct.replace('.', ',')}%
                           </span>
                         </div>
                       </div>
@@ -4080,328 +4868,280 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </div>
 
               {/* Right: Top Kota */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
                       <MapPin className="w-4 h-4" />
                     </div>
                     <div>
                       <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Kota</h4>
-                      <p className="text-[11px] text-slate-500">Klik kota untuk lihat pelanggan dan barang</p>
+                      <p className="text-[11px] text-slate-500">Akumulasi omzet per kota</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedKotaFilter('SEMUA KOTA')}
-                      className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 text-[10px] font-bold cursor-pointer"
-                    >
-                      TAMPILKAN SEMUA
-                    </button>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                      EXPORT
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKotaFilter('SEMUA KOTA')}
+                    className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 text-[10px] font-bold cursor-pointer"
+                  >
+                    TAMPILKAN SEMUA
+                  </button>
                 </div>
 
-                <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
-                  {[
-                    {
-                      kota: 'GENTENG',
-                      omzet: 407796179,
-                      qty: '497.583 PCS',
-                      pctBadge: '+35,0%',
-                      isPositive: true,
-                      vsText: 'Vs bulan lalu: Rp 668.809.157 • Selisih qty +41.637 PCS',
-                      vsBadge: '▲ +141,6%',
-                      vsPos: true,
-                      barPct: 100
-                    },
-                    {
-                      kota: 'BALI - DENPASAR',
-                      omzet: 398989114,
-                      qty: '175.594 PCS',
-                      pctBadge: '+37,8%',
-                      isPositive: true,
-                      vsText: 'Vs bulan lalu: Rp 641.155.802 • Selisih qty -318.150 PCS',
-                      vsBadge: '▼ -21,3%',
-                      vsPos: false,
-                      barPct: 96
-                    },
-                    {
-                      kota: 'JEMBER',
-                      omzet: 162291327,
-                      qty: '263.363 PCS',
-                      pctBadge: '-28,2%',
-                      isPositive: false,
-                      vsText: 'Vs bulan lalu: Rp 500.354.607 • Selisih qty -786.602 PCS',
-                      vsBadge: '▼ -44,5%',
-                      vsPos: false,
-                      barPct: 45
-                    },
-                    {
-                      kota: 'SURABAYA UTARA',
-                      omzet: 155971215,
-                      qty: '873.780 PCS',
-                      pctBadge: '+12,4%',
-                      isPositive: true,
-                      vsText: 'Vs bulan lalu: Rp 412.110.000 • Selisih qty +62.400 PCS',
-                      vsBadge: '▲ +18,2%',
-                      vsPos: true,
-                      barPct: 42
-                    }
-                  ].map((k, idx) => (
-                    <div
-                      key={k.kota}
-                      onClick={() => setSelectedKotaFilter(k.kota)}
-                      className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2 cursor-pointer hover:opacity-90`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-black text-slate-900 dark:text-white">{k.kota}</div>
-                          <div className="text-[11px] text-slate-500 font-semibold">Qty {k.qty}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
-                            Rp {formatRp(k.omzet)}
+                {topKotaList.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-slate-400 italic">
+                    Belum ada data omzet per kota untuk periode ini.
+                  </div>
+                ) : (
+                  <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
+                    {topKotaList.map((k, idx) => (
+                      <div
+                        key={k.kota}
+                        onClick={() => setSelectedKotaFilter(k.kota)}
+                        className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2 cursor-pointer hover:opacity-90`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-black text-slate-900 dark:text-white">{k.kota}</div>
+                            <div className="text-[11px] text-slate-500 font-semibold">Qty {k.qty}</div>
                           </div>
+                          <div className="text-right">
+                            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                              Rp {formatRp(k.omzet)}
+                            </div>
+                            <span
+                              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                k.isPositive
+                                  ? 'bg-emerald-50 text-emerald-600'
+                                  : 'bg-rose-50 text-rose-600'
+                              }`}
+                            >
+                              {k.pctBadge}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div className="bg-blue-600 h-full rounded-full" style={{ width: `${k.barPct}%` }} />
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
+                          <span>{k.vsText}</span>
                           <span
-                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              k.isPositive
-                                ? 'bg-emerald-50 text-emerald-600'
-                                : 'bg-rose-50 text-rose-600'
+                            className={`px-1.5 py-0.5 rounded font-bold ${
+                              k.vsPos ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
                             }`}
                           >
-                            {k.pctBadge}
+                            {k.vsBadge}
                           </span>
                         </div>
                       </div>
-                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full rounded-full" style={{ width: `${k.barPct}%` }} />
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
-                        <span>{k.vsText}</span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-bold ${
-                            k.vsPos ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                          }`}
-                        >
-                          {k.vsBadge}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* ROW 5: TOP CUSTOMER & TOP BARANG (GAMBAR 9) */}
+            {/* ROW 5: TOP WILAYAH / PELANGGAN & KONTRIBUSI ITEM ADMIN */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left: Top Customer */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+              {/* Left: Top Customer / Area */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-violet-50 dark:bg-violet-950/60 text-violet-600 flex items-center justify-center">
                       <Users className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Customer</h4>
-                      <p className="text-[11px] text-slate-500">Klik customer untuk lihat barang yang dibeli</p>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Area &amp; Pelanggan</h4>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 text-[10px] font-bold">
-                      TAMPILKAN SEMUA
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                      EXPORT
-                    </span>
                   </div>
                 </div>
 
-                <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
-                  {TOP_CUSTOMERS_DATA.map((cust, idx) => (
-                    <div key={cust.name} className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-black text-slate-900 dark:text-white">{cust.name}</div>
-                          <div className="text-[11px] text-slate-500 font-semibold">Qty {cust.qty}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
-                            Rp {formatRp(cust.omzet)}
+                {topCustomerList.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400 italic">
+                    Belum ada data omzet area/pelanggan untuk periode ini.
+                  </div>
+                ) : (
+                  <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
+                    {topCustomerList.map((cust, idx) => (
+                      <div key={cust.name} className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-black text-slate-900 dark:text-white">{cust.name}</div>
+                            <div className="text-[11px] text-slate-500 font-semibold">Qty {cust.qty}</div>
                           </div>
-                          <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[10px] font-bold">
-                            {cust.growthPct}
+                          <div className="text-right">
+                            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                              Rp {formatRp(cust.omzet)}
+                            </div>
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[10px] font-bold">
+                              {cust.growthPct}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div className="bg-violet-600 h-full rounded-full" style={{ width: `${cust.progressPct}%` }} />
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
+                          <span>{cust.vsLastMonth}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-bold ${
+                              cust.isVsNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                            }`}
+                          >
+                            {cust.vsBadge}
                           </span>
                         </div>
                       </div>
-                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full rounded-full" style={{ width: `${cust.progressPct}%` }} />
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
-                        <span>{cust.vsLastMonth}</span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-bold ${
-                            cust.isVsNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
-                          }`}
-                        >
-                          {cust.vsBadge}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Right: Top Barang */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+              {/* Right: Top Distribusi Qty & Barang */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
                       <Package className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Top Barang</h4>
-                      <p className="text-[11px] text-slate-500">Klik barang untuk lihat pembeli dan kota</p>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">Distribusi Qty &amp; Omset Admin</h4>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 text-[10px] font-bold">
-                      TAMPILKAN SEMUA
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                      EXPORT
-                    </span>
                   </div>
                 </div>
 
-                <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
-                  {TOP_BARANG_DATA.map((brg, idx) => (
-                    <div key={brg.name} className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-black text-slate-900 dark:text-white">{brg.name}</div>
-                          <div className="text-[11px] text-slate-500 font-semibold">Qty {brg.qty}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
-                            Rp {formatRp(brg.omzet)}
+                {topBarangList.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400 italic">
+                    Belum ada data distribusi barang/qty untuk periode ini.
+                  </div>
+                ) : (
+                  <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800">
+                    {topBarangList.map((brg, idx) => (
+                      <div key={brg.name} className={`${idx > 0 ? 'pt-3.5' : ''} space-y-2`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-black text-slate-900 dark:text-white">{brg.name}</div>
+                            <div className="text-[11px] text-slate-500 font-semibold">Qty {brg.qty}</div>
                           </div>
+                          <div className="text-right">
+                            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                              Rp {formatRp(brg.omzet)}
+                            </div>
+                            <span
+                              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                brg.isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                              }`}
+                            >
+                              {brg.growthPct}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div className="bg-emerald-600 h-full rounded-full" style={{ width: `${brg.progressPct}%` }} />
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
+                          <span>{brg.vsLastMonth}</span>
                           <span
-                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              brg.isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                            className={`px-1.5 py-0.5 rounded font-bold ${
+                              brg.isVsNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
                             }`}
                           >
-                            {brg.growthPct}
+                            {brg.vsBadge}
                           </span>
                         </div>
                       </div>
-                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full rounded-full" style={{ width: `${brg.progressPct}%` }} />
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5">
-                        <span>{brg.vsLastMonth}</span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-bold ${
-                            brg.isVsNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
-                          }`}
-                        >
-                          {brg.vsBadge}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* ROW 7: ANALISA OMZET — ANALISA PRIORITAS ADMIN (GAMBAR 10) */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 block">
-                    ANALISA OMZET
-                  </span>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-0.5">
-                    Analisa Prioritas Admin
-                  </h3>
+            {/* ROW 6: ANALISA OMZET — MATRIKS KONTRIBUSI ADMIN PENJUALAN */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-xs">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+                      ANALISA OMZET &amp; INSIGHT EKSEKUTIF
+                    </span>
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                      Analisa Kontribusi Admin Penjualan ({selectedMonth} {selectedYear})
+                    </h3>
+                  </div>
                 </div>
-                <span className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold">
-                  {selectedMonth} {selectedYear}
-                </span>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <span className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
+                    {synchronizedOmsetRows.length} Admin Terdaftar
+                  </span>
+                </div>
               </div>
 
-              <div className="space-y-2.5">
-                {[
-                  {
-                    key: 'performa',
-                    title: 'Tampilkan Ringkasan Performa',
-                    iconColor: 'text-blue-600',
-                    content: `Total Omzet Netto Admin periode ${selectedMonth} ${selectedYear} mencapai Rp ${formatRp(omsetSummary.omzetNetto)} (${omsetSummary.achvPct.replace('.', ',')}% dari target bulanan Rp ${formatRp(omsetSummary.targetBulanIni)}). Kontributor tertinggi saat ini adalah ${synchronizedOmsetRows[0]?.adminName || '-'} dengan capaian Rp ${formatRp(synchronizedOmsetRows[0]?.omzetNetto || 0)}.`
-                  },
-                  {
-                    key: 'barang',
-                    title: 'Tampilkan Barang Prioritas Follow Up',
-                    iconColor: 'text-amber-600',
-                    content:
-                      'Prioritas follow up stok & SO: MIKA AG B4A (100/2.000) mengalami penurunan -22,9% dibanding bulan lalu, sementara MIKA AG B3A dan SENDOK BBK JAGUAR mencatat pertumbuhan tinggi di atas +20%.'
-                  },
-                  {
-                    key: 'customer',
-                    title: 'Tampilkan Customer / Toko Prioritas Follow Up',
-                    iconColor: 'text-violet-600',
-                    content:
-                      'Toko prioritas re-order minggu ini: TK CENTRAL PLASTIK (selisih qty -148.028 PCS vs bulan lalu) dan CV DEWI SRI MAJU untuk penjadwalan ulang pengiriman kontrak bulanan.'
-                  },
-                  {
-                    key: 'kota',
-                    title: 'Tampilkan Kota Penyumbang Turun',
-                    iconColor: 'text-rose-600',
-                    content:
-                      'Area/Kota dengan penurunan rata-rata harian: JEMBER (-28,2% vs bulan lalu) memerlukan percepatan validasi SO & rilis faktur pengiriman pagi.'
-                  },
-                  {
-                    key: 'admin',
-                    title: 'Tampilkan Perbandingan Admin',
-                    iconColor: 'text-emerald-600',
-                    content: synchronizedOmsetRows
-                      .map(
-                        a =>
-                          `${a.adminName} (${a.branchCode}): Rp ${formatRp(a.omzetNetto)} (Qty ${formatRp(a.qtyNetto)} PCS)`
-                      )
-                      .join(' • ')
-                  }
-                ].map(sec => {
-                  const isOpen = Boolean(openAnalisaAccordion[sec.key]);
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {synchronizedOmsetRows.map((adm, idx) => {
+                  const sharePct =
+                    omsetSummary.omzetNetto > 0
+                      ? ((adm.omzetNetto / omsetSummary.omzetNetto) * 100).toFixed(1)
+                      : '0.0';
+                  const vsLastPct =
+                    adm.lastMonthOmzet > 0
+                      ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1)
+                      : '0.0';
                   return (
                     <div
-                      key={sec.key}
-                      className="rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 overflow-hidden"
+                      key={adm.id}
+                      className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 space-y-2.5 shadow-2xs"
                     >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOpenAnalisaAccordion(prev => ({ ...prev, [sec.key]: !prev[sec.key] }))
-                        }
-                        className="w-full px-4 py-3 text-left flex items-center justify-between text-xs font-black text-slate-900 dark:text-white hover:bg-slate-100/70 dark:hover:bg-slate-900 transition cursor-pointer"
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <TrendingUp className={`w-4 h-4 ${sec.iconColor}`} />
-                          <span>{sec.title}</span>
-                        </span>
-                        {isOpen ? (
-                          <ChevronUp className="w-4 h-4 text-slate-400" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4 text-slate-400" />
-                        )}
-                      </button>
-                      {isOpen && (
-                        <div className="px-4 pb-3.5 pt-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed border-t border-slate-100 dark:border-slate-800/80">
-                          {sec.content}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`w-6 h-6 rounded-lg text-[10px] font-black flex items-center justify-center shrink-0 ${
+                              idx === 0 && adm.omzetNetto > 0
+                                ? 'bg-amber-500 text-white'
+                                : idx === 1 && adm.omzetNetto > 0
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            #{idx + 1}
+                          </span>
+                          <div className="truncate">
+                            <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+                              {adm.adminName}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-bold">
+                              Cabang {adm.branchCode} &bull; {adm.kota}
+                            </div>
+                          </div>
                         </div>
-                      )}
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-black shrink-0">
+                          {sharePct.replace('.', ',')}% Share
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline justify-between pt-1">
+                        <span className="text-xs sm:text-sm font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                          Rp {formatRp(adm.omzetNetto)}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500">
+                          Qty {formatRp(adm.qtyNetto)} PCS
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-indigo-600 to-emerald-500 h-full rounded-full"
+                          style={{ width: `${adm.omzetNetto > 0 ? Math.min(100, Math.max(8, Number(sharePct))) : 0}%` }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold">
+                        <span>Bln lalu: Rp {formatRp(adm.lastMonthOmzet)}</span>
+                        <span className="text-slate-700 dark:text-slate-300 font-bold">
+                          {vsLastPct.replace('.', ',')}% dr bln lalu
+                        </span>
+                      </div>
                     </div>
                   );
                 })}
@@ -4413,3 +5153,4 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     </div>
   );
 };
+

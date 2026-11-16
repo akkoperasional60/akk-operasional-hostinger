@@ -46,6 +46,7 @@ import { driverReportService, DriverHelperReport } from '../services/driverRepor
 import { trackingLogService } from '../services/trackingLogService';
 import { loadFormPrintLogs, loadAllFleetFormTemplates } from './FleetFormDesignerSystem';
 import { NavTab } from './Sidebar';
+import { B2BLogisticsAnalyticsSection } from './B2BLogisticsAnalyticsSection';
 
 export interface WidgetConfig {
   id: string;
@@ -1161,6 +1162,9 @@ export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps>
           </div>
         </div>
       </div>
+
+      {/* B2B LOGISTICS PERFORMANCE & DEEP ANALYTICS MODULE (RECHARTS) */}
+      <B2BLogisticsAnalyticsSection schedules={schedules} fleets={fleets} />
 
       {/* DYNAMIC ACCURATE-STYLE GRID OF ACTIVE WIDGETS */}
       {activeWidgets.length === 0 ? (
