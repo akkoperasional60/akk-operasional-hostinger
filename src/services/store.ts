@@ -686,7 +686,13 @@ class LogisticsStore {
     this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, isProd ? [] : INITIAL_SCANNED_DOCUMENTS);
     this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, isProd ? [] : INITIAL_SECURITY_LOGS);
     this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS);
-    this.systemActivities = this.loadFromStorage('akk_system_activities_v1', []);
+    this.systemActivities = this.sanitizeLoadedActivities(this.loadFromStorage('akk_system_activities_v1', []));
+    this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        void this.hydrateSystemActivitiesFromServer();
+      }, 150);
+    }
     // Legacy config object retained only so older UI state does not crash after migration.
     // No Supabase URL/key is embedded in the browser anymore; Hostinger MySQL is accessed via /api/*.
     const savedSupabaseConf = this.loadFromStorage(STORAGE_KEYS.SUPABASE_CONFIG, {
@@ -1227,11 +1233,6 @@ class LogisticsStore {
     this.use(async (event: EntityChangeEvent) => {
       await this.handleImageStorageAutoSync(event);
     });
-
-    // 3. System Audit Activity Trail Middleware
-    this.use(async (event: EntityChangeEvent) => {
-      await this.handleSystemAuditMiddleware(event);
-    });
   }
 
   /**
@@ -1381,33 +1382,11 @@ class LogisticsStore {
   }
 
   /**
-   * System audit activity auto-sync handler
+   * System audit activity auto-sync handler (dinonaktifkan untuk perubahan teknis web/middleware;
+   * Log Aktivitas hanya mencatat akun pengguna yang menambah, merubah, atau mengurangi data)
    */
-  private async handleSystemAuditMiddleware(event: EntityChangeEvent) {
-    if (event.metadata?.isBatch || event.metadata?.source === 'google_sheets_sync') {
-      return;
-    }
-
-    try {
-      const targetLabel = `${event.entityType.toUpperCase()}: ${event.id}`;
-      const actionLabel = `Auto-Sync [${event.action.toUpperCase()}]`;
-      const details = `Middleware otomatis memicu proses penulisan entitas ${event.entityType} (${event.action}) ke Backend & Google Sheets`;
-
-      const newActivity: SystemActivity = {
-        id: `sys-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
-        timestamp: new Date().toISOString(),
-        userFullName: this.currentUser?.fullName || 'Sistem Auto-Sync Middleware',
-        department: 'Sistem Integrasi Data & Google Sheets',
-        action: actionLabel,
-        target: targetLabel,
-        details
-      };
-
-      this.systemActivities = [newActivity, ...this.systemActivities.slice(0, 25)];
-      this.saveToStorage('akk_system_activities_v1', this.systemActivities);
-    } catch {
-      // Ignore non-critical audit log errors
-    }
+  private async handleSystemAuditMiddleware(_event: EntityChangeEvent) {
+    return;
   }
 
   /**
@@ -1610,7 +1589,7 @@ class LogisticsStore {
             };
           });
         } else if (key === 'akk_system_activities_v1') {
-          sanitizedData = data.slice(0, 20);
+          sanitizedData = data.slice(0, 150);
         } else if (key === STORAGE_KEYS.IMAGES) {
           sanitizedData = data.slice(0, 20);
         } else if (key === STORAGE_KEYS.SALES_ORDERS) {
@@ -2893,7 +2872,15 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     const rejected = this.users.find(u => u.id === userId);
-    if (rejected) this.syncUserToHostinger(userId, rejected);
+    if (rejected) {
+      this.logActivity(
+        'Tolak / Kurangi Pengajuan Akun',
+        rejected.fullName,
+        `Pengajuan akun ${rejected.fullName} (${rejected.email}) ditolak. Alasan: ${reason || 'Ditolak Administrator'}`,
+        'kurangi'
+      );
+      this.syncUserToHostinger(userId, rejected);
+    }
     this.notify();
   }
 
@@ -3119,6 +3106,20 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.syncUserToHostinger(userId, updatedUser);
+    const changedParts: string[] = [];
+    if (data.fullName && data.fullName !== oldName) changedParts.push(`Nama: ${oldName} → ${data.fullName}`);
+    if (data.role && data.role !== oldRole) changedParts.push(`Role: ${oldRole} → ${data.role}`);
+    if (data.department && data.department !== existing.department) changedParts.push(`Departemen: ${data.department}`);
+    if (data.phone && data.phone !== existing.phone) changedParts.push(`No. HP: ${data.phone}`);
+    if (data.permissions) changedParts.push('Hak Akses Modul');
+    this.logActivity(
+      'Ubah Data Akun User',
+      updatedUser.fullName,
+      changedParts.length > 0
+        ? `Merubah data akun ${updatedUser.fullName} (${changedParts.join(', ')})`
+        : `Merubah profil / hak akses akun ${updatedUser.fullName}`,
+      'ubah'
+    );
     this.notify();
     return true;
   }
@@ -3131,6 +3132,12 @@ class LogisticsStore {
         c => c.id !== `crw-${userId}` && !this.isSameCrewPersonName(c.name, target.fullName)
       );
       this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      this.logActivity(
+        'Hapus Data Akun User',
+        target.fullName,
+        `Menghapus akun user ${target.fullName} (${target.email || target.role}) dari daftar pengguna`,
+        'kurangi'
+      );
     }
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
@@ -4110,6 +4117,18 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
 
+    const isAutoGenerated = String(hydratedNewSchedule.notes || '').includes('Jadwal: Berangkat') && String(hydratedNewSchedule.trackingNumber || '').startsWith('PO-AKK-');
+    if (!isAutoGenerated) {
+      const fleetLabel = hydratedNewSchedule.fleet?.plateNumber || hydratedNewSchedule.armada || '-';
+      const driverLabel = hydratedNewSchedule.crew?.name || '-';
+      this.logActivity(
+        'Tambah Jadwal Pengiriman',
+        `Area ${areaName} (${fleetLabel})`,
+        `Menambahkan jadwal pengiriman area ${areaName} • Armada: ${fleetLabel} • Driver: ${driverLabel}`,
+        'tambah'
+      );
+    }
+
     // Trigger auto-write middleware
     this.dispatchMiddleware({
       entityType: 'schedule',
@@ -4203,7 +4222,19 @@ class LogisticsStore {
           crewHelper2: merged.crewHelper2Id ? (this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
         };
         newSch = hydrated;
-        this.logActivity('Update Jadwal', sch.trackingNumber, `Perubahan pada jadwal ${id}`);
+        const isAutoRebalance = String(updatedSchedule.notes || '').includes('[Auto-Rebalanced:');
+        if (!isAutoRebalance) {
+          const areaLabel = hydrated.areaName || hydrated.store?.storeName || sch.trackingNumber || 'Rute Pengiriman';
+          const plateLabel = hydrated.fleet?.plateNumber || hydrated.armada || '-';
+          const driverLabel = hydrated.crew?.name || '-';
+          const helperLabel = hydrated.crewHelper?.name ? `, Helper: ${hydrated.crewHelper.name}` : '';
+          this.logActivity(
+            'Ubah Data Jadwal Pengiriman',
+            `Area ${areaLabel} (${plateLabel})`,
+            `Merubah data jadwal area ${areaLabel} • Armada: ${plateLabel} • Driver: ${driverLabel}${helperLabel}`,
+            'ubah'
+          );
+        }
         return hydrated;
       }
       return sch;
@@ -4243,6 +4274,17 @@ class LogisticsStore {
     this.syncSchedulesToCrewHistory(this.schedules);
     this.reconcileFleetAndScheduleStatuses(true);
 
+    if (target) {
+      const areaLabel = target.areaName || target.store?.storeName || target.trackingNumber || id;
+      const plateLabel = target.fleet?.plateNumber || target.armada || '-';
+      this.logActivity(
+        'Hapus Data Jadwal Pengiriman',
+        `Area ${areaLabel} (${plateLabel})`,
+        `Menghapus jadwal pengiriman area ${areaLabel} • Armada: ${plateLabel} • Driver: ${target.crew?.name || '-'}`,
+        'kurangi'
+      );
+    }
+
     this.dispatchMiddleware({
       entityType: 'schedule',
       action: 'delete',
@@ -4257,6 +4299,14 @@ class LogisticsStore {
 
   public clearAllSchedules() {
     const allIds = this.schedules.map(s => String(s.id)).filter(Boolean);
+    if (allIds.length > 0) {
+      this.logActivity(
+        'Hapus Semua Jadwal Pengiriman',
+        'Jadwal & Penugasan Armada',
+        `Menghapus / mengurangi ${allIds.length} data jadwal pengiriman`,
+        'kurangi'
+      );
+    }
     this.schedules = [];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
     this.reconcileFleetAndScheduleStatuses(true);
@@ -4707,6 +4757,12 @@ class LogisticsStore {
     };
     this.fleets = [...this.fleets, newFleet];
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+    this.logActivity(
+      'Tambah Data Armada',
+      `${newFleet.plateNumber} (${newFleet.initialCode || newFleet.vehicleType})`,
+      `Menambahkan data armada baru ${newFleet.plateNumber} • Jenis: ${newFleet.vehicleType}`,
+      'tambah'
+    );
 
     // Asynchronous backend integration with Supabase
     createFleetInSupabase(newFleet).then(res => {
@@ -5229,6 +5285,13 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     if (updatedFleet) {
+      const fObj = updatedFleet as Fleet;
+      this.logActivity(
+        'Ubah Data Armada',
+        `${fObj.plateNumber} (${fObj.initialCode || fObj.vehicleType})`,
+        `Merubah data armada ${fObj.plateNumber} (${fObj.vehicleType})`,
+        'ubah'
+      );
       // Asynchronous backend integration with Supabase
       updateFleetInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
 
@@ -5373,6 +5436,13 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
 
     if (updatedCrew) {
+      const cObj = updatedCrew as Crew;
+      this.logActivity(
+        'Ubah Data Kru',
+        cObj.name,
+        `Merubah data kru pengiriman ${cObj.name} (${cObj.role})`,
+        'ubah'
+      );
       // Asynchronous backend integration with Supabase
       updateCrewInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Crew Update Sync Note]', err));
 
@@ -5393,7 +5463,7 @@ class LogisticsStore {
     this.crews = this.crews.filter(c => c.id !== id);
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     if (deletedCrew) {
-      this.logActivity('Hapus Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`);
+      this.logActivity('Hapus Data Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`, 'kurangi');
       
       // Asynchronous backend integration with Supabase
       deleteCrewInSupabase(id, deletedCrew.name).catch(err => console.warn('[Supabase Crew Delete Sync Note]', err));
@@ -5427,6 +5497,12 @@ class LogisticsStore {
     };
     this.stores = [...this.stores.filter(s => !isAreaRouteItem(s)), newStore];
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+    this.logActivity(
+      'Tambah Data Pelanggan / Toko',
+      newStore.storeName,
+      `Menambahkan data pelanggan/toko ${newStore.storeName} (${newStore.city || newStore.kabupaten || '-'})`,
+      'tambah'
+    );
     fetch('/api/stores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(newStore)
     }).catch(err => console.warn('[Hostinger Stores] Tambah toko gagal disinkronkan:', err));
@@ -5474,6 +5550,13 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (updatedStore) {
+      const sObj = updatedStore as RetailStore;
+      this.logActivity(
+        'Ubah Data Pelanggan / Toko',
+        sObj.storeName,
+        `Merubah data pelanggan/toko ${sObj.storeName} (${sObj.city || sObj.kabupaten || '-'})`,
+        'ubah'
+      );
       fetch(`/api/stores/${encodeURIComponent(id)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(updatedStore)
       }).catch(err => console.warn('[Hostinger Stores] Update toko gagal disinkronkan:', err));
@@ -5495,6 +5578,12 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (target) {
+      this.logActivity(
+        'Hapus Data Pelanggan / Toko',
+        target.storeName,
+        `Menghapus data pelanggan/toko ${target.storeName} (${target.city || target.kabupaten || '-'})`,
+        'kurangi'
+      );
       fetch(`/api/stores/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' })
         .catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
@@ -5615,22 +5704,135 @@ class LogisticsStore {
     return this.jobdeskConfigs;
   }
 
-  public getSystemActivities(): SystemActivity[] {
-    return [...this.systemActivities];
+  private isSystemWebNoiseActivity(item: any): boolean {
+    if (!item || typeof item !== 'object') return true;
+    const action = String(item.action || '').trim().toLowerCase();
+    const dept = String(item.department || '').trim().toLowerCase();
+    const details = String(item.details || '').trim().toLowerCase();
+    const target = String(item.target || '').trim().toLowerCase();
+    const user = String(item.userFullName || '').trim().toLowerCase();
+
+    if (
+      action.includes('auto-sync') ||
+      action.includes('smart fill') ||
+      action.includes('penyeimbangan jeda') ||
+      action.includes('broadcast alert sla') ||
+      action.includes('middleware') ||
+      dept.includes('sistem integrasi data') ||
+      user.includes('middleware') ||
+      user === 'guest' ||
+      user.includes('belum login') ||
+      details.includes('middleware otomatis') ||
+      details.includes('smart fill mengeksekusi') ||
+      /^perubahan pada jadwal sch-[a-z0-9]+$/i.test(details) ||
+      /^schedule:\s*sch-/i.test(target)
+    ) {
+      return true;
+    }
+    return false;
   }
 
-  public logActivity(action: string, target: string, details: string) {
-    const newActivity: SystemActivity = {
-      id: 'log-' + Math.random().toString(36).substring(2, 9),
-      timestamp: new Date().toISOString(),
-      userFullName: this.currentUser.fullName,
-      department: this.currentUser.department,
+  private inferDataChangeType(action: string, details: string): 'tambah' | 'ubah' | 'kurangi' {
+    const combined = `${action} ${details}`.toLowerCase();
+    if (
+      /\b(hapus|kurang|potong|nonaktif|tolak|reset|keluar|pemakaian|ganti komponen)\b/.test(combined)
+    ) {
+      return 'kurangi';
+    }
+    if (
+      /\b(tambah|buat|input|upload|unggah|restock|registrasi|approval|disetujui|aktifkan)\b/.test(combined)
+    ) {
+      return 'tambah';
+    }
+    return 'ubah';
+  }
+
+  private sanitizeLoadedActivities(list: any[]): SystemActivity[] {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>();
+    const result: SystemActivity[] = [];
+    for (const raw of list) {
+      if (this.isSystemWebNoiseActivity(raw)) continue;
+      const id = String(raw.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push({
+        ...raw,
+        changeType: raw.changeType || this.inferDataChangeType(raw.action || '', raw.details || '')
+      });
+      if (result.length >= 150) break;
+    }
+    return result;
+  }
+
+  public async hydrateSystemActivitiesFromServer(): Promise<void> {
+    if (typeof fetch === 'undefined') return;
+    try {
+      const res = await fetch('/api/system-activities', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.activities)) {
+        const merged = this.sanitizeLoadedActivities([...data.activities, ...this.systemActivities]);
+        this.systemActivities = merged;
+        this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+        this.notify();
+      }
+    } catch {
+      // Ignore transient network errors
+    }
+  }
+
+  public getSystemActivities(): SystemActivity[] {
+    return this.sanitizeLoadedActivities(this.systemActivities);
+  }
+
+  public logActivity(
+    action: string,
+    target: string,
+    details: string,
+    changeType?: 'tambah' | 'ubah' | 'kurangi'
+  ) {
+    const activeUser = this.currentUser;
+    const candidate = {
       action,
       target,
-      details
+      details,
+      userFullName: activeUser?.fullName || 'Super Admin',
+      department: activeUser?.department || 'Manajemen & Direksi'
     };
-    this.systemActivities = [newActivity, ...this.systemActivities].slice(0, 100);
+    if (this.isSystemWebNoiseActivity(candidate)) {
+      return;
+    }
+
+    const resolvedChangeType = changeType || this.inferDataChangeType(action, details);
+    const newActivity: SystemActivity = {
+      id: 'log-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 7),
+      timestamp: new Date().toISOString(),
+      userFullName: activeUser?.fullName && activeUser.id !== 'guest' ? activeUser.fullName : 'Super Admin',
+      userEmail: activeUser?.email && activeUser.id !== 'guest' ? activeUser.email : 'akkoperasional60@gmail.com',
+      userRole: activeUser?.role && activeUser.id !== 'guest' ? activeUser.role : 'super_admin',
+      department: activeUser?.department && activeUser.id !== 'guest' ? activeUser.department : 'Manajemen & Direksi',
+      action,
+      target,
+      details,
+      changeType: resolvedChangeType
+    };
+    this.systemActivities = this.sanitizeLoadedActivities([newActivity, ...this.systemActivities]).slice(0, 150);
     this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/system-activities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ activity: newActivity })
+      }).catch(() => {});
+    }
+
     this.notify();
   }
 
@@ -5656,15 +5858,25 @@ class LogisticsStore {
     this.logActivity(
       'Tambah Sparepart Baru',
       newPart.name,
-      `Stok Awal: ${newPart.stock} ${newPart.unit} (Lokasi: ${newPart.storageLocation})`
+      `Stok Awal: ${newPart.stock} ${newPart.unit} (Lokasi: ${newPart.storageLocation})`,
+      'tambah'
     );
     this.notify();
     return newPart;
   }
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
+    const existing = this.spareParts.find(p => p.id === id);
     this.spareParts = this.spareParts.map(p => p.id === id ? { ...p, ...updated } : p);
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    if (existing) {
+      this.logActivity(
+        'Ubah Data Sparepart',
+        updated.name || existing.name,
+        `Merubah data inventaris sparepart ${updated.name || existing.name}`,
+        'ubah'
+      );
+    }
     this.notify();
   }
 

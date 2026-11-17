@@ -667,7 +667,8 @@ export default function App() {
       case 'purchasing_stock_forecast': return 'Analisa Stok: Prediksi Kebutuhan';
       case 'marketing_online': return 'Departemen Marketing: Prospek & Proaktif Online';
       case 'marketing_offline': return 'Departemen Marketing: Laporan Kunjungan & Laporan Penjualan';
-      case 'marketing_invoice_validation': return 'Departemen Marketing: Validasi Faktur & Integrasi WA Sales';
+      case 'marketing_invoice_validation': return 'Departemen Marketing: Validasi Faktur & Rincian Barang Pengiriman';
+      case 'marketing_sales_mapping': return 'Departemen Marketing: Mapping Nama Sales (Integrasi Validasi Faktur & Aplikasi Penagihan)';
       case 'marketing_to_vo_ro': return 'Departemen Marketing: Prosentase TO, VO & RO';
       case 'marketing_billing_app': return 'Departemen Marketing: Aplikasi Penagihan Pelanggan';
       case 'finance_billing_app': return 'Finance & Tax: Aplikasi Penagihan Pelanggan';
@@ -1211,7 +1212,8 @@ export default function App() {
           {(currentTab === 'marketing_online' ||
             currentTab === 'marketing_offline' ||
             currentTab === 'marketing_to_vo_ro' ||
-            currentTab === 'marketing_invoice_validation') && (
+            currentTab === 'marketing_invoice_validation' ||
+            currentTab === 'marketing_sales_mapping') && (
             <MarketingDashboard
               activeTab={currentTab}
               onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}

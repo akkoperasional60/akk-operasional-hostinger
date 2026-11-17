@@ -226,6 +226,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'marketing_offline':
     case 'marketing_to_vo_ro':
     case 'marketing_invoice_validation':
+    case 'marketing_sales_mapping':
       return loadMarketingDashboard;
     case 'activity_log':
       return loadSystemActivityLog;

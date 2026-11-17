@@ -97,7 +97,7 @@ class DriverReportService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.loadDeletedReportIds(true);
+      this.migrateLegacyLocalStorageOnce();
       try {
         if ('BroadcastChannel' in window) {
           this.channel = new BroadcastChannel('akk_driver_reports_realtime');
@@ -117,51 +117,63 @@ class DriverReportService {
         }
       } catch {}
 
-      window.addEventListener('storage', (evt) => {
-        if (evt.key === DELETED_REPORTS_KEY) {
-          this.loadDeletedReportIds(true);
-        }
-        if (evt.key === STORAGE_KEY && evt.newValue) {
-          try {
-            const parsed = JSON.parse(evt.newValue);
-            if (Array.isArray(parsed)) {
-              this.mergeIncomingReports(parsed, false);
-            }
-          } catch {}
-        }
-      });
+      void this.syncWithServer(true);
     }
   }
 
-  private loadDeletedReportIds(force: boolean = false) {
-    if (this.deletedIdsLoaded && !force) return;
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        localStorage.getItem('akk_session_token') ||
+        localStorage.getItem('session_token') ||
+        sessionStorage.getItem('akk_session_token') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
+  private migrateLegacyLocalStorageOnce() {
     if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
     try {
-      const raw = localStorage.getItem(DELETED_REPORTS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((id) => {
+      const rawDel = localStorage.getItem(DELETED_REPORTS_KEY);
+      if (rawDel) {
+        const parsedDel = JSON.parse(rawDel);
+        if (Array.isArray(parsedDel)) {
+          parsedDel.forEach((id) => {
             if (id) this.deletedReportIds.add(String(id));
           });
         }
+        localStorage.removeItem(DELETED_REPORTS_KEY);
+      }
+      const rawReports = localStorage.getItem(STORAGE_KEY);
+      if (rawReports) {
+        const parsedReports = JSON.parse(rawReports);
+        if (Array.isArray(parsedReports) && parsedReports.length > 0) {
+          this.memoryReports = this.normalizeList(parsedReports);
+        }
+        localStorage.removeItem(STORAGE_KEY);
       }
       this.deletedIdsLoaded = true;
     } catch {}
   }
 
+  private loadDeletedReportIds(_force: boolean = false) {
+    this.deletedIdsLoaded = true;
+  }
+
   private saveDeletedReportIds() {
-    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
-    try {
-      localStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(Array.from(this.deletedReportIds).slice(-500)));
-    } catch {}
+    // Disimpan langsung pada MySQL melalui endpoint /api/driver-reports
   }
 
   private applyRemoteDeletion(id: string, broadcastToPeers: boolean = false) {
     const cleanId = String(id || '').trim();
     if (!cleanId) return;
     this.deletedReportIds.add(cleanId);
-    this.saveDeletedReportIds();
     const current = this.getStoredReports().filter(r => r.id !== cleanId);
     this.persistListInternal(current, broadcastToPeers);
     if (typeof window !== 'undefined') {
@@ -202,8 +214,6 @@ class DriverReportService {
         } catch {}
         if (this.eventSource === es) this.eventSource = null;
 
-        // Re-check the authenticated API first. If the session has expired,
-        // syncWithServer() returns without reopening SSE, avoiding a reconnect loop on the login page.
         if (this.reconnectTimer !== null) {
           window.clearTimeout(this.reconnectTimer);
         }
@@ -219,11 +229,14 @@ class DriverReportService {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
     if (this.isSyncingWithServer) return;
     const nowMs = Date.now();
-    if (!force && nowMs - this.lastServerSyncAt < 4000) return;
+    if (!force && nowMs - this.lastServerSyncAt < 3000) return;
     this.isSyncingWithServer = true;
     this.lastServerSyncAt = nowMs;
     try {
-      const res = await fetch('/api/driver-reports', { credentials: 'include' });
+      const res = await fetch('/api/driver-reports', {
+        credentials: 'include',
+        headers: this.getAuthHeaders()
+      });
       if (!res.ok) return;
       this.ensureServerRealtimeSync();
       const json = await res.json();
@@ -236,10 +249,10 @@ class DriverReportService {
             hasNewDeleted = true;
           }
         });
-        if (hasNewDeleted) {
-          this.saveDeletedReportIds();
-          if (this.memoryReports) {
-            this.memoryReports = this.memoryReports.filter(r => !this.deletedReportIds.has(r.id));
+        if (hasNewDeleted && this.memoryReports) {
+          this.memoryReports = this.memoryReports.filter(r => !this.deletedReportIds.has(r.id));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('driver-report-updated'));
           }
         }
       }
@@ -261,7 +274,7 @@ class DriverReportService {
         unsyncedReports.forEach(r => this.syncedToServerIds.add(r.id));
         await fetch('/api/driver-reports', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include',
           body: JSON.stringify({ reports: unsyncedReports })
         });
@@ -280,7 +293,7 @@ class DriverReportService {
     }
     fetch('/api/driver-reports', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getAuthHeaders(),
       credentials: 'include',
       body: JSON.stringify({ report })
     }).catch(() => {
@@ -441,55 +454,13 @@ class DriverReportService {
     if (this.memoryReports !== null) {
       return this.memoryReports;
     }
-
-    let storedList: DriverHelperReport[] = [];
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        const data = localStorage.getItem(STORAGE_KEY);
-        if (data) {
-          const parsed: DriverHelperReport[] = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            storedList = this.normalizeList(parsed);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to read from localStorage:', e);
-      }
-    }
-
-    this.memoryReports = storedList;
+    this.memoryReports = [];
     return this.memoryReports;
   }
 
   private persistListInternal(list: DriverHelperReport[], broadcastToPeers: boolean = true): void {
     const normalized = this.normalizeList(list);
     this.memoryReports = normalized;
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      } catch {
-        // QuotaExceededError fallback: keep photos on the 15 most recent reports and strip oversized base64 from older reports
-        try {
-          const compact = normalized.map((r, idx) => {
-            if (idx < 15) {
-              // Keep up to 3 photos on recent reports
-              const trimmedPhotos = Array.isArray(r.photoUrls) ? r.photoUrls.slice(0, 3) : undefined;
-              return { ...r, photoUrls: trimmedPhotos };
-            }
-            return { ...r, photoUrl: null, photoUrls: [] };
-          });
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
-        } catch {
-          // Final fallback: keep latest 30 reports metadata + latest 3 photos
-          try {
-            const ultraCompact = normalized.slice(0, 30).map((r, idx) =>
-              idx < 3 ? r : { ...r, photoUrl: null, photoUrls: [] }
-            );
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(ultraCompact));
-          } catch {}
-        }
-      }
-    }
 
     if (broadcastToPeers && this.channel) {
       try {
@@ -590,6 +561,7 @@ class DriverReportService {
       };
 
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
@@ -639,6 +611,7 @@ class DriverReportService {
     if (activeShiftIdx >= 0) {
       list[activeShiftIdx].securityPin = '****';
       this.saveReports(list);
+      this.pushReportToServer(list[activeShiftIdx]);
     }
 
     return this.addReport({
@@ -677,7 +650,7 @@ class DriverReportService {
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
         fetch(`/api/driver-reports/${encodeURIComponent(id)}/solution`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include',
           body: JSON.stringify({
             solution,
@@ -710,7 +683,7 @@ class DriverReportService {
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
         fetch(`/api/driver-reports/${encodeURIComponent(id)}/acknowledge`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include'
         }).catch(() => {});
       }
@@ -768,6 +741,7 @@ class DriverReportService {
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
       fetch(`/api/driver-reports/${encodeURIComponent(cleanId)}`, {
         method: 'DELETE',
+        headers: this.getAuthHeaders(),
         credentials: 'include'
       }).catch(() => {});
     }
@@ -822,6 +796,7 @@ class DriverReportService {
         timestamp: now.toISOString()
       };
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
@@ -891,6 +866,7 @@ class DriverReportService {
 
     if (updatedReport) {
       this.saveReports(list);
+      this.pushReportToServer(updatedReport);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: updatedReport }));
         window.dispatchEvent(new CustomEvent('akk-force-online-mode'));
@@ -949,6 +925,7 @@ class DriverReportService {
         timestamp: now.toISOString()
       };
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
@@ -1034,6 +1011,7 @@ class DriverReportService {
     };
 
     this.saveReports(list);
+    this.pushReportToServer(list[targetIdx]);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[targetIdx] }));
     }

@@ -46,7 +46,8 @@ import {
   Map as MapIcon,
   Clock,
   QrCode,
-  DollarSign
+  DollarSign,
+  Link2
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -113,6 +114,7 @@ export type NavTab =
   | 'marketing_offline'
   | 'marketing_to_vo_ro'
   | 'marketing_invoice_validation'
+  | 'marketing_sales_mapping'
   | 'marketing_billing_app'
   | 'activity_log'
   | 'users'
@@ -702,6 +704,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 </span>
               ),
               description: 'Validasi faktur kirim esok hari & integrasi WA Sales'
+            },
+            {
+              tab: 'marketing_sales_mapping',
+              label: 'Mapping Nama Sales',
+              icon: <Link2 className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  2 Master
+                </span>
+              ),
+              description: 'Mapping 1 Sales = 2 Master Nama Sales (Integrasi Validasi Faktur & Aplikasi Penagihan)'
             },
             {
               tab: 'marketing_to_vo_ro',

@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Award,
   ShieldAlert,
   TrendingUp,
   Percent,
   User,
+  UserX,
+  UserCheck,
+  Check,
+  Search,
   RefreshCw,
   AlertTriangle,
   Building,
@@ -62,6 +66,7 @@ import * as XLSX from 'xlsx';
 import { logisticsStore } from '../../services/store';
 import { branchStore } from '../../services/branchStore';
 import { useToast } from '../../context/ToastContext';
+import { useRoleAccess } from '../../hooks/useRoleAccess';
 import {
   useSalesAdminUsers,
   getSalesAdminAssignedBranchId,
@@ -87,8 +92,310 @@ export interface AdminIndividualKpiRecord {
   discountErrorsCount: number; // Jumlah kesalahan penginputan diskon (kali)
   totalOrders: number;
   lastMonthPct?: number; // % Pencapaian bulan sebelumnya (opsional jika diinput manual/excel)
+  isInactive?: boolean; // Status admin tidak aktif pada bulan tersebut (dikecualikan dari analisa)
   notes?: string;
 }
+
+export interface ModernDropdownOption {
+  value: string;
+  label: string;
+  subLabel?: string;
+  badgeText?: string;
+  badge?: string;
+  badgeTone?: 'emerald' | 'rose' | 'indigo' | 'amber' | 'slate';
+}
+
+interface ModernKpiDropdownProps {
+  label?: string;
+  value: string;
+  onChange: (val: string) => void;
+  options: ModernDropdownOption[];
+  icon?: React.ReactNode;
+  variant?: 'filter-card' | 'compact' | 'form-input';
+  accentColor?: 'indigo' | 'rose' | 'emerald' | 'sky';
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  gridCols?: 1 | 2 | 3;
+}
+
+export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
+  label,
+  value,
+  onChange,
+  options,
+  icon,
+  variant = 'filter-card',
+  accentColor = 'indigo',
+  searchable = false,
+  searchPlaceholder = 'Cari pilihan...',
+  gridCols = 1
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener('keydown', handleEscape);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen]);
+
+  const selectedOption = useMemo(
+    () => options.find(o => o.value === value) || options[0] || { value, label: value },
+    [options, value]
+  );
+
+  const filteredOptions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(
+      o =>
+        o.label.toLowerCase().includes(q) ||
+        (o.subLabel && o.subLabel.toLowerCase().includes(q)) ||
+        ((o.badgeText || o.badge) && (o.badgeText || o.badge)!.toLowerCase().includes(q))
+    );
+  }, [options, searchQuery]);
+
+  const badgeToneClasses = (tone?: ModernDropdownOption['badgeTone'], isSelected?: boolean) => {
+    if (isSelected) {
+      return 'bg-white/20 text-white border-white/30';
+    }
+    switch (tone) {
+      case 'emerald':
+        return 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+      case 'rose':
+        return 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800';
+      case 'amber':
+        return 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+      case 'indigo':
+        return 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800';
+      default:
+        return 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+    }
+  };
+
+  const activeGradient =
+    accentColor === 'rose'
+      ? 'from-rose-600 to-orange-600 text-white shadow-sm shadow-rose-500/20'
+      : accentColor === 'emerald'
+      ? 'from-emerald-600 to-teal-600 text-white shadow-sm shadow-emerald-500/20'
+      : 'from-indigo-600 to-blue-600 text-white shadow-sm shadow-indigo-500/20';
+
+  const selectedBadge = selectedOption.badgeText || selectedOption.badge;
+
+  return (
+    <div ref={containerRef} className="relative">
+      {variant === 'filter-card' ? (
+        <button
+          type="button"
+          onClick={() => {
+            setIsOpen(prev => !prev);
+            setSearchQuery('');
+          }}
+          className={`w-full text-left bg-white/95 dark:bg-slate-950/80 p-3 rounded-2xl border transition-all cursor-pointer group ${
+            isOpen
+              ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+              : 'border-slate-200/90 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 shadow-2xs'
+          }`}
+        >
+          {label && (
+            <span className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+              {label}
+            </span>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {icon && (
+                <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  {icon}
+                </span>
+              )}
+              <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                {selectedOption.label}
+              </span>
+              {selectedBadge && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                    selectedOption.badgeTone,
+                    false
+                  )}`}
+                >
+                  {selectedBadge}
+                </span>
+              )}
+            </div>
+            <span
+              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform duration-200 shrink-0 ${
+                isOpen
+                  ? 'bg-indigo-600 text-white rotate-180'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'
+              }`}
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </span>
+          </div>
+        </button>
+      ) : variant === 'compact' ? (
+        <button
+          type="button"
+          onClick={() => {
+            setIsOpen(prev => !prev);
+            setSearchQuery('');
+          }}
+          className={`px-3.5 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-between gap-2.5 transition-all cursor-pointer min-w-[145px] ${
+            isOpen
+              ? 'border-indigo-500 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-300 ring-2 ring-indigo-500/20 shadow-md'
+              : 'border-slate-200/90 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-800 dark:text-white shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {icon && <span className="text-indigo-600 dark:text-indigo-400 shrink-0">{icon}</span>}
+            <span className="truncate">{selectedOption.label}</span>
+          </div>
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+              isOpen ? 'rotate-180 text-indigo-600' : ''
+            }`}
+          />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setIsOpen(prev => !prev);
+            setSearchQuery('');
+          }}
+          className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
+            isOpen
+              ? 'border-indigo-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ring-2 ring-indigo-500/20 shadow-sm'
+              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:border-indigo-300 text-slate-900 dark:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {icon && <span className="text-indigo-600 dark:text-indigo-400 shrink-0">{icon}</span>}
+            <span className="truncate">{selectedOption.label}</span>
+            {selectedBadge && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                  selectedOption.badgeTone,
+                  false
+                )}`}
+              >
+                {selectedBadge}
+              </span>
+            )}
+          </div>
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+              isOpen ? 'rotate-180 text-indigo-600' : ''
+            }`}
+          />
+        </button>
+      )}
+
+      {isOpen && (
+        <div
+          className={`absolute left-0 mt-2 z-50 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-700 rounded-2xl shadow-2xl shadow-slate-900/15 dark:shadow-black/50 p-2 animate-fade-in ${
+            gridCols === 3
+              ? 'w-72 sm:w-80'
+              : gridCols === 2
+              ? 'w-64 sm:w-72'
+              : 'w-full min-w-[230px]'
+          }`}
+        >
+          {searchable && (
+            <div className="relative mb-2 px-1 pt-1">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
+
+          <div
+            className={`max-h-64 overflow-y-auto pr-0.5 ${
+              gridCols === 3
+                ? 'grid grid-cols-3 gap-1'
+                : gridCols === 2
+                ? 'grid grid-cols-2 gap-1'
+                : 'space-y-1'
+            }`}
+          >
+            {filteredOptions.length === 0 ? (
+              <div className="py-4 px-3 text-center text-xs text-slate-400 italic col-span-full">
+                Tidak ditemukan pilihan
+              </div>
+            ) : (
+              filteredOptions.map(opt => {
+                const isSelected = opt.value === value;
+                const optBadge = opt.badgeText || opt.badge;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                      isSelected
+                        ? `bg-gradient-to-r ${activeGradient} font-black`
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-indigo-50/80 dark:hover:bg-slate-800/80 font-bold'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate">{opt.label}</span>
+                        {optBadge && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                              opt.badgeTone,
+                              isSelected
+                            )}`}
+                          >
+                            {optBadge}
+                          </span>
+                        )}
+                      </div>
+                      {opt.subLabel && (
+                        <span
+                          className={`block text-[10px] truncate mt-0.5 ${
+                            isSelected ? 'text-white/80 font-medium' : 'text-slate-400 dark:text-slate-500 font-medium'
+                          }`}
+                        >
+                          {opt.subLabel}
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 export interface DiscountErrorLogItem {
   id: string;
@@ -242,6 +549,17 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   const [dbSourceLabel, setDbSourceLabel] = useState<string>('MySQL Database');
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(true);
   const { addNotification } = useToast();
+  const { user: currentUser, isAdmin, canEditModule } = useRoleAccess();
+
+  const canEditKpiStaff = useMemo(() => {
+    return (
+      isAdmin() ||
+      canEditModule('sales_admin', 'sales_kpi_individual') ||
+      canEditModule('sales_kpi_individual') ||
+      canEditModule('sales_admin') ||
+      currentUser?.role === 'sales_admin'
+    );
+  }, [currentUser, isAdmin, canEditModule]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -462,7 +780,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           d.year === selectedYear
       ).length;
 
-      const computedPrevPct = prevMonthRecord
+      const computedPrevPct = prevMonthRecord && !prevMonthRecord.isInactive
         ? Number(
             (
               (prevMonthRecord.validasiSoWeb +
@@ -480,6 +798,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         const gapPct = Number(Math.max(0, 100 - avg).toFixed(1));
         return {
           ...existing,
+          isInactive: Boolean(existing.isInactive),
           discountErrorsCount: Math.max(existing.discountErrorsCount, discountLogsCount),
           avgMonthlyPct: avg,
           prevMonthPct: existing.lastMonthPct !== undefined ? Number(existing.lastMonthPct) : computedPrevPct,
@@ -500,6 +819,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         discountErrorsCount: discountLogsCount,
         totalOrders: 0,
         lastMonthPct: computedPrevPct,
+        isInactive: false,
         notes: 'Belum ada data di MySQL',
         avgMonthlyPct: 0,
         prevMonthPct: computedPrevPct,
@@ -519,15 +839,27 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     sidoarjoAdminNames
   ]);
 
+  // Separate active admins from inactive admins so inactive admins are excluded from top ranking & analysis
   const rankedBranchKpiList = useMemo(() => {
-    const sorted = [...branchKpiRecords].sort((a, b) => {
-      if (b.avgMonthlyPct !== a.avgMonthlyPct) return b.avgMonthlyPct - a.avgMonthlyPct;
-      return a.discountErrorsCount - b.discountErrorsCount;
-    });
-    return sorted.map((item, index) => ({
-      ...item,
-      rank: index + 1
-    }));
+    const activeItems = branchKpiRecords
+      .filter(r => !r.isInactive)
+      .sort((a, b) => {
+        if (b.avgMonthlyPct !== a.avgMonthlyPct) return b.avgMonthlyPct - a.avgMonthlyPct;
+        return a.discountErrorsCount - b.discountErrorsCount;
+      })
+      .map((item, index) => ({
+        ...item,
+        rank: index + 1
+      }));
+
+    const inactiveItems = branchKpiRecords
+      .filter(r => Boolean(r.isInactive))
+      .map(item => ({
+        ...item,
+        rank: 0
+      }));
+
+    return [...activeItems, ...inactiveItems];
   }, [branchKpiRecords]);
 
   const displayedKpiList = useMemo(() => {
@@ -537,10 +869,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     );
   }, [rankedBranchKpiList, selectedAdminFilter]);
 
+  // Active-only KPI list for charts & summary analysis (excludes Admin Tidak Aktif on this month)
+  const activeDisplayedKpiList = useMemo(() => {
+    return displayedKpiList.filter(r => !r.isInactive);
+  }, [displayedKpiList]);
+
   // Division / Filter Summary for Gambar 1: Bulan Sebelumnya (%), Target (100%), Aktual (%), Selisih Gap (Target - Aktual)
+  // Excludes any admin marked as Admin Tidak Aktif (`isInactive === true`) on the selected month
   const kpiOverallSummary = useMemo(() => {
-    const activeRows = displayedKpiList.filter(r => r.avgMonthlyPct > 0 || r.prevMonthPct > 0);
-    const sourceRows = activeRows.length > 0 ? activeRows : displayedKpiList;
+    const activeWithScores = activeDisplayedKpiList.filter(r => r.avgMonthlyPct > 0 || r.prevMonthPct > 0);
+    const sourceRows = activeWithScores.length > 0 ? activeWithScores : activeDisplayedKpiList;
     if (sourceRows.length === 0) {
       return {
         prevMonthPct: 0,
@@ -569,7 +907,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         sourceRows.length
       ).toFixed(1)
     );
-    const totalDiscountErrors = displayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0);
+    const totalDiscountErrors = activeDisplayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0);
 
     return {
       prevMonthPct,
@@ -580,7 +918,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       avgFaktur,
       totalDiscountErrors
     };
-  }, [displayedKpiList]);
+  }, [activeDisplayedKpiList]);
 
   const [focusedAdminName, setFocusedAdminName] = useState<string>('');
   useEffect(() => {
@@ -590,13 +928,15 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       !focusedAdminName ||
       !rankedBranchKpiList.some(r => r.adminName === focusedAdminName)
     ) {
-      setFocusedAdminName(rankedBranchKpiList[0]?.adminName || '');
+      const firstActive = rankedBranchKpiList.find(r => !r.isInactive) || rankedBranchKpiList[0];
+      setFocusedAdminName(firstActive?.adminName || '');
     }
   }, [selectedAdminFilter, rankedBranchKpiList, focusedAdminName]);
 
   const focusedAdminKpi = useMemo(() => {
     return (
       rankedBranchKpiList.find(r => r.adminName === focusedAdminName) ||
+      rankedBranchKpiList.find(r => !r.isInactive) ||
       rankedBranchKpiList[0] || {
         id: 'fallback',
         adminName: activeBranchAdminNames[0] || 'ADMIN PENJUALAN',
@@ -608,6 +948,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         pengecekanFaktur: 0,
         discountErrorsCount: 0,
         totalOrders: 0,
+        isInactive: false,
         avgMonthlyPct: 0,
         prevMonthPct: 0,
         targetPct: 100,
@@ -624,6 +965,106 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     selectedYear
   ]);
 
+  // Dropdown Options Builders for ModernKpiDropdown
+  const branchDropdownOptions = useMemo<ModernDropdownOption[]>(
+    () => [
+      {
+        value: 'cab-banyuwangi',
+        label: 'Cabang Nusantara (Banyuwangi)',
+        subLabel: `${nusantaraAdminNames.length} Admin Penjualan Terdaftar`,
+        badgeText: 'BWI',
+        badgeTone: 'indigo'
+      },
+      {
+        value: 'cab-sidoarjo',
+        label: 'Cabang Sidoarjo',
+        subLabel: `${sidoarjoAdminNames.length} Admin Penjualan Terdaftar`,
+        badgeText: 'SDA',
+        badgeTone: 'emerald'
+      },
+      {
+        value: 'ALL',
+        label: 'Semua Cabang',
+        subLabel: 'Gabungan Nusantara & Sidoarjo',
+        badgeText: 'ALL',
+        badgeTone: 'amber'
+      }
+    ],
+    [nusantaraAdminNames.length, sidoarjoAdminNames.length]
+  );
+
+  const monthDropdownOptions = useMemo<ModernDropdownOption[]>(
+    () =>
+      MONTH_OPTIONS.map((m, idx) => ({
+        value: m,
+        label: m,
+        badgeText: `Bln ${idx + 1}`,
+        badgeTone: m === selectedMonth ? 'indigo' : 'slate'
+      })),
+    [selectedMonth]
+  );
+
+  const yearDropdownOptions = useMemo<ModernDropdownOption[]>(
+    () =>
+      YEAR_OPTIONS.map(y => ({
+        value: y,
+        label: y,
+        subLabel: `Periode Evaluasi ${y}`,
+        badgeText: y === String(now.getFullYear()) ? 'Tahun Ini' : undefined,
+        badgeTone: 'emerald'
+      })),
+    [now]
+  );
+
+  const adminFilterDropdownOptions = useMemo<ModernDropdownOption[]>(() => {
+    const activeCount = branchKpiRecords.filter(r => !r.isInactive).length;
+    const inactiveCount = branchKpiRecords.filter(r => r.isInactive).length;
+    const allOption: ModernDropdownOption = {
+      value: 'SEMUA ADMIN',
+      label: `Semua Admin (${activeBranchAdminNames.length})`,
+      subLabel:
+        inactiveCount > 0
+          ? `${activeCount} Aktif • ${inactiveCount} Tidak Aktif bulan ini`
+          : `${activeCount} Admin Aktif dievaluasi`,
+      badgeText: `${activeCount} Aktif`,
+      badgeTone: 'indigo'
+    };
+
+    const individualOptions: ModernDropdownOption[] = activeBranchAdminNames.map(name => {
+      const rec = branchKpiRecords.find(r => r.adminName.toUpperCase() === name.toUpperCase());
+      const isInactive = Boolean(rec?.isInactive);
+      const isSda = sidoarjoAdminNames.includes(name.toUpperCase());
+      return {
+        value: name,
+        label: name,
+        subLabel: isInactive
+          ? `Tidak Aktif (${selectedMonth} ${selectedYear}) • Dikecualikan dari Analisa`
+          : `Aktual KPI: ${rec?.avgMonthlyPct ?? 0}% • Cabang ${isSda ? 'Sidoarjo' : 'Nusantara'}`,
+        badgeText: isInactive ? 'Tidak Aktif' : isSda ? 'SDA' : 'BWI',
+        badgeTone: isInactive ? 'rose' : 'emerald'
+      };
+    });
+
+    return [allOption, ...individualOptions];
+  }, [activeBranchAdminNames, branchKpiRecords, selectedMonth, selectedYear, sidoarjoAdminNames]);
+
+  const adminSelectDropdownOptions = useMemo<ModernDropdownOption[]>(() => {
+    return activeBranchAdminNames.map(name => {
+      const rec = branchKpiRecords.find(r => r.adminName.toUpperCase() === name.toUpperCase());
+      const isInactive = Boolean(rec?.isInactive);
+      const isSda = sidoarjoAdminNames.includes(name.toUpperCase());
+      return {
+        value: name,
+        label: name,
+        subLabel: isInactive
+          ? 'Status Bulan Ini: Tidak Aktif (Dikecualikan dari Analisa)'
+          : `Status Bulan Ini: Aktif • Aktual ${rec?.avgMonthlyPct ?? 0}%`,
+        badgeText: isInactive ? 'Tidak Aktif' : isSda ? 'SDA' : 'BWI',
+        badgeTone: isInactive ? 'rose' : 'emerald'
+      };
+    });
+  }, [activeBranchAdminNames, branchKpiRecords, sidoarjoAdminNames]);
+
   // Upload Excel Modal State & Manual Input State for KPI Individu
   const [isKpiUploadOpen, setIsKpiUploadOpen] = useState(false);
   const [kpiImportMode, setKpiImportMode] = useState<'replace_all' | 'append'>('replace_all');
@@ -639,6 +1080,65 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   const [manualKpiPembuatan, setManualKpiPembuatan] = useState('');
   const [manualKpiPengecekan, setManualKpiPengecekan] = useState('');
   const [manualKpiOrders, setManualKpiOrders] = useState('');
+  const [manualKpiIsInactive, setManualKpiIsInactive] = useState<boolean>(false);
+
+  // Handler to toggle Admin Tidak Aktif on the selected month/year (only for users with edit rights)
+  const handleToggleAdminActiveStatus = (adminName: string, branchIdParam?: string) => {
+    if (!canEditKpiStaff) {
+      showToast('Anda tidak memiliki hak akses untuk mengubah status aktif KPI staff.');
+      return;
+    }
+    const cleanAdmin = adminName.trim().toUpperCase();
+    const targetBranch =
+      branchIdParam ||
+      (sidoarjoAdminNames.includes(cleanAdmin)
+        ? 'cab-sidoarjo'
+        : selectedBranchId === 'ALL'
+        ? 'cab-banyuwangi'
+        : selectedBranchId);
+
+    const next = [...individualKpiList];
+    const idx = next.findIndex(
+      x =>
+        x.adminName.toUpperCase() === cleanAdmin &&
+        x.branchId === targetBranch &&
+        x.month === selectedMonth &&
+        x.year === selectedYear
+    );
+
+    let nextInactiveState = true;
+    if (idx >= 0) {
+      nextInactiveState = !next[idx].isInactive;
+      next[idx] = {
+        ...next[idx],
+        isInactive: nextInactiveState
+      };
+    } else {
+      nextInactiveState = true;
+      next.push({
+        id: `kpi-status-${Date.now()}`,
+        adminName: cleanAdmin,
+        branchId: targetBranch,
+        month: selectedMonth,
+        year: selectedYear,
+        validasiSoWeb: 0,
+        pembuatanFaktur: 0,
+        pengecekanFaktur: 0,
+        discountErrorsCount: 0,
+        totalOrders: 0,
+        isInactive: true,
+        notes: 'Admin Tidak Aktif pada bulan ini'
+      });
+    }
+
+    setIndividualKpiList(next);
+    void persistSalesKpiToMysql({ individualKpiList: next });
+    showToast(
+      nextInactiveState
+        ? `${cleanAdmin} ditandai TIDAK AKTIF pada ${selectedMonth} ${selectedYear} (data tidak masuk analisa).`
+        : `${cleanAdmin} diaktifkan kembali pada analisa KPI ${selectedMonth} ${selectedYear}.`
+    );
+  };
 
   // Discount Error Form State
   const [isAddDiscountErrOpen, setIsAddDiscountErrOpen] = useState(false);
@@ -911,7 +1411,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             x.month === imp.month &&
             x.year === imp.year
         );
-        if (idx >= 0) next[idx] = imp;
+        if (idx >= 0) next[idx] = { ...imp, isInactive: next[idx].isInactive };
         else next.push(imp);
       });
       updatedList = next;
@@ -957,7 +1457,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       discountErrorsCount: 0,
       totalOrders,
       lastMonthPct,
-      notes: 'Input Evaluasi KPI'
+      isInactive: manualKpiIsInactive,
+      notes: manualKpiIsInactive ? 'Admin Tidak Aktif (Dikecualikan dari Analisa)' : 'Input Evaluasi KPI'
     };
 
     const next = [...individualKpiList];
@@ -977,7 +1478,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     setIndividualKpiList(next);
     persistSalesKpiToMysql({ individualKpiList: next });
     setIsManualKpiOpen(false);
-    showToast(`Data KPI ${targetAdmin} berhasil disimpan.`);
+    showToast(
+      manualKpiIsInactive
+        ? `Data KPI ${targetAdmin} disimpan dengan status TIDAK AKTIF (dikecualikan dari analisa ${selectedMonth} ${selectedYear}).`
+        : `Data KPI ${targetAdmin} berhasil disimpan.`
+    );
   };
 
   // ============================================================================
@@ -1749,8 +2254,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   if (isKpiUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
-          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-indigo-500/5 blur-3xl pointer-events-none" />
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
@@ -1767,37 +2271,31 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              <select
+              <ModernKpiDropdown
+                variant="compact"
                 value={selectedBranchId}
-                onChange={e => handleBranchChange(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value="cab-banyuwangi">Cabang Nusantara</option>
-                <option value="cab-sidoarjo">Cabang Sidoarjo</option>
-                <option value="ALL">Semua Cabang</option>
-              </select>
-              <select
+                onChange={handleBranchChange}
+                options={branchDropdownOptions}
+                icon={<Building className="w-3.5 h-3.5" />}
+              />
+              <ModernKpiDropdown
+                variant="compact"
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {MONTH_OPTIONS.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedMonth}
+                options={monthDropdownOptions}
+                icon={<Calendar className="w-3.5 h-3.5" />}
+                gridCols={2}
+              />
+              <ModernKpiDropdown
+                variant="compact"
                 value={selectedYear}
-                onChange={e => setSelectedYear(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {YEAR_OPTIONS.map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedYear}
+                options={yearDropdownOptions}
+              />
+              <ModernKpiDropdown
+                variant="compact"
                 value={selectedAdminFilter}
-                onChange={e => {
-                  const val = e.target.value;
+                onChange={val => {
                   setSelectedAdminFilter(val);
                   if (val !== 'SEMUA ADMIN') {
                     setFocusedAdminName(val);
@@ -1806,13 +2304,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     );
                   }
                 }}
-                className="px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 text-xs font-bold text-indigo-700 dark:text-indigo-300"
-              >
-                <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
-                {activeBranchAdminNames.map(adm => (
-                  <option key={adm} value={adm}>{adm}</option>
-                ))}
-              </select>
+                options={adminFilterDropdownOptions}
+                icon={<Users className="w-3.5 h-3.5" />}
+                searchable
+                searchPlaceholder="Cari nama admin..."
+              />
             </div>
           </div>
 
@@ -1990,8 +2486,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   if (isDendaUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
-          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-rose-500/5 blur-3xl pointer-events-none" />
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-600 via-orange-600 to-amber-500 text-white flex items-center justify-center shadow-md shadow-rose-500/20 shrink-0">
@@ -2008,43 +2503,40 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              <select
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="rose"
                 value={selectedBranchId}
-                onChange={e => handleBranchChange(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value="cab-banyuwangi">Cabang Nusantara</option>
-                <option value="cab-sidoarjo">Cabang Sidoarjo</option>
-                <option value="ALL">Semua Cabang</option>
-              </select>
-              <select
+                onChange={handleBranchChange}
+                options={branchDropdownOptions}
+                icon={<Building className="w-3.5 h-3.5" />}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="rose"
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {MONTH_OPTIONS.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedMonth}
+                options={monthDropdownOptions}
+                icon={<Calendar className="w-3.5 h-3.5" />}
+                gridCols={2}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="rose"
                 value={selectedYear}
-                onChange={e => setSelectedYear(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {YEAR_OPTIONS.map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedYear}
+                options={yearDropdownOptions}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="rose"
                 value={selectedAdminFilter}
-                onChange={e => setSelectedAdminFilter(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/40 text-xs font-bold text-rose-700 dark:text-rose-300"
-              >
-                <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
-                {activeBranchAdminNames.map(adm => (
-                  <option key={adm} value={adm}>{adm}</option>
-                ))}
-              </select>
+                onChange={setSelectedAdminFilter}
+                options={adminFilterDropdownOptions}
+                icon={<Users className="w-3.5 h-3.5" />}
+                searchable
+                searchPlaceholder="Cari nama admin..."
+              />
             </div>
           </div>
 
@@ -2169,8 +2661,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   if (isOmsetUploadOpen) {
     return (
       <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative overflow-hidden">
-          <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-emerald-500/5 blur-3xl pointer-events-none" />
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
@@ -2187,43 +2678,40 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              <select
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="emerald"
                 value={selectedBranchId}
-                onChange={e => handleBranchChange(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value="cab-banyuwangi">Cabang Nusantara</option>
-                <option value="cab-sidoarjo">Cabang Sidoarjo</option>
-                <option value="ALL">Semua Cabang</option>
-              </select>
-              <select
+                onChange={handleBranchChange}
+                options={branchDropdownOptions}
+                icon={<Building className="w-3.5 h-3.5" />}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="emerald"
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {MONTH_OPTIONS.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedMonth}
+                options={monthDropdownOptions}
+                icon={<Calendar className="w-3.5 h-3.5" />}
+                gridCols={2}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="emerald"
                 value={selectedYear}
-                onChange={e => setSelectedYear(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                {YEAR_OPTIONS.map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedYear}
+                options={yearDropdownOptions}
+              />
+              <ModernKpiDropdown
+                variant="compact"
+                accentColor="emerald"
                 value={selectedAdminFilter}
-                onChange={e => setSelectedAdminFilter(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 text-xs font-bold text-emerald-700 dark:text-emerald-300"
-              >
-                <option value="SEMUA ADMIN">Pilih Admin (Semua - {activeBranchAdminNames.length})</option>
-                {activeBranchAdminNames.map(adm => (
-                  <option key={adm} value={adm}>{adm}</option>
-                ))}
-              </select>
+                onChange={setSelectedAdminFilter}
+                options={adminFilterDropdownOptions}
+                icon={<Users className="w-3.5 h-3.5" />}
+                searchable
+                searchPlaceholder="Cari nama admin..."
+              />
             </div>
           </div>
 
@@ -2320,8 +2808,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       {/* ===================================================================== */}
       {/* HEADER BAR MODERN & INTERAKTIF                                        */}
       {/* ===================================================================== */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-white via-slate-50/70 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 rounded-3xl shadow-xs space-y-5">
-        <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-gradient-to-br from-indigo-500/10 to-cyan-500/10 blur-3xl pointer-events-none" />
+      <div className="relative bg-gradient-to-br from-white via-slate-50/70 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 rounded-3xl shadow-xs space-y-5">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 relative">
           <div className="flex items-start sm:items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
@@ -2363,7 +2850,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       selectedAdminFilter !== 'SEMUA ADMIN'
                         ? selectedAdminFilter
                         : activeBranchAdminNames[0] || '';
+                    const existing = branchKpiRecords.find(
+                      x => x.adminName.toUpperCase() === defaultAdmin.toUpperCase()
+                    );
                     setManualKpiAdmin(defaultAdmin);
+                    setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? String(existing.prevMonthPct) : '');
+                    setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? String(existing.validasiSoWeb) : '');
+                    setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? String(existing.pembuatanFaktur) : '');
+                    setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? String(existing.pengecekanFaktur) : '');
+                    setManualKpiOrders(existing && existing.totalOrders > 0 ? String(existing.totalOrders) : '');
+                    setManualKpiIsInactive(Boolean(existing?.isInactive));
                     setIsManualKpiOpen(prev => !prev);
                   }}
                   className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
@@ -2446,115 +2942,89 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         <div
           className={`grid grid-cols-1 sm:grid-cols-2 ${
             activeTab === 'sales_kpi_omset' ? 'lg:grid-cols-6' : 'lg:grid-cols-4'
-          } gap-3 pt-4 border-t border-slate-200/70 dark:border-slate-800 relative`}
+          } gap-3 pt-4 border-t border-slate-200/70 dark:border-slate-800 relative z-20`}
         >
           {/* 1. CABANG */}
-          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-              CABANG OPERASIONAL
-            </label>
-            <select
-              value={selectedBranchId}
-              onChange={e => handleBranchChange(e.target.value)}
-              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              <option value="cab-banyuwangi">Cabang Nusantara (Banyuwangi)</option>
-              <option value="cab-sidoarjo">Cabang Sidoarjo</option>
-              <option value="ALL">Semua Cabang</option>
-            </select>
-          </div>
+          <ModernKpiDropdown
+            variant="filter-card"
+            label="CABANG OPERASIONAL"
+            value={selectedBranchId}
+            onChange={handleBranchChange}
+            options={branchDropdownOptions}
+            icon={<Building className="w-3.5 h-3.5" />}
+          />
 
           {/* 2. BULAN (KALENDER) */}
-          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-              BULAN EVALUASI
-            </label>
-            <div className="relative flex items-center">
-              <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 mr-2 shrink-0 pointer-events-none" />
-              <select
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              >
-                {MONTH_OPTIONS.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          <ModernKpiDropdown
+            variant="filter-card"
+            label="BULAN EVALUASI"
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            options={monthDropdownOptions}
+            icon={<Calendar className="w-3.5 h-3.5" />}
+            gridCols={2}
+          />
 
           {/* 3. TAHUN */}
-          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-              TAHUN PERIODE
-            </label>
-            <select
-              value={selectedYear}
-              onChange={e => setSelectedYear(e.target.value)}
-              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              {YEAR_OPTIONS.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
+          <ModernKpiDropdown
+            variant="filter-card"
+            label="TAHUN PERIODE"
+            value={selectedYear}
+            onChange={setSelectedYear}
+            options={yearDropdownOptions}
+            icon={<Star className="w-3.5 h-3.5" />}
+          />
 
           {/* 4. NAMA ADMIN (TERINTEGRASI USER MANAGEMENT & TERPISAH PER CABANG) */}
-          <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-              NAMA ADMIN PENJUALAN
-            </label>
-            <select
-              value={selectedAdminFilter}
-              onChange={e => setSelectedAdminFilter(e.target.value)}
-              className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              <option value="SEMUA ADMIN">Semua Admin ({activeBranchAdminNames.length})</option>
-              {activeBranchAdminNames.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
+          <ModernKpiDropdown
+            variant="filter-card"
+            label="NAMA ADMIN PENJUALAN"
+            value={selectedAdminFilter}
+            onChange={setSelectedAdminFilter}
+            options={adminFilterDropdownOptions}
+            icon={<Users className="w-3.5 h-3.5" />}
+            searchable
+            searchPlaceholder="Cari nama admin penjualan..."
+          />
 
           {/* 5 & 6. KOTA & AREA (Khusus tampilan Omset Admin) */}
           {activeTab === 'sales_kpi_omset' && (
             <>
-              <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-                  FILTER KOTA
-                </label>
-                <select
-                  value={selectedKotaFilter}
-                  onChange={e => setSelectedKotaFilter(e.target.value)}
-                  className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-                >
-                  <option value="SEMUA KOTA">Semua Kota</option>
-                  <option value="GENTENG">GENTENG</option>
-                  <option value="BALI - DENPASAR">BALI - DENPASAR</option>
-                  <option value="JEMBER">JEMBER</option>
-                  <option value="MUNCAR">MUNCAR</option>
-                  <option value="BANYUWANGI KOTA">BANYUWANGI KOTA</option>
-                  <option value="SITUBONDO">SITUBONDO</option>
-                  <option value="SURABAYA UTARA">SURABAYA UTARA</option>
-                  <option value="SIDOARJO">SIDOARJO</option>
-                  <option value="GRESIK">GRESIK</option>
-                </select>
-              </div>
-              <div className="bg-white/90 dark:bg-slate-950/70 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
-                  FILTER AREA
-                </label>
-                <select
-                  value={selectedAreaFilter}
-                  onChange={e => setSelectedAreaFilter(e.target.value)}
-                  className="w-full bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-                >
-                  <option value="SEMUA AREA">Semua Area</option>
-                  {OFFICIAL_DESTINATION_AREAS.map(area => (
-                    <option key={area} value={area}>{area}</option>
-                  ))}
-                </select>
-              </div>
+              <ModernKpiDropdown
+                variant="filter-card"
+                label="FILTER KOTA"
+                value={selectedKotaFilter}
+                onChange={setSelectedKotaFilter}
+                icon={<MapPin className="w-3.5 h-3.5" />}
+                options={[
+                  { value: 'SEMUA KOTA', label: 'Semua Kota' },
+                  { value: 'GENTENG', label: 'GENTENG' },
+                  { value: 'BALI - DENPASAR', label: 'BALI - DENPASAR' },
+                  { value: 'JEMBER', label: 'JEMBER' },
+                  { value: 'MUNCAR', label: 'MUNCAR' },
+                  { value: 'BANYUWANGI KOTA', label: 'BANYUWANGI KOTA' },
+                  { value: 'SITUBONDO', label: 'SITUBONDO' },
+                  { value: 'SURABAYA UTARA', label: 'SURABAYA UTARA' },
+                  { value: 'SIDOARJO', label: 'SIDOARJO' },
+                  { value: 'GRESIK', label: 'GRESIK' }
+                ]}
+              />
+              <ModernKpiDropdown
+                variant="filter-card"
+                label="FILTER AREA"
+                value={selectedAreaFilter}
+                onChange={setSelectedAreaFilter}
+                icon={<Truck className="w-3.5 h-3.5" />}
+                searchable
+                searchPlaceholder="Cari area kirim..."
+                options={[
+                  { value: 'SEMUA AREA', label: 'Semua Area' },
+                  ...OFFICIAL_DESTINATION_AREAS.map(area => ({
+                    value: area,
+                    label: area
+                  }))
+                ]}
+              />
             </>
           )}
         </div>
@@ -2599,11 +3069,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
                       Nama Admin Penjualan
                     </label>
-                    <select
+                    <ModernKpiDropdown
+                      variant="form-input"
                       value={manualKpiAdmin}
-                      onChange={e => {
-                        const adm = e.target.value;
-                        const existing = displayedKpiList.find(
+                      onChange={adm => {
+                        const existing = branchKpiRecords.find(
                           x => x.adminName.toUpperCase() === adm.toUpperCase()
                         );
                         setManualKpiAdmin(adm);
@@ -2612,13 +3082,13 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? String(existing.pembuatanFaktur) : '');
                         setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? String(existing.pengecekanFaktur) : '');
                         setManualKpiOrders(existing && existing.totalOrders > 0 ? String(existing.totalOrders) : '');
+                        setManualKpiIsInactive(Boolean(existing?.isInactive));
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-                    >
-                      {activeBranchAdminNames.map(adm => (
-                        <option key={adm} value={adm}>{adm}</option>
-                      ))}
-                    </select>
+                      options={adminSelectDropdownOptions}
+                      icon={<User className="w-3.5 h-3.5" />}
+                      searchable
+                      searchPlaceholder="Cari admin..."
+                    />
                   </div>
 
                   <div>
@@ -2633,7 +3103,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPrevPct}
                       onChange={e => setManualKpiPrevPct(e.target.value)}
                       placeholder="Contoh: 92.5"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
                     />
                   </div>
 
@@ -2649,7 +3119,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiValidasi}
                       onChange={e => setManualKpiValidasi(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
                     />
                   </div>
 
@@ -2665,7 +3135,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPembuatan}
                       onChange={e => setManualKpiPembuatan(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
                     />
                   </div>
 
@@ -2681,10 +3151,66 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPengecekan}
                       onChange={e => setManualKpiPengecekan(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
                     />
                   </div>
                 </div>
+
+                {/* FITUR ADMIN TIDAK AKTIF PADA BULAN EVALUASI (KHUSUS USER DENGAN HAK UBAH KPI STAFF) */}
+                {canEditKpiStaff && (
+                  <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start sm:items-center gap-3">
+                      <div
+                        className={`p-2 rounded-xl border shrink-0 ${
+                          manualKpiIsInactive
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {manualKpiIsInactive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Status Analisa Admin Bulan {selectedMonth} {selectedYear}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                              manualKpiIsInactive
+                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                                : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                            }`}
+                          >
+                            {manualKpiIsInactive ? 'Admin Tidak Aktif' : 'Admin Aktif'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Jika ditandai <strong>Admin Tidak Aktif</strong>, data KPI yang diinput pada bulan ini tidak ikut masuk pada perhitungan analisa &amp; rata-rata cabang.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setManualKpiIsInactive(prev => !prev)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition cursor-pointer shrink-0 ${
+                        manualKpiIsInactive
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                          : 'bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                      }`}
+                    >
+                      {manualKpiIsInactive ? (
+                        <>
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>Set Admin Aktif</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Set Admin Tidak Aktif</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -2752,6 +3278,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
                     Perhitungan Bulan Sebelumnya, Target, Aktual Bulan Ini &amp; Selisih Gap
                   </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800 text-[11px] font-bold">
+                    {activeDisplayedKpiList.length} Admin Aktif Dianalisa
+                  </span>
+                  {displayedKpiList.some(r => r.isInactive) && (
+                    <span className="px-3 py-1 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800 text-[11px] font-bold flex items-center gap-1.5">
+                      <UserX className="w-3.5 h-3.5" />
+                      <span>
+                        {displayedKpiList.filter(r => r.isInactive).length} Admin Tidak Aktif (Dikecualikan)
+                      </span>
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -2824,7 +3363,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </div>
             </div>
 
-            {/* Top Operational Summary Metric Cards */}
+            {/* Top Operational Summary Metric Cards (Strictly from Active Admins) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
                 <div>
@@ -2832,12 +3371,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     ADMIN TERBAIK #1 ({selectedMonth.slice(0, 3).toUpperCase()})
                   </span>
                   <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 truncate">
-                    {rankedBranchKpiList.some(r => r.avgMonthlyPct > 0)
-                      ? rankedBranchKpiList[0]?.adminName
+                    {activeDisplayedKpiList.some(r => r.avgMonthlyPct > 0)
+                      ? activeDisplayedKpiList[0]?.adminName
                       : 'Belum Ada Data'}
                   </div>
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-bold">
-                    Aktual: {rankedBranchKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap: {rankedBranchKpiList[0]?.gapPct ?? 100}%
+                    Aktual: {activeDisplayedKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap: {activeDisplayedKpiList[0]?.gapPct ?? 100}%
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
@@ -2851,10 +3390,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     RERATA VALIDASI SO &amp; WEB
                   </span>
                   <div className="text-lg font-black text-blue-600 dark:text-blue-400 mt-1">
-                    {displayedKpiList.some(r => r.validasiSoWeb > 0)
+                    {activeDisplayedKpiList.some(r => r.validasiSoWeb > 0)
                       ? (
-                          displayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
-                          displayedKpiList.length
+                          activeDisplayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
+                          activeDisplayedKpiList.length
                         ).toFixed(1)
                       : '0.0'}
                     %
@@ -2874,12 +3413,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     PEMBUATAN &amp; CEK FAKTUR
                   </span>
                   <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
-                    {displayedKpiList.some(r => r.pembuatanFaktur > 0 || r.pengecekanFaktur > 0)
+                    {activeDisplayedKpiList.some(r => r.pembuatanFaktur > 0 || r.pengecekanFaktur > 0)
                       ? (
-                          displayedKpiList.reduce(
+                          activeDisplayedKpiList.reduce(
                             (s, r) => s + (r.pembuatanFaktur + r.pengecekanFaktur) / 2,
                             0
-                          ) / displayedKpiList.length
+                          ) / activeDisplayedKpiList.length
                         ).toFixed(1)
                       : '0.0'}
                     %
@@ -2899,7 +3438,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     KESALAHAN INPUT DISKON
                   </span>
                   <div className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1">
-                    {displayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0)} Kali
+                    {activeDisplayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0)} Kali
                   </div>
                   <p className="text-[11px] text-slate-500 mt-1 font-semibold">
                     Total temuan bulan {selectedMonth}
@@ -2911,7 +3450,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </div>
             </div>
 
-            {/* CHART PERBANDINGAN METRIK KPI INDIVIDU ANTAR ADMIN */}
+            {/* CHART PERBANDINGAN METRIK KPI INDIVIDU ANTAR ADMIN (HANYA ADMIN AKTIF) */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
@@ -2919,7 +3458,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     Grafik Evaluasi KPI Bulanan Admin ({selectedMonth} {selectedYear})
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Perbandingan Bulan Sebelumnya (%), Validasi SO &amp; Web, Pembuatan Faktur, Pengecekan Faktur, Aktual (%) &amp; Selisih Gap
+                    Perbandingan Bulan Sebelumnya (%), Validasi SO &amp; Web, Pembuatan Faktur, Pengecekan Faktur, Aktual (%) &amp; Selisih Gap (Admin Aktif)
                   </p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
@@ -2930,7 +3469,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               <div className="h-[310px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
-                    data={displayedKpiList}
+                    data={activeDisplayedKpiList}
                     margin={{ top: 10, right: 15, left: -15, bottom: 10 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -3002,7 +3541,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left: Urutan Admin Terbaik (Leaderboard) */}
               <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
                       Urutan Admin Terbaik ({selectedMonth} {selectedYear})
@@ -3011,17 +3550,27 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       Klik nama admin untuk melihat rincian Bulan Sebelumnya, Target 100%, Aktual &amp; Selisih Gap
                     </p>
                   </div>
+                  {canEditKpiStaff && (
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[10px] font-extrabold text-slate-600 dark:text-slate-300 shrink-0">
+                      Hak Edit KPI: Dapat Set Admin Tidak Aktif
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-2.5">
                   {displayedKpiList.map(admin => {
                     const isFocused = focusedAdminKpi.adminName === admin.adminName;
+                    const isInactive = Boolean(admin.isInactive);
                     return (
                       <div
                         key={admin.adminName}
                         onClick={() => setFocusedAdminName(admin.adminName)}
                         className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                          isFocused
+                          isInactive
+                            ? isFocused
+                              ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-400 ring-1 ring-rose-500/20 opacity-85'
+                              : 'bg-slate-100/70 dark:bg-slate-950/60 border-dashed border-slate-300 dark:border-slate-800 opacity-75 hover:opacity-100'
+                            : isFocused
                             ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-500 ring-1 ring-indigo-500/20'
                             : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300'
                         }`}
@@ -3029,7 +3578,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         <div className="flex items-center gap-3 min-w-0">
                           <div
                             className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
-                              admin.rank === 1
+                              isInactive
+                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                                : admin.rank === 1
                                 ? 'bg-amber-400 text-slate-950 shadow-xs'
                                 : admin.rank === 2
                                 ? 'bg-slate-300 text-slate-900'
@@ -3038,16 +3589,27 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                                 : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
                             }`}
                           >
-                            #{admin.rank}
+                            {isInactive ? <UserX className="w-4 h-4" /> : `#${admin.rank}`}
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`text-xs font-black truncate ${
+                                  isInactive
+                                    ? 'line-through text-slate-500 dark:text-slate-400'
+                                    : 'text-slate-900 dark:text-white'
+                                }`}
+                              >
                                 {admin.adminName}
                               </span>
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                                 {admin.branchId === 'cab-sidoarjo' ? 'SDA' : 'BWI'}
                               </span>
+                              {isInactive && (
+                                <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                  Admin Tidak Aktif &bull; Tidak Masuk Analisa
+                                </span>
+                              )}
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
                               <span>Bulan Lalu: <strong>{admin.prevMonthPct}%</strong></span>
@@ -3061,38 +3623,84 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2.5 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right">
-                            <div className="text-sm font-black text-indigo-600 dark:text-indigo-400">
-                              Aktual: {admin.avgMonthlyPct}%
+                            <div
+                              className={`text-sm font-black ${
+                                isInactive
+                                  ? 'text-slate-400 dark:text-slate-500'
+                                  : 'text-indigo-600 dark:text-indigo-400'
+                              }`}
+                            >
+                              {isInactive ? 'Dikecualikan' : `Aktual: ${admin.avgMonthlyPct}%`}
                             </div>
                             <div
                               className={`text-[10px] font-bold ${
-                                admin.discountErrorsCount === 0
+                                isInactive
+                                  ? 'text-rose-500 dark:text-rose-400'
+                                  : admin.discountErrorsCount === 0
                                   ? 'text-emerald-600 dark:text-emerald-400'
                                   : 'text-rose-600 dark:text-rose-400'
                               }`}
                             >
-                              Salah Diskon: {admin.discountErrorsCount}x
+                              {isInactive
+                                ? `Input: ${admin.avgMonthlyPct}%`
+                                : `Salah Diskon: ${admin.discountErrorsCount}x`}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={ev => {
-                              ev.stopPropagation();
-                              setManualKpiAdmin(admin.adminName);
-                              setManualKpiPrevPct(admin.prevMonthPct > 0 ? String(admin.prevMonthPct) : '');
-                              setManualKpiValidasi(admin.validasiSoWeb > 0 ? String(admin.validasiSoWeb) : '');
-                              setManualKpiPembuatan(admin.pembuatanFaktur > 0 ? String(admin.pembuatanFaktur) : '');
-                              setManualKpiPengecekan(admin.pengecekanFaktur > 0 ? String(admin.pengecekanFaktur) : '');
-                              setManualKpiOrders(admin.totalOrders > 0 ? String(admin.totalOrders) : '');
-                              setIsManualKpiOpen(true);
-                            }}
-                            className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 cursor-pointer"
-                            title="Edit KPI Admin ini"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+
+                          {canEditKpiStaff && (
+                            <button
+                              type="button"
+                              onClick={ev => {
+                                ev.stopPropagation();
+                                handleToggleAdminActiveStatus(admin.adminName, admin.branchId);
+                              }}
+                              className={`px-2.5 py-1.5 rounded-xl border text-[10px] font-extrabold flex items-center gap-1 transition cursor-pointer ${
+                                isInactive
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                                  : 'bg-rose-50/70 dark:bg-rose-950/40 border-rose-200/80 dark:border-rose-800/70 text-rose-600 dark:text-rose-300 hover:bg-rose-100'
+                              }`}
+                              title={
+                                isInactive
+                                  ? 'Aktifkan kembali admin ini agar masuk analisa bulan ini'
+                                  : 'Tandai Admin Tidak Aktif agar data bulan ini tidak ikut masuk analisa'
+                              }
+                            >
+                              {isInactive ? (
+                                <>
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">Aktifkan</span>
+                                </>
+                              ) : (
+                                <>
+                                  <UserX className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">Tidak Aktif</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {canEditKpiStaff && (
+                            <button
+                              type="button"
+                              onClick={ev => {
+                                ev.stopPropagation();
+                                setManualKpiAdmin(admin.adminName);
+                                setManualKpiPrevPct(admin.prevMonthPct > 0 ? String(admin.prevMonthPct) : '');
+                                setManualKpiValidasi(admin.validasiSoWeb > 0 ? String(admin.validasiSoWeb) : '');
+                                setManualKpiPembuatan(admin.pembuatanFaktur > 0 ? String(admin.pembuatanFaktur) : '');
+                                setManualKpiPengecekan(admin.pengecekanFaktur > 0 ? String(admin.pengecekanFaktur) : '');
+                                setManualKpiOrders(admin.totalOrders > 0 ? String(admin.totalOrders) : '');
+                                setManualKpiIsInactive(Boolean(admin.isInactive));
+                                setIsManualKpiOpen(true);
+                              }}
+                              className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 cursor-pointer"
+                              title="Edit KPI Admin ini"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -3102,18 +3710,55 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
               {/* Right: Radar & Breakdown Detail for Selected Admin */}
               <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-5">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
-                      Rincian Capaian KPI — {focusedAdminKpi.adminName}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                        Rincian Capaian KPI — {focusedAdminKpi.adminName}
+                      </h3>
+                      {focusedAdminKpi.isInactive && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                          Admin Tidak Aktif
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Peringkat #{focusedAdminKpi.rank} &bull; Target 100% &bull; Aktual {focusedAdminKpi.avgMonthlyPct}% &bull; Gap {focusedAdminKpi.gapPct}%
+                      {focusedAdminKpi.isInactive
+                        ? `Status Tidak Aktif pada ${selectedMonth} ${selectedYear} (Data tidak ikut masuk pada analisa cabang)`
+                        : `Peringkat #${focusedAdminKpi.rank} • Target 100% • Aktual ${focusedAdminKpi.avgMonthlyPct}% • Gap ${focusedAdminKpi.gapPct}%`}
                     </p>
                   </div>
-                  <span className="px-3 py-1 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-black">
-                    Aktual: {focusedAdminKpi.avgMonthlyPct}%
-                  </span>
+
+                  <div className="flex items-center gap-2">
+                    {canEditKpiStaff && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleToggleAdminActiveStatus(focusedAdminKpi.adminName, focusedAdminKpi.branchId)
+                        }
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer ${
+                          focusedAdminKpi.isInactive
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600'
+                            : 'bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                        }`}
+                      >
+                        {focusedAdminKpi.isInactive ? (
+                          <>
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>Aktifkan di Analisa</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserX className="w-3.5 h-3.5" />
+                            <span>Set Admin Tidak Aktif</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <span className="px-3 py-1 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-black">
+                      Aktual: {focusedAdminKpi.avgMonthlyPct}%
+                    </span>
+                  </div>
                 </div>
 
                 {/* 4 Kotak Perhitungan Individu: Bulan Lalu, Target 100%, Aktual, Selisih Gap */}
@@ -3352,15 +3997,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Admin</label>
-                      <select
+                      <ModernKpiDropdown
                         value={dscAdmin}
-                        onChange={e => setDscAdmin(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
-                      >
-                        {activeBranchAdminNames.map(a => (
-                          <option key={a} value={a}>{a}</option>
-                        ))}
-                      </select>
+                        onChange={val => setDscAdmin(val)}
+                        icon={<UserCheck className="w-3.5 h-3.5" />}
+                        searchable
+                        searchPlaceholder="Cari nama admin..."
+                        options={activeBranchAdminNames.map(a => ({
+                          value: a,
+                          label: a,
+                          badge: sidoarjoAdminNames.includes(a) ? 'SDA' : 'BWI',
+                          badgeTone: sidoarjoAdminNames.includes(a) ? 'emerald' : 'indigo'
+                        }))}
+                      />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">No. Faktur / SO</label>
@@ -3608,15 +4257,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
                       Nama (Admin / Checker)
                     </label>
-                    <select
+                    <ModernKpiDropdown
                       value={newDendaAdmin}
-                      onChange={e => setNewDendaAdmin(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
-                    >
-                      {activeBranchAdminNames.map(a => (
-                        <option key={a} value={a}>{a}</option>
-                      ))}
-                    </select>
+                      onChange={val => setNewDendaAdmin(val)}
+                      icon={<UserCheck className="w-3.5 h-3.5" />}
+                      searchable
+                      searchPlaceholder="Cari nama admin..."
+                      options={activeBranchAdminNames.map(a => ({
+                        value: a,
+                        label: a,
+                        badge: sidoarjoAdminNames.includes(a) ? 'SDA' : 'BWI',
+                        badgeTone: sidoarjoAdminNames.includes(a) ? 'emerald' : 'indigo'
+                      }))}
+                    />
                   </div>
 
                   <div>
@@ -3934,17 +4587,30 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               >
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Unit Nusantara</label>
-                  <select
+                  <ModernKpiDropdown
                     value={reoUnit}
-                    onChange={e => {
-                      const u = e.target.value as 'Nusantara Dr. Soetomo' | 'Nusantara Expand';
+                    onChange={val => {
+                      const u = val as 'Nusantara Dr. Soetomo' | 'Nusantara Expand';
                       setReoUnit(u);
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
-                  >
-                    <option value="Nusantara Dr. Soetomo">Nusantara Dr. Soetomo</option>
-                    <option value="Nusantara Expand">Nusantara Expand</option>
-                  </select>
+                    icon={<Building className="w-3.5 h-3.5" />}
+                    options={[
+                      {
+                        value: 'Nusantara Dr. Soetomo',
+                        label: 'Nusantara Dr. Soetomo',
+                        subLabel: 'Pusat Operasional Dr. Soetomo',
+                        badge: 'UTAMA',
+                        badgeTone: 'indigo'
+                      },
+                      {
+                        value: 'Nusantara Expand',
+                        label: 'Nusantara Expand',
+                        subLabel: 'Ekspansi Jaringan Nusantara',
+                        badge: 'EXPAND',
+                        badgeTone: 'emerald'
+                      }
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Analisa (Tanggal)</label>
@@ -4362,10 +5028,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
                       Nama Admin Penjualan
                     </label>
-                    <select
+                    <ModernKpiDropdown
                       value={manualOmsetAdmin}
-                      onChange={e => {
-                        const adm = e.target.value;
+                      onChange={adm => {
                         const existing = synchronizedOmsetRows.find(
                           x => x.adminName.toUpperCase() === adm.toUpperCase()
                         );
@@ -4376,12 +5041,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         setManualOmsetQty(existing && existing.qtyNetto > 0 ? String(existing.qtyNetto) : '');
                         setManualOmsetLastMonth(existing && existing.lastMonthOmzet > 0 ? String(existing.lastMonthOmzet) : '');
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white"
-                    >
-                      {activeBranchAdminNames.map(adm => (
-                        <option key={adm} value={adm}>{adm}</option>
-                      ))}
-                    </select>
+                      icon={<UserCheck className="w-3.5 h-3.5" />}
+                      searchable
+                      searchPlaceholder="Cari nama admin..."
+                      options={activeBranchAdminNames.map(adm => ({
+                        value: adm,
+                        label: adm,
+                        badge: sidoarjoAdminNames.includes(adm) ? 'SDA' : 'BWI',
+                        badgeTone: sidoarjoAdminNames.includes(adm) ? 'emerald' : 'indigo'
+                      }))}
+                    />
                   </div>
 
                   <div>

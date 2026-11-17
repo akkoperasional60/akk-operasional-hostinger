@@ -21,6 +21,14 @@ import {
   FinanceMonitoringLedgerView,
   CustomerMasterMappingView
 } from './finance/FinanceLedgerAndMapping';
+import {
+  SalesNameMappingRecord,
+  DEFAULT_SALES_MAPPINGS,
+  SALES_MAPPINGS_UPDATED_EVENT,
+  fetchSalesNameMappingsFromMysql,
+  getCachedSalesNameMappings,
+  resolveSalesFromMappings
+} from './marketing/MarketingInvoiceValidationView';
 
 const MetricCard = ({ title, value, subtext, icon: Icon, color }: { title: string, value: string, subtext: string, icon: any, color: string }) => (
   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-xs">
@@ -1806,6 +1814,27 @@ const FinanceDashboard: React.FC<{
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('UNPAID_ONLY');
   const [agingFilter, setAgingFilter] = useState<string>('ALL');
+  const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>(() =>
+    getCachedSalesNameMappings()
+  );
+  const [mobileSalesFilter, setMobileSalesFilter] = useState<string>('ALL');
+
+  useEffect(() => {
+    let mounted = true;
+    void fetchSalesNameMappingsFromMysql().then(list => {
+      if (mounted && Array.isArray(list) && list.length > 0) {
+        setSalesMappings(list);
+      }
+    });
+    const handleMappingsUpdate = () => {
+      setSalesMappings(getCachedSalesNameMappings());
+    };
+    window.addEventListener(SALES_MAPPINGS_UPDATED_EVENT, handleMappingsUpdate);
+    return () => {
+      mounted = false;
+      window.removeEventListener(SALES_MAPPINGS_UPDATED_EVENT, handleMappingsUpdate);
+    };
+  }, []);
 
   // Mobile Billing App State (Tampilan HP seperti Admin Penjualan & Portal Driver)
   const [mobileNavTab, setMobileNavTab] = useState<'form_tagih' | 'daftar_toko' | 'riwayat_bukti'>('form_tagih');
@@ -1916,7 +1945,7 @@ const FinanceDashboard: React.FC<{
     });
   }, [invoices, searchQuery, statusFilter, agingFilter, branchFilter, branches]);
 
-  // Invoices filtered by Master Cabang & Tim Penagihan (Finance vs Sales) for Mobile App
+  // Invoices filtered by Master Cabang, Tim Penagihan & Mapping Nama Sales for Mobile App
   const mobileBranchInvoices = useMemo(() => {
     const selectedMasterBranch = branches.find(
       b => b.name.toLowerCase() === branchFilter.toLowerCase() || b.slug.toLowerCase() === branchFilter.toLowerCase()
@@ -1925,6 +1954,15 @@ const FinanceDashboard: React.FC<{
       const team = inv.billingTeam || 'FINANCE';
       if (billingTeamFilter !== 'ALL' && team !== billingTeamFilter) {
         return false;
+      }
+      if (mobileSalesFilter !== 'ALL') {
+        const resolved = resolveSalesFromMappings(inv.salesPersonName || '', salesMappings);
+        const targetLower = mobileSalesFilter.toLowerCase();
+        const rawLower = (inv.salesPersonName || '').toLowerCase();
+        const matchMapped =
+          (resolved && resolved.userFullName.toLowerCase() === targetLower) ||
+          rawLower.includes(targetLower);
+        if (!matchMapped) return false;
       }
       if (branchFilter === 'ALL') return true;
       const regLower = inv.region.toLowerCase();
@@ -1939,7 +1977,7 @@ const FinanceDashboard: React.FC<{
         )
       );
     });
-  }, [invoices, branchFilter, branches, billingTeamFilter]);
+  }, [invoices, branchFilter, branches, billingTeamFilter, mobileSalesFilter, salesMappings]);
 
   const activeMobileInvoice = useMemo(() => {
     return (
@@ -2298,6 +2336,36 @@ const FinanceDashboard: React.FC<{
                   </select>
                 </div>
 
+                {/* Filter Sales Terintegrasi Mapping Nama Sales (Marketing Offline) */}
+                <div className="flex items-center gap-2 bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="text-[10px] font-bold uppercase text-slate-400 shrink-0">Sales:</span>
+                  <select
+                    value={mobileSalesFilter}
+                    onChange={e => setMobileSalesFilter(e.target.value)}
+                    className="w-full bg-transparent text-xs font-black text-emerald-300 focus:outline-none cursor-pointer truncate"
+                  >
+                    <option value="ALL" className="bg-slate-900 text-white">
+                      Semua Sales ({salesMappings.length || DEFAULT_SALES_MAPPINGS.length} Mapping Sales)
+                    </option>
+                    {(salesMappings.length > 0 ? salesMappings : DEFAULT_SALES_MAPPINGS).map(m => (
+                      <option key={m.id} value={m.userFullName} className="bg-slate-900 text-white">
+                        {m.userFullName} ({m.masterSalesName1}{m.masterSalesName2 ? ` / ${m.masterSalesName2}` : ''})
+                      </option>
+                    ))}
+                  </select>
+                  {onNavigateTab && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('marketing_sales_mapping')}
+                      title="Buka Sub-Menu Mapping Nama Sales"
+                      className="px-2 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[9px] font-black uppercase shrink-0 cursor-pointer"
+                    >
+                      Mapping
+                    </button>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-2 bg-slate-950/90 border border-indigo-500/40 rounded-xl px-3 py-2">
                   <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase shrink-0">
                     TOKO
@@ -2349,9 +2417,17 @@ const FinanceDashboard: React.FC<{
                                   : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30'
                               }`}
                             >
-                              {activeMobileInvoice.billingTeam === 'SALES'
-                                ? `Tagihan Khusus Sales${activeMobileInvoice.salesPersonName ? ` • ${activeMobileInvoice.salesPersonName}` : ''}`
-                                : 'Tim Penagihan Finance'}
+                              {(() => {
+                                if (activeMobileInvoice.billingTeam !== 'SALES') return 'Tim Penagihan Finance';
+                                const mapped = resolveSalesFromMappings(
+                                  activeMobileInvoice.salesPersonName || '',
+                                  salesMappings
+                                );
+                                if (mapped) {
+                                  return `Sales: ${mapped.userFullName} (${mapped.userPhone})`;
+                                }
+                                return `Tagihan Khusus Sales${activeMobileInvoice.salesPersonName ? ` • ${activeMobileInvoice.salesPersonName}` : ''}`;
+                              })()}
                             </span>
                           </div>
                           <h3 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
@@ -3311,16 +3387,41 @@ const FinanceDashboard: React.FC<{
                 </div>
                 <div>
                   <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    {newInvForm.billingTeam === 'SALES' ? 'Nama Sales Penagih (PIC Sales)' : 'Catatan Penagihan'}
+                    {newInvForm.billingTeam === 'SALES'
+                      ? 'Nama Sales Penagih (Terintegrasi Mapping Nama Sales)'
+                      : 'Catatan Penagihan'}
                   </label>
                   {newInvForm.billingTeam === 'SALES' ? (
-                    <input
-                      type="text"
-                      placeholder="Contoh: Rendra Saputra / Dina Mariana"
-                      value={newInvForm.salesPersonName}
-                      onChange={e => setNewInvForm({ ...newInvForm, salesPersonName: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                    />
+                    <div className="space-y-1.5">
+                      <select
+                        value={newInvForm.salesPersonName}
+                        onChange={e => setNewInvForm({ ...newInvForm, salesPersonName: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold text-xs cursor-pointer"
+                      >
+                        {(salesMappings.length > 0 ? salesMappings : DEFAULT_SALES_MAPPINGS).map(m => (
+                          <React.Fragment key={m.id}>
+                            <option value={m.userFullName}>
+                              {m.userFullName} — WA {m.userPhone} ({m.masterSalesName1}{m.masterSalesName2 ? ` / ${m.masterSalesName2}` : ''})
+                            </option>
+                            <option value={m.masterSalesName1}>
+                              Master 1: {m.masterSalesName1} ({m.userFullName})
+                            </option>
+                            {m.masterSalesName2 && (
+                              <option value={m.masterSalesName2}>
+                                Master 2: {m.masterSalesName2} ({m.userFullName})
+                              </option>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Atau ketik manual nama Sales..."
+                        value={newInvForm.salesPersonName}
+                        onChange={e => setNewInvForm({ ...newInvForm, salesPersonName: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold text-xs"
+                      />
+                    </div>
                   ) : (
                     <input
                       type="text"

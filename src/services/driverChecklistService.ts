@@ -88,15 +88,25 @@ class DriverChecklistService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('storage', (evt) => {
-        if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3') {
-          this.memoryChecklists = null;
-          window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+      try {
+        const legacy = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3');
+        if (legacy) {
+          const parsed = JSON.parse(legacy);
+          if (Array.isArray(parsed)) {
+            this.memoryChecklists = parsed
+              .filter(chk => chk && chk.id && !String(chk.id).startsWith('CHK-INIT-'))
+              .map(chk => this.normalizeChecklist(chk));
+          }
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem('akk_driver_vehicle_checklists_v3');
         }
-      });
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {}
       setTimeout(() => {
         void this.syncFromServer();
-      }, 300);
+      }, 150);
     }
   }
 
@@ -156,25 +166,8 @@ class DriverChecklistService {
     if (this.memoryChecklists !== null) {
       return this.memoryChecklists;
     }
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3');
-      let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) {
-        list = [];
-      }
-
-      // Filter out legacy fake sample checklists (CHK-INIT-...)
-      list = list
-        .filter(chk => chk && chk.id && !String(chk.id).startsWith('CHK-INIT-'))
-        .map(chk => this.normalizeChecklist(chk));
-
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      this.memoryChecklists = list;
-      return list;
-    } catch {
-      this.memoryChecklists = [];
-      return [];
-    }
+    this.memoryChecklists = [];
+    return this.memoryChecklists;
   }
 
   public async syncFromServer(): Promise<DriverVehicleChecklist[]> {
@@ -192,7 +185,12 @@ class DriverChecklistService {
         return this.loadAllChecklists();
       }
       const data = await res.json();
-      const serverList: DriverVehicleChecklist[] = Array.isArray(data?.checklists) ? data.checklists : [];
+      const rawServerList = Array.isArray(data?.checklists)
+        ? data.checklists
+        : Array.isArray(data?.data)
+        ? data.data
+        : [];
+      const serverList: DriverVehicleChecklist[] = rawServerList;
       const localList = this.loadAllChecklists();
 
       const mergedMap = new Map<string, DriverVehicleChecklist>();
@@ -240,27 +238,7 @@ class DriverChecklistService {
   }
 
   private persistLocal(list: DriverVehicleChecklist[]): void {
-    const trimmedAll = list.slice(0, 60).map((chk, idx) => {
-      if (idx < 8) return chk;
-      return {
-        ...chk,
-        photoEvidenceUrl: chk.photoEvidenceUrl?.startsWith('data:') ? undefined : chk.photoEvidenceUrl,
-        items: chk.items.map(it => ({
-          ...it,
-          photoUrl: it.photoUrl?.startsWith('data:') ? undefined : it.photoUrl
-        }))
-      };
-    });
-    this.memoryChecklists = trimmedAll;
-    const savedOk = safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll));
-    if (!savedOk) {
-      safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
-    }
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
-      }
-    } catch {}
+    this.memoryChecklists = list.slice(0, 100);
   }
 
   public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
@@ -382,8 +360,6 @@ class DriverChecklistService {
       const list = this.loadAllChecklists();
       const filtered = list.filter(c => c.id !== cleanId);
       this.memoryChecklists = filtered;
-      safeSetItem(STORAGE_KEY, JSON.stringify(filtered));
-      safeSetItem('akk_driver_vehicle_checklists_v3', JSON.stringify(filtered));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
         void fetch(`/api/fleet-checklists/${encodeURIComponent(cleanId)}`, {

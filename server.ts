@@ -2362,15 +2362,94 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   const deletedDriverReportIds = new Set<string>();
   const driverReportSseClients = new Set<express.Response>();
 
+  let inMemoryDriverShifts: any[] = [];
+  let inMemoryDriverPins: Record<string, string> = {};
+  let inMemoryShiftsLoadedFromDb = false;
+
+  const loadDriverShiftsFromDbIfNeeded = async (): Promise<{ shifts: any[]; pins: Record<string, string> }> => {
+    if (inMemoryShiftsLoadedFromDb) {
+      return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
+    }
+    inMemoryShiftsLoadedFromDb = true;
+    if (!isDatabaseConfigured()) {
+      return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
+    }
+    try {
+      const [shiftRows, pinRows] = await Promise.all([
+        mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['driver_shifts_v2']).catch(() => []),
+        mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['driver_pins_v2']).catch(() => [])
+      ]);
+      if (Array.isArray(shiftRows) && shiftRows.length > 0 && shiftRows[0].state_json) {
+        const parsed = typeof shiftRows[0].state_json === 'string'
+          ? JSON.parse(shiftRows[0].state_json)
+          : shiftRows[0].state_json;
+        if (Array.isArray(parsed)) {
+          inMemoryDriverShifts = parsed;
+        }
+      }
+      if (Array.isArray(pinRows) && pinRows.length > 0 && pinRows[0].state_json) {
+        const parsedPins = typeof pinRows[0].state_json === 'string'
+          ? JSON.parse(pinRows[0].state_json)
+          : pinRows[0].state_json;
+        if (parsedPins && typeof parsedPins === 'object') {
+          inMemoryDriverPins = parsedPins;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Driver Shifts Load Warning]', err?.message || err);
+    }
+    return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
+  };
+
+  const persistDriverShiftsToDb = async (shiftsList: any[], pinsMap?: Record<string, string>) => {
+    inMemoryDriverShifts = shiftsList.slice(0, 150);
+    if (pinsMap) {
+      inMemoryDriverPins = { ...pinsMap };
+    }
+    if (!isDatabaseConfigured()) return;
+    try {
+      await mysqlQuery(
+        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+        ['driver_shifts_v2', JSON.stringify(inMemoryDriverShifts)]
+      );
+      if (pinsMap) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['driver_pins_v2', JSON.stringify(inMemoryDriverPins)]
+        );
+      }
+    } catch (err: any) {
+      console.warn('[Driver Shifts Persist Warning]', err?.message || err);
+    }
+  };
+
   const loadDriverReportsFromDbIfNeeded = async (): Promise<any[]> => {
     if (inMemoryReportsLoadedFromDb) return inMemoryDriverReports;
     inMemoryReportsLoadedFromDb = true;
     if (!isDatabaseConfigured()) return inMemoryDriverReports;
     try {
-      const rows = await mysqlQuery<any[]>(
-        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
-        ['driver_reports_payload']
-      );
+      const [rows, delRows] = await Promise.all([
+        mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+          ['driver_reports_payload']
+        ).catch(() => []),
+        mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+          ['driver_reports_deleted_ids_v1']
+        ).catch(() => [])
+      ]);
+      if (Array.isArray(delRows) && delRows.length > 0 && delRows[0].state_json) {
+        const parsedDel = typeof delRows[0].state_json === 'string'
+          ? JSON.parse(delRows[0].state_json)
+          : delRows[0].state_json;
+        if (Array.isArray(parsedDel)) {
+          parsedDel.forEach((id: any) => {
+            if (id) deletedDriverReportIds.add(String(id));
+          });
+        }
+      }
       if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
         const parsed = typeof rows[0].state_json === 'string'
           ? JSON.parse(rows[0].state_json)
@@ -2412,11 +2491,18 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
 
     try {
-      await mysqlQuery(
-        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
-         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-        ['driver_reports_payload', JSON.stringify(trimmed)]
-      );
+      await Promise.all([
+        mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['driver_reports_payload', JSON.stringify(trimmed)]
+        ),
+        mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['driver_reports_deleted_ids_v1', JSON.stringify(Array.from(deletedDriverReportIds).slice(-500))]
+        )
+      ]);
     } catch (err: any) {
       console.warn('[Driver Reports Persist Warning]', err?.message || err);
     }
@@ -2437,7 +2523,71 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   };
 
-  app.get("/api/driver-reports/stream", requireScheduleStatusWrite, (req, res) => {
+  app.get("/api/driver-shifts", async (_req, res) => {
+    const { shifts, pins } = await loadDriverShiftsFromDbIfNeeded();
+    return res.json({
+      success: true,
+      shifts,
+      pins,
+      count: shifts.length
+    });
+  });
+
+  app.post("/api/driver-shifts", express.json({ limit: '5mb' }), async (req, res) => {
+    await loadDriverShiftsFromDbIfNeeded();
+    const { shift, shifts, pins } = req.body || {};
+    let nextShifts = [...inMemoryDriverShifts];
+    if (Array.isArray(shifts)) {
+      const map = new Map<string, any>();
+      for (const s of [...shifts, ...nextShifts]) {
+        if (s && s.id) {
+          map.set(String(s.id), s);
+        }
+      }
+      nextShifts = Array.from(map.values()).sort(
+        (a, b) => new Date(b.checkinTime || b.createdAt || 0).getTime() - new Date(a.checkinTime || a.createdAt || 0).getTime()
+      );
+    } else if (shift && shift.id) {
+      const idx = nextShifts.findIndex((s: any) => s.id === shift.id);
+      if (idx >= 0) {
+        nextShifts[idx] = { ...nextShifts[idx], ...shift };
+      } else {
+        nextShifts.unshift(shift);
+      }
+    }
+    const nextPins = pins && typeof pins === 'object' ? { ...inMemoryDriverPins, ...pins } : undefined;
+    await persistDriverShiftsToDb(nextShifts, nextPins);
+    return res.json({
+      success: true,
+      shifts: inMemoryDriverShifts,
+      pins: inMemoryDriverPins,
+      count: inMemoryDriverShifts.length
+    });
+  });
+
+  app.delete("/api/driver-shifts/:id", async (req: any, res) => {
+    const authUser = await getSessionUser(req);
+    const authRole = String(authUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    if (authUser && authRole !== 'superadmin') {
+      return res.status(403).json({ success: false, error: "Akses hapus shift khusus Super Admin" });
+    }
+    await loadDriverShiftsFromDbIfNeeded();
+    const shiftId = String(req.params.id || '').trim();
+    const driverName = String(req.query?.driverName || '').trim().toLowerCase();
+    const dateStr = String(req.query?.date || '').trim();
+    const filtered = inMemoryDriverShifts.filter((s: any) => {
+      if (!s) return false;
+      if (s.id === shiftId) return false;
+      if (driverName && dateStr && String(s.driverName || '').toLowerCase() === driverName && s.date === dateStr) {
+        return false;
+      }
+      return true;
+    });
+    await persistDriverShiftsToDb(filtered);
+    return res.json({ success: true, shifts: inMemoryDriverShifts, count: inMemoryDriverShifts.length });
+  });
+
+  app.get("/api/driver-reports/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
@@ -2458,7 +2608,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     });
   });
 
-  app.get("/api/driver-reports", requireScheduleStatusWrite, async (_req, res) => {
+  app.get("/api/driver-reports", async (_req, res) => {
     const list = await loadDriverReportsFromDbIfNeeded();
     return res.json({
       success: true,
@@ -2468,7 +2618,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     });
   });
 
-  app.post("/api/driver-reports", requireScheduleStatusWrite, async (req, res) => {
+  app.post("/api/driver-reports", express.json({ limit: '20mb' }), async (req, res) => {
     await loadDriverReportsFromDbIfNeeded();
     const { report, reports } = req.body || {};
 
@@ -2548,10 +2698,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return res.status(400).json({ success: false, error: "Payload report tidak valid" });
   });
 
-  app.patch("/api/driver-reports/:id/solution", requireLogisticsWrite, async (req: any, res) => {
+  app.patch("/api/driver-reports/:id/solution", express.json(), async (req: any, res) => {
     await loadDriverReportsFromDbIfNeeded();
     const reportId = String(req.params.id || '');
-    const { solution, status, reportSnapshot } = req.body || {};
+    const { solution, solutionBy, status, reportSnapshot } = req.body || {};
     const cleanSolution = String(solution || '').trim();
     if (!cleanSolution) {
       return res.status(400).json({ success: false, error: 'Solusi/arahan wajib diisi' });
@@ -2564,11 +2714,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
 
     if (idx >= 0) {
+      const authUser = await getSessionUser(req).catch(() => null);
       const allowedStatuses = new Set(['verified', 'follow_up', 'resolved']);
       inMemoryDriverReports[idx] = {
         ...inMemoryDriverReports[idx],
         solution: cleanSolution,
-        solutionBy: String(req.authUser?.full_name || req.authUser?.email || 'SPV Logistik DC'),
+        solutionBy: String(solutionBy || authUser?.full_name || authUser?.email || 'SPV Logistik DC'),
         solutionAt: new Date().toISOString(),
         status: allowedStatuses.has(String(status)) ? String(status) : 'resolved',
         driverAcknowledged: false,
@@ -2583,7 +2734,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
   });
 
-  app.patch("/api/driver-reports/:id/acknowledge", requireScheduleStatusWrite, async (req, res) => {
+  app.patch("/api/driver-reports/:id/acknowledge", express.json(), async (req, res) => {
     await loadDriverReportsFromDbIfNeeded();
     const reportId = String(req.params.id || '');
     const idx = inMemoryDriverReports.findIndex((r: any) => r.id === reportId);
@@ -2609,12 +2760,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
 
       const authUser = await getSessionUser(req);
-      const authRole = String(authUser?.role || '').toLowerCase();
+      const authRole = String(authUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
       if (isDatabaseConfigured()) {
-        if (!authUser || (authRole !== 'super_admin' && authRole !== 'admin')) {
+        if (!authUser || authRole !== 'superadmin') {
           return res.status(403).json({ success: false, error: "Akses hapus laporan khusus Super Admin" });
         }
-      } else if (authUser && authRole !== 'super_admin' && authRole !== 'admin') {
+      } else if (authUser && authRole !== 'superadmin') {
         return res.status(403).json({ success: false, error: "Akses hapus laporan khusus Super Admin" });
       }
 
@@ -3217,13 +3368,18 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       await savePersistedChecklists(trimmed).catch(() => {
         inMemoryFleetChecklists = trimmed;
       });
-      return res.json({ success: true, count: trimmed.length, data: syncedItem });
+      return res.json({ success: true, count: trimmed.length, data: syncedItem, checklist: syncedItem });
     } catch (err: any) {
-      return res.json({ success: true, data: incoming, warning: err?.message });
+      return res.json({ success: true, data: incoming, checklist: incoming, warning: err?.message });
     }
   });
 
-  app.delete("/api/fleet-checklists/:id", async (req, res) => {
+  app.delete("/api/fleet-checklists/:id", async (req: any, res) => {
+    const authUser = await getSessionUser(req).catch(() => null);
+    const authRole = String(authUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    if (authUser && authRole !== 'superadmin') {
+      return res.status(403).json({ success: false, error: 'Akses hapus laporan checklist khusus Super Admin' });
+    }
     const id = String(req.params.id || '').trim();
     try {
       const current = await getPersistedChecklists();
@@ -4687,31 +4843,90 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // 📋 Validasi Faktur Pengiriman Esok — Tim Marketing Offline (Tersimpan langsung di MySQL app_state & Disk)
-  let inMemoryMarketingValidations: any[] = (() => {
-    const disk = readPersistentAppState('marketing_invoice_validations_v1');
-    return Array.isArray(disk) ? disk : [];
-  })();
-  let inMemoryMarketingValidationsLoaded = inMemoryMarketingValidations.length > 0;
+  // 📋 Validasi Faktur & Rincian Barang Pengiriman + Mapping Nama Sales — Tersimpan murni di MySQL app_state
+  const LEGACY_DUMMY_MIV_IDS = new Set([
+    'MIV-1384',
+    'MIV-0625',
+    'MIV-0187',
+    'MIV-1312',
+    'MIV-1313',
+    'MIV-1340',
+    'MIV-1321',
+    'MIV-1289',
+    'MIV-1332',
+    'MIV-1299',
+    'MIV-1298',
+    'MIV-1301',
+    'MIV-1054'
+  ]);
+
+  const sanitizeMarketingValidations = (list: any[]): any[] => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((r: any) => r && !LEGACY_DUMMY_MIV_IDS.has(String(r.id || '')))
+      .map((r: any) => {
+        const rawLines = Array.isArray(r.lineItems) ? r.lineItems : [];
+        const validLines = rawLines.filter((li: any) => {
+          const total = Number(li?.totalHarga) || 0;
+          const harga = Number(li?.hargaSatuan) || 0;
+          return total > 0 || harga > 0;
+        });
+        const status =
+          r.validationStatus === 'Revisi / Tunda Kirim' || r.validationStatus === 'Revisi'
+            ? 'Revisi'
+            : r.validationStatus === 'Tervalidasi Siap Kirim'
+            ? 'Tervalidasi Siap Kirim'
+            : 'Menunggu Validasi';
+        const computedTotal =
+          validLines.length > 0
+            ? validLines.reduce((acc: number, l: any) => acc + (Number(l.totalHarga) || 0), 0)
+            : Number(r.nominalTagihan) || 0;
+        return {
+          ...r,
+          validationStatus: status,
+          nominalTagihan: computedTotal,
+          lineItems: validLines
+        };
+      })
+      .filter((r: any) => (Number(r.nominalTagihan) || 0) > 0);
+  };
+
+  let inMemoryMarketingValidations: any[] = [];
+  let inMemoryMarketingSalesMappings: any[] = [];
+  let inMemoryMarketingValidationsLoaded = false;
   let lastMarketingValidationsSyncAt = 0;
 
   const refreshMarketingValidationsFromDb = async (): Promise<any[] | null> => {
     if (!isDatabaseConfigured()) return null;
     try {
       const rows = await mysqlQuery<any[]>(
-        "SELECT state_json FROM app_state WHERE state_key = 'marketing_invoice_validations_v1' LIMIT 1"
+        "SELECT state_key, state_json FROM app_state WHERE state_key IN ('marketing_invoice_validations_v2', 'marketing_sales_mappings_v1')"
       );
-      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-        const parsed =
-          typeof rows[0].state_json === 'string'
-            ? JSON.parse(rows[0].state_json)
-            : rows[0].state_json;
-        if (Array.isArray(parsed)) {
-          inMemoryMarketingValidations = parsed;
-          inMemoryMarketingValidationsLoaded = true;
-          lastMarketingValidationsSyncAt = Date.now();
-          writePersistentAppState('marketing_invoice_validations_v1', parsed);
-          return parsed;
+      let hadLegacyDummy = false;
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (!row?.state_json) continue;
+          const parsed = typeof row.state_json === 'string' ? JSON.parse(row.state_json) : row.state_json;
+          if (row.state_key === 'marketing_invoice_validations_v2' && Array.isArray(parsed)) {
+            const sanitized = sanitizeMarketingValidations(parsed);
+            if (sanitized.length !== parsed.length) {
+              hadLegacyDummy = true;
+            }
+            inMemoryMarketingValidations = sanitized;
+          } else if (row.state_key === 'marketing_sales_mappings_v1' && Array.isArray(parsed)) {
+            inMemoryMarketingSalesMappings = parsed;
+          }
+        }
+      }
+      if (hadLegacyDummy) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(inMemoryMarketingValidations)]
+          );
+        } catch {
+          // ignore cleanup write error
         }
       }
       inMemoryMarketingValidationsLoaded = true;
@@ -4725,53 +4940,71 @@ Kembalikan HANYA JSON valid:
   app.get('/api/marketing-invoice-validations', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 5000)) {
+      if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 3000)) {
         await Promise.race([
           refreshMarketingValidationsFromDb(),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 900))
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
         ]);
       }
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+        source: 'mysql'
       });
     } catch (err: any) {
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: 'memory_fallback'
+        source: 'mysql'
       });
     }
   });
 
   app.post('/api/marketing-invoice-validations', express.json({ limit: '20mb' }), async (req, res) => {
     try {
-      const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
-      inMemoryMarketingValidations = incoming;
-      inMemoryMarketingValidationsLoaded = true;
-      lastMarketingValidationsSyncAt = Date.now();
-      writePersistentAppState('marketing_invoice_validations_v1', incoming);
-
-      if (isDatabaseConfigured()) {
-        try {
-          await mysqlQuery(
-            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v1', ?, NOW())
-             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-            [JSON.stringify(incoming)]
-          );
-        } catch (dbErr: any) {
-          console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Validations]', dbErr?.message);
+      if (Array.isArray(req.body?.records)) {
+        inMemoryMarketingValidations = sanitizeMarketingValidations(req.body.records);
+        if (isDatabaseConfigured()) {
+          try {
+            await mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(inMemoryMarketingValidations)]
+            );
+          } catch (dbErr: any) {
+            console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Validations]', dbErr?.message);
+          }
         }
       }
+
+      if (Array.isArray(req.body?.salesMappings)) {
+        inMemoryMarketingSalesMappings = req.body.salesMappings;
+        if (isDatabaseConfigured()) {
+          try {
+            await mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_sales_mappings_v1', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(inMemoryMarketingSalesMappings)]
+            );
+          } catch (dbErr: any) {
+            console.warn('[Hostinger MySQL Sync Warning for Marketing Sales Mappings]', dbErr?.message);
+          }
+        }
+      }
+
+      inMemoryMarketingValidationsLoaded = true;
+      lastMarketingValidationsSyncAt = Date.now();
 
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+        source: 'mysql'
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
@@ -4791,32 +5024,48 @@ Kembalikan HANYA JSON valid:
     }
     return cleaned;
   })();
-  let inMemoryFormKirimLoaded = inMemoryFormKirimRecords.length > 0;
+  let inMemoryFormKirimWorkspace: any | null = (() => {
+    const disk = readPersistentAppState('form_kirim_workspace_v1');
+    return disk && typeof disk === 'object' && Array.isArray(disk.invoiceItems) ? disk : null;
+  })();
+  let inMemoryFormKirimLoaded = inMemoryFormKirimRecords.length > 0 || Boolean(inMemoryFormKirimWorkspace);
   let lastFormKirimDbSyncAt = 0;
 
   const refreshFormKirimFromDb = async (): Promise<any[] | null> => {
     if (!isDatabaseConfigured()) return null;
     try {
       const rows = await mysqlQuery<any[]>(
-        "SELECT state_json FROM app_state WHERE state_key = 'form_kirim_records_v1' LIMIT 1"
+        "SELECT state_key, state_json FROM app_state WHERE state_key IN ('form_kirim_records_v1', 'form_kirim_workspace_v1')"
       );
-      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
-        if (Array.isArray(parsed)) {
-          const cleaned = sanitizeFormKirimRecords(parsed);
-          inMemoryFormKirimRecords = cleaned;
-          inMemoryFormKirimLoaded = true;
-          lastFormKirimDbSyncAt = Date.now();
-          writePersistentAppState('form_kirim_records_v1', cleaned);
-          if (cleaned.length !== parsed.length) {
-            mysqlQuery(
-              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_records_v1', ?, NOW())
-               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-              [JSON.stringify(cleaned)]
-            ).catch(() => {});
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (!row?.state_json) continue;
+          const parsed = typeof row.state_json === 'string' ? JSON.parse(row.state_json) : row.state_json;
+          if (row.state_key === 'form_kirim_records_v1' && Array.isArray(parsed)) {
+            const cleaned = sanitizeFormKirimRecords(parsed);
+            inMemoryFormKirimRecords = cleaned;
+            inMemoryFormKirimLoaded = true;
+            writePersistentAppState('form_kirim_records_v1', cleaned);
+            if (cleaned.length !== parsed.length) {
+              mysqlQuery(
+                `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_records_v1', ?, NOW())
+                 ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+                [JSON.stringify(cleaned)]
+              ).catch(() => {});
+            }
+          } else if (
+            row.state_key === 'form_kirim_workspace_v1' &&
+            parsed &&
+            typeof parsed === 'object' &&
+            Array.isArray(parsed.invoiceItems)
+          ) {
+            inMemoryFormKirimWorkspace = parsed;
+            inMemoryFormKirimLoaded = true;
+            writePersistentAppState('form_kirim_workspace_v1', parsed);
           }
-          return cleaned;
         }
+        lastFormKirimDbSyncAt = Date.now();
+        return inMemoryFormKirimRecords;
       }
       lastFormKirimDbSyncAt = Date.now();
     } catch {}
@@ -4827,21 +5076,40 @@ Kembalikan HANYA JSON valid:
     void refreshFormKirimFromDb();
   });
 
-  const persistFormKirimToDbAndDisk = (records: any[]) => {
+  const persistFormKirimToDbAndDisk = async (records: any[]) => {
     inMemoryFormKirimRecords = records;
     inMemoryFormKirimLoaded = true;
     lastFormKirimDbSyncAt = Date.now();
     writePersistentAppState('form_kirim_records_v1', records);
     if (isDatabaseConfigured()) {
-      setImmediate(() => {
-        mysqlQuery(
+      try {
+        await mysqlQuery(
           `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_records_v1', ?, NOW())
            ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
           [JSON.stringify(records)]
-        ).catch((dbErr: any) => {
-          console.warn('[Hostinger MySQL Sync Warning for Form Kirim]', dbErr?.message);
-        });
-      });
+        );
+      } catch (dbErr: any) {
+        console.warn('[Hostinger MySQL Sync Warning for Form Kirim]', dbErr?.message);
+      }
+    }
+  };
+
+  const persistFormKirimWorkspaceToDbAndDisk = async (workspace: any) => {
+    if (!workspace || typeof workspace !== 'object' || !Array.isArray(workspace.invoiceItems)) return;
+    inMemoryFormKirimWorkspace = workspace;
+    inMemoryFormKirimLoaded = true;
+    lastFormKirimDbSyncAt = Date.now();
+    writePersistentAppState('form_kirim_workspace_v1', workspace);
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('form_kirim_workspace_v1', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(workspace)]
+        );
+      } catch (dbErr: any) {
+        console.warn('[Hostinger MySQL Sync Warning for Form Kirim Workspace]', dbErr?.message);
+      }
     }
   };
 
@@ -4901,7 +5169,15 @@ Kembalikan HANYA JSON valid:
             ttdSignerName: existingItem.ttdSignerName,
             ttdSignedAt: existingItem.ttdSignedAt,
             driverUpdatedBy: existingItem.driverUpdatedBy,
-            driverUpdatedAt: existingItem.driverUpdatedAt
+            driverUpdatedAt: existingItem.driverUpdatedAt,
+            driverEditCount: existingItem.driverEditCount,
+            customerNote: existingItem.customerNote,
+            gpsLockHistory: existingItem.gpsLockHistory,
+            lockedGpsLat: existingItem.lockedGpsLat,
+            lockedGpsLng: existingItem.lockedGpsLng,
+            lockedGpsAccuracy: existingItem.lockedGpsAccuracy,
+            lockedGpsLocation: existingItem.lockedGpsLocation,
+            lockedGpsAt: existingItem.lockedGpsAt
           }
         : {}),
       ...pickLatestFlag('financeTfValidated', 'financeTfValidatedAt', 'financeTfValidatedBy'),
@@ -4952,15 +5228,16 @@ Kembalikan HANYA JSON valid:
   app.get('/api/form-kirim', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      if (!inMemoryFormKirimLoaded || Date.now() - lastFormKirimDbSyncAt > 3000) {
+      if (!inMemoryFormKirimLoaded || Date.now() - lastFormKirimDbSyncAt > 2500) {
         await Promise.race([
           refreshFormKirimFromDb(),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 900))
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 5000))
         ]);
       }
       return res.json({
         success: true,
         records: inMemoryFormKirimRecords,
+        workspace: inMemoryFormKirimWorkspace,
         count: inMemoryFormKirimRecords.length,
         source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
       });
@@ -4968,6 +5245,7 @@ Kembalikan HANYA JSON valid:
       return res.json({
         success: true,
         records: inMemoryFormKirimRecords,
+        workspace: inMemoryFormKirimWorkspace,
         count: inMemoryFormKirimRecords.length,
         source: 'memory_fallback'
       });
@@ -4977,19 +5255,102 @@ Kembalikan HANYA JSON valid:
   app.post('/api/form-kirim', express.json({ limit: '25mb' }), async (req, res) => {
     try {
       const incomingRaw = req.body?.records;
-      if (!Array.isArray(incomingRaw)) {
-        return res.status(400).json({ success: false, error: 'Expected records array' });
+      const incomingWorkspace = req.body?.workspace;
+      let nextRecords = inMemoryFormKirimRecords;
+
+      if (Array.isArray(incomingRaw)) {
+        const existingById = new Map(inMemoryFormKirimRecords.map((r: any) => [r.id, r]));
+        nextRecords = sanitizeFormKirimRecords(incomingRaw).map((rec: any) =>
+          mergeFormKirimRecord(existingById.get(rec.id), rec)
+        );
+        await persistFormKirimToDbAndDisk(nextRecords);
       }
-      const existingById = new Map(inMemoryFormKirimRecords.map((r: any) => [r.id, r]));
-      const incoming = sanitizeFormKirimRecords(incomingRaw).map((rec: any) =>
-        mergeFormKirimRecord(existingById.get(rec.id), rec)
-      );
-      persistFormKirimToDbAndDisk(incoming);
+
+      if (incomingWorkspace && typeof incomingWorkspace === 'object' && Array.isArray(incomingWorkspace.invoiceItems)) {
+        await persistFormKirimWorkspaceToDbAndDisk({
+          ...incomingWorkspace,
+          updatedAt: incomingWorkspace.updatedAt || new Date().toISOString()
+        });
+      }
 
       return res.json({
         success: true,
-        records: incoming,
-        count: incoming.length,
+        records: nextRecords,
+        workspace: inMemoryFormKirimWorkspace,
+        count: nextRecords.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.put('/api/form-kirim/workspace', express.json({ limit: '25mb' }), async (req, res) => {
+    try {
+      const workspace = req.body?.workspace || req.body;
+      if (!workspace || typeof workspace !== 'object' || !Array.isArray(workspace.invoiceItems)) {
+        return res.status(400).json({ success: false, error: 'Invalid workspace payload' });
+      }
+      const nextWorkspace = {
+        selectedAreaKirim: String(workspace.selectedAreaKirim || '').trim().toUpperCase(),
+        tanggalKirim: String(workspace.tanggalKirim || '').trim(),
+        activeSavedRecordId: workspace.activeSavedRecordId || null,
+        viewMode: workspace.viewMode === 'saved_preview' ? 'saved_preview' : 'edit',
+        invoiceItems: workspace.invoiceItems,
+        updatedAt: new Date().toISOString()
+      };
+      await persistFormKirimWorkspaceToDbAndDisk(nextWorkspace);
+
+      // If this workspace corresponds to an existing saved record, also keep that record's invoiceItems synced in MySQL
+      const targetId = nextWorkspace.activeSavedRecordId;
+      const recIdx = inMemoryFormKirimRecords.findIndex((r: any) =>
+        targetId
+          ? r.id === targetId
+          : nextWorkspace.selectedAreaKirim &&
+            nextWorkspace.tanggalKirim &&
+            String(r.areaKirim || '').trim().toUpperCase() === nextWorkspace.selectedAreaKirim &&
+            String(r.tanggalKirim || '').trim() === nextWorkspace.tanggalKirim
+      );
+
+      if (recIdx !== -1 && nextWorkspace.invoiceItems.length > 0) {
+        const existingRec = inMemoryFormKirimRecords[recIdx];
+        const exById = new Map(
+          (Array.isArray(existingRec.invoiceItems) ? existingRec.invoiceItems : []).map((it: any) => [it.id, it])
+        );
+        const mergedItems = nextWorkspace.invoiceItems.map((inc: any) =>
+          mergeInvoiceItemFields(exById.get(inc.id), inc)
+        );
+        const codRows = mergedItems.filter(
+          (i: any) => (i.paymentCategory || (Number(i.netDays) > 0 ? 'TEMPO' : 'COD')) === 'COD'
+        );
+        const tempoRows = mergedItems.filter(
+          (i: any) => (i.paymentCategory || (Number(i.netDays) > 0 ? 'TEMPO' : 'COD')) === 'TEMPO'
+        );
+        const totalColli = mergedItems.reduce((acc: number, i: any) => acc + (Number(i.coly) || 0), 0);
+        const codNilai = codRows.reduce((acc: number, i: any) => acc + (Number(i.nilaiFaktur) || 0), 0);
+        const tempoNilai = tempoRows.reduce((acc: number, i: any) => acc + (Number(i.nilaiFaktur) || 0), 0);
+        const totalNilai = codNilai + tempoNilai;
+
+        const updatedRec = {
+          ...existingRec,
+          invoiceItems: mergedItems,
+          totalColli,
+          totalNominalFaktur: totalNilai,
+          sisaPiutangToko: tempoNilai,
+          codCount: codRows.length,
+          tempoCount: tempoRows.length,
+          codTotalNominal: codNilai,
+          tempoTotalNominal: tempoNilai
+        };
+        const nextList = [...inMemoryFormKirimRecords];
+        nextList[recIdx] = updatedRec;
+        await persistFormKirimToDbAndDisk(nextList);
+      }
+
+      return res.json({
+        success: true,
+        workspace: inMemoryFormKirimWorkspace,
+        records: inMemoryFormKirimRecords,
         source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
       });
     } catch (err: any) {
@@ -5024,7 +5385,15 @@ Kembalikan HANYA JSON valid:
             ttdSignerName: incIt.ttdSignerName,
             ttdSignedAt: incIt.ttdSignedAt,
             driverUpdatedBy: incIt.driverUpdatedBy,
-            driverUpdatedAt: incIt.driverUpdatedAt || patch.driverUpdatedAt || new Date().toISOString()
+            driverUpdatedAt: incIt.driverUpdatedAt || patch.driverUpdatedAt || new Date().toISOString(),
+            driverEditCount: incIt.driverEditCount !== undefined ? incIt.driverEditCount : exIt.driverEditCount,
+            customerNote: incIt.customerNote !== undefined ? incIt.customerNote : exIt.customerNote,
+            gpsLockHistory: Array.isArray(incIt.gpsLockHistory) ? incIt.gpsLockHistory : exIt.gpsLockHistory,
+            lockedGpsLat: incIt.lockedGpsLat !== undefined ? incIt.lockedGpsLat : exIt.lockedGpsLat,
+            lockedGpsLng: incIt.lockedGpsLng !== undefined ? incIt.lockedGpsLng : exIt.lockedGpsLng,
+            lockedGpsAccuracy: incIt.lockedGpsAccuracy !== undefined ? incIt.lockedGpsAccuracy : exIt.lockedGpsAccuracy,
+            lockedGpsLocation: incIt.lockedGpsLocation !== undefined ? incIt.lockedGpsLocation : exIt.lockedGpsLocation,
+            lockedGpsAt: incIt.lockedGpsAt !== undefined ? incIt.lockedGpsAt : exIt.lockedGpsAt
           };
         });
       }
@@ -5049,7 +5418,7 @@ Kembalikan HANYA JSON valid:
 
       const nextList = [...inMemoryFormKirimRecords];
       nextList[idx] = updatedRecord;
-      persistFormKirimToDbAndDisk(nextList);
+      await persistFormKirimToDbAndDisk(nextList);
 
       return res.json({ success: true, record: updatedRecord });
     } catch (err: any) {
@@ -5121,9 +5490,154 @@ Kembalikan HANYA JSON valid:
 
       const nextList = [...inMemoryFormKirimRecords];
       nextList[idx] = updatedRecord;
-      persistFormKirimToDbAndDisk(nextList);
+      await persistFormKirimToDbAndDisk(nextList);
 
       return res.json({ success: true, record: updatedRecord });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 📝 Pusat Log Aktivitas Perubahan Data (Tersimpan di MySQL app_state & Disk, Hanya Mencatat Akun yang Menambah/Merubah/Mengurangi Data)
+  const isWebTechnicalNoiseActivity = (item: any): boolean => {
+    if (!item || typeof item !== 'object') return true;
+    const action = String(item.action || '').trim().toLowerCase();
+    const dept = String(item.department || '').trim().toLowerCase();
+    const details = String(item.details || '').trim().toLowerCase();
+    const target = String(item.target || '').trim().toLowerCase();
+    const user = String(item.userFullName || '').trim().toLowerCase();
+
+    if (
+      action.includes('auto-sync') ||
+      action.includes('smart fill') ||
+      action.includes('penyeimbangan jeda') ||
+      action.includes('broadcast alert sla') ||
+      action.includes('middleware') ||
+      dept.includes('sistem integrasi data') ||
+      user.includes('middleware') ||
+      user === 'guest' ||
+      user.includes('belum login') ||
+      details.includes('middleware otomatis') ||
+      details.includes('smart fill mengeksekusi') ||
+      /^perubahan pada jadwal sch-[a-z0-9]+$/i.test(details) ||
+      /^schedule:\s*sch-/i.test(target)
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const sanitizeSystemActivities = (list: any[]): any[] => {
+    if (!Array.isArray(list)) return [];
+    const seenIds = new Set<string>();
+    const cleaned: any[] = [];
+    for (const item of list) {
+      if (isWebTechnicalNoiseActivity(item)) continue;
+      const id = String(item.id || '').trim();
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      cleaned.push(item);
+      if (cleaned.length >= 250) break;
+    }
+    return cleaned;
+  };
+
+  let inMemorySystemActivities: any[] = (() => {
+    const disk = readPersistentAppState('system_activities_mysql_v1');
+    return sanitizeSystemActivities(Array.isArray(disk) ? disk : []);
+  })();
+  let inMemorySystemActivitiesLoaded = inMemorySystemActivities.length > 0;
+  let lastSystemActivitiesDbSyncAt = 0;
+
+  const refreshSystemActivitiesFromDb = async (): Promise<any[] | null> => {
+    if (!isDatabaseConfigured()) return null;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = 'system_activities_mysql_v1' LIMIT 1"
+      );
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        const cleaned = sanitizeSystemActivities(Array.isArray(parsed) ? parsed : []);
+        inMemorySystemActivities = cleaned;
+        inMemorySystemActivitiesLoaded = true;
+        lastSystemActivitiesDbSyncAt = Date.now();
+        writePersistentAppState('system_activities_mysql_v1', cleaned);
+        return cleaned;
+      }
+      lastSystemActivitiesDbSyncAt = Date.now();
+    } catch {}
+    return null;
+  };
+
+  setImmediate(() => {
+    void refreshSystemActivitiesFromDb();
+  });
+
+  const persistSystemActivitiesToDbAndDisk = async (activities: any[]) => {
+    const cleaned = sanitizeSystemActivities(activities);
+    inMemorySystemActivities = cleaned;
+    inMemorySystemActivitiesLoaded = true;
+    lastSystemActivitiesDbSyncAt = Date.now();
+    writePersistentAppState('system_activities_mysql_v1', cleaned);
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('system_activities_mysql_v1', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(cleaned)]
+        );
+      } catch (dbErr: any) {
+        console.warn('[Hostinger MySQL Sync Warning for System Activities]', dbErr?.message);
+      }
+    }
+  };
+
+  app.get('/api/system-activities', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      if (!inMemorySystemActivitiesLoaded || Date.now() - lastSystemActivitiesDbSyncAt > 3000) {
+        await Promise.race([
+          refreshSystemActivitiesFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 4000))
+        ]);
+      }
+      return res.json({
+        success: true,
+        activities: inMemorySystemActivities,
+        count: inMemorySystemActivities.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch {
+      return res.json({
+        success: true,
+        activities: inMemorySystemActivities,
+        count: inMemorySystemActivities.length,
+        source: 'memory_fallback'
+      });
+    }
+  });
+
+  app.post('/api/system-activities', express.json({ limit: '5mb' }), async (req, res) => {
+    try {
+      const singleActivity = req.body?.activity;
+      const incomingList = req.body?.activities;
+      let nextList = inMemorySystemActivities;
+
+      if (singleActivity && typeof singleActivity === 'object') {
+        if (!isWebTechnicalNoiseActivity(singleActivity)) {
+          nextList = sanitizeSystemActivities([singleActivity, ...inMemorySystemActivities]);
+          await persistSystemActivitiesToDbAndDisk(nextList);
+        }
+      } else if (Array.isArray(incomingList)) {
+        nextList = sanitizeSystemActivities([...incomingList, ...inMemorySystemActivities]);
+        await persistSystemActivitiesToDbAndDisk(nextList);
+      }
+
+      return res.json({
+        success: true,
+        activities: inMemorySystemActivities,
+        count: inMemorySystemActivities.length
+      });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
     }

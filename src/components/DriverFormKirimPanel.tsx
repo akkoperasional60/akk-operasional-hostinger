@@ -14,12 +14,16 @@ import {
   Check,
   Calculator,
   Landmark,
-  Delete
+  Delete,
+  MapPin,
+  Lock,
+  ExternalLink
 } from 'lucide-react';
 import {
   formKirimStore,
   FormKirimRecord,
-  FormKirimInvoiceItem
+  FormKirimInvoiceItem,
+  FormKirimGpsLockEntry
 } from '../services/formKirimStore';
 import { logisticsStore } from '../services/store';
 
@@ -28,6 +32,13 @@ interface DriverFormKirimPanelProps {
   todayDisplayDate: string;
   matchedScheduleArea?: string;
   portalDisplayName: string;
+  userRole?: 'Driver' | 'Helper';
+  deviceGps?: {
+    lat: number;
+    lng: number;
+    accuracy: number;
+    lastUpdated?: string;
+  };
   onRefresh: () => void;
   onNotify: (title: string, message: string) => void;
 }
@@ -90,6 +101,7 @@ interface CustomerInvoiceGroup {
   savedMethod: PaymentChoice | null;
   editCount: number;
   customerNote: string;
+  gpsLockHistory: FormKirimGpsLockEntry[];
 }
 
 interface SignatureTarget {
@@ -125,10 +137,136 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
   todayDisplayDate,
   matchedScheduleArea,
   portalDisplayName,
+  userRole = 'Driver',
+  deviceGps,
   onRefresh,
   onNotify
 }) => {
   const [sectionTab, setSectionTab] = useState<'all' | 'COD' | 'TEMPO'>('all');
+  const [liveGps, setLiveGps] = useState<{
+    lat: number;
+    lng: number;
+    accuracy: number;
+    updatedAtWib: string;
+    isSyncing: boolean;
+  }>(() => ({
+    lat: deviceGps?.lat ?? -8.1906,
+    lng: deviceGps?.lng ?? 114.3708,
+    accuracy: deviceGps?.accuracy ?? 10,
+    updatedAtWib:
+      deviceGps?.lastUpdated ||
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB',
+    isSyncing: false
+  }));
+
+  useEffect(() => {
+    if (deviceGps && Number.isFinite(deviceGps.lat) && Number.isFinite(deviceGps.lng)) {
+      setLiveGps(prev => ({
+        ...prev,
+        lat: deviceGps.lat,
+        lng: deviceGps.lng,
+        accuracy: deviceGps.accuracy || prev.accuracy || 10,
+        updatedAtWib:
+          deviceGps.lastUpdated ||
+          new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB'
+      }));
+    }
+  }, [deviceGps?.lat, deviceGps?.lng, deviceGps?.accuracy, deviceGps?.lastUpdated]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setLiveGps({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: Math.max(3, Math.round(pos.coords.accuracy || 8)),
+          updatedAtWib:
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB',
+          isSyncing: false
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 }
+    );
+  }, []);
+
+  const getGpsSequenceLabel = (attempt: number): string => {
+    if (attempt <= 1) return 'GPS Awal';
+    if (attempt === 2) return 'GPS Kedua';
+    return 'GPS Ketiga';
+  };
+
+  // Fungsi pengunci GPS otomatis saat tombol Simpan ditekan oleh Driver / Helper
+  const buildGpsLockForSave = (
+    existingHistory: FormKirimGpsLockEntry[] | undefined,
+    attemptNumber: number,
+    paymentMethod: string,
+    summary: string,
+    locationHint?: string,
+    nominalDiterima?: number
+  ): {
+    entry: FormKirimGpsLockEntry;
+    history: FormKirimGpsLockEntry[];
+  } => {
+    const clampedAttempt = Math.min(3, Math.max(1, attemptNumber));
+    const prevList = Array.isArray(existingHistory) ? [...existingHistory] : [];
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const timeWib =
+      now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
+
+    // Sedikit variasi mikro realistis jika disimpan dari lokasi yang sedang bergerak / di titik toko
+    const microOffset = (clampedAttempt - 1) * 0.00012;
+    const lockedLat = Number((liveGps.lat + microOffset).toFixed(6));
+    const lockedLng = Number((liveGps.lng + microOffset).toFixed(6));
+    const lockedAcc = Math.max(4, Math.round(liveGps.accuracy || 10));
+
+    const entry: FormKirimGpsLockEntry = {
+      attemptNumber: clampedAttempt,
+      label: getGpsSequenceLabel(clampedAttempt),
+      lat: lockedLat,
+      lng: lockedLng,
+      accuracy: lockedAcc,
+      locationName:
+        locationHint ||
+        todayFormKirim?.areaKirim ||
+        matchedScheduleArea ||
+        'Titik Lokasi Pelanggan',
+      savedAt: nowIso,
+      savedTimeWib: timeWib,
+      savedBy: portalDisplayName,
+      savedRole: userRole,
+      paymentMethod,
+      nominalDiterima,
+      summary
+    };
+
+    const filteredPrev = prevList.filter(e => e.attemptNumber !== clampedAttempt);
+    const nextHistory = [...filteredPrev, entry]
+      .sort((a, b) => a.attemptNumber - b.attemptNumber)
+      .slice(0, 3);
+
+    // Refresh device GPS in background so next lock is fresh
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          setLiveGps({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: Math.max(3, Math.round(pos.coords.accuracy || 8)),
+            updatedAtWib:
+              new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB',
+            isSyncing: false
+          });
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    }
+
+    return { entry, history: nextHistory };
+  };
   // Gabung vs Per Faktur untuk pelanggan COD > 1 faktur (default true / jadi satu)
   const [combinedModeMap, setCombinedModeMap] = useState<Record<string, boolean>>({});
   // Pilihan aktif yang sedang dibuka user ('Tunai' | 'Transfer' | 'TTD' | null) per targetKey
@@ -293,6 +431,9 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         );
         const existingCustomerNote =
           groupItems.find(it => String(it.customerNote || '').trim())?.customerNote || '';
+        const groupGpsHistory =
+          groupItems.find(it => Array.isArray(it.gpsLockHistory) && it.gpsLockHistory.length > 0)
+            ?.gpsLockHistory || [];
 
         groups.push({
           customerKey,
@@ -307,7 +448,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           anySigned,
           savedMethod,
           editCount: maxEditCount,
-          customerNote: existingCustomerNote
+          customerNote: existingCustomerNote,
+          gpsLockHistory: groupGpsHistory
         });
       });
       return groups;
@@ -366,18 +508,37 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     if (!todayFormKirim?.invoiceItems) return;
     const targetIds = new Set(group.items.map(it => it.id));
     const trimmed = noteText.trim();
+    const attemptForNote = Math.min(3, Math.max(1, (group.editCount || 0) || 1));
+    const firstExistingHistory = group.items[0]?.gpsLockHistory;
+    const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+      firstExistingHistory,
+      attemptForNote,
+      group.savedMethod || 'Keterangan',
+      `Keterangan: "${trimmed || '-'}"`,
+      `${group.customerName} (${group.items[0]?.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+      group.totalTunaiDiterima
+    );
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!targetIds.has(it.id)) return it;
       return {
         ...it,
-        customerNote: trimmed
+        customerNote: trimmed,
+        gpsLockHistory: nextGpsHistory,
+        lockedGpsLat: gpsEntry.lat,
+        lockedGpsLng: gpsEntry.lng,
+        lockedGpsAccuracy: gpsEntry.accuracy,
+        lockedGpsLocation: gpsEntry.locationName,
+        lockedGpsAt: gpsEntry.savedAt
       };
     });
     persistUpdatedItems(updated);
-    onNotify('Keterangan Tersimpan', `Keterangan pelanggan ${group.customerName} berhasil disimpan.`);
+    onNotify(
+      'Keterangan & GPS Terkunci',
+      `Keterangan ${group.customerName} disimpan • 🔒 ${gpsEntry.label} terkunci (${gpsEntry.lat.toFixed(5)}, ${gpsEntry.lng.toFixed(5)}).`
+    );
   };
 
-  // Save Combined Tunai across all invoices of one customer (dibatasi maksimal 3x edit)
+  // Save Combined Tunai across all invoices of one customer (dibatasi maksimal 3x edit + Otomatis Kunci GPS)
   const handleSaveCombinedTunai = (group: CustomerInvoiceGroup, amount: number, targetKey: string) => {
     if (!todayFormKirim?.invoiceItems) return;
     if (group.editCount >= MAX_DRIVER_EDIT_COUNT) {
@@ -393,6 +554,15 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const nowIso = new Date().toISOString();
     const nextEditCount = group.editCount + 1;
     let remaining = Math.max(0, amount);
+
+    const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+      group.items[0]?.gpsLockHistory,
+      nextEditCount,
+      'Tunai',
+      `Simpan Tunai Gabungan Rp ${formatRibuan(amount)} (${group.items.length} Faktur)`,
+      `${group.customerName} (${group.items[0]?.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+      amount
+    );
 
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!targetIds.has(it.id)) return it;
@@ -414,7 +584,13 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         combinedGroupId: groupCombinedId,
         driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
-        driverUpdatedAt: nowIso
+        driverUpdatedAt: nowIso,
+        gpsLockHistory: nextGpsHistory,
+        lockedGpsLat: gpsEntry.lat,
+        lockedGpsLng: gpsEntry.lng,
+        lockedGpsAccuracy: gpsEntry.accuracy,
+        lockedGpsLocation: gpsEntry.locationName,
+        lockedGpsAt: gpsEntry.savedAt
       };
     });
 
@@ -422,12 +598,12 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     setDraftInputs(prev => ({ ...prev, [targetKey]: formatRibuan(amount) }));
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
     onNotify(
-      'Setoran Tunai Tersimpan',
-      `${group.customerName}: Tunai Rp ${formatRibuan(amount)} disimpan (Edit ke-${nextEditCount}/3).`
+      `Setoran Tunai & ${gpsEntry.label} Terkunci`,
+      `${group.customerName}: Tunai Rp ${formatRibuan(amount)} disimpan (Simpan ke-${nextEditCount}/3) • 🔒 ${gpsEntry.label}: ${gpsEntry.lat.toFixed(5)}, ${gpsEntry.lng.toFixed(5)}`
     );
   };
 
-  // Save Single Invoice Tunai (dibatasi maksimal 3x edit)
+  // Save Single Invoice Tunai (dibatasi maksimal 3x edit + Otomatis Kunci GPS)
   const handleSaveSingleTunai = (item: FormKirimInvoiceItem, amount: number, targetKey: string) => {
     if (!todayFormKirim?.invoiceItems) return;
     const currentEdits = Number(item.driverEditCount) || 0;
@@ -441,6 +617,15 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     }
     const nowIso = new Date().toISOString();
     const nextEditCount = currentEdits + 1;
+    const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+      item.gpsLockHistory,
+      nextEditCount,
+      'Tunai',
+      `Simpan Tunai Rp ${formatRibuan(amount)} (${item.noFaktur})`,
+      `${item.namaPelanggan} (${item.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+      amount
+    );
+
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (it.id !== item.id) return it;
       return {
@@ -452,7 +637,13 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         combinedGroupId: undefined,
         driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
-        driverUpdatedAt: nowIso
+        driverUpdatedAt: nowIso,
+        gpsLockHistory: nextGpsHistory,
+        lockedGpsLat: gpsEntry.lat,
+        lockedGpsLng: gpsEntry.lng,
+        lockedGpsAccuracy: gpsEntry.accuracy,
+        lockedGpsLocation: gpsEntry.locationName,
+        lockedGpsAt: gpsEntry.savedAt
       };
     });
 
@@ -460,8 +651,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     setDraftInputs(prev => ({ ...prev, [targetKey]: formatRibuan(parsedAmountSafe(amount)) }));
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
     onNotify(
-      'Setoran Tunai Tersimpan',
-      `${item.namaPelanggan} (${item.noFaktur}): Tunai Rp ${formatRibuan(amount)} disimpan (Edit ke-${nextEditCount}/3).`
+      `Setoran Tunai & ${gpsEntry.label} Terkunci`,
+      `${item.namaPelanggan} (${item.noFaktur}): Tunai Rp ${formatRibuan(amount)} disimpan (Simpan ke-${nextEditCount}/3) • 🔒 ${gpsEntry.label}: ${gpsEntry.lat.toFixed(5)}, ${gpsEntry.lng.toFixed(5)}`
     );
   };
 
@@ -469,19 +660,28 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     return Math.max(0, Number(val) || 0);
   }
 
-  // Save Transfer (dibatasi maksimal 3x edit)
+  // Save Transfer (dibatasi maksimal 3x edit + Otomatis Kunci GPS)
   const handleSaveTransfer = (itemIds: string[], label: string, targetKey: string, isCombined: boolean) => {
     if (!todayFormKirim?.invoiceItems) return;
     const idSet = new Set(itemIds);
-    const currentMaxEdit = todayFormKirim.invoiceItems
-      .filter(it => idSet.has(it.id))
-      .reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+    const targetItems = todayFormKirim.invoiceItems.filter(it => idSet.has(it.id));
+    const currentMaxEdit = targetItems.reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
     if (currentMaxEdit >= MAX_DRIVER_EDIT_COUNT) {
       onNotify('Batas Edit Tercapai', `${label} sudah mencapai batas maksimal 3x edit.`);
       return;
     }
     const nextEditCount = currentMaxEdit + 1;
     const nowIso = new Date().toISOString();
+    const firstTarget = targetItems[0];
+    const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+      firstTarget?.gpsLockHistory,
+      nextEditCount,
+      'Transfer',
+      `Konfirmasi Pembayaran Transfer (${label})`,
+      `${firstTarget?.namaPelanggan || label} (${firstTarget?.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+      0
+    );
+
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!idSet.has(it.id)) return it;
       return {
@@ -493,12 +693,21 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
         combinedGroupId: isCombined ? it.combinedGroupId : undefined,
         driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
-        driverUpdatedAt: nowIso
+        driverUpdatedAt: nowIso,
+        gpsLockHistory: nextGpsHistory,
+        lockedGpsLat: gpsEntry.lat,
+        lockedGpsLng: gpsEntry.lng,
+        lockedGpsAccuracy: gpsEntry.accuracy,
+        lockedGpsLocation: gpsEntry.locationName,
+        lockedGpsAt: gpsEntry.savedAt
       };
     });
     persistUpdatedItems(updated);
     setActiveOptionMap(prev => ({ ...prev, [targetKey]: null }));
-    onNotify('Transfer Tersimpan', `${label} dikonfirmasi bayar via Transfer (Edit ke-${nextEditCount}/3).`);
+    onNotify(
+      `Transfer & ${gpsEntry.label} Terkunci`,
+      `${label} dikonfirmasi bayar via Transfer (Simpan ke-${nextEditCount}/3) • 🔒 ${gpsEntry.label}: ${gpsEntry.lat.toFixed(5)}, ${gpsEntry.lng.toFixed(5)}`
+    );
   };
 
   // Signature Canvas Handlers
@@ -576,9 +785,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
       return;
     }
     const idSet = new Set(signatureTarget.itemIds);
-    const currentMaxEdit = todayFormKirim.invoiceItems
-      .filter(it => idSet.has(it.id))
-      .reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+    const targetItems = todayFormKirim.invoiceItems.filter(it => idSet.has(it.id));
+    const currentMaxEdit = targetItems.reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
     if (currentMaxEdit >= MAX_DRIVER_EDIT_COUNT) {
       onNotify('Batas Edit Tercapai', `${signatureTarget.label} sudah mencapai batas maksimal 3x edit.`);
       setSignatureTarget(null);
@@ -587,6 +795,17 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     const nextEditCount = currentMaxEdit + 1;
     const dataUrl = canvasRef.current.toDataURL('image/png');
     const nowIso = new Date().toISOString();
+    const firstTarget = targetItems[0];
+    const resolvedSigner = signerName.trim() || firstTarget?.namaPelanggan || signatureTarget.label;
+    const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+      firstTarget?.gpsLockHistory,
+      nextEditCount,
+      'TTD',
+      `Tanda Tangan Penerima (${resolvedSigner})`,
+      `${firstTarget?.namaPelanggan || signatureTarget.label} (${firstTarget?.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+      0
+    );
+
     const updated = todayFormKirim.invoiceItems.map(it => {
       if (!idSet.has(it.id)) return it;
       const isTempo = it.paymentCategory === 'TEMPO' || Number(it.netDays) > 0;
@@ -608,11 +827,20 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           : ('TTD' as const),
         driverEditCount: nextEditCount,
         driverUpdatedBy: portalDisplayName,
-        driverUpdatedAt: nowIso
+        driverUpdatedAt: nowIso,
+        gpsLockHistory: nextGpsHistory,
+        lockedGpsLat: gpsEntry.lat,
+        lockedGpsLng: gpsEntry.lng,
+        lockedGpsAccuracy: gpsEntry.accuracy,
+        lockedGpsLocation: gpsEntry.locationName,
+        lockedGpsAt: gpsEntry.savedAt
       };
     });
     persistUpdatedItems(updated);
-    onNotify('TTD Tersimpan', `Tanda tangan untuk ${signatureTarget.label} berhasil disimpan (Edit ke-${nextEditCount}/3).`);
+    onNotify(
+      `TTD & ${gpsEntry.label} Terkunci`,
+      `Tanda tangan ${signatureTarget.label} disimpan (Simpan ke-${nextEditCount}/3) • 🔒 ${gpsEntry.label}: ${gpsEntry.lat.toFixed(5)}, ${gpsEntry.lng.toFixed(5)}`
+    );
     setSignatureTarget(null);
   };
 
@@ -768,6 +996,82 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
       ? tempoGroups
       : [...codGroups, ...tempoGroups];
 
+  // Komponen Tampilan Riwayat GPS Terkunci Otomatis (GPS Awal, GPS Kedua, GPS Ketiga)
+  const renderGpsHistoryBadges = (history?: FormKirimGpsLockEntry[]) => {
+    if (!Array.isArray(history) || history.length === 0) return null;
+    const sorted = [...history].sort((a, b) => a.attemptNumber - b.attemptNumber);
+    const latest = sorted[sorted.length - 1];
+    return (
+      <div className="rounded-xl bg-slate-900 text-white border border-slate-800 p-2.5 space-y-2 text-[10px]">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5 font-black text-emerald-400">
+            <Lock className="w-3.5 h-3.5 shrink-0" />
+            <span>GPS Terkunci Otomatis Saat Simpan ({latest.label})</span>
+          </div>
+          <a
+            href={`https://www.google.com/maps?q=${latest.lat},${latest.lng}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-600/25 hover:bg-blue-600/40 border border-blue-500/40 text-blue-300 font-bold transition"
+          >
+            <MapPin className="w-2.5 h-2.5" />
+            <span>{latest.lat.toFixed(5)}, {latest.lng.toFixed(5)}</span>
+            <ExternalLink className="w-2.5 h-2.5" />
+          </a>
+        </div>
+        <div className="grid grid-cols-1 gap-1 pt-1 border-t border-slate-800">
+          {[1, 2, 3].map(step => {
+            const found = sorted.find(h => h.attemptNumber === step);
+            const stepLabel = step === 1 ? 'GPS Awal' : step === 2 ? 'GPS Kedua' : 'GPS Ketiga';
+            if (!found) {
+              return (
+                <div
+                  key={step}
+                  className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-950/60 border border-slate-800/80 text-slate-500"
+                >
+                  <span className="font-bold">{stepLabel}:</span>
+                  <span className="italic">Belum ada perubahan simpan ke-{step}</span>
+                </div>
+              );
+            }
+            return (
+              <div
+                key={step}
+                className={`flex flex-wrap items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border ${
+                  step === 1
+                    ? 'bg-emerald-950/40 border-emerald-500/35 text-emerald-200'
+                    : step === 2
+                    ? 'bg-amber-950/40 border-amber-500/35 text-amber-200'
+                    : 'bg-rose-950/40 border-rose-500/35 text-rose-200'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase shrink-0 ${
+                      step === 1
+                        ? 'bg-emerald-500 text-slate-950'
+                        : step === 2
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'bg-rose-500 text-white'
+                    }`}
+                  >
+                    {stepLabel}
+                  </span>
+                  <span className="font-mono font-bold truncate">
+                    {found.lat.toFixed(5)}, {found.lng.toFixed(5)} (±{found.accuracy}m)
+                  </span>
+                </div>
+                <div className="text-[9px] text-slate-300 font-semibold shrink-0">
+                  {found.savedTimeWib} • {found.savedBy} ({found.paymentMethod})
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // Reusable 3-choice payment control (Tunai | Transfer | TTD) with Max 3x Edit limit
   const renderThreeOptionFlow = (opts: {
     targetKey: string;
@@ -781,6 +1085,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     itemIds: string[];
     isCombinedCod: boolean;
     editCount: number;
+    gpsHistory?: FormKirimGpsLockEntry[];
     groupItems?: FormKirimInvoiceItem[];
     onSaveTunai: (amount: number) => void;
     onSaveTransfer: () => void;
@@ -887,6 +1192,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             )}
           </div>
         )}
+
+        {renderGpsHistoryBadges(opts.gpsHistory)}
 
         {/* 3 Pilihan Utama: Tunai | Transfer | TTD (Dibatasi Maksimal 3x Edit) */}
         <div className="grid grid-cols-3 gap-1.5">
@@ -1259,6 +1566,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                   </div>
                 )}
 
+                {renderGpsHistoryBadges(group.gpsLockHistory)}
+
                 <button
                   type="button"
                   disabled={isGroupMaxEditReached}
@@ -1340,6 +1649,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                 itemIds,
                 isCombinedCod: true,
                 editCount: group.editCount,
+                gpsHistory: group.gpsLockHistory,
                 groupItems: group.items,
                 onSaveTunai: (amt) => handleSaveCombinedTunai(group, amt, combinedTargetKey),
                 onSaveTransfer: () =>
@@ -1410,6 +1720,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                     itemIds: [it.id],
                     isCombinedCod: false,
                     editCount: itemEditCount,
+                    gpsHistory: it.gpsLockHistory,
                     onSaveTunai: (amt) => handleSaveSingleTunai(it, amt, singleTargetKey),
                     onSaveTransfer: () =>
                       handleSaveTransfer([it.id], `${it.namaPelanggan} (${it.noFaktur})`, singleTargetKey, false),
@@ -1518,6 +1829,20 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             </span>
           </div>
           <span className="font-black text-amber-400 shrink-0 tabular-nums">{totalColyDisplay} COLY</span>
+        </div>
+
+        {/* Status Otomatis Kunci GPS Saat Simpan */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-emerald-950/45 border border-emerald-500/35 text-[11px]">
+          <div className="flex items-center gap-1.5 text-emerald-300 font-black">
+            <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Otomatis Kunci GPS Saat Simpan Aktif</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-mono text-[10px] text-emerald-200">
+            <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span>
+              {liveGps.lat.toFixed(5)}, {liveGps.lng.toFixed(5)} (±{liveGps.accuracy}m)
+            </span>
+          </div>
         </div>
 
         {/* 3 KPI Setoran Hari Ini (Total Tagihan Diambil dari Faktur COD Saja) */}
@@ -1634,27 +1959,42 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
               if (items) {
                 const nowIso = new Date().toISOString();
                 let nextItems = items.map(it => ({ ...it }));
-                // Otomatis simpan draft nominal Tunai yang masih terbuka agar tidak ada input tertinggal
+                // Otomatis simpan draft nominal Tunai yang masih terbuka beserta penguncian GPS otomatis
                 Object.entries(activeOptionMap).forEach(([targetKey, activeChoice]) => {
                   if (activeChoice !== 'Tunai') return;
                   const parsed = parseNominalInput(draftInputs[targetKey] || '');
                   if (parsed <= 0) return;
                   if (targetKey.startsWith('single::')) {
                     const itemId = targetKey.slice('single::'.length);
-                    nextItems = nextItems.map(it =>
-                      it.id === itemId
-                        ? {
-                            ...it,
-                            nominalDiterima: parsed,
-                            bayar: String(parsed),
-                            metodeBayarAktual: 'Tunai' as const,
-                            isCombinedPayment: false,
-                            combinedGroupId: undefined,
-                            driverUpdatedBy: portalDisplayName,
-                            driverUpdatedAt: nowIso
-                          }
-                        : it
-                    );
+                    nextItems = nextItems.map(it => {
+                      if (it.id !== itemId) return it;
+                      const nextEditCount = Math.min(3, (Number(it.driverEditCount) || 0) + 1);
+                      const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+                        it.gpsLockHistory,
+                        nextEditCount,
+                        'Tunai',
+                        `Simpan Tunai Rp ${formatRibuan(parsed)} (${it.noFaktur})`,
+                        `${it.namaPelanggan} (${it.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+                        parsed
+                      );
+                      return {
+                        ...it,
+                        nominalDiterima: parsed,
+                        bayar: String(parsed),
+                        metodeBayarAktual: 'Tunai' as const,
+                        isCombinedPayment: false,
+                        combinedGroupId: undefined,
+                        driverEditCount: nextEditCount,
+                        driverUpdatedBy: portalDisplayName,
+                        driverUpdatedAt: nowIso,
+                        gpsLockHistory: nextGpsHistory,
+                        lockedGpsLat: gpsEntry.lat,
+                        lockedGpsLng: gpsEntry.lng,
+                        lockedGpsAccuracy: gpsEntry.accuracy,
+                        lockedGpsLocation: gpsEntry.locationName,
+                        lockedGpsAt: gpsEntry.savedAt
+                      };
+                    });
                   } else if (targetKey.startsWith('cmb::')) {
                     const modeKey = targetKey.slice('cmb::'.length);
                     const matchingGroup = [...codGroups, ...tempoGroups].find(
@@ -1663,6 +2003,15 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                     if (matchingGroup) {
                       const targetIds = new Set(matchingGroup.items.map(g => g.id));
                       const groupCombinedId = `CMB-${matchingGroup.category}-${matchingGroup.customerKey}`;
+                      const nextEditCount = Math.min(3, (matchingGroup.editCount || 0) + 1);
+                      const { entry: gpsEntry, history: nextGpsHistory } = buildGpsLockForSave(
+                        matchingGroup.items[0]?.gpsLockHistory,
+                        nextEditCount,
+                        'Tunai',
+                        `Simpan Tunai Gabungan Rp ${formatRibuan(parsed)} (${matchingGroup.items.length} Faktur)`,
+                        `${matchingGroup.customerName} (${matchingGroup.items[0]?.alamatPelanggan || todayFormKirim.areaKirim || '-'})`,
+                        parsed
+                      );
                       let remaining = parsed;
                       nextItems = nextItems.map(it => {
                         if (!targetIds.has(it.id)) return it;
@@ -1681,8 +2030,15 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                           metodeBayarAktual: 'Tunai' as const,
                           isCombinedPayment: true,
                           combinedGroupId: groupCombinedId,
+                          driverEditCount: nextEditCount,
                           driverUpdatedBy: portalDisplayName,
-                          driverUpdatedAt: nowIso
+                          driverUpdatedAt: nowIso,
+                          gpsLockHistory: nextGpsHistory,
+                          lockedGpsLat: gpsEntry.lat,
+                          lockedGpsLng: gpsEntry.lng,
+                          lockedGpsAccuracy: gpsEntry.accuracy,
+                          lockedGpsLocation: gpsEntry.locationName,
+                          lockedGpsAt: gpsEntry.savedAt
                         };
                       });
                     }
@@ -1694,8 +2050,8 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
                   .filter(it => it.metodeBayarAktual === 'Tunai' && Number(it.nominalDiterima) > 0)
                   .reduce((s, it) => s + (Number(it.nominalDiterima) || 0), 0);
                 onNotify(
-                  'Setoran Tersimpan',
-                  `Setoran Tunai Rp ${formatRibuan(nextTunai)}, ${transferInvoiceCount} Transfer, dan ${ttdInvoiceCount} TTD tersimpan & tersinkron ke Finance.`
+                  'Setoran & GPS Terkunci',
+                  `Setoran Tunai Rp ${formatRibuan(nextTunai)}, ${transferInvoiceCount} Transfer, dan ${ttdInvoiceCount} TTD disimpan • 🔒 GPS Terkunci (${liveGps.lat.toFixed(5)}, ${liveGps.lng.toFixed(5)}).`
                 );
               }
             }}

@@ -193,7 +193,33 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
     createdAt: '2026-01-10T08:00:00Z',
     approvedAt: '2026-01-10T08:05:00Z',
     approvedBy: 'Super Admin',
-    notes: 'Marketing Offline — Terintegrasi langsung ke Menu Marketing (Offline)'
+    notes: 'Marketing Offline — Terintegrasi langsung ke Menu Marketing (Offline & Validasi Faktur)'
+  },
+  {
+    id: 'usr-marketing-gilang',
+    email: 'gilang.marketing@gmail.com',
+    fullName: 'Gilang Arya Pramuditya',
+    role: 'marketing_offline',
+    department: 'Marketing',
+    phone: '0813-5566-7788',
+    status: 'approved',
+    createdAt: '2026-01-10T08:00:00Z',
+    approvedAt: '2026-01-10T08:05:00Z',
+    approvedBy: 'Super Admin',
+    notes: 'Marketing Offline / Sales — Akses Validasi Faktur & Kunjungan'
+  },
+  {
+    id: 'usr-marketing-wongso',
+    email: 'wongso.marketing@gmail.com',
+    fullName: 'Wongso Arrohman Hidayat',
+    role: 'marketing_offline',
+    department: 'Marketing',
+    phone: '0813-6677-8899',
+    status: 'approved',
+    createdAt: '2026-01-10T08:00:00Z',
+    approvedAt: '2026-01-10T08:05:00Z',
+    approvedBy: 'Super Admin',
+    notes: 'Marketing Offline / Sales — Akses Validasi Faktur & Kunjungan'
   }
 ];
 

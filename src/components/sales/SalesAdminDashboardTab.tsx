@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { MONTH_OPTIONS, useSalesAdminUsers } from './SalesHeaderFilter';
 import { cleanFleetDisplayLabel } from './LoadingDurationTab';
+import { ModernKpiDropdown } from './SalesKpi';
 import type { NavTab } from '../Sidebar';
 
 interface SalesAdminDashboardTabProps {
@@ -360,9 +361,16 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       });
     });
 
+    const inactiveAdminSet = new Set<string>();
     indList.forEach((item: any) => {
       const name = String(item.adminName || '').trim().toUpperCase();
       if (!name) return;
+      if (item.isInactive && (!item.month || item.month === selectedMonth) && (!item.year || item.year === selectedYear)) {
+        inactiveAdminSet.add(name);
+        map.delete(name);
+        return;
+      }
+      if (inactiveAdminSet.has(name)) return;
       const short = name.split(' ')[0];
       const avg = Math.round(
         ((Number(item.validasiSoWebPct) || 90) +
@@ -405,11 +413,13 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
         : 94.2;
 
     return {
-      rows: Array.from(map.values()),
+      rows: Array.from(map.entries())
+        .filter(([k]) => !inactiveAdminSet.has(k))
+        .map(([, v]) => v),
       persentaseKiriman,
       totalDendaCases: dendaList.length
     };
-  }, [salesKpiData, adminNames]);
+  }, [salesKpiData, adminNames, selectedMonth, selectedYear]);
 
   return (
     <div className="space-y-6">
@@ -437,31 +447,32 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
 
           {/* Filter Periode Bulan & Tahun */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2">
-              <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <select
+            <div className="w-44">
+              <ModernKpiDropdown
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="bg-transparent text-xs font-extrabold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              >
-                {MONTH_OPTIONS.map(m => (
-                  <option key={m} value={m} className="bg-white dark:bg-slate-900">
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <span className="text-slate-300 dark:text-slate-700">|</span>
-              <select
+                onChange={val => setSelectedMonth(val)}
+                icon={<Calendar className="w-3.5 h-3.5" />}
+                options={MONTH_OPTIONS.map((m, idx) => ({
+                  value: m,
+                  label: m,
+                  subLabel: `Bulan ke-${idx + 1}`,
+                  badge: m.slice(0, 3).toUpperCase(),
+                  badgeTone: m === currentMonthName ? 'indigo' : 'slate'
+                }))}
+              />
+            </div>
+            <div className="w-32">
+              <ModernKpiDropdown
                 value={selectedYear}
-                onChange={e => setSelectedYear(e.target.value)}
-                className="bg-transparent text-xs font-mono font-extrabold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              >
-                {['2025', '2026', '2027'].map(y => (
-                  <option key={y} value={y} className="bg-white dark:bg-slate-900">
-                    {y}
-                  </option>
-                ))}
-              </select>
+                onChange={val => setSelectedYear(val)}
+                icon={<Sparkles className="w-3.5 h-3.5" />}
+                options={['2025', '2026', '2027'].map(y => ({
+                  value: y,
+                  label: `Tahun ${y}`,
+                  badge: y === currentYearStr ? 'AKTIF' : undefined,
+                  badgeTone: 'emerald'
+                }))}
+              />
             </div>
           </div>
         </div>

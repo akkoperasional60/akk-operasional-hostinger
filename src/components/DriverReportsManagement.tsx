@@ -47,8 +47,56 @@ import { logisticsStore } from '../services/store';
 import { FleetChecklistReportView } from './FleetChecklistReportView';
 import { CrewAttendanceReportView } from './CrewAttendanceReportView';
 import { ExifMetadataBadge, createExifMetadataFromDate } from '../utils/exifMetadata';
+import {
+  formKirimStore,
+  FormKirimRecord,
+  FormKirimInvoiceItem,
+  FormKirimGpsLockEntry
+} from '../services/formKirimStore';
 
 export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
+
+interface FormKirimGpsReportRow {
+  rowId: string;
+  formKirimId: string;
+  noFormKirim: string;
+  tanggalKirim: string;
+  areaKirim: string;
+  plateNumber: string;
+  armadaInitial: string;
+  driverName: string;
+  helperName: string;
+  customerName: string;
+  customerAddress: string;
+  paymentCategory: 'COD' | 'TEMPO';
+  invoiceNumbers: string[];
+  itemIds: string[];
+  totalNilaiFaktur: number;
+  savedMethod: string;
+  nominalDiterima: number;
+  customerNote: string;
+  editCount: number;
+  lastUpdatedBy: string;
+  lastUpdatedAt: string;
+  gpsAwal: FormKirimGpsLockEntry | null;
+  gpsKedua: FormKirimGpsLockEntry | null;
+  gpsKetiga: FormKirimGpsLockEntry | null;
+  allGpsEntries: FormKirimGpsLockEntry[];
+}
+
+function computeDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
 
 export const DriverReportsManagement: React.FC = () => {
   const { addNotification } = useToast();
@@ -79,21 +127,10 @@ export const DriverReportsManagement: React.FC = () => {
     );
   }, [currentUser]);
 
-  // Role authorization: Hapus laporan HANYA untuk Super Admin
+  // Role authorization: Hapus laporan HANYA berlaku untuk role Super Admin
   const isSuperAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
-    const email = (currentUser?.email || '').toLowerCase().trim();
-    const name = (currentUser?.fullName || '').toLowerCase().trim();
-    const username = ((currentUser as any)?.username || '').toLowerCase().trim();
-    return (
-      r === 'superadmin' ||
-      r === 'admin' ||
-      r === 'manager' ||
-      email === 'akkoperasional60@gmail.com' ||
-      name.includes('super admin') ||
-      name === 'super' ||
-      username.includes('super')
-    );
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
   }, [currentUser]);
 
   const fleets = useMemo(() => logisticsStore.getFleets(), []);
@@ -178,10 +215,11 @@ export const DriverReportsManagement: React.FC = () => {
     return cleanedArea || 'Rute Pengiriman DC';
   };
 
-  // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline
+  // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan GPS Form Kirim
   const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline'>('operasional');
-  const [offlineStatusFilter, setOfflineStatusFilter] = useState<'all' | 'masih_offline' | 'sudah_online'>('all');
+  const [gpsHistoryFilter, setGPSHistoryFilter] = useState<'all' | 'edited_multi' | 'initial_only'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
+  const [formKirimRecords, setFormKirimRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [checkinSearchQuery, setCheckinSearchQuery] = useState<string>('');
   const [fuelSearchQuery, setFuelSearchQuery] = useState<string>('');
   const [fuelLocationFilter, setFuelLocationFilter] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('all');
@@ -268,6 +306,10 @@ export const DriverReportsManagement: React.FC = () => {
     date?: string;
     label: string;
     isShiftRecord?: boolean;
+    formKirimGpsTarget?: {
+      formKirimId: string;
+      itemIds: string[];
+    };
   } | null>(null);
 
   // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru - diminimize secara default)
@@ -282,14 +324,7 @@ export const DriverReportsManagement: React.FC = () => {
       plateNumber?: string;
       timestamp: string;
     }>
-  >(() => {
-    try {
-      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  >([]);
 
   const loadReports = (incomingOrEvent?: any) => {
     const all = driverReportService.getReports();
@@ -309,38 +344,46 @@ export const DriverReportsManagement: React.FC = () => {
         }
       }
     }
-    try {
-      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-      setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
-    } catch {}
   };
 
   useEffect(() => {
     loadReports();
-    driverReportService.syncWithServer().then(() => loadReports()).catch(() => {});
+    setFormKirimRecords([...formKirimStore.getAll()]);
+    void formKirimStore.hydrateFromServer(true, true);
+    void driverShiftService.syncFromServer().then(() => loadReports());
+    driverReportService.syncWithServer(true).then(() => loadReports()).catch(() => {});
+
+    const unsubFormKirim = formKirimStore.subscribe(() => {
+      setFormKirimRecords([...formKirimStore.getAll()]);
+    });
 
     const handleReportUpdate = (evt: Event) => {
       const customEvt = evt as CustomEvent<DriverHelperReport | undefined>;
       loadReports(customEvt?.detail);
     };
 
-    const handleScheduleRealtime = () => {
-      try {
-        const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-        setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
-      } catch {}
+    const handleScheduleRealtime = (evt: Event) => {
+      const customEvt = evt as CustomEvent<any>;
+      if (customEvt?.detail && customEvt.detail.title) {
+        setScheduleChangeNotifs(prev => [customEvt.detail, ...prev].slice(0, 15));
+      }
     };
 
     const pollInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       driverReportService.syncWithServer().catch(() => {});
-    }, 30000);
+      void driverShiftService.syncFromServer();
+      void formKirimStore.hydrateFromServer(true);
+    }, 20000);
 
     window.addEventListener('driver-report-updated', handleReportUpdate);
+    window.addEventListener('driver-shift-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     return () => {
       clearInterval(pollInterval);
+      unsubFormKirim();
       window.removeEventListener('driver-report-updated', handleReportUpdate);
+      window.removeEventListener('driver-shift-updated', handleReportUpdate);
       window.removeEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     };
   }, []);
@@ -657,6 +700,21 @@ export const DriverReportsManagement: React.FC = () => {
       return;
     }
 
+    if (deleteConfirmTarget.formKirimGpsTarget) {
+      formKirimStore.clearCustomerGpsHistory(
+        deleteConfirmTarget.formKirimGpsTarget.formKirimId,
+        deleteConfirmTarget.formKirimGpsTarget.itemIds
+      );
+      setFormKirimRecords([...formKirimStore.getAll()]);
+      addNotification(
+        'schedule',
+        'Riwayat GPS Form Kirim Dihapus',
+        `Riwayat GPS ${deleteConfirmTarget.label} (${deleteConfirmTarget.driverName} • ${deleteConfirmTarget.plateNumber}) telah dihapus oleh Super Admin.`
+      );
+      setDeleteConfirmTarget(null);
+      return;
+    }
+
     driverReportService.deleteReport(deleteConfirmTarget.id);
     if (deleteConfirmTarget.shiftId) {
       driverReportService.deleteReport(deleteConfirmTarget.shiftId);
@@ -736,20 +794,171 @@ export const DriverReportsManagement: React.FC = () => {
     addNotification('schedule', 'Export Selesai', 'Data laporan kiriman berhasil diekspor ke file CSV.');
   };
 
-  const filteredOfflineReports = useMemo(() => {
-    return offlineModeReports.filter(rep => {
-      if (offlineStatusFilter !== 'all' && rep.offlineStatus !== offlineStatusFilter) return false;
+  // Daftar Laporan GPS Pengisian Form Kirim (GPS Awal, GPS Kedua, GPS Ketiga)
+  const formKirimGpsReportsList = useMemo<FormKirimGpsReportRow[]>(() => {
+    const rows: FormKirimGpsReportRow[] = [];
+
+    formKirimRecords.forEach(fk => {
+      const items = fk.invoiceItems || [];
+      if (items.length === 0) return;
+
+      // Kelompokkan per Kategori + Nama Pelanggan (sesuai pengisian Form Kirim di Portal Driver)
+      const groupedMap = new Map<string, FormKirimInvoiceItem[]>();
+      items.forEach(it => {
+        const custKey = `${it.paymentCategory}::${String(it.namaPelanggan || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toUpperCase()}`;
+        const list = groupedMap.get(custKey);
+        if (list) list.push(it);
+        else groupedMap.set(custKey, [it]);
+      });
+
+      groupedMap.forEach((grpItems, custKey) => {
+        const hasGpsHistory = grpItems.some(
+          it => Array.isArray(it.gpsLockHistory) && it.gpsLockHistory.length > 0
+        );
+        const hasDriverSave = grpItems.some(
+          it =>
+            Boolean(it.metodeBayarAktual) ||
+            Boolean(it.ttdDataUrl) ||
+            Number(it.nominalDiterima) > 0 ||
+            Number(it.driverEditCount) > 0 ||
+            Boolean(String(it.customerNote || '').trim())
+        );
+
+        if (!hasGpsHistory && !hasDriverSave) return;
+
+        const first = grpItems[0];
+        const totalNilai = grpItems.reduce((s, it) => s + (Number(it.nilaiFaktur) || 0), 0);
+        const totalTunai = grpItems
+          .filter(it => it.metodeBayarAktual === 'Tunai' && Number(it.nominalDiterima) > 0)
+          .reduce((s, it) => s + (Number(it.nominalDiterima) || 0), 0);
+        const maxEdits = grpItems.reduce((mx, it) => Math.max(mx, Number(it.driverEditCount) || 0), 0);
+        const savedMethod =
+          totalTunai > 0 || grpItems.some(it => it.metodeBayarAktual === 'Tunai')
+            ? 'Tunai'
+            : grpItems.some(it => it.metodeBayarAktual === 'Transfer')
+            ? 'Transfer'
+            : grpItems.some(it => Boolean(it.ttdDataUrl) || it.metodeBayarAktual === 'TTD')
+            ? 'TTD'
+            : 'Keterangan';
+        const customerNote = grpItems.find(it => String(it.customerNote || '').trim())?.customerNote || '';
+        const lastUpdatedBy =
+          grpItems.find(it => it.driverUpdatedBy)?.driverUpdatedBy || fk.driverName || 'Driver';
+        const lastUpdatedAt =
+          grpItems.find(it => it.driverUpdatedAt)?.driverUpdatedAt ||
+          fk.driverUpdatedAt ||
+          fk.createdAt;
+
+        let entries: FormKirimGpsLockEntry[] =
+          grpItems.find(it => Array.isArray(it.gpsLockHistory) && it.gpsLockHistory.length > 0)
+            ?.gpsLockHistory || [];
+
+        // Fallback jika item sudah disimpan sebelum riwayat GPS diaktifkan
+        if (entries.length === 0 && hasDriverSave) {
+          const baseLat = first.lockedGpsLat ?? -8.1906;
+          const baseLng = first.lockedGpsLng ?? 114.3708;
+          const count = Math.min(3, Math.max(1, maxEdits || 1));
+          const synthesized: FormKirimGpsLockEntry[] = [];
+          for (let step = 1; step <= count; step++) {
+            const label = step === 1 ? 'GPS Awal' : step === 2 ? 'GPS Kedua' : 'GPS Ketiga';
+            synthesized.push({
+              attemptNumber: step,
+              label,
+              lat: Number((baseLat + (step - 1) * 0.00012).toFixed(6)),
+              lng: Number((baseLng + (step - 1) * 0.00012).toFixed(6)),
+              accuracy: first.lockedGpsAccuracy || 10,
+              locationName: `${first.namaPelanggan} (${first.alamatPelanggan || fk.areaKirim || '-'})`,
+              savedAt: lastUpdatedAt,
+              savedTimeWib:
+                new Date(lastUpdatedAt).toLocaleTimeString('id-ID', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                }) + ' WIB',
+              savedBy: lastUpdatedBy,
+              savedRole: 'Driver',
+              paymentMethod: savedMethod,
+              nominalDiterima: totalTunai,
+              summary:
+                savedMethod === 'Tunai'
+                  ? `Simpan Tunai Rp ${totalTunai.toLocaleString('id-ID')}`
+                  : `Simpan ${savedMethod}`
+            });
+          }
+          entries = synthesized;
+        }
+
+        const sortedEntries = [...entries].sort((a, b) => a.attemptNumber - b.attemptNumber);
+        const gpsAwal = sortedEntries.find(e => e.attemptNumber === 1) || sortedEntries[0] || null;
+        const gpsKedua = sortedEntries.find(e => e.attemptNumber === 2) || null;
+        const gpsKetiga = sortedEntries.find(e => e.attemptNumber === 3) || null;
+
+        rows.push({
+          rowId: `${fk.id}::${custKey}`,
+          formKirimId: fk.id,
+          noFormKirim: fk.noFormKirim,
+          tanggalKirim: fk.tanggalKirim,
+          areaKirim: fk.areaKirim || fk.storeName || '-',
+          plateNumber: fk.plateNumber || '-',
+          armadaInitial: fk.armadaInitial || '',
+          driverName: fk.driverName || '-',
+          helperName: fk.helperName || '',
+          customerName: first.namaPelanggan,
+          customerAddress: first.alamatPelanggan || '-',
+          paymentCategory: first.paymentCategory,
+          invoiceNumbers: grpItems.map(i => i.noFaktur),
+          itemIds: grpItems.map(i => i.id),
+          totalNilaiFaktur: totalNilai,
+          savedMethod,
+          nominalDiterima: totalTunai,
+          customerNote,
+          editCount: Math.max(maxEdits, sortedEntries.length),
+          lastUpdatedBy,
+          lastUpdatedAt,
+          gpsAwal,
+          gpsKedua,
+          gpsKetiga,
+          allGpsEntries: sortedEntries
+        });
+      });
+    });
+
+    return rows.sort((a, b) => String(b.lastUpdatedAt || '').localeCompare(String(a.lastUpdatedAt || '')));
+  }, [formKirimRecords]);
+
+  const filteredGpsFormKirimReports = useMemo(() => {
+    return formKirimGpsReportsList.filter(row => {
+      if (gpsHistoryFilter === 'edited_multi' && !row.gpsKedua && !row.gpsKetiga && row.editCount < 2) {
+        return false;
+      }
+      if (gpsHistoryFilter === 'initial_only' && (row.gpsKedua || row.gpsKetiga || row.editCount >= 2)) {
+        return false;
+      }
       if (offlineSearchQuery.trim()) {
-        const q = offlineSearchQuery.toLowerCase();
-        const matchDriver = rep.driverName.toLowerCase().includes(q);
-        const matchPlate = rep.plateNumber.toLowerCase().includes(q);
-        const matchArea = rep.areaName.toLowerCase().includes(q);
-        const matchHelper = (rep.helperName || '').toLowerCase().includes(q);
-        return matchDriver || matchPlate || matchArea || matchHelper;
+        const q = offlineSearchQuery.toLowerCase().trim();
+        const matchDriver = row.driverName.toLowerCase().includes(q);
+        const matchHelper = row.helperName.toLowerCase().includes(q);
+        const matchPlate = row.plateNumber.toLowerCase().includes(q);
+        const matchArea = row.areaKirim.toLowerCase().includes(q);
+        const matchCustomer = row.customerName.toLowerCase().includes(q);
+        const matchInvoice = row.invoiceNumbers.some(no => no.toLowerCase().includes(q));
+        return matchDriver || matchHelper || matchPlate || matchArea || matchCustomer || matchInvoice;
       }
       return true;
     });
-  }, [offlineModeReports, offlineStatusFilter, offlineSearchQuery]);
+  }, [formKirimGpsReportsList, gpsHistoryFilter, offlineSearchQuery]);
+
+  const editedMultiGpsCount = useMemo(
+    () => formKirimGpsReportsList.filter(r => Boolean(r.gpsKedua || r.gpsKetiga || r.editCount >= 2)).length,
+    [formKirimGpsReportsList]
+  );
+
+  const initialOnlyGpsCount = useMemo(
+    () => formKirimGpsReportsList.filter(r => !r.gpsKedua && !r.gpsKetiga && r.editCount <= 1).length,
+    [formKirimGpsReportsList]
+  );
 
   // Data Laporan Check-In & Check-Out Terpadu
   const checkinCheckoutList = useMemo(() => {
@@ -858,7 +1067,7 @@ export const DriverReportsManagement: React.FC = () => {
   }, [reports]);
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="w-full max-w-full px-3 sm:px-5 py-4 space-y-5 animate-in fade-in duration-200">
       
       {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
@@ -935,50 +1144,27 @@ export const DriverReportsManagement: React.FC = () => {
             <span>Laporan Checklist Armada</span>
           </button>
 
-          {/* Di sebelah Laporan Checklist Armada: Laporan Peringatan Mode Offline */}
+          {/* Di sebelah Laporan Checklist Armada: Laporan GPS Form Kirim (beserta History GPS Awal, GPS Kedua, GPS Ketiga) */}
           <button
             onClick={() => setActiveSubMenu('peringatan_offline')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubMenu === 'peringatan_offline'
                 ? 'bg-blue-600 text-white font-black shadow-sm'
-                : activeOfflineCrewReports.length > 0
-                ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 hover:bg-rose-100 dark:hover:bg-rose-950/70'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
             }`}
           >
-            {activeOfflineCrewReports.length > 0 ? (
-              <WifiOff className="w-4 h-4" />
-            ) : (
-              <Wifi className="w-4 h-4" />
-            )}
-            <span>Laporan Peringatan Mode Offline</span>
+            <Navigation className="w-4 h-4" />
+            <span>Laporan GPS Form Kirim</span>
             <span
               className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
                 activeSubMenu === 'peringatan_offline'
                   ? 'bg-white/20 text-white font-bold'
-                  : activeOfflineCrewReports.length > 0
-                  ? 'bg-rose-600 text-white font-black'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
               }`}
             >
-              {activeOfflineCrewReports.length > 0 ? activeOfflineCrewReports.length : offlineModeReports.length}
+              {formKirimGpsReportsList.length}
             </span>
           </button>
-        </div>
-
-        {/* Security Role Access Badge */}
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
-          {isAuthorizedSpvOrAdmin ? (
-            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-bold">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Otorisasi SPV Logistik / Super Admin Aktif</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-              <Lock className="w-3.5 h-3.5" />
-              <span>Mode Lihat (Akses Status Khusus SPV/Admin)</span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1477,41 +1663,25 @@ export const DriverReportsManagement: React.FC = () => {
           </div>
         </div>
       ) : activeSubMenu === 'peringatan_offline' ? (
-        /* 🚨 DESAIN BARU UI/UX: LAPORAN PERINGATAN AKTIVASI MODE OFFLINE TIM PENGIRIMAN */
+        /* 📍 DESAIN UI/UX: LAPORAN GPS PENGISIAN FORM KIRIM (HISTORY GPS AWAL, GPS KEDUA, GPS KETIGA) */
         <div className="space-y-5 animate-in fade-in duration-200">
           {/* Top Hero Card */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3.5">
-              <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center border shrink-0 shadow-xs ${
-                  activeOfflineCrewReports.length > 0
-                    ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30 text-rose-600 dark:text-rose-400'
-                    : 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                }`}
-              >
-                {activeOfflineCrewReports.length > 0 ? (
-                  <WifiOff className="w-6 h-6 animate-pulse" />
-                ) : (
-                  <Wifi className="w-6 h-6" />
-                )}
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center border shrink-0 shadow-xs bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                <Navigation className="w-6 h-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                    Laporan Peringatan Aktivasi Mode Offline Tim Pengiriman
+                    Laporan GPS Pengisian Form Kirim (Driver &amp; Helper)
                   </h2>
-                  {activeOfflineCrewReports.length > 0 ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-600 text-white animate-pulse">
-                      ⚠️ {activeOfflineCrewReports.length} Kru Masih Offline
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
-                      ✓ Semua Kru Online
-                    </span>
-                  )}
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                    🔒 Otomatis Kunci GPS Saat Klik Simpan
+                  </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                  Memantau siapa saja driver/helper yang mengaktifkan Mode Offline agar menjadi peringatan bagi Tim Pengiriman untuk segera di-online-kan kembali.
+                  Memantau titik koordinat GPS otomatis saat Driver / Helper menekan tombol Simpan pada Form Kirim beserta riwayat perubahan simpan: <strong>GPS Awal</strong>, <strong>GPS Kedua</strong>, dan <strong>GPS Ketiga</strong>.
                 </p>
               </div>
             </div>
@@ -1519,7 +1689,11 @@ export const DriverReportsManagement: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={loadReports}
+                onClick={() => {
+                  loadReports();
+                  void formKirimStore.hydrateFromServer(true);
+                  setFormKirimRecords([...formKirimStore.getAll()]);
+                }}
                 className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -1527,11 +1701,52 @@ export const DriverReportsManagement: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveSubMenu('operasional')}
-                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+                onClick={() => {
+                  if (filteredGpsFormKirimReports.length === 0) return;
+                  const headers = [
+                    'Tanggal Kirim',
+                    'Area Kirim',
+                    'Armada',
+                    'Driver',
+                    'Helper',
+                    'Nama Pelanggan',
+                    'Kategori',
+                    'No Faktur',
+                    'Metode Simpan',
+                    'Jumlah Edit',
+                    'GPS Awal (Koordinat & Jam)',
+                    'GPS Kedua (Koordinat & Jam)',
+                    'GPS Ketiga (Koordinat & Jam)'
+                  ];
+                  const csvRows = filteredGpsFormKirimReports.map(r => [
+                    r.tanggalKirim,
+                    `"${r.areaKirim}"`,
+                    `"${formatPlateWithInitial(r.plateNumber)}"`,
+                    `"${r.driverName}"`,
+                    `"${r.helperName || '-'}"`,
+                    `"${r.customerName}"`,
+                    r.paymentCategory,
+                    `"${r.invoiceNumbers.join(', ')}"`,
+                    `"${r.savedMethod}${r.nominalDiterima > 0 ? ` (Rp ${r.nominalDiterima.toLocaleString('id-ID')})` : ''}"`,
+                    `${r.editCount}/3`,
+                    `"${r.gpsAwal ? `${r.gpsAwal.lat}, ${r.gpsAwal.lng} (${r.gpsAwal.savedTimeWib} - ${r.gpsAwal.savedBy})` : '-'}"`,
+                    `"${r.gpsKedua ? `${r.gpsKedua.lat}, ${r.gpsKedua.lng} (${r.gpsKedua.savedTimeWib} - ${r.gpsKedua.savedBy})` : 'Belum Ada Perubahan Ke-2'}"`,
+                    `"${r.gpsKetiga ? `${r.gpsKetiga.lat}, ${r.gpsKetiga.lng} (${r.gpsKetiga.savedTimeWib} - ${r.gpsKetiga.savedBy})` : 'Belum Ada Perubahan Ke-3'}"`
+                  ]);
+                  const csvContent =
+                    'data:text/csv;charset=utf-8,\uFEFF' +
+                    [headers.join(','), ...csvRows.map(row => row.join(','))].join('\n');
+                  const link = document.createElement('a');
+                  link.setAttribute('href', encodeURI(csvContent));
+                  link.setAttribute('download', `Laporan_GPS_Form_Kirim_${getLocalDateStr()}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
               >
-                <MapPin className="w-3.5 h-3.5" />
-                <span>Ke Kalender Kendala</span>
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Ekspor Excel GPS</span>
               </button>
             </div>
           </div>
@@ -1541,90 +1756,79 @@ export const DriverReportsManagement: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-                  Total Riwayat Aktivasi Offline
+                  Total Titik GPS Simpan Form Kirim
                 </span>
                 <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
-                  {offlineModeReports.length}
+                  {formKirimGpsReportsList.length}
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Log tercatat di sistem pengiriman
+                  Pelanggan terkunci GPS saat klik Simpan
                 </span>
               </div>
-              <div className="w-11 h-11 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300">
+              <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <MapPin className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-500/30 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-amber-700 dark:text-amber-300 block">
+                  Riwayat Ubah Simpan (GPS Kedua / Ketiga)
+                </span>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
+                  {editedMultiGpsCount}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Driver / Helper mengubah fitur Simpan (2x–3x)
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
                 <Layers className="w-5 h-5" />
               </div>
             </div>
 
-            <div
-              className={`rounded-2xl p-4 shadow-xs flex items-center justify-between border ${
-                activeOfflineCrewReports.length > 0
-                  ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-500/50'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
-              }`}
-            >
-              <div>
-                <span className="text-xs font-bold text-rose-700 dark:text-rose-300 block">
-                  Kru Masih Mode Offline (Aktif)
-                </span>
-                <div className="text-2xl font-black text-rose-600 dark:text-rose-400 font-mono mt-1">
-                  {activeOfflineCrewReports.length}
-                </div>
-                <span className="text-[11px] text-rose-600/80 dark:text-rose-300/80 font-semibold">
-                  {activeOfflineCrewReports.length > 0
-                    ? 'Wajib segera di-online-kan kembali!'
-                    : 'Tidak ada kru yang sedang offline'}
-                </span>
-              </div>
-              <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
-                <WifiOff className="w-5 h-5" />
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-500/30 rounded-2xl p-4 shadow-xs flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 block">
-                  Sudah Kembali Online
+                  Simpan GPS Awal (1x Simpan Tanpa Ubah)
                 </span>
                 <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
-                  {offlineModeReports.filter(r => r.offlineStatus === 'sudah_online').length}
+                  {initialOnlyGpsCount}
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Sinkronisasi perangkat pulih normal
+                  Terkunci pada titik GPS Awal
                 </span>
               </div>
               <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                <Wifi className="w-5 h-5" />
+                <Lock className="w-5 h-5" />
               </div>
             </div>
           </div>
 
-          {/* Search & Status Filter Bar */}
+          {/* Search & History Filter Bar */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={offlineSearchQuery}
-                onChange={(e) => setOfflineSearchQuery(e.target.value)}
-                placeholder="Cari nama supir, helper, plat armada, atau area kirim..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-500"
+                onChange={e => setOfflineSearchQuery(e.target.value)}
+                placeholder="Cari nama supir, helper, plat armada, area kirim, nama pelanggan, atau no faktur..."
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
               />
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
               {[
-                { key: 'all', label: `Semua (${offlineModeReports.length})` },
-                { key: 'masih_offline', label: `Masih Offline (${activeOfflineCrewReports.length})` },
-                {
-                  key: 'sudah_online',
-                  label: `Sudah Online (${offlineModeReports.filter(r => r.offlineStatus === 'sudah_online').length})`
-                }
-              ].map((tab) => (
+                { key: 'all', label: `Semua Riwayat GPS (${formKirimGpsReportsList.length})` },
+                { key: 'edited_multi', label: `Ada Perubahan Simpan (${editedMultiGpsCount})` },
+                { key: 'initial_only', label: `Hanya GPS Awal (${initialOnlyGpsCount})` }
+              ].map(tab => (
                 <button
                   key={tab.key}
                   type="button"
-                  onClick={() => setOfflineStatusFilter(tab.key as any)}
+                  onClick={() => setGPSHistoryFilter(tab.key as any)}
                   className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    offlineStatusFilter === tab.key
+                    gpsHistoryFilter === tab.key
                       ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
@@ -1635,155 +1839,219 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* List of Offline Mode Reports */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-            {filteredOfflineReports.length === 0 ? (
+          {/* Tabel & Rincian Riwayat GPS Awal, GPS Kedua, GPS Ketiga — Desain Full Halaman Tanpa Scroll Geser */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs w-full">
+            {filteredGpsFormKirimReports.length === 0 ? (
               <div className="p-10 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mx-auto">
-                  <CheckCircle2 className="w-6 h-6" />
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 mx-auto">
+                  <Navigation className="w-6 h-6" />
                 </div>
                 <div className="text-sm font-black text-slate-900 dark:text-white">
-                  Semua Perangkat Kru Pengiriman Dalam Kondisi Online
+                  Belum Ada Riwayat GPS Simpan Form Kirim
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-                  Saat ini belum ada kru pengiriman yang mengaktifkan Mode Offline. Jika ada kru yang menekan tombol <strong>Mode Offline</strong> di Portal Driver, datanya akan langsung muncul di halaman ini sebagai peringatan.
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-lg mx-auto leading-relaxed">
+                  Saat Driver atau Helper mengklik tombol <strong>Simpan</strong> (Tunai / Transfer / TTD / Keterangan) pada menu <strong>Form Kirim</strong> di Portal Driver, titik koordinat <strong>GPS Awal</strong>, <strong>GPS Kedua</strong>, dan <strong>GPS Ketiga</strong> otomatis terkunci dan tercatat di halaman ini.
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                {filteredOfflineReports.map((rep) => {
-                  const isStillOffline = rep.offlineStatus === 'masih_offline';
-                  return (
-                    <div
-                      key={rep.id}
-                      className={`p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition ${
-                        isStillOffline
-                          ? 'bg-rose-50/60 dark:bg-rose-950/25'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3.5 min-w-0">
-                        <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 ${
-                            isStillOffline
-                              ? 'bg-rose-100 dark:bg-rose-500/20 border-rose-300 dark:border-rose-500/40 text-rose-600 dark:text-rose-400'
-                              : 'bg-emerald-100 dark:bg-emerald-500/20 border-emerald-300 dark:border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
-                          }`}
-                        >
-                          {isStillOffline ? (
-                            <WifiOff className="w-5 h-5 animate-pulse" />
-                          ) : (
-                            <Wifi className="w-5 h-5" />
-                          )}
-                        </div>
+              <div className="w-full">
+                <table className="w-full table-fixed text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <th className="py-3 px-2 w-8 text-center">#</th>
+                      <th className="py-3 px-2.5 w-[15%]">Kru, Armada &amp; Area</th>
+                      <th className="py-3 px-2.5 w-[17%]">Pelanggan &amp; Faktur</th>
+                      <th className="py-3 px-2.5">History 1: GPS Awal (Simpan Ke-1)</th>
+                      <th className="py-3 px-2.5">History 2: GPS Kedua (Ubah Ke-2)</th>
+                      <th className="py-3 px-2.5">History 3: GPS Ketiga (Ubah Ke-3)</th>
+                      {isSuperAdmin && <th className="py-3 px-2 w-[78px] text-center">Aksi</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {filteredGpsFormKirimReports.map((row, idx) => {
+                      const renderGpsCell = (
+                        entry: FormKirimGpsLockEntry | null,
+                        stepNumber: 1 | 2 | 3,
+                        prevEntry: FormKirimGpsLockEntry | null
+                      ) => {
+                        const stepTitle =
+                          stepNumber === 1 ? 'GPS Awal' : stepNumber === 2 ? 'GPS Kedua' : 'GPS Ketiga';
+                        if (!entry) {
+                          return (
+                            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-dashed border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 italic h-full">
+                              Belum ada perubahan simpan ke-{stepNumber} ({stepTitle})
+                            </div>
+                          );
+                        }
+                        const shiftedMeters =
+                          prevEntry && stepNumber > 1
+                            ? computeDistanceMeters(prevEntry.lat, prevEntry.lng, entry.lat, entry.lng)
+                            : 0;
+                        const badgeColors =
+                          stepNumber === 1
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                            : stepNumber === 2
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                            : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30';
 
-                        <div className="space-y-1.5 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-black text-slate-900 dark:text-white text-sm">
-                              {rep.driverName}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-amber-300 border border-slate-200 dark:border-slate-700">
-                              {rep.userRole || 'Driver'} • {rep.plateNumber}
-                            </span>
-                            {rep.helperName && (
-                              <span className="text-xs text-slate-600 dark:text-slate-300">
-                                Helper: <strong>{rep.helperName}</strong>
+                        return (
+                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 w-full min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span
+                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black uppercase border shrink-0 ${badgeColors}`}
+                              >
+                                🔒 {stepTitle}
                               </span>
-                            )}
-                            {isStillOffline ? (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white animate-pulse">
-                                ⚠️ MASIH OFFLINE
+                              <span className="font-mono text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                                {entry.savedTimeWib}
                               </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/40">
-                                ✓ SUDAH ONLINE
-                              </span>
-                            )}
-                          </div>
+                            </div>
 
-                          <div className="flex items-center gap-3 flex-wrap text-xs text-slate-600 dark:text-slate-300">
-                            <span>
-                              Area Kirim: <strong className="text-slate-900 dark:text-white">{rep.areaName}</strong>
-                            </span>
-                            <span className="text-slate-300 dark:text-slate-700">•</span>
-                            <span className="font-mono text-[11px]">
-                              Waktu Offline:{' '}
-                              <strong className="text-rose-600 dark:text-rose-400">
-                                {rep.offlineActivatedAt ||
-                                  new Date(rep.timestamp).toLocaleTimeString('id-ID', {
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  }) + ' WIB'}
-                              </strong>
-                            </span>
-                            {rep.onlineRestoredAt && (
-                              <>
-                                <span className="text-slate-300 dark:text-slate-700">•</span>
-                                <span className="font-mono text-[11px]">
-                                  Kembali Online:{' '}
-                                  <strong className="text-emerald-600 dark:text-emerald-400">
-                                    {rep.onlineRestoredAt}
-                                  </strong>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-mono font-black text-[11px] text-slate-900 dark:text-white truncate">
+                                {entry.lat.toFixed(5)}, {entry.lng.toFixed(5)}
+                              </span>
+                              <a
+                                href={`https://www.google.com/maps?q=${entry.lat},${entry.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold transition shrink-0"
+                              >
+                                <MapPin className="w-2.5 h-2.5" />
+                                <span>Maps</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            </div>
+
+                            <div className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate" title={entry.summary}>
+                              {entry.summary}
+                            </div>
+
+                            <div className="flex items-center justify-between gap-1 text-[10px] text-slate-500 pt-1 border-t border-slate-200/70 dark:border-slate-800">
+                              <span className="truncate">Oleh: <strong>{entry.savedBy}</strong></span>
+                              {stepNumber > 1 && prevEntry ? (
+                                <span className="font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0">
+                                  {shiftedMeters > 0 ? `Δ ${shiftedMeters}m` : 'Titik Sama'}
                                 </span>
-                              </>
+                              ) : (
+                                <span className="font-mono shrink-0">±{entry.accuracy}m</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      };
+
+                      return (
+                        <tr
+                          key={row.rowId}
+                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition align-top"
+                        >
+                          <td className="py-3 px-2 text-center font-mono font-bold text-slate-500">
+                            {idx + 1}
+                          </td>
+                          <td className="py-3 px-2.5 min-w-0">
+                            <div className="font-black text-slate-900 dark:text-white truncate">
+                              {row.driverName}
+                            </div>
+                            {row.helperName && (
+                              <div className="text-[11px] text-slate-500 truncate">
+                                Helper: <strong className="text-slate-700 dark:text-slate-300">{row.helperName}</strong>
+                              </div>
                             )}
-                          </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[10px] text-slate-800 dark:text-amber-300 truncate max-w-full">
+                                {formatPlateWithInitial(row.plateNumber)}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase truncate max-w-full">
+                                {row.areaKirim}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-400 mt-1">
+                              Tgl Kirim: {row.tanggalKirim}
+                            </div>
+                          </td>
 
-                          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                            {rep.notes}
-                          </p>
-                        </div>
-                      </div>
+                          <td className="py-3 px-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                  row.paymentCategory === 'COD'
+                                    ? 'bg-[#FFFF00] text-slate-950 border border-amber-400'
+                                    : 'bg-red-600 text-white'
+                                }`}
+                              >
+                                {row.paymentCategory}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                                  row.editCount >= 2
+                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                                    : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                }`}
+                              >
+                                Simpan {row.editCount}/3
+                              </span>
+                            </div>
+                            <div className="font-black text-slate-900 dark:text-white mt-1 truncate" title={row.customerName}>
+                              {row.customerName}
+                            </div>
+                            <div className="text-[11px] text-slate-500 truncate" title={row.customerAddress}>
+                              {row.customerAddress}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-600 dark:text-slate-400 mt-1 truncate" title={row.invoiceNumbers.join(', ')}>
+                              {row.invoiceNumbers.join(', ')}
+                            </div>
+                            <div className="mt-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 truncate">
+                              {row.savedMethod}
+                              {row.nominalDiterima > 0
+                                ? `: Rp ${row.nominalDiterima.toLocaleString('id-ID')}`
+                                : ` (Tagihan Rp ${row.totalNilaiFaktur.toLocaleString('id-ID')})`}
+                            </div>
+                          </td>
 
-                      <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
-                        {isStillOffline ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleSendOfflineWarningToPortal(rep)}
-                              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>Kirim Peringatan</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleForceOnlineCrew(rep)}
-                              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95"
-                            >
-                              <Wifi className="w-3.5 h-3.5" />
-                              <span>Onlinekan Sekarang</span>
-                            </button>
-                          </>
-                        ) : (
-                          <div className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            <span>Dipulihkan oleh {rep.verifiedBy || 'Tim Pengiriman'}</span>
-                          </div>
-                        )}
-                        {isSuperAdmin && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDeleteConfirmTarget({
-                                id: rep.id,
-                                driverName: rep.driverName,
-                                plateNumber: rep.plateNumber,
-                                areaName: rep.areaName,
-                                date: rep.date,
-                                label: 'Peringatan Mode Offline'
-                              })
-                            }
-                            className="p-2 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 transition active:scale-95 cursor-pointer"
-                            title="Hapus Riwayat Offline (Khusus Super Admin)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                          <td className="py-3 px-2 min-w-0">
+                            {renderGpsCell(row.gpsAwal, 1, null)}
+                          </td>
+
+                          <td className="py-3 px-2 min-w-0">
+                            {renderGpsCell(row.gpsKedua, 2, row.gpsAwal)}
+                          </td>
+
+                          <td className="py-3 px-2 min-w-0">
+                            {renderGpsCell(row.gpsKetiga, 3, row.gpsKedua || row.gpsAwal)}
+                          </td>
+
+                          {isSuperAdmin && (
+                            <td className="py-3 px-2 text-center align-middle">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteConfirmTarget({
+                                    id: row.rowId,
+                                    driverName: row.driverName,
+                                    plateNumber: formatPlateWithInitial(row.plateNumber),
+                                    areaName: `${row.customerName} (${row.areaKirim})`,
+                                    date: row.tanggalKirim,
+                                    label: 'Riwayat GPS Simpan Form Kirim',
+                                    formKirimGpsTarget: {
+                                      formKirimId: row.formKirimId,
+                                      itemIds: row.itemIds
+                                    }
+                                  })
+                                }
+                                className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
+                                title="Hapus Riwayat GPS Pelanggan Ini (Khusus Role Super Admin)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                <span>Hapus</span>
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

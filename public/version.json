@@ -1,9 +1,9 @@
 {
-  "versionCode": 10036,
-  "versionName": "1.0.36",
-  "updatedAt": "2026-11-16T16:15:00.000000",
+  "versionCode": 10037,
+  "versionName": "1.0.37",
+  "updatedAt": "2026-11-17T10:32:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V48: Dashboard Admin Penjualan Terpadu, Finance Ledger & Mapping Master Pelanggan, Validasi Faktur Marketing Offline Esok Hari, Analitik B2B Logistik, Approval Super Admin Hapus Foto Barang, Self-Service Profil & Ganti Password Akun, serta Persistensi Penuh MySQL untuk KPI Penjualan & Durasi Muat."
+  "releaseNotes": "Update V49: Menu Mapping Nama Sales (1 Sales = 2 Master) & Rincian Barang Validasi Faktur Marketing, Audit 3 Titik Lock GPS Form Kirim Driver (GPS Awal/Kedua/Ketiga), Sinkronisasi Workspace Form Kirim MySQL, Persistensi MySQL Shift/PIN/Laporan Driver, Log Aktivitas Perubahan Data Murni (/api/system-activities), serta ModernKpiDropdown & Filter Admin Non-Aktif."
 }

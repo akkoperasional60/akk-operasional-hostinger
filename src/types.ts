@@ -553,10 +553,13 @@ export interface SystemActivity {
   id: string;
   timestamp: string;
   userFullName: string;
+  userEmail?: string;
+  userRole?: string;
   department: string;
   action: string;
   target: string;
   details: string;
+  changeType?: 'tambah' | 'ubah' | 'kurangi';
 }
 
 export type SparePartCategory = 'oli' | 'ban' | 'aki' | 'filter' | 'rem' | 'lainnya';

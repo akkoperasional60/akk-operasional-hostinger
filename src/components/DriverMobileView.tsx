@@ -7005,6 +7005,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             todayDisplayDate={realtimeDayDateStr}
             matchedScheduleArea={todayFormKirimIntegration.matchedArea}
             portalDisplayName={portalDisplayName}
+            userRole={isUserHelperRole ? 'Helper' : 'Driver'}
+            deviceGps={deviceGps}
             onRefresh={() => {
               void formKirimStore.hydrateFromServer(true);
               loadDeliveries(true);

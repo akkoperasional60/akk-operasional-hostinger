@@ -63,59 +63,113 @@ function isSameDriverIdentity(
 class DriverShiftService {
   private memoryShifts: DriverShiftCheckin[] | null = null;
   private memoryPins: Record<string, string> | null = null;
+  private isSyncing = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('storage', (evt) => {
-        if (evt.key === SHIFTS_STORAGE_KEY) {
-          this.memoryShifts = null;
+      try {
+        const legacyShifts = localStorage.getItem(SHIFTS_STORAGE_KEY);
+        if (legacyShifts) {
+          const parsed = JSON.parse(legacyShifts);
+          if (Array.isArray(parsed)) {
+            this.memoryShifts = parsed;
+          }
+          localStorage.removeItem(SHIFTS_STORAGE_KEY);
         }
-        if (evt.key === PINS_STORAGE_KEY) {
-          this.memoryPins = null;
+        const legacyPins = localStorage.getItem(PINS_STORAGE_KEY);
+        if (legacyPins) {
+          const parsedPins = JSON.parse(legacyPins);
+          if (parsedPins && typeof parsedPins === 'object') {
+            this.memoryPins = parsedPins;
+          }
+          localStorage.removeItem(PINS_STORAGE_KEY);
         }
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem(SHIFTS_STORAGE_KEY);
+          sessionStorage.removeItem(PINS_STORAGE_KEY);
+        }
+      } catch {}
+      void this.syncFromServer();
+    }
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        localStorage.getItem('akk_session_token') ||
+        localStorage.getItem('session_token') ||
+        sessionStorage.getItem('akk_session_token') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
+  public async syncFromServer(): Promise<void> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined' || this.isSyncing) return;
+    this.isSyncing = true;
+    try {
+      const res = await fetch('/api/driver-shifts', {
+        credentials: 'include',
+        headers: this.getAuthHeaders()
       });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.shifts)) {
+        const mergedMap = new Map<string, DriverShiftCheckin>();
+        for (const s of [...data.shifts, ...(this.memoryShifts || [])]) {
+          if (s && s.id && !mergedMap.has(String(s.id))) {
+            mergedMap.set(String(s.id), s);
+          }
+        }
+        this.memoryShifts = Array.from(mergedMap.values()).slice(0, 150);
+      }
+      if (data?.pins && typeof data.pins === 'object') {
+        this.memoryPins = { ...(this.memoryPins || {}), ...data.pins };
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-shift-updated'));
+      }
+    } catch {} finally {
+      this.isSyncing = false;
     }
   }
 
   private persistShifts(shifts: DriverShiftCheckin[]): void {
     const trimmed = shifts.slice(0, 150);
     this.memoryShifts = trimmed;
-    const serialized = JSON.stringify(trimmed);
-    safeSetItem(SHIFTS_STORAGE_KEY, serialized);
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(SHIFTS_STORAGE_KEY, serialized);
-      }
-    } catch {}
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch('/api/driver-shifts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ shifts: trimmed })
+      }).catch(() => {});
+    }
   }
 
   private readPinsMap(): Record<string, string> {
     if (this.memoryPins !== null) {
       return this.memoryPins;
     }
-    try {
-      const raw =
-        (typeof localStorage !== 'undefined' ? localStorage.getItem(PINS_STORAGE_KEY) : null) ||
-        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(PINS_STORAGE_KEY) : null);
-      const parsed = raw ? JSON.parse(raw) : {};
-      const validPins: Record<string, string> = parsed && typeof parsed === 'object' ? parsed : {};
-      this.memoryPins = validPins;
-      return validPins;
-    } catch {
-      this.memoryPins = {};
-      return {};
-    }
+    this.memoryPins = {};
+    return this.memoryPins;
   }
 
   private writePinsMap(pins: Record<string, string>): void {
     this.memoryPins = { ...pins };
-    const serialized = JSON.stringify(pins);
-    safeSetItem(PINS_STORAGE_KEY, serialized);
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(PINS_STORAGE_KEY, serialized);
-      }
-    } catch {}
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch('/api/driver-shifts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ pins: this.memoryPins })
+      }).catch(() => {});
+    }
   }
 
   private resolvePinCandidateKeys(driverId: string, driverName?: string): string[] {
@@ -142,27 +196,14 @@ class DriverShiftService {
   }
 
   /**
-   * Get all recorded shifts from storage
+   * Get all recorded shifts from memory synced with MySQL
    */
   public getShifts(): DriverShiftCheckin[] {
     if (this.memoryShifts !== null) {
       return [...this.memoryShifts];
     }
-    try {
-      const raw =
-        (typeof localStorage !== 'undefined' ? localStorage.getItem(SHIFTS_STORAGE_KEY) : null) ||
-        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SHIFTS_STORAGE_KEY) : null);
-      if (!raw) {
-        this.memoryShifts = [];
-        return [];
-      }
-      const parsed = JSON.parse(raw);
-      this.memoryShifts = Array.isArray(parsed) ? parsed : [];
-      return [...this.memoryShifts];
-    } catch {
-      this.memoryShifts = [];
-      return [];
-    }
+    this.memoryShifts = [];
+    return [];
   }
 
   /**
@@ -573,8 +614,16 @@ class DriverShiftService {
         }
         return true;
       });
-      this.persistShifts(filtered);
-      if (typeof window !== 'undefined') {
+      this.memoryShifts = filtered;
+      if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+        const q = new URLSearchParams();
+        if (driverName) q.set('driverName', driverName);
+        if (dateStr) q.set('date', dateStr);
+        fetch(`/api/driver-shifts/${encodeURIComponent(cleanId)}?${q.toString()}`, {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: this.getAuthHeaders()
+        }).catch(() => {});
         window.dispatchEvent(new CustomEvent('driver-shift-updated'));
       }
       return true;

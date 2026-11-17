@@ -33,7 +33,10 @@ import {
   computeInvoiceAgingDays,
   getInvoiceStatus
 } from './DepartmentDashboard';
-import { MarketingInvoiceValidationView } from './marketing/MarketingInvoiceValidationView';
+import {
+  MarketingInvoiceValidationView,
+  MarketingSalesMappingView
+} from './marketing/MarketingInvoiceValidationView';
 
 // ============================================================
 // TYPES
@@ -98,7 +101,12 @@ export interface ToVoRoRecord {
 }
 
 interface MarketingDashboardProps {
-  activeTab: 'marketing_online' | 'marketing_offline' | 'marketing_to_vo_ro' | 'marketing_invoice_validation';
+  activeTab:
+    | 'marketing_online'
+    | 'marketing_offline'
+    | 'marketing_to_vo_ro'
+    | 'marketing_invoice_validation'
+    | 'marketing_sales_mapping';
   onNavigateTab?: (tab: string) => void;
 }
 
@@ -1040,7 +1048,11 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
   const totalFilteredSalesOmset = filteredSales.reduce((sum, s) => sum + s.totalPenjualan, 0);
 
   if (activeTab === 'marketing_invoice_validation') {
-    return <MarketingInvoiceValidationView />;
+    return <MarketingInvoiceValidationView onNavigateTab={onNavigateTab} />;
+  }
+
+  if (activeTab === 'marketing_sales_mapping') {
+    return <MarketingSalesMappingView onNavigateTab={onNavigateTab} />;
   }
 
   // ============================================================

@@ -618,11 +618,16 @@ const RupiahCellInput: React.FC<RupiahCellInputProps> = ({ value, className = ''
 export const SalesFormKirimTab: React.FC = () => {
   const [records, setRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
+  const hasLocalEditsRef = useRef<boolean>(false);
 
-  // State Pengaturan Pengiriman (otomatis tanggal hari ini WIB; area default 'Pilih Area')
+  // State Pengaturan Pengiriman (tersinkronisasi langsung dengan MySQL)
   const [selectedBranchName] = useState<string>(() => branches[0]?.name || 'Banyuwangi');
-  const [selectedAreaKirim, setSelectedAreaKirim] = useState<string>('');
-  const [tanggalKirim, setTanggalKirim] = useState<string>(() => getTodayWibIso());
+  const [selectedAreaKirim, setSelectedAreaKirim] = useState<string>(
+    () => formKirimStore.getWorkspace()?.selectedAreaKirim || ''
+  );
+  const [tanggalKirim, setTanggalKirim] = useState<string>(
+    () => formKirimStore.getWorkspace()?.tanggalKirim || getTodayWibIso()
+  );
   const [selectedFleetId, setSelectedFleetId] = useState<string>('');
   const [selectedDriverName, setSelectedDriverName] = useState<string>('');
   const [selectedHelperName, setSelectedHelperName] = useState<string>('');
@@ -636,14 +641,26 @@ export const SalesFormKirimTab: React.FC = () => {
   const [excelPreviewRows, setExcelPreviewRows] = useState<FormKirimInvoiceItem[]>([]);
   const [showUploadPreview, setShowUploadPreview] = useState<boolean>(false);
 
-  // Items di dalam tabel Form Kirim aktif (COLY dikosongi / 0 secara default agar diinput Admin)
-  const [invoiceItems, setInvoiceItems] = useState<FormKirimInvoiceItem[]>(() =>
-    SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS.map(item => ({ ...item, coly: 0 }))
-  );
+  // Items di dalam tabel Form Kirim aktif (dimuat dari MySQL workspace / records)
+  const [invoiceItems, setInvoiceItems] = useState<FormKirimInvoiceItem[]>(() => {
+    const ws = formKirimStore.getWorkspace();
+    if (ws && Array.isArray(ws.invoiceItems) && ws.invoiceItems.length > 0) {
+      return ws.invoiceItems;
+    }
+    const today = getTodayWibIso();
+    const allRecs = formKirimStore.getAll();
+    const todayRec = allRecs.find(r => r.tanggalKirim === today && Array.isArray(r.invoiceItems) && r.invoiceItems.length > 0);
+    if (todayRec?.invoiceItems) {
+      return todayRec.invoiceItems;
+    }
+    return SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS.map(item => ({ ...item, coly: 0 }));
+  });
 
   // Mode tampilan: 'edit' (Net Days tampil & bisa input COLY/tambah baris) vs 'saved_preview' (tampilan simpan tanpa Net Days & tanpa Aksi)
   const [viewMode, setViewMode] = useState<'edit' | 'saved_preview'>('edit');
-  const [activeSavedRecordId, setActiveSavedRecordId] = useState<string | null>(null);
+  const [activeSavedRecordId, setActiveSavedRecordId] = useState<string | null>(
+    () => formKirimStore.getWorkspace()?.activeSavedRecordId || null
+  );
 
   // Sorting & Filter state
   const [sortField, setSortField] = useState<SortField>('default');
@@ -683,10 +700,30 @@ export const SalesFormKirimTab: React.FC = () => {
   }, [records]);
 
   useEffect(() => {
-    void formKirimStore.hydrateFromServer(true);
+    void formKirimStore.hydrateFromServer(true, true);
     const unsubForm = formKirimStore.subscribe(() => {
       const latest = formKirimStore.getAll();
       setRecords(latest);
+      if (!hasLocalEditsRef.current) {
+        const ws = formKirimStore.getWorkspace();
+        if (ws && Array.isArray(ws.invoiceItems) && ws.invoiceItems.length > 0) {
+          setInvoiceItems(ws.invoiceItems);
+          if (ws.selectedAreaKirim !== undefined) setSelectedAreaKirim(ws.selectedAreaKirim);
+          if (ws.tanggalKirim) setTanggalKirim(ws.tanggalKirim);
+          setActiveSavedRecordId(ws.activeSavedRecordId || null);
+        } else if (latest.length > 0) {
+          const today = getTodayWibIso();
+          const matched =
+            latest.find(r => r.tanggalKirim === today && Array.isArray(r.invoiceItems) && r.invoiceItems.length > 0) ||
+            latest.find(r => Array.isArray(r.invoiceItems) && r.invoiceItems.length > 0);
+          if (matched && matched.invoiceItems) {
+            setInvoiceItems(matched.invoiceItems);
+            if (matched.areaKirim) setSelectedAreaKirim(matched.areaKirim);
+            if (matched.tanggalKirim) setTanggalKirim(matched.tanggalKirim);
+            setActiveSavedRecordId(matched.id);
+          }
+        }
+      }
     });
     const unsubBranch = branchStore.subscribe(() => {
       setBranches(branchStore.getBranches());
@@ -1003,6 +1040,91 @@ export const SalesFormKirimTab: React.FC = () => {
     }
   };
 
+  // Helper untuk sinkronisasi setiap perubahan baris tabel langsung ke MySQL
+  const updateInvoiceItemsAndSync = (
+    updater: FormKirimInvoiceItem[] | ((prev: FormKirimInvoiceItem[]) => FormKirimInvoiceItem[]),
+    immediate = false,
+    areaOverride?: string,
+    dateOverride?: string
+  ) => {
+    hasLocalEditsRef.current = true;
+    setInvoiceItems(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const areaToPersist = areaOverride !== undefined ? areaOverride : selectedAreaKirim;
+      const dateToPersist = dateOverride !== undefined ? dateOverride : tanggalKirim;
+      formKirimStore.saveWorkspace(
+        {
+          selectedAreaKirim: areaToPersist,
+          tanggalKirim: dateToPersist,
+          activeSavedRecordId,
+          viewMode,
+          invoiceItems: next
+        },
+        immediate
+      );
+      return next;
+    });
+  };
+
+  const handleSelectAreaKirim = (nextArea: string) => {
+    hasLocalEditsRef.current = true;
+    setSelectedAreaKirim(nextArea);
+    const cleanArea = standardizeAreaName(nextArea || '').trim().toUpperCase();
+    const matched = records.find(
+      r =>
+        standardizeAreaName(r.areaKirim || '').trim().toUpperCase() === cleanArea &&
+        r.tanggalKirim === tanggalKirim &&
+        Array.isArray(r.invoiceItems) &&
+        r.invoiceItems.length > 0
+    );
+    const nextItems = matched?.invoiceItems ? matched.invoiceItems.map(it => ({ ...it })) : invoiceItems;
+    const nextActiveId = matched ? matched.id : activeSavedRecordId;
+    if (matched?.invoiceItems) {
+      setInvoiceItems(nextItems);
+      setActiveSavedRecordId(matched.id);
+    }
+    formKirimStore.saveWorkspace(
+      {
+        selectedAreaKirim: nextArea,
+        tanggalKirim,
+        activeSavedRecordId: nextActiveId,
+        viewMode,
+        invoiceItems: nextItems
+      },
+      true
+    );
+  };
+
+  const handleSelectTanggalKirim = (nextDate: string) => {
+    hasLocalEditsRef.current = true;
+    setTanggalKirim(nextDate);
+    const cleanArea = standardizeAreaName(selectedAreaKirim || '').trim().toUpperCase();
+    const matched = records.find(
+      r =>
+        r.tanggalKirim === nextDate &&
+        (!cleanArea || standardizeAreaName(r.areaKirim || '').trim().toUpperCase() === cleanArea) &&
+        Array.isArray(r.invoiceItems) &&
+        r.invoiceItems.length > 0
+    );
+    const nextItems = matched?.invoiceItems ? matched.invoiceItems.map(it => ({ ...it })) : invoiceItems;
+    const nextActiveId = matched ? matched.id : activeSavedRecordId;
+    if (matched?.invoiceItems) {
+      setInvoiceItems(nextItems);
+      if (matched.areaKirim && !selectedAreaKirim) setSelectedAreaKirim(matched.areaKirim);
+      setActiveSavedRecordId(matched.id);
+    }
+    formKirimStore.saveWorkspace(
+      {
+        selectedAreaKirim: matched?.areaKirim && !selectedAreaKirim ? matched.areaKirim : selectedAreaKirim,
+        tanggalKirim: nextDate,
+        activeSavedRecordId: nextActiveId,
+        viewMode,
+        invoiceItems: nextItems
+      },
+      true
+    );
+  };
+
   // Simpan Form Kirim dari halaman Upload & Preview lalu langsung buka Aplikasi Portal Driver
   const handleSaveFromUploadPage = () => {
     const resolvedArea = (
@@ -1027,7 +1149,7 @@ export const SalesFormKirimTab: React.FC = () => {
     setSelectedAreaKirim(resolvedArea);
     setTanggalKirim(uploadDraftTanggalKirim);
     if (excelPreviewRows.length > 0) {
-      setInvoiceItems(targetItems);
+      updateInvoiceItemsAndSync(targetItems, true, resolvedArea, uploadDraftTanggalKirim);
     }
 
     setIsUploadExcelOpen(false);
@@ -1053,13 +1175,13 @@ export const SalesFormKirimTab: React.FC = () => {
       isManualSbu: false
     };
 
-    setInvoiceItems(prev => {
+    updateInvoiceItemsAndSync(prev => {
       const idx = prev.findIndex(item => item.id === targetId);
       if (idx === -1) return [...prev, newRow];
       const next = [...prev];
       next.splice(idx + 1, 0, newRow);
       return next;
-    });
+    }, true);
   };
 
   const handleInsertManualRowInSection = (category: 'COD' | 'TEMPO') => {
@@ -1077,11 +1199,11 @@ export const SalesFormKirimTab: React.FC = () => {
       paymentCategory: category,
       isManualSbu: false
     };
-    setInvoiceItems(prev => [...prev, newRow]);
+    updateInvoiceItemsAndSync(prev => [...prev, newRow], true);
   };
 
   const handleUpdateInvoiceCell = (id: string, field: keyof FormKirimInvoiceItem, value: any) => {
-    setInvoiceItems(prev =>
+    updateInvoiceItemsAndSync(prev =>
       prev.map(item => {
         if (item.id !== id) return item;
         if (field === 'netDays') {
@@ -1105,7 +1227,16 @@ export const SalesFormKirimTab: React.FC = () => {
   };
 
   const handleDeleteInvoiceRow = (id: string) => {
-    setInvoiceItems(prev => prev.filter(item => item.id !== id));
+    const deletedRow = invoiceItems.find(item => item.id === id);
+    updateInvoiceItemsAndSync(prev => prev.filter(item => item.id !== id), true);
+    if (deletedRow) {
+      logisticsStore.logActivity(
+        'Hapus Baris Faktur Form Kirim',
+        deletedRow.noFaktur || deletedRow.namaPelanggan || 'Form Kirim Barang',
+        `Menghapus baris faktur ${deletedRow.noFaktur || '-'} (${deletedRow.namaPelanggan || '-'}) pada Form Kirim Barang`,
+        'kurangi'
+      );
+    }
   };
 
   // Pindah baris ke atas: mendukung perpindahan lintas grup (dari TEMPO naik ke COD)
@@ -1113,7 +1244,7 @@ export const SalesFormKirimTab: React.FC = () => {
     if (sortField !== 'default') {
       setSortField('default');
     }
-    setInvoiceItems(prev => {
+    updateInvoiceItemsAndSync(prev => {
       const currentCod = prev.filter(it => {
         const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
         return cat === 'COD';
@@ -1157,7 +1288,7 @@ export const SalesFormKirimTab: React.FC = () => {
       }
 
       return prev;
-    });
+    }, true);
   };
 
   // Pindah baris ke bawah: mendukung perpindahan lintas grup (dari COD turun ke TEMPO)
@@ -1165,7 +1296,7 @@ export const SalesFormKirimTab: React.FC = () => {
     if (sortField !== 'default') {
       setSortField('default');
     }
-    setInvoiceItems(prev => {
+    updateInvoiceItemsAndSync(prev => {
       const currentCod = prev.filter(it => {
         const cat = it.paymentCategory || (Number(it.netDays) > 0 ? 'TEMPO' : 'COD');
         return cat === 'COD';
@@ -1209,14 +1340,14 @@ export const SalesFormKirimTab: React.FC = () => {
       }
 
       return prev;
-    });
+    }, true);
   };
 
   const handleToggleCategory = (id: string) => {
     if (sortField !== 'default') {
       setSortField('default');
     }
-    setInvoiceItems(prev => {
+    updateInvoiceItemsAndSync(prev => {
       const target = prev.find(item => item.id === id);
       if (!target) return prev;
       const currentCat = target.paymentCategory || (Number(target.netDays) > 0 ? 'TEMPO' : 'COD');
@@ -1238,7 +1369,7 @@ export const SalesFormKirimTab: React.FC = () => {
         showToast(`${target.namaPelanggan || 'Pelanggan'} dipindahkan ke kelompok TEMPO.`);
         return [...otherCod, updatedItem, ...otherTempo];
       }
-    });
+    }, true);
   };
 
   const persistFormKirimToStore = (
@@ -1353,18 +1484,52 @@ export const SalesFormKirimTab: React.FC = () => {
       driverStatus: 'ready_for_driver' as const
     };
 
-    let savedRecordId = activeSavedRecordId;
-    if (activeSavedRecordId) {
-      formKirimStore.updateFormKirim(activeSavedRecordId, payload);
+    const existingForAreaDate = formKirimStore
+      .getAll()
+      .find(
+        r =>
+          standardizeAreaName(r.areaKirim || '').trim().toUpperCase() === cleanArea &&
+          r.tanggalKirim === deliveryDate
+      );
+    const targetRecordId = activeSavedRecordId || existingForAreaDate?.id || null;
+
+    let savedRecordId = targetRecordId;
+    if (targetRecordId) {
+      formKirimStore.updateFormKirim(targetRecordId, payload);
+      setActiveSavedRecordId(targetRecordId);
       setViewMode('saved_preview');
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur). Membuka Portal Driver...`);
+      logisticsStore.logActivity(
+        'Ubah Data Form Kirim Barang',
+        `Area ${cleanArea} (${deliveryDate})`,
+        `Merubah data Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
+        'ubah'
+      );
+      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke MySQL (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur). Membuka Portal Driver...`);
     } else {
       const created = formKirimStore.addFormKirim(payload);
       savedRecordId = created.id;
       setActiveSavedRecordId(created.id);
       setViewMode('saved_preview');
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan (${uniqueCustomers} Pelanggan). Membuka Portal Driver...`);
+      logisticsStore.logActivity(
+        'Tambah Data Form Kirim Barang',
+        `Area ${cleanArea} (${deliveryDate})`,
+        `Menambahkan Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
+        'tambah'
+      );
+      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke MySQL (${uniqueCustomers} Pelanggan). Membuka Portal Driver...`);
     }
+
+    hasLocalEditsRef.current = true;
+    formKirimStore.saveWorkspace(
+      {
+        selectedAreaKirim: cleanArea,
+        tanggalKirim: deliveryDate,
+        activeSavedRecordId: savedRecordId,
+        viewMode: 'saved_preview',
+        invoiceItems: itemsToSave.map(it => ({ ...it }))
+      },
+      true
+    );
 
     try {
       window.dispatchEvent(
@@ -1804,10 +1969,10 @@ export const SalesFormKirimTab: React.FC = () => {
             <ModernAreaDropdown
               value={selectedAreaKirim}
               options={deliveryAreaOptions}
-              onChange={setSelectedAreaKirim}
+              onChange={handleSelectAreaKirim}
               placeholder="Pilih Area"
             />
-            <ModernCalendarPicker value={tanggalKirim} onChange={setTanggalKirim} />
+            <ModernCalendarPicker value={tanggalKirim} onChange={handleSelectTanggalKirim} />
 
             <button
               type="button"
@@ -2094,17 +2259,17 @@ export const SalesFormKirimTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabel Form Kirim Modern & Rapi */}
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs font-sans">
+        {/* Tabel Form Kirim Modern & Rapi Full-Width */}
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-fixed border-collapse text-xs font-sans">
             <thead>
-              <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-extrabold uppercase tracking-wider">
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-center w-12">
+              <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-extrabold uppercase tracking-wider">
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[36px]">
                   NO
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('noFaktur')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[132px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[11%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir No. Faktur"
                 >
                   <div className="flex items-center justify-between gap-1">
@@ -2116,12 +2281,12 @@ export const SalesFormKirimTab: React.FC = () => {
                     )}
                   </div>
                 </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[100px]">
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[7%]">
                   Tgl Faktur
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('namaPelanggan')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[185px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-left w-[15%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Nama Pelanggan (A-Z / Z-A)"
                 >
                   <div className="flex items-center justify-between gap-1">
@@ -2135,7 +2300,7 @@ export const SalesFormKirimTab: React.FC = () => {
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('nilaiFaktur')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-right min-w-[138px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-right w-[11%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Nilai Faktur (Besar ke Kecil / Kecil ke Besar)"
                 >
                   <div className="flex items-center justify-end gap-1">
@@ -2149,7 +2314,7 @@ export const SalesFormKirimTab: React.FC = () => {
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('coly')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-center w-20 cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[6%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir COLY"
                 >
                   <div className="flex items-center justify-center gap-1">
@@ -2161,12 +2326,12 @@ export const SalesFormKirimTab: React.FC = () => {
                     )}
                   </div>
                 </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[96px]">
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[7%]">
                   BAYAR
                 </th>
                 <th
                   onClick={() => handleColumnSortToggle('alamatPelanggan')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[160px] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
+                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[12%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
                   title="Klik untuk sortir Alamat Pelanggan"
                 >
                   <div className="flex items-center justify-between gap-1">
@@ -2178,15 +2343,15 @@ export const SalesFormKirimTab: React.FC = () => {
                     )}
                   </div>
                 </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-3 text-left min-w-[155px]">
+                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[11%]">
                   Keterangan
                 </th>
                 {viewMode === 'edit' && (
                   <>
-                    <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-center min-w-[118px] w-32 leading-tight">
+                    <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[9%] leading-tight">
                       Syarat (Hari) &amp; Kategori
                     </th>
-                    <th className="py-3 px-2.5 text-center min-w-[108px] w-28 whitespace-nowrap">
+                    <th className="py-3 px-1.5 text-center w-[92px] whitespace-nowrap">
                       Urutan &amp; Aksi
                     </th>
                   </>

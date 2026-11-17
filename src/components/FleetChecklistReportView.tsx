@@ -40,17 +40,16 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
   onBackToOperationalReports
 }) => {
   const { addNotification } = useToast();
-  const currentUser = logisticsStore.getCurrentUser();
+  const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
+  useEffect(() => {
+    const unsub = logisticsStore.subscribe(() => {
+      setCurrentUser(logisticsStore.getCurrentUser());
+    });
+    return () => unsub();
+  }, []);
   const isSuperAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase();
-    const email = (currentUser?.email || '').toLowerCase();
-    const name = (currentUser?.fullName || '').toLowerCase();
-    return (
-      r === 'super_admin' ||
-      r === 'admin' ||
-      email === 'akkoperasional60@gmail.com' ||
-      name.includes('super admin')
-    );
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
   }, [currentUser]);
 
   const [checklists, setChecklists] = useState<DriverVehicleChecklist[]>([]);

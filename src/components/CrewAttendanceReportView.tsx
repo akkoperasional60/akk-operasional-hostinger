@@ -62,19 +62,8 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   }, [currentUser]);
 
   const isSuperAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
-    const email = (currentUser?.email || '').toLowerCase().trim();
-    const name = (currentUser?.fullName || '').toLowerCase().trim();
-    const username = ((currentUser as any)?.username || '').toLowerCase().trim();
-    return (
-      r === 'superadmin' ||
-      r === 'admin' ||
-      r === 'manager' ||
-      email === 'akkoperasional60@gmail.com' ||
-      name.includes('super admin') ||
-      name === 'super' ||
-      username.includes('super')
-    );
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
   }, [currentUser]);
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
@@ -130,6 +119,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
   useEffect(() => {
     loadAttendanceReports();
+    void driverReportService.syncWithServer(true);
     const handleUpdate = () => loadAttendanceReports();
     window.addEventListener('driver-report-updated', handleUpdate);
     return () => window.removeEventListener('driver-report-updated', handleUpdate);
