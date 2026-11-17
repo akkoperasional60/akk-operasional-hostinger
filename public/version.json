@@ -1,9 +1,9 @@
 {
-  "versionCode": 10037,
-  "versionName": "1.0.37",
-  "updatedAt": "2026-11-17T10:32:00.000000",
+  "versionCode": 10038,
+  "versionName": "1.0.38",
+  "updatedAt": "2026-11-17T12:09:00.000000",
   "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V49: Menu Mapping Nama Sales (1 Sales = 2 Master) & Rincian Barang Validasi Faktur Marketing, Audit 3 Titik Lock GPS Form Kirim Driver (GPS Awal/Kedua/Ketiga), Sinkronisasi Workspace Form Kirim MySQL, Persistensi MySQL Shift/PIN/Laporan Driver, Log Aktivitas Perubahan Data Murni (/api/system-activities), serta ModernKpiDropdown & Filter Admin Non-Aktif."
+  "releaseNotes": "Update V50: Navigasi Sidebar Multi-Level Nested Dropdown (3 Level Kategori -> Sub-Grup Accordion -> Sub-Menu), Sorting & Status Terjadwal/Kirim Armada di Jadwal & Penugasan Armada, Indikator Terjadwal Hari Ini & Esok di Data Armada Terpadu, serta Sinkronisasi Kru dari Hak Akses Jadwal & Penugasan Armada."
 }

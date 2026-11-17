@@ -1942,10 +1942,9 @@ class LogisticsStore {
 
   /**
    * Mengecek apakah akun pengguna merupakan Kru Pengiriman aktif (Driver / Helper)
-   * yang memiliki hak akses ke Portal Driver Mobile (driver_portal / portal_driver),
-   * termasuk akun dengan role Gudang (warehouse_admin) seperti Teguh Baskoro yang
-   * diberikan akses ke Portal Driver Mobile di Manajemen User, serta memisahkan
-   * secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
+   * atau pengguna lintas departemen yang memiliki hak akses ke Portal Driver Mobile (driver_portal / portal_driver)
+   * maupun Jadwal & Penugasan Armada (schedules / rencana_rute), baik Full Access maupun Hanya Lihat (Read Only),
+   * serta memisahkan secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
    */
   public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
     if (!u) return false;
@@ -1974,26 +1973,40 @@ class LogisticsStore {
       u.permissions?.branchPermissions
     );
 
-    const hasBranchPortalDriverAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
+    const hasBranchDeliveryOrScheduleAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
       if (!bEntry || !bEntry.enabled) return false;
       const logMod = bEntry.modules?.logistics;
       if (!logMod || !logMod.enabled) return false;
       const subs = logMod.subMenus || {};
       const dpVal = subs.driver_portal ?? subs.portal_driver;
-      if (dpVal === 'full_access' || dpVal === 'read_only') {
+      const schVal = subs.schedules ?? subs.rencana_rute;
+      if (
+        dpVal === 'full_access' ||
+        dpVal === 'read_only' ||
+        schVal === 'full_access' ||
+        schVal === 'read_only'
+      ) {
         return true;
       }
-      if ((u.role === 'driver' || u.role === 'crew_helper' || u.role === 'spv_logistik' || u.role === 'pengiriman' || u.role === 'dispatcher') && dpVal === undefined) {
+      if (
+        (u.role === 'driver' ||
+          u.role === 'crew_helper' ||
+          u.role === 'spv_logistik' ||
+          u.role === 'pengiriman' ||
+          u.role === 'dispatcher') &&
+        dpVal === undefined &&
+        schVal === undefined
+      ) {
         return Object.values(subs).some(v => v === 'full_access' || v === 'read_only');
       }
       return false;
     };
 
     if (targetBranchId && targetBranchId !== 'ALL') {
-      return hasBranchPortalDriverAccess(branchPerms[targetBranchId]);
+      return hasBranchDeliveryOrScheduleAccess(branchPerms[targetBranchId]);
     }
 
-    return Object.values(branchPerms).some(bEntry => hasBranchPortalDriverAccess(bEntry));
+    return Object.values(branchPerms).some(bEntry => hasBranchDeliveryOrScheduleAccess(bEntry));
   }
 
   public getCrewUserPrimaryBranchId(u: UserProfile): string {
@@ -2011,29 +2024,29 @@ class LogisticsStore {
     if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
     if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
 
-    const sdaHasDp = Boolean(
-      sdaEnabled &&
-        sdaEntry?.modules?.logistics?.enabled &&
-        (sdaEntry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
-          sdaEntry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
-          sdaEntry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
-          sdaEntry.modules.logistics.subMenus?.portal_driver === 'read_only')
-    );
-    const bwiHasDp = Boolean(
-      bwiEnabled &&
-        bwiEntry?.modules?.logistics?.enabled &&
-        (bwiEntry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
-          bwiEntry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
-          bwiEntry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
-          bwiEntry.modules.logistics.subMenus?.portal_driver === 'read_only')
-    );
+    const hasScheduleOrPortalAccess = (entry?: UserBranchPermissionEntry) =>
+      Boolean(
+        entry?.enabled &&
+          entry?.modules?.logistics?.enabled &&
+          (entry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
+            entry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
+            entry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
+            entry.modules.logistics.subMenus?.portal_driver === 'read_only' ||
+            entry.modules.logistics.subMenus?.schedules === 'full_access' ||
+            entry.modules.logistics.subMenus?.schedules === 'read_only' ||
+            entry.modules.logistics.subMenus?.rencana_rute === 'full_access' ||
+            entry.modules.logistics.subMenus?.rencana_rute === 'read_only')
+      );
+
+    const sdaHasDp = hasScheduleOrPortalAccess(sdaEntry);
+    const bwiHasDp = hasScheduleOrPortalAccess(bwiEntry);
 
     if (sdaHasDp && !bwiHasDp) return 'cab-sidoarjo';
     return 'cab-banyuwangi';
   }
 
   /**
-   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (semua akun aktif yang memiliki akses Portal Driver Mobile)
+   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (semua akun aktif yang memiliki akses Portal Driver Mobile atau Jadwal & Penugasan Armada)
    * tanpa memicu efek samping penyimpanan atau notifikasi listener.
    */
   private computeSyncedCrews(): Crew[] {
@@ -4912,6 +4925,7 @@ class LogisticsStore {
 
     const conflictSchedule = (this.schedules || []).find(sch => {
       if (excludeScheduleId && sch.id === excludeScheduleId) return false;
+      if (sch.status === 'delivered' || String(sch.status) === 'cancelled') return false;
       if (!this.doesScheduleCoverDate(sch, cleanTargetIso)) return false;
 
       if (resolvedFleet) {
@@ -5089,11 +5103,12 @@ class LogisticsStore {
     excludeScheduleId?: string
   ): {
     effectiveStatus: 'available' | 'on-duty' | 'maintenance';
-    statusLabel: 'Ready' | 'Kirim' | 'Servis';
+    statusLabel: 'Ready' | 'Terjadwal' | 'Kirim' | 'Servis';
     dotColorClass: string;
     badgeColorClass: string;
     areaName: string | null;
     todayScheduledArea: string | null;
+    tomorrowScheduledArea: string | null;
     driverName: string | null;
     helperName: string | null;
     canBeScheduled: boolean;
@@ -5118,6 +5133,7 @@ class LogisticsStore {
         badgeColorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
         areaName: null,
         todayScheduledArea: null,
+        tomorrowScheduledArea: null,
         driverName: null,
         helperName: null,
         canBeScheduled: true,
@@ -5127,11 +5143,19 @@ class LogisticsStore {
     }
 
     const todayWib = this.getWibTodayIso();
+    const tomorrowWib = (() => {
+      const parts = todayWib.split('-').map(Number);
+      if (parts.length !== 3 || parts.some(isNaN)) return '';
+      const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + 1));
+      return d.toISOString().slice(0, 10);
+    })();
     const targetIso = (targetDateStr || todayWib).slice(0, 10);
     const isDateSpecificQuery = Boolean(targetDateStr && targetDateStr.trim() !== '');
     const cleanPlate = (fleet.plateNumber || '').trim().toUpperCase();
 
     const matchesFleet = (sch: Schedule) => this.matchesFleetSchedule(fleet, sch);
+    const isActiveAssignableStatus = (st?: Schedule['status']) =>
+      st !== 'delivered' && String(st) !== 'cancelled';
 
     // 1. Cari jadwal yang sedang aktif di jalan pada hari ini (sudah klik Gate-Out: in_transit, picked_up, delayed)
     const activeTripSch = (this.schedules || []).find(
@@ -5142,13 +5166,25 @@ class LogisticsStore {
         (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
     );
 
-    // 2. Cari jadwal yang tepat pada tanggal target (hari ini atau tanggal form jadwal yang sedang dipilih)
+    // 2. Cari jadwal aktif (belum delivered/cancelled) yang tepat pada tanggal target (hari ini atau tanggal form jadwal)
     const targetDateSch = (this.schedules || []).find(
       sch =>
         (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+        isActiveAssignableStatus(sch.status) &&
         matchesFleet(sch) &&
         this.doesScheduleCoverDate(sch, targetIso)
     );
+
+    // 3. Cek juga jadwal aktif untuk esok hari (WIB) agar Data Armada Terpadu konsisten
+    const tomorrowDateSch = tomorrowWib
+      ? (this.schedules || []).find(
+          sch =>
+            (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+            isActiveAssignableStatus(sch.status) &&
+            matchesFleet(sch) &&
+            this.doesScheduleCoverDate(sch, tomorrowWib)
+        )
+      : undefined;
 
     // Jadwal aktif untuk tampilan Live Armada (hari ini) vs Form Jadwal (tanggal spesifik)
     const effectiveSch = isDateSpecificQuery
@@ -5180,6 +5216,11 @@ class LogisticsStore {
         ? (targetDateSch.areaName || targetDateSch.store?.storeName || null)
         : null;
 
+    const tomorrowScheduledArea =
+      tomorrowDateSch
+        ? (tomorrowDateSch.areaName || tomorrowDateSch.store?.storeName || null)
+        : null;
+
     // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
     if (!resolvedArea && typeof localStorage !== 'undefined') {
       try {
@@ -5202,7 +5243,7 @@ class LogisticsStore {
 
     // Penentuan Status Kondisi Armada:
     // - Jika sedang ditanya untuk tanggal penjadwalan tertentu (`isDateSpecificQuery`):
-    //   armada yang SUDAH punya jadwal pada `targetIso` tidak boleh dipilih ulang (canBeScheduled: false)
+    //   armada yang SUDAH punya jadwal aktif (belum delivered/cancelled) pada `targetIso` tidak boleh dipilih ulang (canBeScheduled: false)
     // - Untuk status Live Operasional hari ini:
     //   'Kirim' hanya aktif apabila benar-benar memiliki trip aktif hari ini (`activeTripSch`),
     //   sehingga armada tanpa trip hari ini tidak pernah stuck di status 'Kirim' area kemarin.
@@ -5225,6 +5266,7 @@ class LogisticsStore {
         badgeColorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
         areaName: resolvedArea,
         todayScheduledArea: null,
+        tomorrowScheduledArea: null,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: false,
@@ -5234,18 +5276,26 @@ class LogisticsStore {
     }
 
     if (effectiveStatus === 'on-duty') {
-      const canScheduleFlag = isDateSpecificQuery ? !targetDateSch : !targetDateSch;
+      const isPendingScheduleOnly = isDateSpecificQuery && targetDateSch?.status === 'scheduled';
+      const canScheduleFlag = !targetDateSch;
       return {
         effectiveStatus: 'on-duty',
-        statusLabel: 'Kirim',
-        dotColorClass: 'bg-blue-500 ring-4 ring-blue-500/25',
-        badgeColorClass: 'bg-blue-500/15 text-blue-300 border-blue-500/40',
+        statusLabel: isPendingScheduleOnly ? 'Terjadwal' : 'Kirim',
+        dotColorClass: isPendingScheduleOnly
+          ? 'bg-amber-500 ring-4 ring-amber-500/25'
+          : 'bg-blue-500 ring-4 ring-blue-500/25',
+        badgeColorClass: isPendingScheduleOnly
+          ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+          : 'bg-blue-500/15 text-blue-300 border-blue-500/40',
         areaName: resolvedArea,
-        todayScheduledArea: null,
+        todayScheduledArea: isPendingScheduleOnly ? resolvedArea : null,
+        tomorrowScheduledArea,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: canScheduleFlag,
-        statusDescription: resolvedArea
+        statusDescription: isPendingScheduleOnly
+          ? `Terjadwal (${targetIso}): ${resolvedArea || 'Kirim'}`
+          : resolvedArea
           ? `Sedang Kirim • Area: ${resolvedArea}`
           : 'Sedang dipakai kirim tim pengiriman (Gate-Out)',
         scheduleStatus: effectiveSch?.status || 'in_transit'
@@ -5259,11 +5309,14 @@ class LogisticsStore {
       badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
       areaName: null,
       todayScheduledArea,
+      tomorrowScheduledArea,
       driverName: resolvedDriver,
       helperName: resolvedHelper,
       canBeScheduled: true,
       statusDescription: todayScheduledArea
         ? `Terjadwal hari ini: ${todayScheduledArea}`
+        : tomorrowScheduledArea
+        ? `Terjadwal esok: ${tomorrowScheduledArea}`
         : 'Siap jadwal esok',
       scheduleStatus: effectiveSch?.status || null
     };

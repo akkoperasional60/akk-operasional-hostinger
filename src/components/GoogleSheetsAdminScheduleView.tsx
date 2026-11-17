@@ -462,13 +462,25 @@ const FleetCustomSelectDropdown: React.FC<{
 
   const filteredFleets = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return fleets;
-    return fleets.filter(f =>
-      f.plateNumber.toLowerCase().includes(q) ||
-      (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
-      (f.vehicleType && f.vehicleType.toLowerCase().includes(q))
-    );
-  }, [fleets, search]);
+    const list = !q
+      ? fleets
+      : fleets.filter(f =>
+          f.plateNumber.toLowerCase().includes(q) ||
+          (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
+          (f.vehicleType && f.vehicleType.toLowerCase().includes(q))
+        );
+
+    return list
+      .map((fleet) => {
+        const fleetCode = fleet.initialCode || fleet.plateNumber;
+        const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
+        const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso, excludeScheduleId);
+        const isSelectable = live.canBeScheduled || isSelected;
+        const sortRank = isSelectable ? 0 : live.effectiveStatus === 'maintenance' ? 2 : 1;
+        return { fleet, fleetCode, isSelected, live, isSelectable, sortRank };
+      })
+      .sort((a, b) => a.sortRank - b.sortRank);
+  }, [fleets, search, selectedFleet, value, dateIso, excludeScheduleId]);
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -477,25 +489,14 @@ const FleetCustomSelectDropdown: React.FC<{
   const handleSelectHighlightedOrFirstValid = () => {
     if (filteredFleets.length === 0) return;
     const target = filteredFleets[highlightedIndex] || filteredFleets[0];
-    if (target) {
-      const code = target.initialCode || target.plateNumber;
-      const isCurrentValue = code === value || target.plateNumber === value;
-      const live = logisticsStore.getFleetLiveOperationalInfo(target, dateIso, excludeScheduleId);
-      if (live.canBeScheduled || isCurrentValue) {
-        onChange(code);
-        setIsOpen(false);
-        return;
-      }
+    if (target && target.isSelectable) {
+      onChange(target.fleetCode);
+      setIsOpen(false);
+      return;
     }
-    const firstValid = filteredFleets.find(f => {
-      const code = f.initialCode || f.plateNumber;
-      const isCurrentValue = code === value || f.plateNumber === value;
-      const live = logisticsStore.getFleetLiveOperationalInfo(f, dateIso, excludeScheduleId);
-      return live.canBeScheduled || isCurrentValue;
-    });
+    const firstValid = filteredFleets.find(entry => entry.isSelectable);
     if (firstValid) {
-      const code = firstValid.initialCode || firstValid.plateNumber;
-      onChange(code);
+      onChange(firstValid.fleetCode);
       setIsOpen(false);
     }
   };
@@ -551,7 +552,7 @@ const FleetCustomSelectDropdown: React.FC<{
         <ChevronDown className={`w-4 h-4 text-slate-700 dark:text-slate-300 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`} />
       </button>
 
-      {/* Separate Status Box Below Dropdown (Matching Image 5) */}
+      {/* Separate Status Box Below Dropdown */}
       <div className="mt-2 h-[32px] w-full px-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between text-[11px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
@@ -559,8 +560,10 @@ const FleetCustomSelectDropdown: React.FC<{
               ? 'bg-slate-200 dark:bg-slate-800'
               : liveInfo.effectiveStatus === 'maintenance'
               ? 'bg-rose-500/20'
-              : liveInfo.effectiveStatus === 'on-duty'
+              : liveInfo.statusLabel === 'Terjadwal'
               ? 'bg-amber-500/20'
+              : liveInfo.effectiveStatus === 'on-duty'
+              ? 'bg-blue-500/20'
               : 'bg-emerald-500/20'
           }`}>
             <span className={`w-2.5 h-2.5 rounded-full ${
@@ -577,7 +580,7 @@ const FleetCustomSelectDropdown: React.FC<{
             : liveInfo?.effectiveStatus === 'maintenance'
             ? 'Sedang Proses Servis'
             : liveInfo?.effectiveStatus === 'on-duty'
-            ? `Terjadwal: ${liveInfo.areaName || 'Kirim'}`
+            ? `${liveInfo.statusLabel === 'Terjadwal' ? 'Terjadwal' : 'Kirim'}: ${liveInfo.areaName || 'Kirim'}`
             : liveInfo?.todayScheduledArea
             ? `Terjadwal: ${liveInfo.todayScheduledArea}`
             : 'Siap Digunakan Kirim'}
@@ -631,18 +634,15 @@ const FleetCustomSelectDropdown: React.FC<{
                 Tidak ada armada truk yang cocok dengan pencarian "{search}".
               </div>
             ) : (
-              filteredFleets.map((fleet, idx) => {
-                const fleetCode = fleet.initialCode || fleet.plateNumber;
-                const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
+              filteredFleets.map(({ fleet, fleetCode, isSelected, live }, idx) => {
                 const isHighlighted = idx === highlightedIndex;
-                const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso, excludeScheduleId);
                 const isUnselectable = !live.canBeScheduled && !isSelected;
                 const isMaintenance = live.effectiveStatus === 'maintenance';
                 const optionLabel = `[${fleet.initialCode || fleet.plateNumber}] ${fleet.plateNumber} — ${
                   isMaintenance
                     ? 'Sedang Servis'
                     : (live.effectiveStatus === 'on-duty' || !live.canBeScheduled) && !isSelected
-                    ? `Terjadwal (${live.areaName || live.todayScheduledArea || 'Kirim'})`
+                    ? `${live.statusLabel} (${live.areaName || live.todayScheduledArea || 'Jadwal'})`
                     : live.statusLabel
                 }`;
 
@@ -669,9 +669,13 @@ const FleetCustomSelectDropdown: React.FC<{
                     {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
                     {isUnselectable && (
                       <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border shrink-0 ${
-                        isMaintenance ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                        isMaintenance
+                          ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                          : live.statusLabel === 'Kirim'
+                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/25'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
                       }`}>
-                        {isMaintenance ? 'Servis' : 'Terjadwal'}
+                        {isMaintenance ? 'Servis' : live.statusLabel}
                       </span>
                     )}
                   </button>
@@ -1411,13 +1415,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return result;
   };
 
-  const getTodayIso = () => {
-    const now = new Date();
-    const yr = now.getFullYear();
-    const mo = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${yr}-${mo}-${d}`;
-  };
+  const getTodayIso = () => logisticsStore.getWibTodayIso();
 
   const addDaysToIso = (isoDate: string, days: number): string => {
     const parts = (isoDate || '').split('-').map(Number);

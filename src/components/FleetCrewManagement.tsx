@@ -1542,8 +1542,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                       Tidak bisa diatur kirim
                                     </span>
                                   ) : liveInfo.todayScheduledArea ? (
-                                    <span className="text-emerald-300 font-semibold">
-                                      Terjadwal: {liveInfo.todayScheduledArea}
+                                    <span className="text-amber-300 font-semibold">
+                                      Terjadwal Hari Ini: {liveInfo.todayScheduledArea}
+                                    </span>
+                                  ) : liveInfo.tomorrowScheduledArea ? (
+                                    <span className="text-amber-300 font-semibold">
+                                      Terjadwal Esok: {liveInfo.tomorrowScheduledArea}
                                     </span>
                                   ) : (
                                     <span>Siap jadwal esok</span>
@@ -1701,13 +1705,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
                           <span>{liveInfo.statusLabel}</span>
                         </button>
-                        <span className="text-[10px] text-slate-400 font-medium">
+                        <span className="text-[10px] text-slate-400 font-medium max-w-[180px] truncate text-right" title={liveInfo.statusDescription}>
                           {liveInfo.effectiveStatus === 'on-duty'
                             ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
                             : liveInfo.effectiveStatus === 'maintenance'
                             ? 'Dalam perbaikan (Tidak bisa kirim)'
                             : liveInfo.todayScheduledArea
-                            ? `Terjadwal: ${liveInfo.todayScheduledArea}`
+                            ? `Terjadwal Hari Ini: ${liveInfo.todayScheduledArea}`
+                            : liveInfo.tomorrowScheduledArea
+                            ? `Terjadwal Esok: ${liveInfo.tomorrowScheduledArea}`
                             : 'Siap jadwal esok'}
                         </span>
                       </div>

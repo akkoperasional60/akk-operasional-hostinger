@@ -130,7 +130,7 @@ interface SidebarProps {
   onToggleMinimize?: () => void;
 }
 
-// Simple Dropdown navigation data structures
+// Multi-level Nested Dropdown navigation data structures
 export interface SimpleDropdownItem {
   tab: NavTab;
   label: string;
@@ -140,7 +140,9 @@ export interface SimpleDropdownItem {
 }
 
 export interface SimpleDropdownGroup {
+  groupId: string;
   groupTitle?: string;
+  groupIcon?: React.ReactNode;
   items: SimpleDropdownItem[];
 }
 
@@ -168,9 +170,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
 
-  // Active category dropdown state (Simple Dropdown pattern)
+  // Active category dropdown state (Multi-Level Nested Dropdown)
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [dropdownTop, setDropdownTop] = useState<number>(80);
+  const [expandedSubGroups, setExpandedSubGroups] = useState<Record<string, boolean>>({});
 
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -246,7 +249,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       const totalGroups = cat ? cat.groups.length : 1;
       const estimatedHeight = Math.min(
         window.innerHeight - 24,
-        64 + totalItems * 54 + totalGroups * 28
+        100 + totalGroups * 46 + Math.min(totalItems, 6) * 44
       );
       const clamped = Math.max(12, Math.min(rect.top, window.innerHeight - estimatedHeight - 12));
       setDropdownTop(clamped);
@@ -327,7 +330,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
     }
   };
 
-  // Define Navigation Schema with "Dashboard Logistik & Pengiriman" in Logistik & Pengiriman
+  // Define Navigation Schema with detailed multi-level nested groups
   const categories: NavCategory[] = [
     {
       id: 'dashboard',
@@ -338,6 +341,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'dashboard'),
       groups: [
         {
+          groupId: 'dashboard-exec',
           items: [
             {
               tab: 'dashboard',
@@ -363,19 +367,16 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'logistics'),
       groups: [
         {
-          groupTitle: 'Dashboard & Analitik Logistik',
+          groupId: 'logistik-dashboard-jadwal',
+          groupTitle: 'Dashboard & Penjadwalan',
+          groupIcon: <Calendar className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'operational_dashboard',
               label: 'Dashboard Logistik & Pengiriman',
               icon: <BarChart3 className="w-4 h-4 text-blue-500" />,
               description: 'Analitik performa armada, kru & ketepatan waktu kirim'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Jadwal & Distribusi',
-          items: [
+            },
             {
               tab: 'schedules',
               label: 'Jadwal & Penugasan Armada',
@@ -391,14 +392,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Monitoring & Rute GPS',
+          groupId: 'logistik-monitoring',
+          groupTitle: 'Monitoring, GPS & Laporan',
+          groupIcon: <MapPin className="w-4 h-4 text-emerald-500" />,
           items: [
-            {
-              tab: 'fleet_forms',
-              label: 'Formulir Pengadaan Armada',
-              icon: <FileText className="w-4 h-4 text-amber-500" />,
-              description: 'Formulir pengadaan armada, servis & surat jalan'
-            },
             {
               tab: 'driver_reports',
               label: 'Laporan Kiriman Kru',
@@ -408,18 +405,26 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                   {pendingReportsCount} baru
                 </span>
               ) : undefined,
-              description: 'Kendala perjalanan, penyerahan & foto bukti'
+              description: 'Kendala perjalanan, penyerahan & riwayat GPS'
             },
             {
               tab: 'tracking_eval',
               label: 'Evaluasi Jalur GPS (Excel)',
               icon: <FileSpreadsheet className="w-4 h-4 text-emerald-500" />,
               description: 'Unggah file Excel tracking GPS vendor'
+            },
+            {
+              tab: 'fleet_forms',
+              label: 'Formulir Pengadaan Armada',
+              icon: <FileText className="w-4 h-4 text-amber-500" />,
+              description: 'Formulir pengadaan armada, servis & surat jalan'
             }
           ]
         },
         {
-          groupTitle: 'Armada & Perawatan',
+          groupId: 'logistik-armada',
+          groupTitle: 'Armada, Kru & Perawatan',
+          groupIcon: <Truck className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'fleets',
@@ -444,12 +449,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Efisiensi Bahan Bakar (BBM)',
               icon: <Fuel className="w-4 h-4 text-rose-500" />,
               description: 'Analisis rasio km/liter dan konsumsi armada'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Simulasi Muatan Armada',
-          items: [
+            },
             {
               tab: 'warehouse_fleet_cubication',
               label: 'Simulasi Box Muatan Armada',
@@ -473,19 +473,16 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'warehouse'),
       groups: [
         {
-          groupTitle: 'Spesifikasi & Kubikasi',
+          groupId: 'warehouse-master',
+          groupTitle: 'Master Barang & Denah Rak',
+          groupIcon: <Database className="w-4 h-4 text-emerald-500" />,
           items: [
             {
               tab: 'warehouse_scanner',
               label: 'Database Barang',
               icon: <Database className="w-4 h-4 text-emerald-500" />,
               description: 'Nomor barang, dimensi, kubikasi & dokumentasi'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Inventori & Rak Gudang',
-          items: [
+            },
             {
               tab: 'warehouse_slotting',
               label: 'Denah Rak & Slotting',
@@ -495,7 +492,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Operasi Muat & Inbound',
+          groupId: 'warehouse-ops',
+          groupTitle: 'Operasi Inbound & Outbound',
+          groupIcon: <Package className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'warehouse_inbound',
@@ -527,7 +526,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'sales_admin'),
       groups: [
         {
+          groupId: 'sales-aktivitas',
           groupTitle: 'Aktivitas Harian Admin',
+          groupIcon: <BarChart3 className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'sales_dashboard',
@@ -550,7 +551,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Pengeluaran & Scan Barang Muat',
+          groupId: 'sales-muat',
+          groupTitle: 'Faktur, Form Kirim & Scan Muat',
+          groupIcon: <FileText className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'sales_invoice_so',
@@ -583,7 +586,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
+          groupId: 'sales-kpi',
           groupTitle: 'Data KPI Penjualan',
+          groupIcon: <Award className="w-4 h-4 text-amber-500" />,
           items: [
             {
               tab: 'sales_kpi_individual',
@@ -621,7 +626,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'purchasing'),
       groups: [
         {
-          groupTitle: 'Admin Pembelian (PO) & Stok Opname',
+          groupId: 'purchasing-po',
+          groupTitle: 'Pembelian & Analisis Stok',
+          groupIcon: <ShoppingBag className="w-4 h-4 text-purple-500" />,
           items: [
             {
               tab: 'purchasing_dashboard',
@@ -629,6 +636,25 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               icon: <ShoppingBag className="w-4 h-4 text-purple-500" />,
               description: 'Permintaan barang dan PO supplier'
             },
+            {
+              tab: 'purchasing_stock_overview',
+              label: 'Ringkasan Stok Bahan',
+              icon: <Database className="w-4 h-4 text-blue-500" />,
+              description: 'Monitoring bahan baku karton box & lem'
+            },
+            {
+              tab: 'purchasing_stock_forecast',
+              label: 'Prediksi Kebutuhan Stok',
+              icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
+              description: 'Perhitungan titik reorder point (ROP)'
+            }
+          ]
+        },
+        {
+          groupId: 'purchasing-opname',
+          groupTitle: 'Stok Opname & Kartu Stok',
+          groupIcon: <ClipboardCheck className="w-4 h-4 text-indigo-500" />,
+          items: [
             {
               tab: 'purchasing_stok_opname',
               label: 'Stok Opname',
@@ -650,18 +676,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 </span>
               ),
               description: 'Kartu stok digital & analisa otomatis selisih hari pengisian stok'
-            },
-            {
-              tab: 'purchasing_stock_overview',
-              label: 'Ringkasan Stok Bahan',
-              icon: <Database className="w-4 h-4 text-blue-500" />,
-              description: 'Monitoring bahan baku karton box & lem'
-            },
-            {
-              tab: 'purchasing_stock_forecast',
-              label: 'Prediksi Kebutuhan Stok',
-              icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
-              description: 'Perhitungan titik reorder point (ROP)'
             }
           ]
         }
@@ -675,7 +689,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'marketing'),
       groups: [
         {
+          groupId: 'marketing-online-grp',
           groupTitle: 'Marketing Online',
+          groupIcon: <Globe className="w-4 h-4 text-cyan-500" />,
           items: [
             {
               tab: 'marketing_online',
@@ -686,7 +702,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Marketing Offline',
+          groupId: 'marketing-offline-grp',
+          groupTitle: 'Marketing Offline & Faktur',
+          groupIcon: <Megaphone className="w-4 h-4 text-amber-500" />,
           items: [
             {
               tab: 'marketing_offline',
@@ -715,7 +733,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                 </span>
               ),
               description: 'Mapping 1 Sales = 2 Master Nama Sales (Integrasi Validasi Faktur & Aplikasi Penagihan)'
-            },
+            }
+          ]
+        },
+        {
+          groupId: 'marketing-analytics-grp',
+          groupTitle: 'Analisa Pelanggan & Penagihan',
+          groupIcon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
+          items: [
             {
               tab: 'marketing_to_vo_ro',
               label: 'Prosentase TO, VO & RO',
@@ -756,7 +781,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'finance_tax'),
       groups: [
         {
-          groupTitle: 'Keuangan & Penagihan Pelanggan',
+          groupId: 'finance-master',
+          groupTitle: 'Tagihan & Master Pelanggan',
+          groupIcon: <FileText className="w-4 h-4 text-emerald-500" />,
           items: [
             {
               tab: 'finance_dashboard',
@@ -769,7 +796,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Mapping Master Pelanggan',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
               description: 'Pengkategorian pelanggan Tempo & COD, sisa limit & umur jatuh tempo'
-            },
+            }
+          ]
+        },
+        {
+          groupId: 'finance-validasi',
+          groupTitle: 'Validasi & Penagihan Lapangan',
+          groupIcon: <ShieldCheck className="w-4 h-4 text-blue-500" />,
+          items: [
             {
               tab: 'finance_validasi_form_kirim',
               label: 'Validasi Form Kirim',
@@ -811,20 +845,36 @@ const SidebarComponent: React.FC<SidebarProps> = ({
         canAccess(user, 'hr', 'training_karyawan'),
       groups: [
         {
-          groupTitle: 'Sub-Menu Utama Departemen HR',
+          groupId: 'hr-personalia',
+          groupTitle: 'Personalia & Kehadiran',
+          groupIcon: <Users className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'hr_dashboard',
               label: 'HR',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
               description: 'Data karyawan, presensi kru & rekap kehadiran'
-            },
+            }
+          ]
+        },
+        {
+          groupId: 'hr-ga',
+          groupTitle: 'General Affairs (GA) & Keamanan',
+          groupIcon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
+          items: [
             {
               tab: 'ga_security',
               label: 'GA',
               icon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
               description: 'Security pos gerbang, housekeeping 5R & manajemen aset pabrik'
-            },
+            }
+          ]
+        },
+        {
+          groupId: 'hr-training',
+          groupTitle: 'Pengembangan & Training',
+          groupIcon: <Award className="w-4 h-4 text-emerald-500" />,
+          items: [
             {
               tab: 'training_videos',
               label: 'Training & Development',
@@ -848,7 +898,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       checkAccess: (user) => canAccess(user, 'sistem_pengguna'),
       groups: [
         {
+          groupId: 'sys-org',
           groupTitle: 'Organisasi & Hak Akses',
+          groupIcon: <Users className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'users',
@@ -870,7 +922,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Audit & Arsitektur',
+          groupId: 'sys-audit',
+          groupTitle: 'Audit, Pengujian & Arsitektur',
+          groupIcon: <Database className="w-4 h-4 text-cyan-500" />,
           items: [
             {
               tab: 'activity_log',
@@ -920,6 +974,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
     })
     .filter(cat => cat.groups.length > 0);
 
+  const isNavItemActive = (itemTab: NavTab): boolean => {
+    if (currentTab === itemTab) return true;
+    if (itemTab === 'operational_dashboard' && currentTab === 'analytics_reports') return true;
+    if (itemTab === 'ga_security' && (currentTab === 'ga_hk' || currentTab === 'ga_aset')) return true;
+    if (itemTab === 'training_videos' && currentTab === 'training_karyawan') return true;
+    return false;
+  };
+
   // Determine if a category contains the currently active tab
   const isCategoryActive = (cat: NavCategory): boolean => {
     if (cat.defaultTab === currentTab) return true;
@@ -931,13 +993,23 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       return true;
     }
     for (const group of cat.groups) {
-      if (group.items.some(item => item.tab === currentTab)) return true;
+      if (group.items.some(item => isNavItemActive(item.tab))) return true;
     }
     return false;
   };
 
   // Determine active category object
   const activeCategory = visibleCategories.find(c => c.id === activeCategoryId);
+
+  const isSubGroupExpanded = (cat: NavCategory, group: SimpleDropdownGroup): boolean => {
+    const key = `${cat.id}::${group.groupId}`;
+    return Boolean(expandedSubGroups[key]);
+  };
+
+  const toggleSubGroup = (catId: string, groupId: string, currentlyExpanded: boolean) => {
+    const key = `${catId}::${groupId}`;
+    setExpandedSubGroups(currentlyExpanded ? {} : { [key]: true });
+  };
 
   return (
     <>
@@ -1058,7 +1130,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                         ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
                         : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                     }`}
-                    title={isMinimized ? cat.label : undefined}
+                    title={isMinimized && activeCategoryId !== cat.id ? cat.label : undefined}
                   >
                     <div className={`flex items-center min-w-0 ${isMinimized ? 'gap-0' : 'gap-3'}`}>
                       <span className={`shrink-0 transition-colors ${
@@ -1097,8 +1169,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           </nav>
 
           {/* ========================================================== */}
-          {/* SIMPLE DROPDOWN CARD (Style inspired by Lumen Dropdown)    */}
-          {/* Single clean card right beside the sidebar without jitter  */}
+          {/* MULTI-LEVEL NESTED DROPDOWN CARD                           */}
+          {/* Level 1 (Category) -> Level 2 (Sub-Group Accordion) ->     */}
+          {/* Level 3 (Sub-Menu Items)                                   */}
           {/* ========================================================== */}
           {activeCategory && activeCategoryId && (
             <div
@@ -1115,10 +1188,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             >
               <div
                 style={{ maxHeight: `calc(100vh - ${dropdownTop + 16}px)` }}
-                className="w-80 overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 pb-4 text-left"
+                className="w-[340px] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 pb-3.5 text-left"
               >
-                {/* Clean Category Header */}
-                <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800/80 mb-1.5 flex items-center justify-between">
+                {/* Level 1 Category Header + Expand/Collapse All */}
+                <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800/80 mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-blue-600 dark:text-blue-400 shrink-0">
                       {activeCategory.icon}
@@ -1127,51 +1200,128 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                       {activeCategory.label}
                     </span>
                   </div>
-                  {activeCategory.badge}
+                  {activeCategory.badge && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {activeCategory.badge}
+                    </div>
+                  )}
                 </div>
 
-                {/* Vertical List of Items (Clean Menu Labels Only) */}
-                <div className="space-y-0.5">
-                  {activeCategory.groups.map((group, groupIdx) => (
-                    <div key={groupIdx} className="space-y-0.5">
-                      {(group.groupTitle === 'Data KPI Penjualan' || group.groupTitle === 'Marketing Offline') && groupIdx > 0 && (
-                        <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-700/90 px-3">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                            {group.groupTitle}
-                          </span>
-                        </div>
-                      )}
-                      {group.items.map((item) => {
-                        const isItemActive =
-                          currentTab === item.tab ||
-                          (item.tab === 'operational_dashboard' && currentTab === 'analytics_reports');
+                {/* Level 2 Nested Sub-Group Dropdowns -> Level 3 Items */}
+                <div className="space-y-1.5">
+                  {activeCategory.groups.map((group) => {
+                    const hasGroupActiveItem = group.items.some(item => isNavItemActive(item.tab));
+                    const isGroupOpen = isSubGroupExpanded(activeCategory, group);
 
-                        return (
-                          <button
-                            key={item.tab}
-                            type="button"
-                            onMouseEnter={() => preloadTabModule(item.tab)}
-                            onFocus={() => preloadTabModule(item.tab)}
-                            onClick={() => handleTabClick(item.tab)}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
-                              isItemActive
-                                ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                                : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
-                            }`}
-                          >
-                            <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
-                              {item.icon}
+                    if (!group.groupTitle) {
+                      return (
+                        <div key={group.groupId} className="space-y-0.5">
+                          {group.items.map((item) => {
+                            const isItemActive = isNavItemActive(item.tab);
+                            return (
+                              <button
+                                key={item.tab}
+                                type="button"
+                                onMouseEnter={() => preloadTabModule(item.tab)}
+                                onFocus={() => preloadTabModule(item.tab)}
+                                onClick={() => handleTabClick(item.tab)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                                  isItemActive
+                                    ? 'bg-blue-600 text-white font-semibold shadow-xs'
+                                    : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
+                                  {item.icon}
+                                </span>
+                                <span className="text-xs truncate font-medium flex-1">
+                                  {item.label}
+                                </span>
+                                {item.badge && !isItemActive && <span className="shrink-0">{item.badge}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={group.groupId}
+                        className={`rounded-xl border transition-colors ${
+                          isGroupOpen
+                            ? 'border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/35'
+                            : 'border-transparent hover:border-slate-200/70 dark:hover:border-slate-800/80 bg-transparent'
+                        }`}
+                      >
+                        {/* Level 2 Group Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => toggleSubGroup(activeCategory.id, group.groupId, isGroupOpen)}
+                          className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                            hasGroupActiveItem
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-6 h-6 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-center shrink-0 shadow-2xs">
+                              {group.groupIcon || <Layers className="w-3.5 h-3.5 text-slate-500" />}
                             </span>
-                            <div className="min-w-0 flex-1 flex items-center justify-between gap-1">
-                              <span className="text-xs truncate font-medium">
-                                {item.label}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
+                            <span className="text-[11.5px] font-bold tracking-tight truncate">
+                              {group.groupTitle}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {hasGroupActiveItem && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
+                            )}
+                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-slate-200/70 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300">
+                              {group.items.length}
+                            </span>
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                                isGroupOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''
+                              }`}
+                            />
+                          </div>
+                        </button>
+
+                        {/* Level 3 Nested Sub-Menu Items */}
+                        {isGroupOpen && (
+                          <div className="pl-4 pr-1.5 pb-2 pt-0.5 space-y-0.5 ml-4 border-l-2 border-slate-200 dark:border-slate-700/90">
+                            {group.items.map((item) => {
+                              const isItemActive = isNavItemActive(item.tab);
+                              return (
+                                <button
+                                  key={item.tab}
+                                  type="button"
+                                  onMouseEnter={() => preloadTabModule(item.tab)}
+                                  onFocus={() => preloadTabModule(item.tab)}
+                                  onClick={() => handleTabClick(item.tab)}
+                                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                    isItemActive
+                                      ? 'bg-blue-600 text-white font-semibold shadow-xs'
+                                      : 'hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
+                                    {item.icon}
+                                  </span>
+                                  <span className="text-[11.5px] truncate font-medium flex-1">
+                                    {item.label}
+                                  </span>
+                                  {item.badge && !isItemActive && (
+                                    <span className="shrink-0">{item.badge}</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1265,37 +1415,97 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                     </button>
 
                     {isCatExpanded && (
-                      <div className="p-2 space-y-1 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
-                        {cat.groups.map((group, gIdx) => (
-                          <div key={gIdx} className="space-y-0.5">
-                            {(group.groupTitle === 'Data KPI Penjualan' || group.groupTitle === 'Marketing Offline') && gIdx > 0 && (
-                              <div className="my-2 pt-2 border-t border-slate-200 dark:border-slate-700/90 px-3">
-                                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                                  {group.groupTitle}
-                                </span>
+                      <div className="p-2 space-y-1.5 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+                        {cat.groups.map((group) => {
+                          const hasGroupActiveItem = group.items.some(item => isNavItemActive(item.tab));
+                          const isGroupOpen = isSubGroupExpanded(cat, group);
+
+                          if (!group.groupTitle) {
+                            return (
+                              <div key={group.groupId} className="space-y-0.5">
+                                {group.items.map((item) => {
+                                  const isCur = isNavItemActive(item.tab);
+                                  return (
+                                    <button
+                                      key={item.tab}
+                                      onClick={() => handleTabClick(item.tab)}
+                                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-left transition ${
+                                        isCur
+                                          ? 'bg-blue-600 text-white font-semibold'
+                                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
+                                        <span className="truncate">{item.label}</span>
+                                      </div>
+                                      {item.badge && !isCur && <span className="shrink-0 ml-1">{item.badge}</span>}
+                                    </button>
+                                  );
+                                })}
                               </div>
-                            )}
-                            {group.items.map((item) => {
-                              const isCur = currentTab === item.tab;
-                              return (
-                                <button
-                                  key={item.tab}
-                                  onClick={() => handleTabClick(item.tab)}
-                                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-left transition ${
-                                    isCur
-                                      ? 'bg-blue-600 text-white font-semibold'
-                                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
-                                    <span>{item.label}</span>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ))}
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={group.groupId}
+                              className={`rounded-xl border transition-colors ${
+                                isGroupOpen
+                                  ? 'border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40'
+                                  : 'border-slate-100 dark:border-slate-800/60 bg-transparent'
+                              }`}
+                            >
+                              {/* Mobile Level 2 Group Header */}
+                              <button
+                                type="button"
+                                onClick={() => toggleSubGroup(cat.id, group.groupId, isGroupOpen)}
+                                className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left text-[11.5px] font-bold transition ${
+                                  hasGroupActiveItem
+                                    ? 'text-blue-600 dark:text-blue-400'
+                                    : 'text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="shrink-0">{group.groupIcon || <Layers className="w-3.5 h-3.5 text-slate-400" />}</span>
+                                  <span className="truncate">{group.groupTitle}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    {group.items.length}
+                                  </span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isGroupOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : 'text-slate-400'}`} />
+                                </div>
+                              </button>
+
+                              {/* Mobile Level 3 Items */}
+                              {isGroupOpen && (
+                                <div className="pl-3 pr-1.5 pb-2 pt-0.5 space-y-0.5 ml-3.5 border-l-2 border-slate-200 dark:border-slate-700">
+                                  {group.items.map((item) => {
+                                    const isCur = isNavItemActive(item.tab);
+                                    return (
+                                      <button
+                                        key={item.tab}
+                                        onClick={() => handleTabClick(item.tab)}
+                                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[11.5px] font-medium text-left transition ${
+                                          isCur
+                                            ? 'bg-blue-600 text-white font-semibold'
+                                            : 'text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
+                                          <span className="truncate">{item.label}</span>
+                                        </div>
+                                        {item.badge && !isCur && <span className="shrink-0 ml-1">{item.badge}</span>}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
