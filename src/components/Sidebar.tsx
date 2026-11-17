@@ -47,7 +47,10 @@ import {
   Clock,
   QrCode,
   DollarSign,
-  Link2
+  Link2,
+  Receipt,
+  FileCheck2,
+  Navigation
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -65,10 +68,13 @@ export type NavTab =
   | 'analytics_reports'
   | 'operational_dashboard'
   | 'schedules'
+  | 'portal_validation'
   | 'fleets'
   | 'spareparts'
+  | 'maintenance_costs'
   | 'fuel_efficiency'
   | 'crew_history'
+  | 'live_trips'
   | 'tracking_eval'
   | 'fleet_forms'
   | 'sales_dashboard'
@@ -388,6 +394,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Portal Driver Mobile',
               icon: <Smartphone className="w-4 h-4 text-emerald-500" />,
               description: 'Tampilan antarmuka khusus mobile supir'
+            },
+            {
+              tab: 'portal_validation',
+              label: 'Validasi Portal',
+              icon: <FileCheck2 className="w-4 h-4 text-indigo-500" />,
+              description: 'Validasi kesesuaian jadwal admin dengan check-in portal kru'
             }
           ]
         },
@@ -396,6 +408,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           groupTitle: 'Monitoring, GPS & Laporan',
           groupIcon: <MapPin className="w-4 h-4 text-emerald-500" />,
           items: [
+            {
+              tab: 'live_trips',
+              label: 'Live Trips & Playback Rute',
+              icon: <Navigation className="w-4 h-4 text-blue-500" />,
+              description: 'Pantau armada live di jalan, riwayat rute & playback perjalanan'
+            },
             {
               tab: 'driver_reports',
               label: 'Laporan Kiriman Kru',
@@ -443,6 +461,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Suku Cadang & Bengkel',
               icon: <Wrench className="w-4 h-4 text-amber-500" />,
               description: 'Jadwal servis berkala dan stok sparepart'
+            },
+            {
+              tab: 'maintenance_costs',
+              label: 'Biaya Servis & Pemeliharaan',
+              icon: <Receipt className="w-4 h-4 text-emerald-500" />,
+              description: 'Catat pengeluaran servis rutin, perbaikan, ban, KIR & nota bengkel'
             },
             {
               tab: 'fuel_efficiency',
@@ -1156,11 +1180,6 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                           isOpen ? 'translate-x-0.5 text-white' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'
                         }`} />
                       </div>
-                    )}
-
-                    {/* Small badge dot for minimized mode */}
-                    {isMinimized && cat.badge && (
-                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
                     )}
                   </button>
                 </div>

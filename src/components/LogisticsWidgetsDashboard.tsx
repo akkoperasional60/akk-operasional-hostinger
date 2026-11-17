@@ -358,7 +358,7 @@ export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps>
         }))
       );
     } else if (preset === 'fleet_maintenance') {
-      const maintenanceTabs: NavTab[] = ['fleets', 'spareparts', 'fuel_efficiency', 'warehouse_fleet_cubication', 'fleet_forms'];
+      const maintenanceTabs: NavTab[] = ['fleets', 'spareparts', 'maintenance_costs', 'fuel_efficiency', 'warehouse_fleet_cubication', 'fleet_forms'];
       setTempWidgets(prev =>
         prev.map(w => ({
           ...w,

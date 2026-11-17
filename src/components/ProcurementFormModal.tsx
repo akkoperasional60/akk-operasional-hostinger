@@ -3,10 +3,24 @@ import { X, Save, Printer, Download, AlertCircle } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import { jsPDF } from 'jspdf';
 
+import {
+  getFleetModalDraft,
+  saveFleetModalDraft,
+  hydrateFleetFormStateFromMysql,
+  FLEET_FORMS_UPDATED_EVENT
+} from './FleetFormDesignerSystem';
+
 interface ProcurementFormModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const DEFAULT_PROCUREMENT_DRAFT = {
+  category: '',
+  quantity: '',
+  urgency: 'medium',
+  reason: '',
+};
 
 export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOpen, onClose }) => {
   const componentRef = useRef<HTMLDivElement>(null);
@@ -15,21 +29,32 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
   });
 
   const [formData, setFormData] = useState(() => {
-    const saved = localStorage.getItem('procurement_form_draft');
-    return saved ? JSON.parse(saved) : {
-      category: '',
-      quantity: '',
-      urgency: 'medium',
-      reason: '',
-    };
+    return getFleetModalDraft<typeof DEFAULT_PROCUREMENT_DRAFT>('procurement') || { ...DEFAULT_PROCUREMENT_DRAFT };
   });
 
   const [validationError, setValidationError] = useState<string | null>(null);
+  const hasUserEditedRef = useRef(false);
 
   const validate = () => !!(formData.category && formData.quantity && formData.reason);
 
   useEffect(() => {
-    localStorage.setItem('procurement_form_draft', JSON.stringify(formData));
+    const handleHydrated = () => {
+      if (!hasUserEditedRef.current) {
+        const remote = getFleetModalDraft<typeof DEFAULT_PROCUREMENT_DRAFT>('procurement');
+        if (remote) setFormData(remote);
+      }
+    };
+    window.addEventListener(FLEET_FORMS_UPDATED_EVENT, handleHydrated);
+    void hydrateFleetFormStateFromMysql();
+    return () => window.removeEventListener(FLEET_FORMS_UPDATED_EVENT, handleHydrated);
+  }, []);
+
+  useEffect(() => {
+    if (!hasUserEditedRef.current) return;
+    const timer = window.setTimeout(() => {
+      saveFleetModalDraft('procurement', formData);
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [formData]);
 
   const handleDownloadPdf = () => {
@@ -173,7 +198,7 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
           <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200 print:hidden text-xs">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Kategori Barang</label>
-              <select className="w-full border p-2 rounded-lg bg-white" value={formData.category} onChange={e => { setFormData({...formData, category: e.target.value}); setValidationError(null); }}>
+              <select className="w-full border p-2 rounded-lg bg-white" value={formData.category} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, category: e.target.value}); setValidationError(null); }}>
                 <option value="">Pilih Kategori</option>
                 <option value="oli">Oli & Pelumas</option>
                 <option value="ban">Ban & Velg</option>
@@ -183,11 +208,11 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Jumlah</label>
-              <input type="number" className="w-full border p-2 rounded-lg bg-white" value={formData.quantity} onChange={e => { setFormData({...formData, quantity: e.target.value}); setValidationError(null); }} placeholder="Contoh: 2" />
+              <input type="number" className="w-full border p-2 rounded-lg bg-white" value={formData.quantity} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, quantity: e.target.value}); setValidationError(null); }} placeholder="Contoh: 2" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Urgensi</label>
-              <select className="w-full border p-2 rounded-lg bg-white" value={formData.urgency} onChange={e => setFormData({...formData, urgency: e.target.value})}>
+              <select className="w-full border p-2 rounded-lg bg-white" value={formData.urgency} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, urgency: e.target.value}); }}>
                 <option value="low">Rendah (Rutin)</option>
                 <option value="medium">Sedang (Dalam 3 Hari)</option>
                 <option value="high">Tinggi (Mendesak / Urgent)</option>
@@ -195,7 +220,7 @@ export const ProcurementFormModal: React.FC<ProcurementFormModalProps> = ({ isOp
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-semibold text-gray-700 mb-1">Alasan Pengadaan</label>
-              <textarea className="w-full border p-2 rounded-lg bg-white" value={formData.reason} onChange={e => { setFormData({...formData, reason: e.target.value}); setValidationError(null); }} rows={2} placeholder="Sebutkan alasan atau kebutuhan armada..."></textarea>
+              <textarea className="w-full border p-2 rounded-lg bg-white" value={formData.reason} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, reason: e.target.value}); setValidationError(null); }} rows={2} placeholder="Sebutkan alasan atau kebutuhan armada..."></textarea>
             </div>
           </div>
 

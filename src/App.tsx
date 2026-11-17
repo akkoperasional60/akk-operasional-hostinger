@@ -21,6 +21,7 @@ import {
   loadScheduleManagement,
   loadFleetCrewManagement,
   loadSparePartManagement,
+  loadFleetMaintenanceCostManagement,
   loadFuelEfficiencyManagement,
   loadUserManagement,
   loadExcelTrackingEvaluator,
@@ -40,6 +41,8 @@ import {
   loadAnalyticsReportingModule,
   loadE2ETesterModule,
   loadMasterCabang,
+  loadSchedulePortalValidationReport,
+  loadLiveTripsMonitorPanel,
   preloadTabsSequential,
   lazyWithRetry
 } from './utils/tabLoaders';
@@ -48,6 +51,7 @@ const ExecutiveDashboard = lazyWithRetry(loadExecutiveDashboard);
 const ScheduleManagement = lazyWithRetry(loadScheduleManagement);
 const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
 const SparePartManagement = lazyWithRetry(loadSparePartManagement);
+const FleetMaintenanceCostManagement = lazyWithRetry(loadFleetMaintenanceCostManagement);
 const FuelEfficiencyManagement = lazyWithRetry(loadFuelEfficiencyManagement);
 const UserManagement = lazyWithRetry(loadUserManagement);
 const ExcelTrackingEvaluator = lazyWithRetry(loadExcelTrackingEvaluator);
@@ -67,6 +71,8 @@ const DriverReportsManagement = lazyWithRetry(loadDriverReportsManagement);
 const AnalyticsReportingModule = lazyWithRetry(loadAnalyticsReportingModule);
 const E2ETesterModule = lazyWithRetry(loadE2ETesterModule);
 const MasterCabang = lazyWithRetry(loadMasterCabang);
+const SchedulePortalValidationReport = lazyWithRetry(loadSchedulePortalValidationReport);
+const LiveTripsMonitorPanel = lazyWithRetry(loadLiveTripsMonitorPanel);
 
 const AppShellSkeleton: React.FC<{
   statusLabel?: string;
@@ -272,6 +278,7 @@ const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
   'fleets',
   'spareparts',
+  'maintenance_costs',
   'fuel_efficiency',
   'fleet_forms'
 ];
@@ -627,8 +634,11 @@ export default function App() {
       case 'analytics_reports': return 'Dashboard Logistik & Pengiriman';
       case 'operational_dashboard': return 'Dashboard Logistik & Pengiriman';
       case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
+      case 'portal_validation': return 'Validasi Portal Driver & Helper';
+      case 'live_trips': return 'Live Trips, Riwayat Rute & Playback Perjalanan';
       case 'fleets': return 'Manajemen Armada & Kru Supir';
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
+      case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
       case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
       case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
@@ -974,6 +984,14 @@ export default function App() {
             />
           )}
 
+          {currentTab === 'portal_validation' && (canManageFleet() || canAccess(currentUser, 'portal_validation')) && (
+            <SchedulePortalValidationReport />
+          )}
+
+          {currentTab === 'live_trips' && (canManageFleet() || canAccess(currentUser, 'live_trips')) && (
+            <LiveTripsMonitorPanel />
+          )}
+
           {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
             <FleetCrewManagement
               initialTab="fleets"
@@ -984,6 +1002,13 @@ export default function App() {
 
           {currentTab === 'spareparts' && (canManageFleet() || canAccess(currentUser, 'spareparts')) && (
             <SparePartManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
+          )}
+
+          {currentTab === 'maintenance_costs' && (canManageFleet() || canAccess(currentUser, 'maintenance_costs')) && (
+            <FleetMaintenanceCostManagement
+              onNavigateToFleets={() => setCurrentTab('fleets')}
+              onNavigateToSpareParts={() => setCurrentTab('spareparts')}
+            />
           )}
 
           {currentTab === 'fuel_efficiency' && (canManageFleet() || canAccess(currentUser, 'fuel_efficiency')) && (

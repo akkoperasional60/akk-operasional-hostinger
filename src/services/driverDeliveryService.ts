@@ -18,6 +18,21 @@ export interface StatusUpdateResult {
 }
 
 class DriverDeliveryService {
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        (typeof localStorage !== 'undefined' ? (localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')) : '') ||
+        (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('akk_session_token') || sessionStorage.getItem('session_token')) : '') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
   /**
    * Fetch deliveries assigned to a driver.
    * Pulls from Hostinger MySQL if online and available, with local cache only for offline continuity.
@@ -37,7 +52,10 @@ class DriverDeliveryService {
 
     // Hostinger MySQL remote snapshot
     try {
-      const res = await fetch('/api/schedules/persisted', { credentials: 'same-origin' });
+      const res = await fetch('/api/schedules/persisted', {
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
       if (res.ok) {
         const remote = await res.json();
         const remoteSchedules: Schedule[] = Array.isArray(remote?.schedules) ? remote.schedules : [];
@@ -99,7 +117,8 @@ class DriverDeliveryService {
         : undefined);
       const response = await fetch(`/api/schedules/${encodeURIComponent(scheduleId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders(),
         body: JSON.stringify({
           trackingNumber,
           status: newStatus,

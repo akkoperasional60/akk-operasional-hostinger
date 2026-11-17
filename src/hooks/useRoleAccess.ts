@@ -101,6 +101,7 @@ export function useRoleAccess(): UseRoleAccessReturn {
         canAccess(activeUser, 'fleets') ||
         canAccess(activeUser, 'schedules') ||
         canAccess(activeUser, 'spareparts') ||
+        canAccess(activeUser, 'maintenance_costs') ||
         canAccess(activeUser, 'fuel_efficiency') ||
         canAccess(activeUser, 'fleet_forms') ||
         canAccess(activeUser, 'warehouse_fleet_cubication')

@@ -1831,20 +1831,6 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           <span className="font-black text-amber-400 shrink-0 tabular-nums">{totalColyDisplay} COLY</span>
         </div>
 
-        {/* Status Otomatis Kunci GPS Saat Simpan */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-emerald-950/45 border border-emerald-500/35 text-[11px]">
-          <div className="flex items-center gap-1.5 text-emerald-300 font-black">
-            <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Otomatis Kunci GPS Saat Simpan Aktif</span>
-          </div>
-          <div className="flex items-center gap-1.5 font-mono text-[10px] text-emerald-200">
-            <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
-            <span>
-              {liveGps.lat.toFixed(5)}, {liveGps.lng.toFixed(5)} (±{liveGps.accuracy}m)
-            </span>
-          </div>
-        </div>
-
         {/* 3 KPI Setoran Hari Ini (Total Tagihan Diambil dari Faktur COD Saja) */}
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">

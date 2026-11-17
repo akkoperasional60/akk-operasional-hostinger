@@ -1,9 +1,9 @@
 {
-  "versionCode": 10038,
-  "versionName": "1.0.38",
-  "updatedAt": "2026-11-17T12:09:00.000000",
-  "changelog": "Pembaruan UI/UX Admin Penjualan (Kalender Jadwal Admin, Pemantauan Durasi Muat Terpadu, Integrasi User Manajemen Adm. Penjualan) & Optimasi Build Hostinger.",
+  "versionCode": 10039,
+  "versionName": "1.0.39",
+  "updatedAt": "2026-11-17T17:06:00.000000",
+  "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V50: Navigasi Sidebar Multi-Level Nested Dropdown (3 Level Kategori -> Sub-Grup Accordion -> Sub-Menu), Sorting & Status Terjadwal/Kirim Armada di Jadwal & Penugasan Armada, Indikator Terjadwal Hari Ini & Esok di Data Armada Terpadu, serta Sinkronisasi Kru dari Hak Akses Jadwal & Penugasan Armada."
+  "releaseNotes": "Update V51: Studio 3D Showcase Armada (Fleet3DShowcase & truck3dBuilder), Menu Biaya Servis & Pemeliharaan Armada, Menu Validasi Portal (Jadwal vs Check-In), Menu Live Trips & Playback Rute GPS, serta Migrasi Penuh Seluruh Modul dari localStorage ke MySQL Hostinger."
 }

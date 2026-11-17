@@ -78,6 +78,7 @@ export const DEFAULT_QUICK_REPLIES: QuickReply[] = [
 const getTabContextName = (tab?: string): string => {
   switch (tab) {
     case 'spareparts': return 'Stok & Sparepart';
+    case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan';
     case 'fleets': return 'Armada & Kru Supir';
     case 'schedules': return 'Jadwal Pengiriman';
     case 'fuel_efficiency': return 'Efisiensi BBM';

@@ -544,14 +544,48 @@ function scheduleSignature(schedule: any): string {
 
 let hostingerPollInFlight = false;
 let hostingerRateLimitedUntil = 0;
+let hostingerInitialPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getSessionAuthHeaders(): { headers: Record<string, string>; hasSession: boolean } {
+  const headers: Record<string, string> = {};
+  let token = '';
+  let hasAuthUser = false;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      token = localStorage.getItem('akk_session_token') || localStorage.getItem('session_token') || '';
+      hasAuthUser = Boolean(localStorage.getItem('akk_auth_session') || localStorage.getItem('akk_current_user'));
+    }
+    if (!token && typeof sessionStorage !== 'undefined') {
+      token = sessionStorage.getItem('akk_session_token') || sessionStorage.getItem('session_token') || '';
+    }
+    if (!hasAuthUser && typeof sessionStorage !== 'undefined') {
+      hasAuthUser = Boolean(sessionStorage.getItem('akk_auth_session'));
+    }
+  } catch {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    headers['x-akk-session-token'] = token;
+  }
+  return { headers, hasSession: Boolean(token || hasAuthUser) };
+}
 
 async function pollHostingerSchedules(): Promise<void> {
   if (typeof fetch === 'undefined' || hostingerPollInFlight) return;
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
   if (Date.now() < hostingerRateLimitedUntil) return;
+  const { headers, hasSession } = getSessionAuthHeaders();
+  if (!hasSession) return;
   hostingerPollInFlight = true;
   try {
-    const response = await fetch('/api/schedules/persisted', { cache: 'no-store' });
+    const response = await fetch('/api/schedules/persisted', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers
+    });
+    if (response.status === 401 || response.status === 403) {
+      hostingerRateLimitedUntil = Date.now() + 60000;
+      return;
+    }
     if (response.status === 429) {
       hostingerRateLimitedUntil = Date.now() + 60000;
       return;
@@ -567,16 +601,18 @@ async function pollHostingerSchedules(): Promise<void> {
     if (!pollInitialized) {
       lastHostingerSchedules = nextMap;
       pollInitialized = true;
-      triggerStoreSync();
       return;
     }
 
+    let hasChanges = false;
     nextMap.forEach((schedule, id) => {
       const previous = lastHostingerSchedules.get(id);
       if (!previous) {
+        hasChanges = true;
         notifyListeners('schedules', 'INSERT', schedule);
         dispatchToMatchingDrivers('INSERT', schedule, null);
       } else if (scheduleSignature(previous) !== scheduleSignature(schedule)) {
+        hasChanges = true;
         notifyListeners('schedules', 'UPDATE', schedule);
         dispatchToMatchingDrivers('UPDATE', schedule, previous);
         dispatchToAdminLogistics(schedule, previous, 'local_sync');
@@ -584,11 +620,16 @@ async function pollHostingerSchedules(): Promise<void> {
     });
 
     lastHostingerSchedules.forEach((previous, id) => {
-      if (!nextMap.has(id)) notifyListeners('schedules', 'DELETE', previous);
+      if (!nextMap.has(id)) {
+        hasChanges = true;
+        notifyListeners('schedules', 'DELETE', previous);
+      }
     });
 
     lastHostingerSchedules = nextMap;
-    triggerStoreSync();
+    if (hasChanges) {
+      triggerStoreSync();
+    }
   } catch (err) {
     console.warn('[HostingerLive] Schedule polling skipped:', err);
   } finally {
@@ -598,7 +639,13 @@ async function pollHostingerSchedules(): Promise<void> {
 
 function ensureHostingerPolling(): void {
   if (hostingerPollTimer || typeof window === 'undefined') return;
-  void pollHostingerSchedules();
+  // Tunda baseline poll pertama 35 detik agar tidak duplikat dengan hydrate startup store.ts
+  if (!hostingerInitialPollTimer) {
+    hostingerInitialPollTimer = setTimeout(() => {
+      hostingerInitialPollTimer = null;
+      void pollHostingerSchedules();
+    }, 35000);
+  }
   hostingerPollTimer = setInterval(() => void pollHostingerSchedules(), 45000);
   isSubscribed = true;
 }
@@ -654,9 +701,11 @@ export const supabaseRealtimeSync = {
 
     try {
       if (schedule.id) {
+        const { headers: authHeaders } = getSessionAuthHeaders();
         await fetch(`/api/schedules/${encodeURIComponent(String(schedule.id))}/status`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({
             status: schedule.status,
             notes: extraNotes ?? schedule.notes,
@@ -674,6 +723,8 @@ export const supabaseRealtimeSync = {
   },
 
   unsubscribe(): void {
+    if (hostingerInitialPollTimer) clearTimeout(hostingerInitialPollTimer);
+    hostingerInitialPollTimer = null;
     if (hostingerPollTimer) clearInterval(hostingerPollTimer);
     hostingerPollTimer = null;
     isSubscribed = false;

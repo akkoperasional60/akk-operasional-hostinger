@@ -49,6 +49,7 @@ import { FleetMiniMapPreview } from './FleetMiniMapPreview';
 import { FuelEfficiencyManagement } from './FuelEfficiencyManagement';
 import { SparePartManagement } from './SparePartManagement';
 import { FleetFormCenter } from './FleetFormCenter';
+import { Fleet3DShowcase } from './Fleet3DShowcase';
 import { branchStore, BranchRecord } from '../services/branchStore';
 import {
   updateFleetInSupabase,
@@ -253,8 +254,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [crewRoleFilter, setCrewRoleFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // View mode toggle: 'table' (default data table view) or 'cards' (visual card grid view)
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  // View mode toggle: 'table' (default data table view), 'cards' (visual card grid view), or '3d' (studio 3D truck showcase)
+  const [viewMode, setViewMode] = useState<'table' | 'cards' | '3d'>('table');
+  const [selected3DFleetId, setSelected3DFleetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'fleets' && viewMode === '3d') {
+      setViewMode('table');
+    }
+  }, [activeTab, viewMode]);
 
   // Supabase sync feedback & loading state
   const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
@@ -1211,7 +1219,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </button>
               )}
 
-              {/* View Switcher: Table View vs Cards Grid */}
+              {/* View Switcher: Table View vs Cards Grid vs 3D Showcase */}
               <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
                   type="button"
@@ -1235,6 +1243,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Kartu</span>
                 </button>
+                {activeTab === 'fleets' && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('3d')}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      viewMode === '3d' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Tampilan Desain 3D Interaktif Armada"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>3D</span>
+                  </button>
+                )}
               </div>
 
               {/* Refresh Data Button */}
@@ -1621,6 +1642,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         {/* Aksi */}
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelected3DFleetId(fleet.id);
+                                setViewMode('3d');
+                              }}
+                              className="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+                              title="Lihat Desain 3D Armada"
+                            >
+                              <Box className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleEditFleetClick(fleet)}
@@ -2075,8 +2107,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </div>
                 </div>
 
-                {/* Edit & Hapus Buttons */}
+                {/* 3D, Edit & Hapus Buttons */}
                 <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-end gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected3DFleetId(fleet.id);
+                      setViewMode('3d');
+                    }}
+                    className="px-3 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-medium flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>3D</span>
+                  </button>
                   <button
                     onClick={() => handleEditFleetClick(fleet)}
                     className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-750 hover:text-white text-slate-300 font-medium flex items-center gap-1 transition cursor-pointer"
@@ -2099,6 +2142,27 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )
       )}
 
+      {/* Fleets Content: 3D Studio Showcase View */}
+      {activeTab === 'fleets' && viewMode === '3d' && (
+        <Fleet3DShowcase
+          fleets={filteredFleets}
+          crews={crews}
+          selectedFleetId={selected3DFleetId}
+          onSelectFleetId={(id) => setSelected3DFleetId(id)}
+          onToggleFleetStatus={toggleFleetStatus}
+          onEditFleet={handleEditFleetClick}
+          onUpdateFleetPhotos={(fleetId, photos3d) => {
+            logisticsStore.updateFleet(fleetId, { photos3d });
+            setFleets(logisticsStore.getFleets());
+          }}
+          onViewKirDoc={(fl) => setSelectedKirDocFleet(fl)}
+          getBoxCapacityM3={getFleetBoxCapacity}
+          getBoxDimensions={(fl) => getDefaultBoxDimensions(fl.vehicleType, fl.brand)}
+          formatIndoDate={formatIndoDate}
+          getExpiryStatus={getExpiryStatus}
+        />
+      )}
+
       {/* Info Indikator Status Operasional & Rumus Performa Rit & Rating */}
       {activeTab === 'crews' && (
         <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
@@ -2119,7 +2183,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       )}
 
       {/* Crews Content: Table View */}
-      {activeTab === 'crews' && viewMode === 'table' && (
+      {activeTab === 'crews' && (viewMode === 'table' || viewMode === '3d') && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">

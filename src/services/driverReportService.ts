@@ -92,8 +92,6 @@ class DriverReportService {
   private lastServerSyncAt = 0;
   private seqCounter = 0;
   private channel: BroadcastChannel | null = null;
-  private eventSource: EventSource | null = null;
-  private reconnectTimer: number | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -181,55 +179,11 @@ class DriverReportService {
     }
   }
 
-  private ensureServerRealtimeSync() {
-    if (typeof window === 'undefined' || !('EventSource' in window)) return;
-    if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) return;
-
-    try {
-      const es = new EventSource('/api/driver-reports/stream');
-      this.eventSource = es;
-
-      es.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          if (data.type === 'report_deleted' && data.payload?.id) {
-            this.applyRemoteDeletion(String(data.payload.id), false);
-          } else if (
-            data.type === 'report_upserted' ||
-            data.type === 'solution_updated' ||
-            data.type === 'solution_acknowledged'
-          ) {
-            if (data.payload && data.payload.id) {
-              this.mergeIncomingReports([data.payload], false);
-            }
-          } else if (data.type === 'reports_synced') {
-            this.syncWithServer(true).catch(() => {});
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        try {
-          es.close();
-        } catch {}
-        if (this.eventSource === es) this.eventSource = null;
-
-        if (this.reconnectTimer !== null) {
-          window.clearTimeout(this.reconnectTimer);
-        }
-        this.reconnectTimer = window.setTimeout(() => {
-          this.reconnectTimer = null;
-          this.syncWithServer(true).catch(() => {});
-        }, 4000);
-      };
-    } catch {}
-  }
-
   public async syncWithServer(force: boolean = false): Promise<void> {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
     if (this.isSyncingWithServer) return;
     const nowMs = Date.now();
-    if (!force && nowMs - this.lastServerSyncAt < 3000) return;
+    if (!force && nowMs - this.lastServerSyncAt < 8000) return;
     this.isSyncingWithServer = true;
     this.lastServerSyncAt = nowMs;
     try {
@@ -238,7 +192,6 @@ class DriverReportService {
         headers: this.getAuthHeaders()
       });
       if (!res.ok) return;
-      this.ensureServerRealtimeSync();
       const json = await res.json();
       if (Array.isArray(json.deletedIds) && json.deletedIds.length > 0) {
         let hasNewDeleted = false;
@@ -521,6 +474,7 @@ class DriverReportService {
     driverId: string;
     driverName: string;
     userRole?: string;
+    helperName?: string;
     plateNumber: string;
     areaName?: string;
     checkinTimeFormatted: string;
@@ -529,6 +483,7 @@ class DriverReportService {
   }): DriverHelperReport {
     const list = this.getReports();
     const today = getLocalDateStr();
+    const helperSuffix = params.helperName ? ` | Helper: ${params.helperName}` : '';
 
     // Cari laporan presensi aktif untuk shiftId atau driverId pada hari ini
     const existingIdx = list.findIndex(
@@ -542,8 +497,8 @@ class DriverReportService {
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
       const mergedPin = '****';
       const updatedNotes = mergedCheckout
-        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan: Terverifikasi`
-        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
+        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout}${helperSuffix} | PIN Keamanan: Terverifikasi`
+        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
       list[existingIdx] = {
         ...existing,
@@ -570,8 +525,8 @@ class DriverReportService {
 
     const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
-      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan: Terverifikasi`
-      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
+      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted}${helperSuffix} | PIN Keamanan: Terverifikasi`
+      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
     return this.addReport({
       driverId: params.driverId,

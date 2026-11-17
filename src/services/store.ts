@@ -169,6 +169,34 @@ const STORAGE_KEYS = {
   MESSAGES: 'akk_chat_messages_v1'
 };
 
+const MYSQL_BACKED_STORAGE_KEYS = new Set<string>([
+  STORAGE_KEYS.FLEETS,
+  STORAGE_KEYS.CREWS,
+  STORAGE_KEYS.STORES,
+  STORAGE_KEYS.SCHEDULES,
+  STORAGE_KEYS.CREW_HISTORY,
+  STORAGE_KEYS.AREA_APPROVALS,
+  STORAGE_KEYS.AREA_THRESHOLD,
+  STORAGE_KEYS.FUEL_LOGS,
+  STORAGE_KEYS.SCANNED_DOCUMENTS,
+  STORAGE_KEYS.SPARE_PARTS,
+  STORAGE_KEYS.SPARE_PART_USAGES,
+  STORAGE_KEYS.SALES_ORDERS,
+  STORAGE_KEYS.ADMIN_ACTIVITIES,
+  STORAGE_KEYS.ADMIN_SCHEDULES,
+  STORAGE_KEYS.LOADING_RECORDS,
+  STORAGE_KEYS.SKILL_PROFILES,
+  STORAGE_KEYS.JOBDESK_CONFIGS,
+  STORAGE_KEYS.IMAGES,
+  STORAGE_KEYS.SECURITY_LOGS,
+  STORAGE_KEYS.SCHEDULE_CHANGE_LOGS,
+  'akk_system_activities_v1',
+  'akk_admin_schedule_weeks_cache',
+  'akk_last_admin_schedule_sync_time',
+  'akk_last_admin_schedule_auto_synced',
+  'akk_fuel_logs_empty_init_v2'
+]);
+
 export const GUEST_USER_PROFILE: UserProfile = {
   id: 'guest',
   email: 'guest@akk-packaging.co.id',
@@ -524,6 +552,8 @@ class LogisticsStore {
   private securityLogs: SecurityGateLog[] = [];
   private scheduleChangeLogs: ScheduleChangeLogEntry[] = [];
   private messages: ChatMessage[] = [];
+  private adminScheduleWeeksCache: Record<string, any[]> = {};
+  private lastAdminScheduleWeeksList: any[] = [];
   private autoSyncStatus: AutoSyncStatus = {
     isSyncing: false,
     lastSyncTime: null,
@@ -551,21 +581,22 @@ class LogisticsStore {
 
   constructor() {
     const isProd = Boolean(import.meta?.env?.PROD) && !this.isPreviewEnvironment();
-    this.offlineScheduleQueue = this.loadFromStorage('akk_offline_sync_queue', []);
+    // Bersihkan kunci localStorage bisnis lama agar data tidak tersimpan di localStorage browser (100% MySQL Hostinger)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        MYSQL_BACKED_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+        Object.keys(localStorage).forEach((k) => {
+          if (k.startsWith('akk_admin_schedule_cache_')) {
+            localStorage.removeItem(k);
+          }
+        });
+      } catch {}
+    }
+
+    this.offlineScheduleQueue = [];
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.syncOfflineQueueToSupabase();
-      });
-      window.addEventListener('storage', (e) => {
-        if (e.key && Object.values(STORAGE_KEYS).includes(e.key)) {
-          this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
-          this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
-          this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
-          this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
-          this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
-          this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
-          this.notify();
-        }
       });
       setInterval(() => {
         if (navigator.onLine && this.offlineScheduleQueue.length > 0) {
@@ -573,23 +604,13 @@ class LogisticsStore {
         }
       }, 30000);
     }
-    this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
-    this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
-    this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
-    this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
-    this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, isProd ? [] : INITIAL_TRACKSOLID_DEVICES);
+    this.fleets = isProd ? [] : INITIAL_FLEETS;
+    this.crews = isProd ? [] : INITIAL_CREWS;
+    this.stores = isProd ? [] : INITIAL_STORES;
+    this.schedules = [];
+    this.devices = isProd ? [] : INITIAL_TRACKSOLID_DEVICES;
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
-    this.messages = this.loadFromStorage(STORAGE_KEYS.MESSAGES, INITIAL_CHAT_MESSAGES);
-
-    // Kosongkan jadwal awal secara otomatis (one-time migration v4) sesuai instruksi operasional
-    try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_schedules_empty_init_v4') !== 'true') {
-        this.schedules = [];
-        this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
-        localStorage.removeItem('akk_driver_cached_deliveries_v2');
-        localStorage.setItem('akk_schedules_empty_init_v4', 'true');
-      }
-    } catch {}
+    this.messages = [];
 
     // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL in production.
     // In preview environment, ensure INITIAL_PROFILES are merged so preview login always recognizes standard accounts.
@@ -663,31 +684,23 @@ class LogisticsStore {
         } catch {}
       }
     }
-    this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
-    this.areaApprovals = this.loadFromStorage(STORAGE_KEYS.AREA_APPROVALS, isProd ? [] : INITIAL_AREA_APPROVALS);
-    this.areaThreshold = this.loadFromStorage(STORAGE_KEYS.AREA_THRESHOLD, 3);
-    this.salesOrders = this.loadFromStorage(STORAGE_KEYS.SALES_ORDERS, isProd ? [] : INITIAL_SALES_ORDERS);
-    this.adminActivities = this.loadFromStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, isProd ? [] : INITIAL_ADMIN_ACTIVITIES);
-    this.adminSchedules = this.loadFromStorage(STORAGE_KEYS.ADMIN_SCHEDULES, isProd ? [] : INITIAL_ADMIN_SCHEDULES);
-    this.loadingRecords = this.loadFromStorage(STORAGE_KEYS.LOADING_RECORDS, isProd ? [] : INITIAL_LOADING_RECORDS);
-    this.skillProfiles = this.loadFromStorage(STORAGE_KEYS.SKILL_PROFILES, isProd ? [] : INITIAL_SKILL_PROFILES);
-    this.jobdeskConfigs = this.loadFromStorage(STORAGE_KEYS.JOBDESK_CONFIGS, isProd ? [] : INITIAL_JOBDESK_CONFIGS);
-    this.spareParts = this.loadFromStorage(STORAGE_KEYS.SPARE_PARTS, isProd ? [] : INITIAL_SPARE_PARTS);
-    this.sparePartUsages = this.loadFromStorage(STORAGE_KEYS.SPARE_PART_USAGES, isProd ? [] : INITIAL_SPARE_PART_USAGES);
-    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, []);
-    try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_fuel_logs_empty_init_v2') !== 'true') {
-        this.fuelLogs = [];
-        this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, []);
-        localStorage.setItem('akk_fuel_logs_empty_init_v2', 'true');
-      }
-    } catch {}
-    this.imageRecords = this.loadFromStorage(STORAGE_KEYS.IMAGES, []);
-    this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, isProd ? [] : INITIAL_SCANNED_DOCUMENTS);
-    this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, isProd ? [] : INITIAL_SECURITY_LOGS);
-    this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS);
-    this.systemActivities = this.sanitizeLoadedActivities(this.loadFromStorage('akk_system_activities_v1', []));
-    this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+    this.crewHistory = [];
+    this.areaApprovals = [];
+    this.areaThreshold = 3;
+    this.salesOrders = isProd ? [] : INITIAL_SALES_ORDERS;
+    this.adminActivities = isProd ? [] : INITIAL_ADMIN_ACTIVITIES;
+    this.adminSchedules = isProd ? [] : INITIAL_ADMIN_SCHEDULES;
+    this.loadingRecords = isProd ? [] : INITIAL_LOADING_RECORDS;
+    this.skillProfiles = isProd ? [] : INITIAL_SKILL_PROFILES;
+    this.jobdeskConfigs = isProd ? [] : INITIAL_JOBDESK_CONFIGS;
+    this.spareParts = isProd ? [] : INITIAL_SPARE_PARTS;
+    this.sparePartUsages = isProd ? [] : INITIAL_SPARE_PART_USAGES;
+    this.fuelLogs = [];
+    this.imageRecords = [];
+    this.scannedDocuments = [];
+    this.securityLogs = isProd ? [] : INITIAL_SECURITY_LOGS;
+    this.scheduleChangeLogs = isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS;
+    this.systemActivities = [];
     if (typeof window !== 'undefined') {
       setTimeout(() => {
         void this.hydrateSystemActivitiesFromServer();
@@ -1307,8 +1320,6 @@ class LogisticsStore {
               googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
             }
           }
-        } else if (event.entityType === 'admin_schedule' && event.action === 'update') {
-          localStorage.setItem('akk_last_admin_schedule_auto_synced', new Date().toISOString());
         }
       } catch (err) {
         console.warn('[Google Sheets Auto-Write Middleware Warning]', err);
@@ -1539,64 +1550,18 @@ class LogisticsStore {
 
   private saveToStorage(key: string, data: any) {
     this.invalidateReadCaches();
-    try {
-      let sanitizedData = data;
-      if (Array.isArray(data)) {
-        if (key === STORAGE_KEYS.SCHEDULES) {
-          // Strip duplicated heavy sub-objects before stringify while preserving lightweight fleet & crew/helper identity
-          sanitizedData = data.slice(0, 5000).map((sch: any) => {
-            if (!sch || typeof sch !== 'object') return sch;
-            const { store, fleet, crew, crewHelper, crewHelper2, ...compact } = sch;
-            const resolvedArmada = sch.armada || fleet?.initialCode || fleet?.plateNumber;
-            return {
-              ...compact,
-              ...(resolvedArmada ? { armada: resolvedArmada } : {}),
-              ...(fleet && (fleet.id || fleet.plateNumber || fleet.initialCode)
-                ? {
-                    fleet: {
-                      id: fleet.id,
-                      plateNumber: fleet.plateNumber,
-                      initialCode: fleet.initialCode,
-                      vehicleType: fleet.vehicleType
-                    }
-                  }
-                : {}),
-              ...(crew && crew.name ? { crew: { id: crew.id, name: crew.name, phone: crew.phone, role: crew.role } } : {}),
-              ...(crewHelper && crewHelper.name ? { crewHelper: { id: crewHelper.id, name: crewHelper.name, phone: crewHelper.phone, role: crewHelper.role } } : {}),
-              ...(crewHelper2 && crewHelper2.name ? { crewHelper2: { id: crewHelper2.id, name: crewHelper2.name, phone: crewHelper2.phone, role: crewHelper2.role } } : {})
-            };
-          });
-        } else if (key === STORAGE_KEYS.CREW_HISTORY) {
-          // Compact crew history records and limit to 50 items max
-          sanitizedData = data.slice(0, 50).map((item: any) => {
-            if (!item || typeof item !== 'object') return item;
-            return {
-              id: item.id,
-              crewId: item.crewId,
-              crewName: item.crewName,
-              scheduleId: item.scheduleId,
-              trackingNumber: item.trackingNumber,
-              storeName: item.storeName,
-              area: item.area,
-              city: item.city,
-              island: item.island,
-              vehiclePlate: item.vehiclePlate,
-              initialCode: item.initialCode,
-              vehicleType: item.vehicleType,
-              completionDate: item.completionDate,
-              status: item.status,
-              onTimeStatus: item.onTimeStatus
-            };
-          });
-        } else if (key === 'akk_system_activities_v1') {
-          sanitizedData = data.slice(0, 150);
-        } else if (key === STORAGE_KEYS.IMAGES) {
-          sanitizedData = data.slice(0, 20);
-        } else if (key === STORAGE_KEYS.SALES_ORDERS) {
-          sanitizedData = data.slice(0, 50);
+    // Data operasional bisnis disimpan di Hostinger MySQL (/api/*), bukan localStorage browser
+    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(key);
         }
-      }
-      safeSetItem(key, JSON.stringify(sanitizedData));
+      } catch {}
+      this.notify();
+      return;
+    }
+    try {
+      safeSetItem(key, JSON.stringify(data));
     } catch {
       // Safe fallback - in-memory state remains fully intact
     }
@@ -1834,6 +1799,7 @@ class LogisticsStore {
       kirDocUrl: pickExplicitStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
       kirDocFileName: pickExplicitStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
       kirDocUploadedAt: pickExplicitStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+      photos3d: f.photos3d !== undefined ? f.photos3d : (localRef?.photos3d ?? canonical?.photos3d),
       driverId: pickExplicitStr(f.driverId, localRef?.driverId, canonical?.driverId),
       tonnageCapacity: pickNum(f.tonnageCapacity, localRef?.tonnageCapacity, canonical?.tonnageCapacity) ?? 3.5,
       odometerKm: typeof f.odometerKm === 'number' && Number.isFinite(f.odometerKm) && f.odometerKm >= 0
@@ -2523,6 +2489,21 @@ class LogisticsStore {
     return [...this.areaApprovals];
   }
 
+  private persistCrewRotationStateToMysql() {
+    if (typeof window === 'undefined') return;
+    const payload = {
+      areaThreshold: this.areaThreshold,
+      areaApprovals: this.areaApprovals,
+      crewHistory: this.crewHistory.slice(0, 500)
+    };
+    fetch('/api/logistics/crew-rotation-state', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload)
+    }).catch(err => console.warn('[Hostinger Crew Rotation] Gagal simpan ke MySQL:', err));
+  }
+
   public createAreaApprovalRequest(req: Omit<AreaApprovalRequest, 'id' | 'requestedAt'>): AreaApprovalRequest {
     const newReq: AreaApprovalRequest = {
       ...req,
@@ -2530,7 +2511,8 @@ class LogisticsStore {
       requestedAt: new Date().toISOString()
     };
     this.areaApprovals = [newReq, ...this.areaApprovals];
-    this.saveToStorage(STORAGE_KEYS.AREA_APPROVALS, this.areaApprovals);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
     return newReq;
   }
 
@@ -2547,7 +2529,8 @@ class LogisticsStore {
       }
       return req;
     });
-    this.saveToStorage(STORAGE_KEYS.AREA_APPROVALS, this.areaApprovals);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
   }
 
   public getAreaDeliveryThreshold(): number {
@@ -2556,7 +2539,8 @@ class LogisticsStore {
 
   public setAreaDeliveryThreshold(val: number) {
     this.areaThreshold = val;
-    this.saveToStorage(STORAGE_KEYS.AREA_THRESHOLD, val);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
   }
 
   /**
@@ -2707,7 +2691,7 @@ class LogisticsStore {
       return item;
     });
 
-    this.saveToStorage(STORAGE_KEYS.CREW_HISTORY, this.crewHistory);
+    this.persistCrewRotationStateToMysql();
     this.notify();
     return addedCount;
   }
@@ -3512,11 +3496,15 @@ class LogisticsStore {
           authHeaders['x-akk-session-token'] = savedToken;
         }
 
-        const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+        const [fleetRes, crewRes, storeRes, scheduleRes, fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
           fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
+          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
         ]);
 
         if (
@@ -3529,12 +3517,37 @@ class LogisticsStore {
           return false;
         }
 
-        const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
+        const [fleetPayload, crewPayload, storePayload, schedulePayload, fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
           fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
           crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
           storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
-          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
+          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({}),
+          fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
+          scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
+          rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
+          adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
         ]);
+
+        if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
+          this.fuelLogs = fuelPayload.data;
+        }
+        if (scanRes.ok && Array.isArray(scanPayload?.data)) {
+          this.scannedDocuments = scanPayload.data;
+        }
+        if (rotationRes.ok && rotationPayload?.data && typeof rotationPayload.data === 'object') {
+          if (typeof rotationPayload.data.areaThreshold === 'number') {
+            this.areaThreshold = rotationPayload.data.areaThreshold;
+          }
+          if (Array.isArray(rotationPayload.data.areaApprovals)) {
+            this.areaApprovals = rotationPayload.data.areaApprovals;
+          }
+          if (Array.isArray(rotationPayload.data.crewHistory)) {
+            this.crewHistory = rotationPayload.data.crewHistory;
+          }
+        }
+        if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
+          this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+        }
 
         if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
           const deletedIdSet = new Set(
@@ -4390,9 +4403,32 @@ class LogisticsStore {
     const updateMap = new Map<string, Partial<Schedule>>();
     itemsToUpdate.forEach(u => updateMap.set(u.id, u.data));
     const addByIdMap = new Map<string, Schedule>();
+    const importFleetDateKeys = new Set<string>();
+
+    if (options.isImport) {
+      this.schedules.forEach(sch => {
+        if (sch.status === 'delivered' || String(sch.status) === 'cancelled') return;
+        const calIso = this.getScheduleCalendarIso(sch);
+        const fKey = (sch.fleetId || sch.armada || '').trim().toUpperCase();
+        if (fKey && calIso) importFleetDateKeys.add(`${fKey}__${calIso}`);
+      });
+    }
+
     itemsToAdd.forEach(item => {
       if (item?.id && !String(item.id).startsWith('batch-')) {
-        addByIdMap.set(item.id, sanitizeScheduleItem(item));
+        const sanitized = sanitizeScheduleItem(item);
+        if (options.isImport && sanitized.status !== 'delivered' && String(sanitized.status) !== 'cancelled') {
+          const calIso = this.getScheduleCalendarIso(sanitized);
+          const fKey = (sanitized.fleetId || sanitized.armada || '').trim().toUpperCase();
+          if (fKey && calIso) {
+            const composite = `${fKey}__${calIso}`;
+            if (importFleetDateKeys.has(composite)) {
+              return;
+            }
+            importFleetDateKeys.add(composite);
+          }
+        }
+        addByIdMap.set(item.id, sanitized);
       }
     });
 
@@ -4431,47 +4467,37 @@ class LogisticsStore {
   }
 
   /**
-   * Mengambil data minggu jadwal admin Sheet ALL dari cache persistent atau mengonversi dari jadwal operasional aktif
+   * Mengambil data minggu jadwal admin Sheet ALL dari memori/server Hostinger MySQL (tanpa localStorage)
    */
   public getAdminScheduleWeeks(year: number, month: number): any[] | null {
     const effectiveMonth = month === -1 ? 0 : month;
-    const cacheKey = `akk_admin_schedule_cache_${year}_${effectiveMonth}`;
-    try {
-      const saved = localStorage.getItem(cacheKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.days?.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('Gagal membaca cache admin schedule weeks:', e);
+    const cacheKey = `${year}_${effectiveMonth}`;
+    const saved = this.adminScheduleWeeksCache[cacheKey];
+    if (Array.isArray(saved) && saved.length > 0 && saved[0]?.days?.length > 0) {
+      return saved;
     }
     return null;
   }
 
+  public getAllCachedAdminScheduleWeeks(): any[] {
+    if (this.lastAdminScheduleWeeksList.length > 0) {
+      return this.lastAdminScheduleWeeksList;
+    }
+    const all: any[] = [];
+    Object.values(this.adminScheduleWeeksCache).forEach((arr) => {
+      if (Array.isArray(arr)) all.push(...arr);
+    });
+    return all;
+  }
+
   /**
-   * Menyimpan data minggu jadwal admin Sheet ALL ke cache persistent
+   * Menyimpan data minggu jadwal admin ke memori & Hostinger MySQL (tanpa localStorage)
    */
   public saveAdminScheduleWeeks(year: number, month: number, weeks: any[]) {
     const effectiveMonth = month === -1 ? 0 : month;
-    const cacheKey = `akk_admin_schedule_cache_${year}_${effectiveMonth}`;
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(weeks));
-      localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(weeks));
-      localStorage.setItem('akk_last_admin_schedule_sync_time', new Date().toISOString());
-    } catch (e) {
-      console.warn('Gagal menyimpan admin schedule weeks:', e);
-    }
-
-    this.dispatchMiddleware({
-      entityType: 'admin_schedule',
-      action: 'update',
-      id: `weeks_${year}_${effectiveMonth}`,
-      data: weeks,
-      timestamp: new Date().toISOString()
-    });
-
+    const cacheKey = `${year}_${effectiveMonth}`;
+    this.adminScheduleWeeksCache[cacheKey] = weeks;
+    this.lastAdminScheduleWeeksList = weeks;
     this.notify();
   }
 
@@ -5557,7 +5583,7 @@ class LogisticsStore {
       'tambah'
     );
     fetch('/api/stores', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(newStore)
+      method: 'POST', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(newStore)
     }).catch(err => console.warn('[Hostinger Stores] Tambah toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
@@ -5576,7 +5602,7 @@ class LogisticsStore {
     this.stores = newStores.filter(s => !isAreaRouteItem(s));
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
     fetch('/api/stores/batch', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
+      method: 'POST', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
     }).catch(err => console.warn('[Hostinger Stores] Batch toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
@@ -5611,7 +5637,7 @@ class LogisticsStore {
         'ubah'
       );
       fetch(`/api/stores/${encodeURIComponent(id)}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(updatedStore)
+        method: 'PUT', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(updatedStore)
       }).catch(err => console.warn('[Hostinger Stores] Update toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
@@ -5637,8 +5663,11 @@ class LogisticsStore {
         `Menghapus data pelanggan/toko ${target.storeName} (${target.city || target.kabupaten || '-'})`,
         'kurangi'
       );
-      fetch(`/api/stores/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' })
-        .catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
+      fetch(`/api/stores/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: this.buildSessionAuthHeaders(),
+        credentials: 'same-origin'
+      }).catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
         action: 'delete',
@@ -6266,28 +6295,27 @@ class LogisticsStore {
     };
 
     this.fuelLogs = [newLog, ...this.fuelLogs];
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch('/api/fuel-logs', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newLog)
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal simpan ke MySQL:', err));
 
     if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
       this.fleets = this.fleets.map(f =>
         f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
       );
-      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm }).catch(() => {});
     }
 
     this.logActivity(
       'Pencatatan BBM Armada',
       `${newLog.plateNumber} (${newLog.initialCode || 'Armada'})`,
-      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${totalCost.toLocaleString('id-ID')}) - Rasio: ${ratioKmPerLiter} KM/L [${efficiencyStatus}]`
+      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${totalCost.toLocaleString('id-ID')}) - Rasio: ${ratioKmPerLiter} KM/L [${efficiencyStatus}]`,
+      'tambah'
     );
-
-    this.dispatchMiddleware({
-      entityType: 'fuel',
-      action: 'create',
-      id: newLog.id,
-      data: newLog,
-      timestamp: new Date().toISOString()
-    });
 
     this.notify();
     return newLog;
@@ -6334,21 +6362,20 @@ class LogisticsStore {
     };
 
     this.fuelLogs = this.fuelLogs.map(l => l.id === id ? updatedLog : l);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updatedLog)
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal update ke MySQL:', err));
 
     this.logActivity(
       'Edit Log Pengisian BBM',
       updatedLog.plateNumber,
-      `Pembaruan catatan BBM ID: ${id}`
+      `Pembaruan catatan BBM ID: ${id}`,
+      'ubah'
     );
-
-    this.dispatchMiddleware({
-      entityType: 'fuel',
-      action: 'update',
-      id,
-      data: updatedLog,
-      timestamp: new Date().toISOString()
-    });
 
     this.notify();
   }
@@ -6356,22 +6383,20 @@ class LogisticsStore {
   public deleteFuelLog(id: string) {
     const item = this.fuelLogs.find(l => l.id === id);
     this.fuelLogs = this.fuelLogs.filter(l => l.id !== id);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal hapus di MySQL:', err));
 
     if (item) {
       this.logActivity(
         'Hapus Log Pengisian BBM',
         item.plateNumber,
-        `Catatan pengisian BBM ${item.liters} L pada tanggal ${item.date} dihapus`
+        `Catatan pengisian BBM ${item.liters} L pada tanggal ${item.date} dihapus`,
+        'kurangi'
       );
-
-      this.dispatchMiddleware({
-        entityType: 'fuel',
-        action: 'delete',
-        id,
-        data: item,
-        timestamp: new Date().toISOString()
-      });
     }
     this.notify();
   }
@@ -6714,11 +6739,17 @@ class LogisticsStore {
       timestamp: new Date().toISOString()
     };
     this.scannedDocuments = [newDoc, ...this.scannedDocuments];
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch('/api/scanned-documents', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newDoc)
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal simpan ke MySQL:', err));
     this.logActivity(
       'Scan Dokumen',
       newDoc.documentNumber,
-      `Dokumen digital dipindai & diarsipkan: ${newDoc.documentTypeLabel} (${newDoc.documentNumber})`
+      `Dokumen digital dipindai & diarsipkan: ${newDoc.documentTypeLabel} (${newDoc.documentNumber})`,
+      'tambah'
     );
     this.notify();
     return newDoc;
@@ -6726,13 +6757,22 @@ class LogisticsStore {
 
   public updateScannedDocument(id: string, updates: Partial<ScannedDocumentLog>): void {
     this.scannedDocuments = this.scannedDocuments.map(d => d.id === id ? { ...d, ...updates } : d);
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch(`/api/scanned-documents/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updates)
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal update ke MySQL:', err));
     this.notify();
   }
 
   public deleteScannedDocument(id: string): void {
     this.scannedDocuments = this.scannedDocuments.filter(d => d.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch(`/api/scanned-documents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal hapus di MySQL:', err));
     this.notify();
   }
 

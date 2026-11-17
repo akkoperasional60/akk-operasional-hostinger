@@ -185,7 +185,8 @@ export function mapSupabaseRowToFleet(row: any, fallback?: Fleet): Fleet {
     kirDocUploadedAt: explicitStrOrFallback(row.kirDocUploadedAt, row.kir_doc_uploaded_at, effFallback?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
     taxDueDate: explicitStrOrFallback(row.taxDueDate, row.tax_due_date, effFallback?.taxDueDate, canonical?.taxDueDate),
     stnkExpiryDate: explicitStrOrFallback(row.stnkExpiryDate, row.stnk_expiry_date, effFallback?.stnkExpiryDate, canonical?.stnkExpiryDate),
-    kirExpiryDate: rawLastMaint
+    kirExpiryDate: rawLastMaint,
+    photos3d: (row.photos3d && typeof row.photos3d === 'object') ? row.photos3d : effFallback?.photos3d
   } as Fleet;
 }
 

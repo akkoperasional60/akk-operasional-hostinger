@@ -1,4 +1,5 @@
 import { VERIFIED_DATA_FIX_STORES } from '../data/verifiedDataFixStores';
+import { logisticsStore } from '../services/store';
 import { RetailStore } from '../types';
 
 export interface PreciseCustomerLocationResult {
@@ -393,17 +394,11 @@ export function resolvePreciseCustomerGps(params: {
       };
     }
 
-    // 2. Cek master data toko di VERIFIED_DATA_FIX_STORES & localStorage akk_stores_v1
+    // 2. Cek master data toko di VERIFIED_DATA_FIX_STORES & Hostinger MySQL (logisticsStore.getStores())
     let customStores: RetailStore[] = [];
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('akk_stores_v1');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) customStores = parsed;
-        }
-      } catch {}
-    }
+    try {
+      customStores = logisticsStore.getStores() || [];
+    } catch {}
     const allStores = [...VERIFIED_DATA_FIX_STORES, ...customStores];
     const matchedStore = allStores.find(s => {
       const sName = (s.storeName || '').toLowerCase();

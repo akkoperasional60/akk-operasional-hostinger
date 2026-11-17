@@ -38,9 +38,11 @@ import {
   LogIn,
   LogOut,
   Trash2,
-  ChevronDown
+  ChevronDown,
+  FileCheck2
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
+import { SchedulePortalValidationReport } from './SchedulePortalValidationReport';
 import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
@@ -216,7 +218,7 @@ export const DriverReportsManagement: React.FC = () => {
   };
 
   // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan GPS Form Kirim
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline'>('operasional');
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal'>('operasional');
   const [gpsHistoryFilter, setGPSHistoryFilter] = useState<'all' | 'edited_multi' | 'initial_only'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
   const [formKirimRecords, setFormKirimRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
@@ -1165,6 +1167,19 @@ export const DriverReportsManagement: React.FC = () => {
               {formKirimGpsReportsList.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubMenu('validasi_jadwal_portal')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeSubMenu === 'validasi_jadwal_portal'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4" />
+            <span>Validasi Jadwal vs Portal</span>
+          </button>
         </div>
       </div>
 
@@ -1676,9 +1691,6 @@ export const DriverReportsManagement: React.FC = () => {
                   <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
                     Laporan GPS Pengisian Form Kirim (Driver &amp; Helper)
                   </h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
-                    🔒 Otomatis Kunci GPS Saat Klik Simpan
-                  </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                   Memantau titik koordinat GPS otomatis saat Driver / Helper menekan tombol Simpan pada Form Kirim beserta riwayat perubahan simpan: <strong>GPS Awal</strong>, <strong>GPS Kedua</strong>, dan <strong>GPS Ketiga</strong>.
@@ -2056,6 +2068,11 @@ export const DriverReportsManagement: React.FC = () => {
             )}
           </div>
         </div>
+      ) : activeSubMenu === 'validasi_jadwal_portal' ? (
+        <SchedulePortalValidationReport
+          onBack={() => setActiveSubMenu('operasional')}
+          backLabel="Kembali ke Laporan Kru"
+        />
       ) : (
         <>
           {/* Header Section - Compact & Dense */}

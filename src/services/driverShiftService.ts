@@ -139,17 +139,27 @@ class DriverShiftService {
     }
   }
 
-  private persistShifts(shifts: DriverShiftCheckin[]): void {
+  private async persistShiftsToServer(shifts: DriverShiftCheckin[]): Promise<boolean> {
     const trimmed = shifts.slice(0, 150);
     this.memoryShifts = trimmed;
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetch('/api/driver-shifts', {
-        method: 'POST',
-        credentials: 'include',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({ shifts: trimmed })
-      }).catch(() => {});
+      try {
+        const res = await fetch('/api/driver-shifts', {
+          method: 'POST',
+          credentials: 'include',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({ shifts: trimmed })
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
     }
+    return false;
+  }
+
+  private persistShifts(shifts: DriverShiftCheckin[]): void {
+    void this.persistShiftsToServer(shifts);
   }
 
   private readPinsMap(): Record<string, string> {
@@ -221,7 +231,10 @@ class DriverShiftService {
 
     const active = shifts.find(s => {
       if (!s || s.status === 'checked_out') return false;
-      if (!isSameDriverIdentity(s.driverId, s.driverName, driverId, driverName)) return false;
+      const isPrimary = isSameDriverIdentity(s.driverId, s.driverName, driverId, driverName);
+      const isHelper1 = Boolean(s.helper1Id || s.helper1Name) && isSameDriverIdentity(s.helper1Id, s.helper1Name, driverId, driverName);
+      const isHelper2 = Boolean(s.helper2Id || s.helper2Name) && isSameDriverIdentity(s.helper2Id, s.helper2Name, driverId, driverName);
+      if (!isPrimary && !isHelper1 && !isHelper2) return false;
 
       const shiftLocalDate = s.checkinTime ? getLocalDateStr(new Date(s.checkinTime)) : s.date;
       const isToday =
@@ -242,6 +255,13 @@ class DriverShiftService {
     });
 
     if (active) {
+      const isPrimary = isSameDriverIdentity(active.driverId, active.driverName, driverId, driverName);
+      if (!isPrimary) {
+        return {
+          ...active,
+          checkinRole: 'helper'
+        };
+      }
       return active;
     }
 
@@ -266,13 +286,17 @@ class DriverShiftService {
           id: matchingReport.shiftId || `SHIFT-REC-${matchingReport.id}`,
           driverId: driverId || matchingReport.driverId,
           driverName: driverName || matchingReport.driverName,
+          checkinRole: matchingReport.userRole?.toLowerCase().includes('helper') ? 'helper' : 'driver',
+          selectedArea: matchingReport.areaName && !matchingReport.areaName.toLowerCase().includes('presensi')
+            ? matchingReport.areaName
+            : undefined,
           plateNumber: matchingReport.plateNumber || '-',
           vehicleType: '-',
           date: todayLocal,
           checkinTime: matchingReport.timestamp || new Date().toISOString(),
           checkinTimeFormatted: matchingReport.checkinTimeFormatted || '07:00 WIB',
           verificationMethod: 'pin',
-          locationName: 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
+          locationName: matchingReport.areaName || 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
           latitude: matchingReport.latitude || -8.1906,
           longitude: matchingReport.longitude || 114.3708,
           status: 'checked_in',
@@ -374,17 +398,62 @@ class DriverShiftService {
     }
   }
 
+  public async updateShiftProgress(
+    shiftId: string,
+    patch: Partial<Pick<DriverShiftCheckin, 'checklistCompletedAt' | 'securityValidatedAt' | 'securityValidatedBy' | 'gateOutAt' | 'arrivedAtWarehouseAt' | 'selectedArea' | 'checkinRole' | 'fleetId' | 'fleetInitialCode' | 'plateNumber' | 'vehicleType' | 'helper1Id' | 'helper1Name' | 'helper2Id' | 'helper2Name'>>
+  ): Promise<DriverShiftCheckin | null> {
+    const shifts = this.getShifts();
+    const idx = shifts.findIndex(s => s.id === shiftId);
+    if (idx < 0) return null;
+    const baseShift = shifts[idx];
+    const updated: DriverShiftCheckin = {
+      ...baseShift,
+      ...patch,
+      synced: true
+    };
+    const nextShifts = shifts.map((s, i) => {
+      if (i === idx) return updated;
+      // Propagate security validation / gate-out / area / fleet updates ke shift partner pada shift utama yang sama
+      if (
+        s.status !== 'checked_out' &&
+        s.date === baseShift.date &&
+        (s.id.startsWith(`SHIFT-LINK-${baseShift.id}`) || baseShift.id.startsWith(`SHIFT-LINK-${s.id}`))
+      ) {
+        return {
+          ...s,
+          ...(patch.securityValidatedAt ? { securityValidatedAt: patch.securityValidatedAt } : {}),
+          ...(patch.securityValidatedBy ? { securityValidatedBy: patch.securityValidatedBy } : {}),
+          ...(patch.gateOutAt ? { gateOutAt: patch.gateOutAt } : {}),
+          ...(patch.checklistCompletedAt ? { checklistCompletedAt: patch.checklistCompletedAt } : {}),
+          synced: true
+        };
+      }
+      return s;
+    });
+    await this.persistShiftsToServer(nextShifts);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: updated }));
+    }
+    return updated;
+  }
+
   /**
-   * Check in driver with 2x PIN verification and log entry timestamp to Laporan Kiriman Kru
+   * Check in driver/helper with Role, Area, Armada & optional Helper 1 / Helper 2 selection + PIN verification and log entry to Hostinger MySQL & Laporan Kiriman Kru
    */
   public async checkInDriver(params: {
     driverId: string;
     driverName: string;
     userRole?: string;
+    checkinRole?: 'driver' | 'helper';
     fleetId?: string;
+    fleetInitialCode?: string;
     plateNumber?: string;
     vehicleType?: string;
     areaName?: string;
+    helper1Id?: string;
+    helper1Name?: string;
+    helper2Id?: string;
+    helper2Name?: string;
     verificationMethod: ShiftVerificationMethod;
     pin?: string;
     shiftName?: string;
@@ -407,7 +476,7 @@ class DriverShiftService {
       };
     }
 
-    // Jika pengguna baru belum memiliki PIN, simpan PIN yang baru diverifikasi 2x tersebut untuk semua alias ID/nama kru
+    // Jika pengguna baru belum memiliki PIN, simpan PIN yang baru diverifikasi tersebut untuk semua alias ID/nama kru
     if (!hadPinBefore) {
       try {
         const pins = this.readPinsMap();
@@ -419,26 +488,109 @@ class DriverShiftService {
       } catch {}
     }
 
-    // Jika sudah ada shift aktif hari ini untuk kru yang sama, perbarui dan kembalikan shift aktif tersebut agar tidak duplikat
+    const currentUser = logisticsStore.getCurrentUser();
+    const resolvedCheckinRole: 'driver' | 'helper' =
+      params.checkinRole ||
+      (String(params.userRole || currentUser?.role || '').toLowerCase().includes('helper') ? 'helper' : 'driver');
+    const roleLabel =
+      resolvedCheckinRole === 'helper'
+        ? 'Helper'
+        : params.userRole || (currentUser?.role ? getUserRoleDisplayTitle(currentUser.role) : 'Driver');
+    const chosenArea = (params.areaName || '').trim();
+    const cleanH1Name = resolvedCheckinRole === 'driver' ? (params.helper1Name || '').trim() : '';
+    const cleanH1Id = cleanH1Name ? (params.helper1Id || `hlp1-${cleanH1Name.toLowerCase().replace(/\s+/g, '-')}`) : undefined;
+    const cleanH2Name = resolvedCheckinRole === 'driver' ? (params.helper2Name || '').trim() : '';
+    const cleanH2Id = cleanH2Name ? (params.helper2Id || `hlp2-${cleanH2Name.toLowerCase().replace(/\s+/g, '-')}`) : undefined;
+
+    const buildLinkedHelperShifts = (
+      primaryShift: DriverShiftCheckin,
+      existingList: DriverShiftCheckin[]
+    ): DriverShiftCheckin[] => {
+      const cleanedList = existingList.filter(
+        s => !s.id.startsWith(`SHIFT-LINK-${primaryShift.id}`)
+      );
+      const linked: DriverShiftCheckin[] = [];
+      const crewSummary = [
+        `Driver: ${primaryShift.driverName}`,
+        cleanH1Name ? `H1: ${cleanH1Name}` : '',
+        cleanH2Name ? `H2: ${cleanH2Name}` : ''
+      ].filter(Boolean).join(' · ');
+
+      if (cleanH1Name) {
+        linked.push({
+          ...primaryShift,
+          id: `SHIFT-LINK-${primaryShift.id}-H1`,
+          driverId: cleanH1Id || `hlp1-${Date.now()}`,
+          driverName: cleanH1Name,
+          checkinRole: 'helper',
+          helper1Id: cleanH1Id,
+          helper1Name: cleanH1Name,
+          helper2Id: cleanH2Id,
+          helper2Name: cleanH2Name || undefined,
+          notes: `Terhubung Otomatis Check-In Driver (${crewSummary})`
+        });
+      }
+      if (cleanH2Name && !isSameDriverIdentity(cleanH1Id, cleanH1Name, cleanH2Id, cleanH2Name)) {
+        linked.push({
+          ...primaryShift,
+          id: `SHIFT-LINK-${primaryShift.id}-H2`,
+          driverId: cleanH2Id || `hlp2-${Date.now()}`,
+          driverName: cleanH2Name,
+          checkinRole: 'helper',
+          helper1Id: cleanH1Id,
+          helper1Name: cleanH1Name || undefined,
+          helper2Id: cleanH2Id,
+          helper2Name: cleanH2Name,
+          notes: `Terhubung Otomatis Check-In Driver (${crewSummary})`
+        });
+      }
+      return [...cleanedList.filter(s => s.id !== primaryShift.id), primaryShift, ...linked]
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    };
+
+    // Jika sudah ada shift aktif hari ini untuk kru yang sama, perbarui Peran, Area, Armada & Kru Helper sesuai pilihan check-in terbaru
     const existingActive = this.getActiveShift(params.driverId, params.driverName);
-    if (existingActive) {
+    if (existingActive && isSameDriverIdentity(existingActive.driverId, existingActive.driverName, params.driverId, params.driverName)) {
       const updatedExisting: DriverShiftCheckin = {
         ...existingActive,
         driverId: params.driverId || existingActive.driverId,
         driverName: params.driverName || existingActive.driverName,
+        checkinRole: resolvedCheckinRole,
+        selectedArea: chosenArea || existingActive.selectedArea,
         fleetId: params.fleetId || existingActive.fleetId,
+        fleetInitialCode: params.fleetInitialCode || existingActive.fleetInitialCode,
         plateNumber: params.plateNumber || existingActive.plateNumber || '-',
-        vehicleType: params.vehicleType || existingActive.vehicleType || '-'
+        vehicleType: params.vehicleType || existingActive.vehicleType || '-',
+        helper1Id: cleanH1Id || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper1Id),
+        helper1Name: cleanH1Name || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper1Name),
+        helper2Id: cleanH2Id || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper2Id),
+        helper2Name: cleanH2Name || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper2Name),
+        locationName: chosenArea || existingActive.locationName,
+        notes: params.notes || existingActive.notes,
+        synced: true
       };
-      const allShifts = this.getShifts().map(s => (s.id === updatedExisting.id ? updatedExisting : s));
-      this.persistShifts(allShifts);
+      const allShifts = buildLinkedHelperShifts(updatedExisting, this.getShifts());
+      await this.persistShiftsToServer(allShifts);
+
+      driverReportService.upsertShiftCheckinCheckoutReport({
+        shiftId: updatedExisting.id,
+        driverId: updatedExisting.driverId,
+        driverName: updatedExisting.driverName,
+        userRole: roleLabel,
+        helperName: [cleanH1Name, cleanH2Name].filter(Boolean).join(', ') || undefined,
+        plateNumber: updatedExisting.plateNumber || '-',
+        areaName: chosenArea || updatedExisting.locationName || 'Presensi Masuk Shift DC',
+        checkinTimeFormatted: updatedExisting.checkinTimeFormatted,
+        securityPin: '****'
+      });
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: updatedExisting }));
       }
       return {
         success: true,
         shift: updatedExisting,
-        message: `Presensi masuk aktif! Shift dimulai pukul ${updatedExisting.checkinTimeFormatted}.`
+        message: `Check-In ${roleLabel} diperbarui! Area: ${chosenArea || '-'} • Armada: ${updatedExisting.plateNumber}.`
       };
     }
 
@@ -448,35 +600,41 @@ class DriverShiftService {
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const timeFormatted = `${hours}:${minutes} WIB`;
 
-    const currentUser = logisticsStore.getCurrentUser();
-    const roleLabel = params.userRole || (currentUser?.role ? getUserRoleDisplayTitle(currentUser.role) : 'Driver');
-
     const newShift: DriverShiftCheckin = {
       id: `SHIFT-${Date.now()}-${Math.floor(Math.random() * 899 + 100)}`,
       driverId: params.driverId,
       driverName: params.driverName,
+      checkinRole: resolvedCheckinRole,
+      selectedArea: chosenArea || undefined,
       fleetId: params.fleetId,
+      fleetInitialCode: params.fleetInitialCode,
       plateNumber: params.plateNumber || '-',
       vehicleType: params.vehicleType || '-',
+      helper1Id: cleanH1Id,
+      helper1Name: cleanH1Name || undefined,
+      helper2Id: cleanH2Id,
+      helper2Name: cleanH2Name || undefined,
       date: dateStr,
       checkinTime: now.toISOString(),
       checkinTimeFormatted: timeFormatted,
       verificationMethod: 'pin',
-      locationName: 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
+      locationName: chosenArea || 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
       latitude: -8.1906,
       longitude: 114.3708,
       status: 'checked_in',
       shiftName: params.shiftName || 'Shift Operasional Harian',
       odometerStartKm: 0,
-      notes: params.notes || 'Presensi masuk resmi via PIN Keamanan (2x Verifikasi)',
+      notes: params.notes || `Check-In sebagai ${roleLabel} • Area: ${chosenArea || '-'} • Armada: ${params.plateNumber || '-'}${cleanH1Name ? ` • Helper 1: ${cleanH1Name}` : ''}${cleanH2Name ? ` • Helper 2: ${cleanH2Name}` : ''}`,
       synced: false,
       createdAt: now.toISOString()
     };
 
-    // Persist to Local Storage & Session Storage
-    const shifts = this.getShifts();
-    shifts.unshift(newShift);
-    this.persistShifts(shifts);
+    // Persist directly to memory & Hostinger MySQL /api/driver-shifts (including auto-linked Helper 1 & Helper 2 shifts)
+    const shifts = buildLinkedHelperShifts(newShift, this.getShifts());
+    const savedRemote = await this.persistShiftsToServer(shifts);
+    if (savedRemote) {
+      newShift.synced = true;
+    }
 
     // Catat langsung ke Sub-Menu Laporan Kiriman Kru
     driverReportService.upsertShiftCheckinCheckoutReport({
@@ -484,8 +642,9 @@ class DriverShiftService {
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: roleLabel,
+      helperName: [cleanH1Name, cleanH2Name].filter(Boolean).join(', ') || undefined,
       plateNumber: newShift.plateNumber || '-',
-      areaName: params.areaName || 'Presensi Masuk Shift DC',
+      areaName: chosenArea || 'Presensi Masuk Shift DC',
       checkinTimeFormatted: timeFormatted,
       securityPin: '****'
     });
@@ -494,20 +653,21 @@ class DriverShiftService {
     try {
       const response = await fetch('/api/attendance', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           crewId: params.driverId,
           date: dateStr,
           status: 'present',
-          reason: `Shift Check-in (PIN 2x) ${timeFormatted}`
+          reason: `Check-in ${roleLabel} • ${chosenArea || 'DC'} • ${newShift.plateNumber} (${timeFormatted})`
         })
       });
       if (response.ok) {
         newShift.synced = true;
-        this.persistShifts(shifts);
+        await this.persistShiftsToServer(shifts);
       }
     } catch (err) {
-      console.warn('Hostinger attendance sync error (saved locally):', err);
+      console.warn('Hostinger attendance sync error:', err);
     }
 
     if (typeof window !== 'undefined') {
@@ -517,7 +677,7 @@ class DriverShiftService {
     return {
       success: true,
       shift: newShift,
-      message: `Presensi masuk berhasil! Shift dimulai pukul ${timeFormatted}.`
+      message: `Check-In ${roleLabel} berhasil pukul ${timeFormatted}! Area: ${chosenArea || '-'} • Armada: ${newShift.plateNumber}.`
     };
   }
 

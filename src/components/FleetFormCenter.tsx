@@ -33,6 +33,8 @@ import {
   loadAllFleetFormTemplates,
   loadFormPrintLogs,
   appendFormPrintLog,
+  hydrateFleetFormStateFromMysql,
+  FLEET_FORMS_UPDATED_EVENT,
   RancanganFormulirModal,
   VisualReportDesignerModal,
   FleetFormInteractiveModal
@@ -69,12 +71,22 @@ export const FleetFormCenter: React.FC = () => {
     logisticsStore.getScannedDocuments()
   );
 
-  // Subscribe to store updates
+  // Subscribe to store updates & Hostinger MySQL form designer state
   useEffect(() => {
+    const syncFormDesigner = () => {
+      setTemplatesMap({ ...loadAllFleetFormTemplates() });
+      setPrintLogs([...loadFormPrintLogs()]);
+    };
+    window.addEventListener(FLEET_FORMS_UPDATED_EVENT, syncFormDesigner);
+    void hydrateFleetFormStateFromMysql(true);
+
     const unsubscribe = logisticsStore.subscribe(() => {
       setScannedDocuments(logisticsStore.getScannedDocuments());
     });
-    return () => unsubscribe();
+    return () => {
+      window.removeEventListener(FLEET_FORMS_UPDATED_EVENT, syncFormDesigner);
+      unsubscribe();
+    };
   }, []);
 
   // Search & Filter State

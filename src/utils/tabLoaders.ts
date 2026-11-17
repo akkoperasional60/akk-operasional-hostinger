@@ -56,6 +56,11 @@ export const loadSparePartManagement = () =>
     import('../components/SparePartManagement').then(m => ({ default: m.SparePartManagement }))
   );
 
+export const loadFleetMaintenanceCostManagement = () =>
+  loadOnce('FleetMaintenanceCostManagement', () =>
+    import('../components/FleetMaintenanceCostManagement').then(m => ({ default: m.FleetMaintenanceCostManagement }))
+  );
+
 export const loadFuelEfficiencyManagement = () =>
   loadOnce('FuelEfficiencyManagement', () =>
     import('../components/FuelEfficiencyManagement').then(m => ({ default: m.FuelEfficiencyManagement }))
@@ -151,6 +156,16 @@ export const loadMasterCabang = () =>
     import('../components/MasterCabang').then(m => ({ default: m.MasterCabang }))
   );
 
+export const loadSchedulePortalValidationReport = () =>
+  loadOnce('SchedulePortalValidationReport', () =>
+    import('../components/SchedulePortalValidationReport').then(m => ({ default: m.SchedulePortalValidationReport }))
+  );
+
+export const loadLiveTripsMonitorPanel = () =>
+  loadOnce('LiveTripsMonitorPanel', () =>
+    import('../components/LiveTripsMonitorPanel').then(m => ({ default: m.LiveTripsMonitorPanel }))
+  );
+
 export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
   switch (tab) {
     case 'dashboard':
@@ -164,11 +179,17 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
       return loadAnalyticsReportingModule;
     case 'schedules':
       return loadScheduleManagement;
+    case 'portal_validation':
+      return loadSchedulePortalValidationReport;
+    case 'live_trips':
+      return loadLiveTripsMonitorPanel;
     case 'fleets':
     case 'crew_history':
       return loadFleetCrewManagement;
     case 'spareparts':
       return loadSparePartManagement;
+    case 'maintenance_costs':
+      return loadFleetMaintenanceCostManagement;
     case 'fuel_efficiency':
       return loadFuelEfficiencyManagement;
     case 'tracking_eval':

@@ -4149,16 +4149,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       setParsedUploadedTrips(parsedTrips);
 
       if (parsedTrips.length > 0) {
-        if (importMode === 'tambahkan') {
-          mergeAndSaveCombinedTrips(
-            parsedTrips.map(t => ({ ...t, source: 'excel' as const })),
-            'tambahkan',
-            file.name
-          );
-        } else {
-          const groupedWeeks = convertParsedTripsToWeeks(parsedTrips);
-          updateWeeks(groupedWeeks);
-        }
+        mergeAndSaveCombinedTrips(
+          parsedTrips.map(t => ({ ...t, source: 'excel' as const })),
+          importMode,
+          file.name
+        );
       }
 
       const rawAreas = parsedTrips.map(t => t.area).filter(Boolean);
@@ -6164,7 +6159,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeSubPage === 'upload_process' ? (
         /* HALAMAN BARU 2: HALAMAN PEMROSESAN & PREVIEW FILE JADWAL EXCEL */
         <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-in fade-in duration-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
@@ -6297,7 +6292,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Modal Edit / Tambah Ritase Pengiriman */}
       {editingTripModal && editingTripModal.isOpen && (
@@ -6537,13 +6532,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     value={manualScheduleForm.dateIso}
                     onChange={(nextIso) => {
                       setManualScheduleFormError(null);
+                      const existingArmada = manualScheduleForm.armada.trim();
+                      const hasConflictOnNextDate = existingArmada
+                        ? Boolean(logisticsStore.findFleetAssignmentConflict(existingArmada, nextIso))
+                        : false;
                       setManualScheduleForm({
                         ...manualScheduleForm,
                         dateIso: nextIso,
                         returnDateIso: nextIso,
                         departureDateIso: (!manualScheduleForm.departureDateIso || manualScheduleForm.departureDateIso === manualScheduleForm.dateIso)
                           ? nextIso
-                          : manualScheduleForm.departureDateIso
+                          : manualScheduleForm.departureDateIso,
+                        armada: hasConflictOnNextDate ? '' : manualScheduleForm.armada
                       });
                     }}
                     accentColor="emerald"
@@ -6609,10 +6609,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       badgeText="Sesuai Tanggal Kirim"
                       value={manualScheduleForm.returnDateIso || manualScheduleForm.dateIso}
                       onChange={(nextRet) => {
+                        const existingArmada = manualScheduleForm.armada.trim();
+                        const hasConflictOnNextDate = existingArmada
+                          ? Boolean(logisticsStore.findFleetAssignmentConflict(existingArmada, nextRet))
+                          : false;
                         setManualScheduleForm({
                           ...manualScheduleForm,
                           returnDateIso: nextRet,
-                          dateIso: nextRet
+                          dateIso: nextRet,
+                          armada: hasConflictOnNextDate ? '' : manualScheduleForm.armada
                         });
                       }}
                       accentColor="emerald"
@@ -6910,6 +6915,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setManualScheduleFormError('Mohon pilih Driver / Supir terlebih dahulu.');
                     return;
                   }
+                  if (!manualScheduleForm.armada.trim()) {
+                    setManualScheduleFormError('Mohon pilih Armada Truk yang berstatus Ready terlebih dahulu.');
+                    return;
+                  }
                   if (!manualScheduleForm.area.trim()) {
                     setManualScheduleFormError('Mohon pilih Area Kirim Tujuan terlebih dahulu.');
                     return;
@@ -6918,19 +6927,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   const retIso = manualScheduleForm.returnDateIso || manualScheduleForm.dateIso;
                   const depIso = manualScheduleForm.departureDateIso || retIso;
                   const effectiveDateStr = retIso;
-                  const armadaVal = manualScheduleForm.armada.trim() || 'DS3';
+                  const armadaVal = manualScheduleForm.armada.trim();
+                  const matchedFleetObj = logisticsStore.findFleetByCodeOrPlate(armadaVal);
 
                   const fleetConflict =
-                    logisticsStore.findFleetAssignmentConflict(armadaVal, effectiveDateStr) ||
+                    logisticsStore.findFleetAssignmentConflict(matchedFleetObj?.id || armadaVal, effectiveDateStr) ||
                     (depIso !== effectiveDateStr
-                      ? logisticsStore.findFleetAssignmentConflict(armadaVal, depIso)
+                      ? logisticsStore.findFleetAssignmentConflict(matchedFleetObj?.id || armadaVal, depIso)
                       : null);
 
-                  if (fleetConflict) {
-                    const cSch = fleetConflict.conflictSchedule;
-                    const cCode = fleetConflict.fleet?.initialCode || cSch.armada || armadaVal;
-                    const cArea = cSch.areaName || cSch.store?.storeName || '-';
-                    const cDriver = cSch.crew?.name || '-';
+                  const calParts = effectiveDateStr.split('-').map(Number);
+                  const calYr = calParts[0];
+                  const calMo = calParts[1] ? calParts[1] - 1 : -1;
+                  const calDay = calParts[2];
+                  const effSelectedMo = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
+                  const legacyDayRowConflict = (calYr === selectedYear && calMo === effSelectedMo && calDay)
+                    ? weeksRef.current
+                        .flatMap(w => w.days)
+                        .find(d => d.dayNumber === calDay)
+                        ?.pengiriman.find(row => {
+                          const rowFleet = logisticsStore.findFleetByCodeOrPlate(row.armada);
+                          if (matchedFleetObj && rowFleet) return rowFleet.id === matchedFleetObj.id;
+                          return (row.armada || '').trim().toUpperCase() === armadaVal.toUpperCase();
+                        })
+                    : undefined;
+
+                  if (fleetConflict || legacyDayRowConflict) {
+                    const cSch = fleetConflict?.conflictSchedule;
+                    const cCode = fleetConflict?.fleet?.initialCode || cSch?.armada || legacyDayRowConflict?.armada || armadaVal;
+                    const cArea = cSch?.areaName || cSch?.store?.storeName || legacyDayRowConflict?.area || '-';
+                    const cDriver = cSch?.crew?.name || legacyDayRowConflict?.driver || '-';
                     const dupMsg = `Armada ${cCode} sudah terjadwal pada tanggal ${effectiveDateStr} (${cArea} • Driver: ${cDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
                     setManualScheduleFormError(dupMsg);
                     setUploadToast({ type: 'error', message: dupMsg });
@@ -6972,7 +6998,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     helper: initHelpers[0]?.name || 'Saifur Rizal',
                     helper2: '',
                     area: '',
-                    armada: 'DS3',
+                    armada: '',
                     target: '',
                     departureTime: '07:30',
                     targetReturnTime: '17:00',

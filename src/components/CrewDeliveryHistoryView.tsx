@@ -673,41 +673,38 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       }
     });
 
-    // 3. From Cached Admin Schedule Weeks (if present)
+    // 3. From Hostinger-synced Admin Schedule Weeks cache (tanpa localStorage)
     try {
-      const rawWeeks = localStorage.getItem('akk_admin_schedule_weeks_cache');
-      if (rawWeeks) {
-        const parsedWeeks = JSON.parse(rawWeeks);
-        if (Array.isArray(parsedWeeks)) {
-          const effMo = selectedMonth === -1 ? 0 : selectedMonth;
-          parsedWeeks.forEach((w: any) => {
-            (w.days || []).forEach((d: any) => {
-              (d.pengiriman || []).forEach((p: any, idx: number) => {
-                const areaVal = String(p.area || '');
-                if (areaVal.toLowerCase().includes('kanvas')) {
-                  const dayPad = String(d.dayNumber || 1).padStart(2, '0');
-                  const moPad = String(effMo + 1).padStart(2, '0');
-                  const isoDate = `${selectedYear}-${moPad}-${dayPad}`;
-                  const driverName = String(p.driver || 'Driver Kanvas');
-                  const key = `${isoDate}-${driverName.toLowerCase()}-${areaVal.toLowerCase()}`;
-                  if (!seenKeys.has(key)) {
-                    seenKeys.add(key);
-                    combined.push({
-                      id: p.id || `kanvas-wk-${isoDate}-${idx}`,
-                      dateStr: isoDate,
-                      crewName: driverName,
-                      helperName: p.helper || '-',
-                      crewRole: 'Driver Utama',
-                      plateNumber: p.armada || 'NP1',
-                      areaName: areaVal.toUpperCase(),
-                      statusLabel: 'Terjadwal & Tercatat'
-                    });
-                  }
+      const parsedWeeks = logisticsStore.getAllCachedAdminScheduleWeeks();
+      if (Array.isArray(parsedWeeks) && parsedWeeks.length > 0) {
+        const effMo = selectedMonth === -1 ? 0 : selectedMonth;
+        parsedWeeks.forEach((w: any) => {
+          (w.days || []).forEach((d: any) => {
+            (d.pengiriman || []).forEach((p: any, idx: number) => {
+              const areaVal = String(p.area || '');
+              if (areaVal.toLowerCase().includes('kanvas')) {
+                const dayPad = String(d.dayNumber || 1).padStart(2, '0');
+                const moPad = String(effMo + 1).padStart(2, '0');
+                const isoDate = `${selectedYear}-${moPad}-${dayPad}`;
+                const driverName = String(p.driver || 'Driver Kanvas');
+                const key = `${isoDate}-${driverName.toLowerCase()}-${areaVal.toLowerCase()}`;
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  combined.push({
+                    id: p.id || `kanvas-wk-${isoDate}-${idx}`,
+                    dateStr: isoDate,
+                    crewName: driverName,
+                    helperName: p.helper || '-',
+                    crewRole: 'Driver Utama',
+                    plateNumber: p.armada || 'NP1',
+                    areaName: areaVal.toUpperCase(),
+                    statusLabel: 'Terjadwal & Tercatat'
+                  });
                 }
-              });
+              }
             });
           });
-        }
+        });
       }
     } catch {}
 

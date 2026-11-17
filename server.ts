@@ -745,7 +745,7 @@ async function startServer() {
   // Server-side RBAC: Enforces both User Management permissions_json (Hak Akses single source of truth) and role fallbacks.
   const requireLogisticsWrite = requireModuleWrite(
     'logistics',
-    ['fleets', 'crews', 'spareparts', 'fuel_efficiency', 'schedules', 'fleet_procurement', 'fleet_forms', 'box_simulation', 'warehouse_fleet_cubication', 'armada_ceklis', 'logistics_dashboard'],
+    ['fleets', 'crews', 'crew_history', 'spareparts', 'maintenance_costs', 'fuel_efficiency', 'schedules', 'fleet_procurement', 'fleet_forms', 'box_simulation', 'warehouse_fleet_cubication', 'armada_ceklis', 'logistics_dashboard'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman']
   );
   const requireScheduleWrite = requireModuleWrite(
@@ -762,6 +762,11 @@ async function startServer() {
     'marketing',
     ['customer_map', 'marketing_offline', 'laporan_kunjungan'],
     ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline']
+  );
+  const requireMarketingWrite = requireModuleWrite(
+    'marketing',
+    ['marketing_online', 'marketing_offline', 'marketing_to_vo_ro', 'customer_map', 'kampanye', 'leads_pipeline', 'laporan_kunjungan'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'marketing_online', 'marketing_offline', 'sales_admin']
   );
   const requireWarehouseAccess = requireModuleWrite(
     'wms_gudang',
@@ -930,7 +935,38 @@ async function startServer() {
         cost_rupiah DECIMAL(12,2) NOT NULL,
         odometer_km INT NOT NULL,
         spbu_location VARCHAR(191) NOT NULL,
+        payload_json LONGTEXT NULL,
         logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS scanned_documents (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        document_type VARCHAR(64) NOT NULL,
+        document_number VARCHAR(128) NOT NULL,
+        doc_date VARCHAR(32) NULL,
+        vehicle_plate VARCHAR(32) NULL,
+        driver_name VARCHAR(191) NULL,
+        status VARCHAR(32) DEFAULT 'pending_review',
+        payload_json LONGTEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS fleet_maintenance_costs (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        fleet_id VARCHAR(64) NOT NULL,
+        plate_number VARCHAR(32) NOT NULL,
+        service_date DATE NOT NULL,
+        category VARCHAR(64) NOT NULL,
+        work_title VARCHAR(255) NOT NULL,
+        workshop_name VARCHAR(191) NOT NULL,
+        odometer_km INT DEFAULT 0,
+        parts_cost DECIMAL(14,2) DEFAULT 0.00,
+        labor_cost DECIMAL(14,2) DEFAULT 0.00,
+        other_cost DECIMAL(14,2) DEFAULT 0.00,
+        total_cost DECIMAL(14,2) DEFAULT 0.00,
+        payment_status VARCHAR(64) DEFAULT 'Lunas',
+        payload_json LONGTEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_fmc_fleet_date (fleet_id, service_date)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS app_state (
         state_key VARCHAR(100) NOT NULL PRIMARY KEY,
@@ -1012,6 +1048,39 @@ async function startServer() {
         last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_sessions_user (user_id, revoked_at, expires_at),
         INDEX idx_sessions_expires (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS portal_schedule_validations (
+        id VARCHAR(80) NOT NULL PRIMARY KEY,
+        validation_date DATE NOT NULL,
+        branch_id VARCHAR(64) NOT NULL DEFAULT 'all',
+        cocok_count INT NOT NULL DEFAULT 0,
+        tidak_cocok_count INT NOT NULL DEFAULT 0,
+        total_count INT NOT NULL DEFAULT 0,
+        rows_json LONGTEXT NOT NULL,
+        validated_by VARCHAR(120) NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_portal_val_date (validation_date, branch_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS gps_live_trips (
+        id VARCHAR(96) NOT NULL PRIMARY KEY,
+        trip_date DATE NOT NULL,
+        branch_id VARCHAR(64) NOT NULL DEFAULT 'cab-banyuwangi',
+        fleet_id VARCHAR(64) NULL,
+        plate_number VARCHAR(32) NOT NULL,
+        initial_code VARCHAR(32) NULL,
+        vehicle_type VARCHAR(64) NULL,
+        driver_name VARCHAR(120) NOT NULL,
+        helper1_name VARCHAR(120) NULL,
+        helper2_name VARCHAR(120) NULL,
+        area_name VARCHAR(160) NOT NULL,
+        status ENUM('active', 'completed') NOT NULL DEFAULT 'active',
+        started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ended_at DATETIME NULL,
+        current_lat DECIMAL(10,6) NULL,
+        current_lng DECIMAL(10,6) NULL,
+        points_json LONGTEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_gps_trips_date_status (trip_date, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -1021,6 +1090,12 @@ async function startServer() {
         console.warn('[Database Schema] Gagal memastikan tabel:', err?.message || err);
       }
     }
+    try {
+      const cols = await mysqlQuery<any[]>("SHOW COLUMNS FROM fuel_logs LIKE 'payload_json'");
+      if (!Array.isArray(cols) || cols.length === 0) {
+        await mysqlQuery("ALTER TABLE fuel_logs ADD COLUMN payload_json LONGTEXT NULL");
+      }
+    } catch {}
   };
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
@@ -2587,6 +2662,392 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return res.json({ success: true, shifts: inMemoryDriverShifts, count: inMemoryDriverShifts.length });
   });
 
+  // =========================================================================
+  // PORTAL FLOW STATE SYNC (MySQL-persisted Driver <-> Helper Flow & Waybills)
+  // =========================================================================
+  let inMemoryPortalFlowState: {
+    sharedScheduleFlowMap: Record<string, any>;
+    keluarArgoMap: Record<string, string>;
+    sjKeluarSistemMap: Record<string, string>;
+    activeFormKirimByCrew?: Record<string, string>;
+    activeScheduleByCrew?: Record<string, string>;
+  } = {
+    sharedScheduleFlowMap: {},
+    keluarArgoMap: {},
+    sjKeluarSistemMap: {},
+    activeFormKirimByCrew: {},
+    activeScheduleByCrew: {}
+  };
+  let inMemoryPortalFlowLoaded = false;
+
+  const loadPortalFlowStateIfNeeded = async () => {
+    if (inMemoryPortalFlowLoaded) return inMemoryPortalFlowState;
+    inMemoryPortalFlowLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryPortalFlowState;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['portal_flow_state_v1']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string'
+          ? JSON.parse(rows[0].state_json)
+          : rows[0].state_json;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryPortalFlowState = {
+            sharedScheduleFlowMap: parsed.sharedScheduleFlowMap || {},
+            keluarArgoMap: parsed.keluarArgoMap || {},
+            sjKeluarSistemMap: parsed.sjKeluarSistemMap || {},
+            activeFormKirimByCrew: parsed.activeFormKirimByCrew || {},
+            activeScheduleByCrew: parsed.activeScheduleByCrew || {}
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Portal Flow State Load Warning]', err?.message || err);
+    }
+    return inMemoryPortalFlowState;
+  };
+
+  app.get("/api/portal-flow-state", async (_req, res) => {
+    const state = await loadPortalFlowStateIfNeeded();
+    return res.json({ success: true, state });
+  });
+
+  app.post("/api/portal-flow-state", express.json({ limit: '5mb' }), async (req, res) => {
+    await loadPortalFlowStateIfNeeded();
+    const body = req.body || {};
+    inMemoryPortalFlowState = {
+      sharedScheduleFlowMap: {
+        ...inMemoryPortalFlowState.sharedScheduleFlowMap,
+        ...(body.sharedScheduleFlowMap || {})
+      },
+      keluarArgoMap: {
+        ...inMemoryPortalFlowState.keluarArgoMap,
+        ...(body.keluarArgoMap || {})
+      },
+      sjKeluarSistemMap: {
+        ...inMemoryPortalFlowState.sjKeluarSistemMap,
+        ...(body.sjKeluarSistemMap || {})
+      },
+      activeFormKirimByCrew: {
+        ...(inMemoryPortalFlowState.activeFormKirimByCrew || {}),
+        ...(body.activeFormKirimByCrew || {})
+      },
+      activeScheduleByCrew: {
+        ...(inMemoryPortalFlowState.activeScheduleByCrew || {}),
+        ...(body.activeScheduleByCrew || {})
+      }
+    };
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['portal_flow_state_v1', JSON.stringify(inMemoryPortalFlowState)]
+        );
+      } catch (err: any) {
+        console.warn('[Portal Flow State Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, state: inMemoryPortalFlowState });
+  });
+
+  // =========================================================================
+  // VALIDASI PORTAL REPORT PERSISTENCE (Hostinger MySQL)
+  // =========================================================================
+  let inMemoryPortalValidations: any[] = [];
+  let inMemoryPortalValidationsLoaded = false;
+
+  app.get("/api/portal-validations", async (req, res) => {
+    const filterDate = String(req.query?.date || '').trim();
+    const filterBranch = String(req.query?.branchId || '').trim();
+    if (isDatabaseConfigured()) {
+      try {
+        let sql = "SELECT * FROM portal_schedule_validations WHERE 1=1";
+        const params: any[] = [];
+        if (filterDate) {
+          sql += " AND validation_date = ?";
+          params.push(filterDate);
+        }
+        if (filterBranch && filterBranch !== 'all') {
+          sql += " AND branch_id = ?";
+          params.push(filterBranch);
+        }
+        sql += " ORDER BY updated_at DESC LIMIT 60";
+        const dbRows = await mysqlQuery<any[]>(sql, params);
+        const mapped = (Array.isArray(dbRows) ? dbRows : []).map((r: any) => ({
+          id: r.id,
+          validationDate: String(r.validation_date || '').slice(0, 10),
+          branchId: r.branch_id || 'all',
+          cocokCount: Number(r.cocok_count || 0),
+          tidakCocokCount: Number(r.tidak_cocok_count || 0),
+          totalCount: Number(r.total_count || 0),
+          rows: parseJsonColumn(r.rows_json) || [],
+          validatedBy: r.validated_by || '',
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+        }));
+        return res.json({ success: true, validations: mapped, source: 'mysql' });
+      } catch (err: any) {
+        console.warn('[Portal Validations GET Warning]', err?.message || err);
+      }
+    }
+    if (!inMemoryPortalValidationsLoaded && isDatabaseConfigured()) {
+      inMemoryPortalValidationsLoaded = true;
+    }
+    const filtered = inMemoryPortalValidations.filter(v =>
+      (!filterDate || v.validationDate === filterDate) &&
+      (!filterBranch || filterBranch === 'all' || v.branchId === filterBranch)
+    );
+    return res.json({ success: true, validations: filtered, source: 'memory' });
+  });
+
+  app.post("/api/portal-validations", express.json({ limit: '5mb' }), async (req, res) => {
+    const body = req.body || {};
+    const validationDate = String(body.validationDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const branchId = String(body.branchId || 'all').slice(0, 64);
+    const id = String(body.id || `VAL-${validationDate}-${branchId}`).slice(0, 80);
+    const cocokCount = Number(body.cocokCount || 0);
+    const tidakCocokCount = Number(body.tidakCocokCount || 0);
+    const totalCount = Number(body.totalCount || cocokCount + tidakCocokCount);
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    const validatedBy = String(body.validatedBy || 'Admin Operasional').slice(0, 120);
+    const record = {
+      id,
+      validationDate,
+      branchId,
+      cocokCount,
+      tidakCocokCount,
+      totalCount,
+      rows,
+      validatedBy,
+      updatedAt: new Date().toISOString()
+    };
+
+    const existingIdx = inMemoryPortalValidations.findIndex(v => v.id === id);
+    if (existingIdx >= 0) {
+      inMemoryPortalValidations[existingIdx] = record;
+    } else {
+      inMemoryPortalValidations.unshift(record);
+      inMemoryPortalValidations = inMemoryPortalValidations.slice(0, 60);
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO portal_schedule_validations (
+             id, validation_date, branch_id, cocok_count, tidak_cocok_count, total_count, rows_json, validated_by, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE
+             cocok_count=VALUES(cocok_count), tidak_cocok_count=VALUES(tidak_cocok_count),
+             total_count=VALUES(total_count), rows_json=VALUES(rows_json),
+             validated_by=VALUES(validated_by), updated_at=NOW()`,
+          [id, validationDate, branchId, cocokCount, tidakCocokCount, totalCount, JSON.stringify(rows), validatedBy]
+        );
+        return res.json({ success: true, validation: record, persisted: 'mysql' });
+      } catch (err: any) {
+        console.warn('[Portal Validations POST Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, validation: record, persisted: 'memory' });
+  });
+
+  // =========================================================================
+  // LIVE GPS TRIPS + ROUTE HISTORY + PLAYBACK (Hostinger MySQL)
+  // =========================================================================
+  let inMemoryGpsTrips: any[] = [];
+
+  const mapDbTripRow = (r: any) => ({
+    id: r.id,
+    tripDate: String(r.trip_date || '').slice(0, 10),
+    branchId: r.branch_id || 'cab-banyuwangi',
+    fleetId: r.fleet_id || undefined,
+    plateNumber: r.plate_number || '-',
+    initialCode: r.initial_code || undefined,
+    vehicleType: r.vehicle_type || undefined,
+    driverName: r.driver_name || '-',
+    helper1Name: r.helper1_name || undefined,
+    helper2Name: r.helper2_name || undefined,
+    areaName: r.area_name || '-',
+    status: r.status === 'completed' ? 'completed' : 'active',
+    startedAt: r.started_at ? new Date(r.started_at).toISOString() : new Date().toISOString(),
+    endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : undefined,
+    currentLat: r.current_lat != null ? Number(r.current_lat) : undefined,
+    currentLng: r.current_lng != null ? Number(r.current_lng) : undefined,
+    points: parseJsonColumn(r.points_json) || [],
+    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+  });
+
+  app.get("/api/gps-trips", async (req, res) => {
+    const filterDate = String(req.query?.date || '').trim();
+    const filterStatus = String(req.query?.status || '').trim();
+    if (isDatabaseConfigured()) {
+      try {
+        let sql = "SELECT * FROM gps_live_trips WHERE 1=1";
+        const params: any[] = [];
+        if (filterDate) {
+          sql += " AND trip_date = ?";
+          params.push(filterDate);
+        }
+        if (filterStatus === 'active' || filterStatus === 'completed') {
+          sql += " AND status = ?";
+          params.push(filterStatus);
+        }
+        sql += " ORDER BY updated_at DESC LIMIT 120";
+        const rows = await mysqlQuery<any[]>(sql, params);
+        const mapped = (Array.isArray(rows) ? rows : []).map(mapDbTripRow);
+        return res.json({ success: true, trips: mapped, source: 'mysql' });
+      } catch (err: any) {
+        console.warn('[GPS Trips GET Warning]', err?.message || err);
+      }
+    }
+    const filtered = inMemoryGpsTrips.filter(t =>
+      (!filterDate || t.tripDate === filterDate) &&
+      (!filterStatus || filterStatus === 'all' || t.status === filterStatus)
+    );
+    return res.json({ success: true, trips: filtered, source: 'memory' });
+  });
+
+  app.post("/api/gps-trips", express.json({ limit: '5mb' }), async (req, res) => {
+    const b = req.body || {};
+    const id = String(b.id || `TRIP-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`).slice(0, 96);
+    const tripDate = String(b.tripDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const branchId = String(b.branchId || 'cab-banyuwangi').slice(0, 64);
+    const fleetId = b.fleetId ? String(b.fleetId).slice(0, 64) : null;
+    const plateNumber = String(b.plateNumber || '-').slice(0, 32);
+    const initialCode = b.initialCode ? String(b.initialCode).slice(0, 32) : null;
+    const vehicleType = b.vehicleType ? String(b.vehicleType).slice(0, 64) : null;
+    const driverName = String(b.driverName || 'Driver AKK').slice(0, 120);
+    const helper1Name = b.helper1Name ? String(b.helper1Name).slice(0, 120) : null;
+    const helper2Name = b.helper2Name ? String(b.helper2Name).slice(0, 120) : null;
+    const areaName = String(b.areaName || '-').slice(0, 160);
+    const status = b.status === 'completed' ? 'completed' : 'active';
+    const points = Array.isArray(b.points) ? b.points : [];
+    const lastPt = points[points.length - 1];
+    const currentLat = b.currentLat != null ? Number(b.currentLat) : (lastPt?.lat ?? -8.1906);
+    const currentLng = b.currentLng != null ? Number(b.currentLng) : (lastPt?.lng ?? 114.3708);
+    const startedAtIso = b.startedAt || new Date().toISOString();
+    const endedAtIso = status === 'completed' ? (b.endedAt || new Date().toISOString()) : null;
+
+    const record = {
+      id,
+      tripDate,
+      branchId,
+      fleetId: fleetId || undefined,
+      plateNumber,
+      initialCode: initialCode || undefined,
+      vehicleType: vehicleType || undefined,
+      driverName,
+      helper1Name: helper1Name || undefined,
+      helper2Name: helper2Name || undefined,
+      areaName,
+      status,
+      startedAt: startedAtIso,
+      endedAt: endedAtIso || undefined,
+      currentLat,
+      currentLng,
+      points,
+      updatedAt: new Date().toISOString()
+    };
+
+    const existingIdx = inMemoryGpsTrips.findIndex(t => t.id === id);
+    if (existingIdx >= 0) {
+      const mergedPts = points.length >= (inMemoryGpsTrips[existingIdx].points?.length || 0)
+        ? points
+        : inMemoryGpsTrips[existingIdx].points;
+      inMemoryGpsTrips[existingIdx] = { ...inMemoryGpsTrips[existingIdx], ...record, points: mergedPts };
+    } else {
+      inMemoryGpsTrips.unshift(record);
+      inMemoryGpsTrips = inMemoryGpsTrips.slice(0, 120);
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO gps_live_trips (
+             id, trip_date, branch_id, fleet_id, plate_number, initial_code, vehicle_type,
+             driver_name, helper1_name, helper2_name, area_name, status, started_at, ended_at,
+             current_lat, current_lng, points_json, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE
+             status=VALUES(status), ended_at=COALESCE(VALUES(ended_at), ended_at),
+             current_lat=VALUES(current_lat), current_lng=VALUES(current_lng),
+             points_json=VALUES(points_json), updated_at=NOW()`,
+          [
+            id, tripDate, branchId, fleetId, plateNumber, initialCode, vehicleType,
+            driverName, helper1Name, helper2Name, areaName, status,
+            toMysqlDateTime(startedAtIso), endedAtIso ? toMysqlDateTime(endedAtIso) : null,
+            currentLat, currentLng, JSON.stringify(points)
+          ]
+        );
+        return res.json({ success: true, trip: record, persisted: 'mysql' });
+      } catch (err: any) {
+        console.warn('[GPS Trips POST Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, trip: record, persisted: 'memory' });
+  });
+
+  app.post("/api/gps-trips/:id/ping", express.json({ limit: '1mb' }), async (req, res) => {
+    const id = String(req.params.id || '').slice(0, 96);
+    const { lat, lng, locationName, speedKmh, timestamp, status, completeTrip } = req.body || {};
+    const numLat = Number(lat);
+    const numLng = Number(lng);
+    if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+      return res.status(400).json({ success: false, error: 'Koordinat lat/lng wajib valid' });
+    }
+    const newPoint = {
+      lat: numLat,
+      lng: numLng,
+      timestamp: timestamp || new Date().toISOString(),
+      locationName: locationName || undefined,
+      speedKmh: speedKmh != null ? Number(speedKmh) : undefined
+    };
+    const nextStatus = (completeTrip || status === 'completed') ? 'completed' : 'active';
+    const endedAtIso = nextStatus === 'completed' ? new Date().toISOString() : null;
+
+    let existing = inMemoryGpsTrips.find(t => t.id === id);
+    if (!existing && isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>("SELECT * FROM gps_live_trips WHERE id = ? LIMIT 1", [id]);
+        if (Array.isArray(rows) && rows.length > 0) {
+          existing = mapDbTripRow(rows[0]);
+        }
+      } catch {}
+    }
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Trip tidak ditemukan' });
+    }
+
+    const updatedPoints = [...(Array.isArray(existing.points) ? existing.points : []), newPoint].slice(-500);
+    const updatedTrip = {
+      ...existing,
+      status: nextStatus,
+      endedAt: endedAtIso || existing.endedAt,
+      currentLat: numLat,
+      currentLng: numLng,
+      points: updatedPoints,
+      updatedAt: new Date().toISOString()
+    };
+
+    const idx = inMemoryGpsTrips.findIndex(t => t.id === id);
+    if (idx >= 0) inMemoryGpsTrips[idx] = updatedTrip;
+    else inMemoryGpsTrips.unshift(updatedTrip);
+
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `UPDATE gps_live_trips SET status=?, ended_at=COALESCE(?, ended_at), current_lat=?, current_lng=?, points_json=?, updated_at=NOW() WHERE id=?`,
+          [nextStatus, endedAtIso ? toMysqlDateTime(endedAtIso) : null, numLat, numLng, JSON.stringify(updatedPoints), id]
+        );
+      } catch (err: any) {
+        console.warn('[GPS Trip Ping Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, trip: updatedTrip });
+  });
+
   app.get("/api/driver-reports/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -3128,7 +3589,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/fleets", requireLogisticsWrite, express.json(), async (req, res) => {
+  app.post("/api/fleets", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
     const f = req.body || {};
     if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
     const id = String(f.id || `flt-${Date.now()}`).trim();
@@ -3193,7 +3654,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.put("/api/fleets/:id", requireLogisticsWrite, express.json(), async (req, res) => {
+  app.put("/api/fleets/:id", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
     const id = String(req.params.id || '').trim();
     const f = req.body || {};
     try {
@@ -3390,6 +3851,500 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       return res.json({ success: true, count: filtered.length });
     } catch (err: any) {
       return res.json({ success: true, count: inMemoryFleetChecklists.length, warning: err?.message });
+    }
+  });
+
+  // REST API for Fleet Maintenance & Service Costs (Biaya Servis & Pemeliharaan Armada -> MySQL)
+  let inMemoryMaintenanceCosts: any[] = [];
+
+  app.get("/api/fleet-maintenance-costs", requireAuth, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT * FROM fleet_maintenance_costs ORDER BY service_date DESC, created_at DESC"
+      );
+      if (rows && rows.length > 0) {
+        const mapped = rows.map((r) => {
+          const extra = parseJsonColumn(r.payload_json) || {};
+          const srvDate = r.service_date instanceof Date
+            ? r.service_date.toISOString().slice(0, 10)
+            : String(r.service_date || '').slice(0, 10);
+          return {
+            ...extra,
+            id: r.id,
+            fleetId: r.fleet_id,
+            plateNumber: r.plate_number,
+            serviceDate: srvDate || extra.serviceDate || '',
+            category: r.category,
+            workTitle: r.work_title,
+            workshopName: r.workshop_name,
+            odometerKm: Number(r.odometer_km || 0),
+            partsCost: Number(r.parts_cost || 0),
+            laborCost: Number(r.labor_cost || 0),
+            otherCost: Number(r.other_cost || 0),
+            totalCost: Number(r.total_cost || 0),
+            paymentStatus: r.payment_status || 'Lunas',
+            createdAt: extra.createdAt || (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at || new Date().toISOString()))
+          };
+        });
+        inMemoryMaintenanceCosts = mapped;
+        return res.json({ success: true, data: mapped });
+      }
+      return res.json({ success: true, data: inMemoryMaintenanceCosts });
+    } catch (err: any) {
+      return res.json({ success: true, data: inMemoryMaintenanceCosts, warning: err?.message });
+    }
+  });
+
+  app.post("/api/fleet-maintenance-costs", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
+    const item = req.body || {};
+    if (!item.fleetId || !item.workTitle) {
+      return res.status(400).json({ success: false, error: 'Armada dan judul servis wajib diisi' });
+    }
+    const id = String(item.id || `fmc-${Date.now()}`).trim();
+    const partsCost = Number(item.partsCost || 0);
+    const laborCost = Number(item.laborCost || 0);
+    const otherCost = Number(item.otherCost || 0);
+    const totalCost = Number(item.totalCost ?? (partsCost + laborCost + otherCost));
+    const serviceDate = toMysqlDateOnly(item.serviceDate) || new Date().toISOString().slice(0, 10);
+    const fullRecord = {
+      ...item,
+      id,
+      serviceDate,
+      partsCost,
+      laborCost,
+      otherCost,
+      totalCost,
+      createdAt: item.createdAt || new Date().toISOString()
+    };
+
+    try {
+      await mysqlQuery(
+        `INSERT INTO fleet_maintenance_costs
+          (id, fleet_id, plate_number, service_date, category, work_title, workshop_name, odometer_km, parts_cost, labor_cost, other_cost, total_cost, payment_status, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           fleet_id=VALUES(fleet_id),
+           plate_number=VALUES(plate_number),
+           service_date=VALUES(service_date),
+           category=VALUES(category),
+           work_title=VALUES(work_title),
+           workshop_name=VALUES(workshop_name),
+           odometer_km=VALUES(odometer_km),
+           parts_cost=VALUES(parts_cost),
+           labor_cost=VALUES(labor_cost),
+           other_cost=VALUES(other_cost),
+           total_cost=VALUES(total_cost),
+           payment_status=VALUES(payment_status),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          String(fullRecord.fleetId),
+          String(fullRecord.plateNumber || ''),
+          serviceDate,
+          String(fullRecord.category || 'servis_berkala'),
+          String(fullRecord.workTitle),
+          String(fullRecord.workshopName || 'Bengkel Internal'),
+          Number(fullRecord.odometerKm || 0),
+          partsCost,
+          laborCost,
+          otherCost,
+          totalCost,
+          String(fullRecord.paymentStatus || 'Lunas'),
+          JSON.stringify(fullRecord)
+        ]
+      );
+      const idx = inMemoryMaintenanceCosts.findIndex((x) => x.id === id);
+      if (idx >= 0) inMemoryMaintenanceCosts[idx] = fullRecord;
+      else inMemoryMaintenanceCosts = [fullRecord, ...inMemoryMaintenanceCosts];
+      return res.json({ success: true, data: fullRecord });
+    } catch (err: any) {
+      inMemoryMaintenanceCosts = [fullRecord, ...inMemoryMaintenanceCosts.filter((x) => x.id !== id)];
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan biaya servis ke MySQL' });
+    }
+  });
+
+  app.put("/api/fleet-maintenance-costs/:id", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const item = req.body || {};
+    const partsCost = Number(item.partsCost || 0);
+    const laborCost = Number(item.laborCost || 0);
+    const otherCost = Number(item.otherCost || 0);
+    const totalCost = Number(item.totalCost ?? (partsCost + laborCost + otherCost));
+    const serviceDate = toMysqlDateOnly(item.serviceDate) || new Date().toISOString().slice(0, 10);
+    const fullRecord = { ...item, id, serviceDate, partsCost, laborCost, otherCost, totalCost };
+    try {
+      await mysqlQuery(
+        `UPDATE fleet_maintenance_costs
+         SET fleet_id=?, plate_number=?, service_date=?, category=?, work_title=?, workshop_name=?, odometer_km=?, parts_cost=?, labor_cost=?, other_cost=?, total_cost=?, payment_status=?, payload_json=?
+         WHERE id=?`,
+        [
+          String(fullRecord.fleetId || ''),
+          String(fullRecord.plateNumber || ''),
+          serviceDate,
+          String(fullRecord.category || 'servis_berkala'),
+          String(fullRecord.workTitle || ''),
+          String(fullRecord.workshopName || 'Bengkel Internal'),
+          Number(fullRecord.odometerKm || 0),
+          partsCost,
+          laborCost,
+          otherCost,
+          totalCost,
+          String(fullRecord.paymentStatus || 'Lunas'),
+          JSON.stringify(fullRecord),
+          id
+        ]
+      );
+      inMemoryMaintenanceCosts = inMemoryMaintenanceCosts.map((x) => (x.id === id ? fullRecord : x));
+      return res.json({ success: true, data: fullRecord });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui biaya servis' });
+    }
+  });
+
+  app.delete("/api/fleet-maintenance-costs/:id", requireLogisticsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    try {
+      await mysqlQuery("DELETE FROM fleet_maintenance_costs WHERE id = ?", [id]);
+      inMemoryMaintenanceCosts = inMemoryMaintenanceCosts.filter((x) => x.id !== id);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus data biaya servis' });
+    }
+  });
+
+  // REST API for Fuel Logs (Efisiensi Bahan Bakar Armada -> Hostinger MySQL)
+  let inMemoryFuelLogs: any[] = [];
+
+  app.get("/api/fuel-logs", requireAuth, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT * FROM fuel_logs ORDER BY logged_at DESC");
+      if (Array.isArray(rows)) {
+        const mapped = rows.map((r) => {
+          const extra = parseJsonColumn(r.payload_json) || {};
+          const loggedIso = r.logged_at instanceof Date ? r.logged_at.toISOString() : String(r.logged_at || '');
+          return {
+            ...extra,
+            id: r.id,
+            fleetId: extra.fleetId || r.fleet_id,
+            driverName: extra.driverName || r.driver_name,
+            liters: Number(extra.liters ?? r.fuel_liters ?? 0),
+            totalCost: Number(extra.totalCost ?? r.cost_rupiah ?? 0),
+            endOdometerKm: Number(extra.endOdometerKm ?? r.odometer_km ?? 0),
+            gasStation: extra.gasStation || r.spbu_location || '-',
+            date: extra.date || (loggedIso ? loggedIso.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+            createdAt: extra.createdAt || loggedIso || new Date().toISOString()
+          };
+        });
+        inMemoryFuelLogs = mapped;
+        return res.json({ success: true, source: 'hostinger_mysql', data: mapped });
+      }
+      return res.json({ success: true, source: 'memory', data: inMemoryFuelLogs });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemoryFuelLogs, warning: err?.message });
+    }
+  });
+
+  app.post("/api/fuel-logs", requireLogisticsWrite, express.json({ limit: '10mb' }), async (req, res) => {
+    const item = req.body || {};
+    if (!item.fleetId) {
+      return res.status(400).json({ success: false, error: 'ID armada wajib diisi' });
+    }
+    const id = String(item.id || `fuel-${Date.now()}`).trim();
+    const fullRecord = {
+      ...item,
+      id,
+      createdAt: item.createdAt || new Date().toISOString()
+    };
+    const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
+    try {
+      await mysqlQuery(
+        `INSERT INTO fuel_logs (id, fleet_id, driver_name, fuel_liters, cost_rupiah, odometer_km, spbu_location, payload_json, logged_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           fleet_id=VALUES(fleet_id),
+           driver_name=VALUES(driver_name),
+           fuel_liters=VALUES(fuel_liters),
+           cost_rupiah=VALUES(cost_rupiah),
+           odometer_km=VALUES(odometer_km),
+           spbu_location=VALUES(spbu_location),
+           payload_json=VALUES(payload_json),
+           logged_at=VALUES(logged_at)`,
+        [
+          id,
+          String(fullRecord.fleetId),
+          String(fullRecord.driverName || '-'),
+          Number(fullRecord.liters || 0),
+          Number(fullRecord.totalCost || 0),
+          Number(fullRecord.endOdometerKm || fullRecord.startOdometerKm || 0),
+          String(fullRecord.gasStation || '-'),
+          JSON.stringify(fullRecord),
+          loggedAt
+        ]
+      );
+      inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
+      return res.json({ success: true, source: 'hostinger_mysql', data: fullRecord });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan log BBM ke MySQL' });
+    }
+  });
+
+  app.put("/api/fuel-logs/:id", requireLogisticsWrite, express.json({ limit: '10mb' }), async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const item = { ...(req.body || {}), id };
+    const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
+    try {
+      await mysqlQuery(
+        `UPDATE fuel_logs
+         SET fleet_id=?, driver_name=?, fuel_liters=?, cost_rupiah=?, odometer_km=?, spbu_location=?, payload_json=?, logged_at=?
+         WHERE id=?`,
+        [
+          String(item.fleetId || ''),
+          String(item.driverName || '-'),
+          Number(item.liters || 0),
+          Number(item.totalCost || 0),
+          Number(item.endOdometerKm || item.startOdometerKm || 0),
+          String(item.gasStation || '-'),
+          JSON.stringify(item),
+          loggedAt,
+          id
+        ]
+      );
+      inMemoryFuelLogs = inMemoryFuelLogs.map((x) => (x.id === id ? item : x));
+      return res.json({ success: true, source: 'hostinger_mysql', data: item });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui log BBM di MySQL' });
+    }
+  });
+
+  app.delete("/api/fuel-logs/:id", requireLogisticsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    try {
+      await mysqlQuery("DELETE FROM fuel_logs WHERE id = ?", [id]);
+      inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
+      return res.json({ success: true, source: 'hostinger_mysql' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
+    }
+  });
+
+  // REST API for Scanned Documents (Formulir Pengadaan Armada & Pusat Dokumen Logistik -> Hostinger MySQL)
+  let inMemoryScannedDocuments: any[] = [];
+
+  app.get("/api/scanned-documents", requireAuth, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT * FROM scanned_documents ORDER BY created_at DESC");
+      if (Array.isArray(rows)) {
+        const mapped = rows.map((r) => {
+          const parsed = parseJsonColumn(r.payload_json) || {};
+          return {
+            ...parsed,
+            id: r.id,
+            documentType: parsed.documentType || r.document_type,
+            documentNumber: parsed.documentNumber || r.document_number,
+            date: parsed.date || r.doc_date || '',
+            vehiclePlate: parsed.vehiclePlate ?? r.vehicle_plate ?? '',
+            driverName: parsed.driverName ?? r.driver_name ?? '',
+            status: parsed.status || r.status || 'pending_review'
+          };
+        });
+        inMemoryScannedDocuments = mapped;
+        return res.json({ success: true, source: 'hostinger_mysql', data: mapped });
+      }
+      return res.json({ success: true, source: 'memory', data: inMemoryScannedDocuments });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemoryScannedDocuments, warning: err?.message });
+    }
+  });
+
+  app.post("/api/scanned-documents", requireLogisticsWrite, express.json({ limit: '25mb' }), async (req, res) => {
+    const doc = req.body || {};
+    const id = String(doc.id || `DOC-SCAN-${Date.now()}`).trim();
+    const fullDoc = { ...doc, id, timestamp: doc.timestamp || new Date().toISOString() };
+    try {
+      await mysqlQuery(
+        `INSERT INTO scanned_documents (id, document_type, document_number, doc_date, vehicle_plate, driver_name, status, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           document_type=VALUES(document_type),
+           document_number=VALUES(document_number),
+           doc_date=VALUES(doc_date),
+           vehicle_plate=VALUES(vehicle_plate),
+           driver_name=VALUES(driver_name),
+           status=VALUES(status),
+           payload_json=VALUES(payload_json),
+           updated_at=NOW()`,
+        [
+          id,
+          String(fullDoc.documentType || 'delivery_slip'),
+          String(fullDoc.documentNumber || id),
+          String(fullDoc.date || ''),
+          fullDoc.vehiclePlate ? String(fullDoc.vehiclePlate) : null,
+          fullDoc.driverName ? String(fullDoc.driverName) : null,
+          String(fullDoc.status || 'pending_review'),
+          JSON.stringify(fullDoc)
+        ]
+      );
+      inMemoryScannedDocuments = [fullDoc, ...inMemoryScannedDocuments.filter((d) => d.id !== id)];
+      return res.json({ success: true, source: 'hostinger_mysql', data: fullDoc });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan dokumen scan ke MySQL' });
+    }
+  });
+
+  app.put("/api/scanned-documents/:id", requireLogisticsWrite, express.json({ limit: '25mb' }), async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const updates = req.body || {};
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT payload_json FROM scanned_documents WHERE id = ? LIMIT 1", [id]);
+      const prev = rows?.[0]?.payload_json ? parseJsonColumn(rows[0].payload_json) : (inMemoryScannedDocuments.find((d) => d.id === id) || {});
+      const fullDoc = { ...prev, ...updates, id };
+      await mysqlQuery(
+        `UPDATE scanned_documents
+         SET document_type=?, document_number=?, doc_date=?, vehicle_plate=?, driver_name=?, status=?, payload_json=?, updated_at=NOW()
+         WHERE id=?`,
+        [
+          String(fullDoc.documentType || 'delivery_slip'),
+          String(fullDoc.documentNumber || id),
+          String(fullDoc.date || ''),
+          fullDoc.vehiclePlate ? String(fullDoc.vehiclePlate) : null,
+          fullDoc.driverName ? String(fullDoc.driverName) : null,
+          String(fullDoc.status || 'pending_review'),
+          JSON.stringify(fullDoc),
+          id
+        ]
+      );
+      inMemoryScannedDocuments = inMemoryScannedDocuments.map((d) => (d.id === id ? fullDoc : d));
+      return res.json({ success: true, source: 'hostinger_mysql', data: fullDoc });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui dokumen scan' });
+    }
+  });
+
+  app.delete("/api/scanned-documents/:id", requireLogisticsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    try {
+      await mysqlQuery("DELETE FROM scanned_documents WHERE id = ?", [id]);
+      inMemoryScannedDocuments = inMemoryScannedDocuments.filter((d) => d.id !== id);
+      return res.json({ success: true, source: 'hostinger_mysql' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus dokumen scan' });
+    }
+  });
+
+  // REST API for Fleet Form Designer Templates & Print Logs -> Hostinger MySQL (app_state)
+  let inMemoryFleetFormsState: any = null;
+
+  app.get("/api/fleet-forms/state", requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = 'fleet_form_designer_state' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          inMemoryFleetFormsState = parsed;
+          return res.json({ success: true, source: 'hostinger_mysql', data: parsed });
+        }
+      }
+      return res.json({ success: true, source: 'memory', data: inMemoryFleetFormsState });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemoryFleetFormsState, warning: err?.message });
+    }
+  });
+
+  app.put("/api/fleet-forms/state", requireLogisticsWrite, express.json({ limit: '20mb' }), async (req, res) => {
+    const payload = req.body || {};
+    inMemoryFleetFormsState = payload;
+    try {
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('fleet_form_designer_state', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(payload)]
+        );
+      }
+      return res.json({ success: true, source: 'hostinger_mysql', data: payload });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan template formulir ke MySQL' });
+    }
+  });
+
+  // REST API for Crew Rotation Threshold, Approvals & Delivery History -> Hostinger MySQL (app_state)
+  let inMemoryCrewRotationState: any = null;
+
+  app.get("/api/logistics/crew-rotation-state", requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = 'crew_rotation_state' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          inMemoryCrewRotationState = parsed;
+          return res.json({ success: true, source: 'hostinger_mysql', data: parsed });
+        }
+      }
+      return res.json({ success: true, source: 'memory', data: inMemoryCrewRotationState });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemoryCrewRotationState, warning: err?.message });
+    }
+  });
+
+  app.put("/api/logistics/crew-rotation-state", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
+    const payload = req.body || {};
+    inMemoryCrewRotationState = payload;
+    try {
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('crew_rotation_state', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(payload)]
+        );
+      }
+      return res.json({ success: true, source: 'hostinger_mysql', data: payload });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan rotasi kru ke MySQL' });
+    }
+  });
+
+  // REST API for Marketing Dashboard & Analisa TO / VO / RO -> Hostinger MySQL (app_state)
+  let inMemoryMarketingState: any = null;
+
+  app.get("/api/marketing/state", requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = 'marketing_dashboard_state' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          inMemoryMarketingState = parsed;
+          return res.json({ success: true, source: 'hostinger_mysql', data: parsed });
+        }
+      }
+      return res.json({ success: true, source: 'memory', data: inMemoryMarketingState });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemoryMarketingState, warning: err?.message });
+    }
+  });
+
+  app.put("/api/marketing/state", requireMarketingWrite, express.json({ limit: '20mb' }), async (req, res) => {
+    const payload = req.body || {};
+    inMemoryMarketingState = payload;
+    try {
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_dashboard_state', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(payload)]
+        );
+      }
+      return res.json({ success: true, source: 'hostinger_mysql', data: payload });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan data marketing ke MySQL' });
     }
   });
 
@@ -4505,6 +5460,48 @@ Kembalikan HANYA JSON valid:
       return res.status(400).json({ success: false, message: 'Invalid payload, expected invoices array.' });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message });
+    }
+  });
+
+  // Meta state for Sales RFID (recent scan history & active invoice) -> Hostinger MySQL (app_state)
+  let inMemorySalesRfidMeta: { recentScansLog?: any[]; activeInvoiceId?: string } = { recentScansLog: [] };
+
+  app.get('/api/sales-rfid-meta', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>(
+          `SELECT state_json FROM app_state WHERE state_key = 'sales_rfid_meta_v1' LIMIT 1`
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+          inMemorySalesRfidMeta = parsed || { recentScansLog: [] };
+          return res.json({ success: true, source: 'hostinger_mysql', data: inMemorySalesRfidMeta });
+        }
+      }
+      return res.json({ success: true, source: 'memory', data: inMemorySalesRfidMeta });
+    } catch (err: any) {
+      return res.json({ success: true, source: 'memory_fallback', data: inMemorySalesRfidMeta, message: err?.message });
+    }
+  });
+
+  app.put('/api/sales-rfid-meta', express.json({ limit: '15mb' }), async (req, res) => {
+    try {
+      const payload = {
+        recentScansLog: Array.isArray(req.body?.recentScansLog) ? req.body.recentScansLog.slice(0, 30) : (inMemorySalesRfidMeta.recentScansLog || []),
+        activeInvoiceId: req.body?.activeInvoiceId !== undefined ? String(req.body.activeInvoiceId || '') : inMemorySalesRfidMeta.activeInvoiceId
+      };
+      inMemorySalesRfidMeta = payload;
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('sales_rfid_meta_v1', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(payload)]
+        );
+      }
+      return res.json({ success: true, source: 'hostinger_mysql', data: payload });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menyimpan log scan RFID ke MySQL' });
     }
   });
 

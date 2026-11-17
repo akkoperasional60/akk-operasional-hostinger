@@ -67,7 +67,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   onClose,
   deliveries,
   driverName = 'Supir AKK',
-  plateNumber = 'P 8125 VC',
+  plateNumber = '',
   driverId,
   userJobdeskRole = 'driver',
   initialCategory,
@@ -111,12 +111,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   // Otomatis terisi nomor kendaraan sesuai data checklist
   const [autoPlateNumber, setAutoPlateNumber] = useState<string>(plateNumber);
 
-  // Lookup inisial armada dari master data
+  // Lookup inisial armada dari master data (hanya jika plat sudah terisi dari check-in & checklist)
   const fleets = logisticsStore.getFleets();
-  const matchedFleet = fleets.find(f =>
-    f.plateNumber.replace(/\s+/g, '').toUpperCase() === (autoPlateNumber || '').replace(/\s+/g, '').toUpperCase()
-  );
-  const fleetInitial = matchedFleet?.initialCode || (autoPlateNumber.includes('8848') ? 'N3 / NS1' : autoPlateNumber.includes('8125') ? 'N1 / NP1' : autoPlateNumber.includes('8509') ? 'A3 / NP3' : undefined);
+  const matchedFleet = autoPlateNumber
+    ? fleets.find(f =>
+        f.plateNumber.replace(/\s+/g, '').toUpperCase() === autoPlateNumber.replace(/\s+/g, '').toUpperCase()
+      )
+    : undefined;
+  const fleetInitial = matchedFleet?.initialCode;
 
   // GPS Coordinates (Direkam otomatis secara real-time high-accuracy untuk sistem)
   const [driverLat, setDriverLat] = useState<number>(-8.2190);
@@ -244,19 +246,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       } else {
         setCategory(isHelperJobdesk ? 'kendala_jalan' : 'isi_bbm');
       }
-      try {
-        const checklists = driverChecklistService.getChecklists();
-        const activeChecklist = driverId
-          ? checklists.find(c => c.driverId === driverId)
-          : checklists[0];
-        if (activeChecklist?.plateNumber) {
-          setAutoPlateNumber(activeChecklist.plateNumber);
-        } else if (plateNumber) {
-          setAutoPlateNumber(plateNumber);
-        }
-      } catch {
-        setAutoPlateNumber(plateNumber);
-      }
+      setAutoPlateNumber(plateNumber ? plateNumber.trim() : '');
 
       refreshActiveQueue();
       requestFreshGpsLocation();
@@ -666,7 +656,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
       driverName: driverName,
-      plateNumber: autoPlateNumber,
+      plateNumber: autoPlateNumber || '-',
       category,
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
       customerOutletName: submittedCustomer,
@@ -737,7 +727,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   )}
                 </div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold truncate">
-                  Area: {currentAreaName} ({autoPlateNumber})
+                  Area: {currentAreaName}{autoPlateNumber ? ` (${autoPlateNumber})` : ''}
                 </div>
               </div>
             </div>
@@ -945,14 +935,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-sm font-black text-white">
                     {isHelperJobdesk
-                      ? 'Fitur Kendala & Absen Pelanggan'
-                      : 'Isi (Foto) BBM, Kendala & Absen Pelanggan'}
+                      ? 'Laporan Kendala & Absen Pelanggan'
+                      : 'Laporan BBM, Kendala & Absen Pelanggan'}
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium">
                   {isHelperJobdesk
-                    ? 'Dokumentasi fitur kendala di jalan dan fitur absen pelanggan'
-                    : 'Dokumentasi isi (foto) BBM, fitur kendala, dan fitur absen pelanggan'}
+                    ? 'Unggah foto bukti kendala rute dan penyerahan kiriman pelanggan'
+                    : 'Unggah foto bukti pengisian BBM, kendala rute, atau penyerahan kiriman pelanggan'}
                 </p>
               </div>
             </div>
@@ -1261,21 +1251,33 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                 <span>Nomor Kendaraan Armada:</span>
-                <span className="text-[10px] text-slate-400 font-semibold">✓ Sesuai Check-In</span>
+                {autoPlateNumber && (
+                  <span className="text-[10px] text-slate-400 font-semibold">✓ Sesuai Check-In</span>
+                )}
               </label>
               <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-blue-400" />
-                  <span className="font-mono font-bold text-white text-sm">{autoPlateNumber}</span>
-                  {fleetInitial && (
-                    <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 text-[11px] font-bold">
-                      Inisial: {fleetInitial}
+                  <Truck className={`w-4 h-4 ${autoPlateNumber ? 'text-blue-400' : 'text-slate-500'}`} />
+                  {autoPlateNumber ? (
+                    <>
+                      <span className="font-mono font-bold text-white text-sm">{autoPlateNumber}</span>
+                      {fleetInitial && (
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 text-[11px] font-bold">
+                          Inisial: {fleetInitial}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-slate-400 font-medium">
+                      Belum terisi (lakukan Check-In &amp; Checklist dulu)
                     </span>
                   )}
                 </div>
-                <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold">
-                  Terkunci Otomatis
-                </span>
+                {autoPlateNumber && (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold">
+                    Terkunci Otomatis
+                  </span>
+                )}
               </div>
             </div>
 

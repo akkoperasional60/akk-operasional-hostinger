@@ -3,10 +3,23 @@ import { X, Save, Printer, Download, AlertCircle } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import { jsPDF } from 'jspdf';
 
+import {
+  getFleetModalDraft,
+  saveFleetModalDraft,
+  hydrateFleetFormStateFromMysql,
+  FLEET_FORMS_UPDATED_EVENT
+} from './FleetFormDesignerSystem';
+
 interface ServiceFormModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const getDefaultServiceDraft = () => ({
+  date: new Date().toISOString().split('T')[0],
+  lastKm: '',
+  damageDetails: '',
+});
 
 export const ServiceFormModal: React.FC<ServiceFormModalProps> = ({ isOpen, onClose }) => {
   const componentRef = useRef<HTMLDivElement>(null);
@@ -15,20 +28,32 @@ export const ServiceFormModal: React.FC<ServiceFormModalProps> = ({ isOpen, onCl
   });
 
   const [formData, setFormData] = useState(() => {
-    const saved = localStorage.getItem('service_form_draft');
-    return saved ? JSON.parse(saved) : {
-      date: new Date().toISOString().split('T')[0],
-      lastKm: '',
-      damageDetails: '',
-    };
+    return getFleetModalDraft<ReturnType<typeof getDefaultServiceDraft>>('service') || getDefaultServiceDraft();
   });
 
   const [validationError, setValidationError] = useState<string | null>(null);
+  const hasUserEditedRef = useRef(false);
 
   const validate = () => !!(formData.date && formData.lastKm && formData.damageDetails);
 
   useEffect(() => {
-    localStorage.setItem('service_form_draft', JSON.stringify(formData));
+    const handleHydrated = () => {
+      if (!hasUserEditedRef.current) {
+        const remote = getFleetModalDraft<ReturnType<typeof getDefaultServiceDraft>>('service');
+        if (remote) setFormData(remote);
+      }
+    };
+    window.addEventListener(FLEET_FORMS_UPDATED_EVENT, handleHydrated);
+    void hydrateFleetFormStateFromMysql();
+    return () => window.removeEventListener(FLEET_FORMS_UPDATED_EVENT, handleHydrated);
+  }, []);
+
+  useEffect(() => {
+    if (!hasUserEditedRef.current) return;
+    const timer = window.setTimeout(() => {
+      saveFleetModalDraft('service', formData);
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [formData]);
 
   const handleDownloadPdf = () => {
@@ -144,15 +169,15 @@ export const ServiceFormModal: React.FC<ServiceFormModalProps> = ({ isOpen, onCl
           <div className="grid grid-cols-2 gap-4 border p-4 mb-4 bg-gray-50 rounded-xl print:hidden text-xs">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Tanggal</label>
-              <input type="date" className="w-full border p-2 rounded-lg bg-white" value={formData.date} onChange={e => { setFormData({...formData, date: e.target.value}); setValidationError(null); }} />
+              <input type="date" className="w-full border p-2 rounded-lg bg-white" value={formData.date} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, date: e.target.value}); setValidationError(null); }} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">KM Terakhir</label>
-              <input type="number" className="w-full border p-2 rounded-lg bg-white" value={formData.lastKm} onChange={e => { setFormData({...formData, lastKm: e.target.value}); setValidationError(null); }} placeholder="Contoh: 15000" />
+              <input type="number" className="w-full border p-2 rounded-lg bg-white" value={formData.lastKm} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, lastKm: e.target.value}); setValidationError(null); }} placeholder="Contoh: 15000" />
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-semibold text-gray-700 mb-1">Detail Kerusakan & Keluhan</label>
-              <textarea className="w-full border p-2 rounded-lg bg-white" value={formData.damageDetails} onChange={e => { setFormData({...formData, damageDetails: e.target.value}); setValidationError(null); }} rows={3} placeholder="Jelaskan kendala armada secara spesifik..."></textarea>
+              <textarea className="w-full border p-2 rounded-lg bg-white" value={formData.damageDetails} onChange={e => { hasUserEditedRef.current = true; setFormData({...formData, damageDetails: e.target.value}); setValidationError(null); }} rows={3} placeholder="Jelaskan kendala armada secara spesifik..."></textarea>
             </div>
           </div>
 

@@ -440,21 +440,40 @@ export function convertParsedTripsToWeeks(trips: Array<{
 /**
  * Convert real operational Schedule[] items from logisticsStore to AdminScheduleWeek[]
  */
-export function getScheduleCalendarDateObj(sch: any): Date | null {
-  if (!sch || !sch.departureDate) return null;
-  const dep = new Date(sch.departureDate);
-  if (isNaN(dep.getTime())) return null;
-  if (sch.estimatedArrival) {
-    const arr = new Date(sch.estimatedArrival);
-    if (!isNaN(arr.getTime())) {
-      const depKey = `${dep.getFullYear()}-${String(dep.getMonth() + 1).padStart(2, '0')}-${String(dep.getDate()).padStart(2, '0')}`;
-      const arrKey = `${arr.getFullYear()}-${String(arr.getMonth() + 1).padStart(2, '0')}-${String(arr.getDate()).padStart(2, '0')}`;
-      if (arrKey > depKey) {
-        return arr;
-      }
-    }
+function parseWibIsoParts(raw?: string): { ymd: string; dateObj: Date; timeHhMm: string } | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    return { ymd: s, dateObj: new Date(y, m - 1, d, 7, 30, 0), timeHhMm: '07:30' };
   }
-  return dep;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && (s.includes('+07:00') || !s.endsWith('Z'))) {
+    const ymd = s.slice(0, 10);
+    const [y, m, d] = ymd.split('-').map(Number);
+    const hhMm = s.slice(11, 16);
+    const [hh, mm] = hhMm.split(':').map(Number);
+    return { ymd, dateObj: new Date(y, m - 1, d, isNaN(hh) ? 7 : hh, isNaN(mm) ? 30 : mm, 0), timeHhMm: hhMm };
+  }
+  const parsed = new Date(s);
+  if (isNaN(parsed.getTime())) return null;
+  const wibDate = new Date(parsed.getTime() + 7 * 60 * 60 * 1000);
+  const y = wibDate.getUTCFullYear();
+  const m = wibDate.getUTCMonth();
+  const d = wibDate.getUTCDate();
+  const hh = String(wibDate.getUTCHours()).padStart(2, '0');
+  const mm = String(wibDate.getUTCMinutes()).padStart(2, '0');
+  const ymd = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return { ymd, dateObj: new Date(y, m, d, wibDate.getUTCHours(), wibDate.getUTCMinutes(), 0), timeHhMm: `${hh}:${mm}` };
+}
+
+export function getScheduleCalendarDateObj(sch: any): Date | null {
+  if (!sch || (!sch.departureDate && !sch.deliveryDate && !sch.returnDate)) return null;
+  const depInfo = parseWibIsoParts(sch.deliveryDate || sch.departureDate);
+  const retInfo = parseWibIsoParts(sch.returnDate || sch.estimatedArrival);
+  if (retInfo && depInfo && retInfo.ymd > depInfo.ymd) {
+    return retInfo.dateObj;
+  }
+  return depInfo?.dateObj || retInfo?.dateObj || null;
 }
 
 export function convertSchedulesToAdminWeeks(
@@ -477,8 +496,8 @@ export function convertSchedulesToAdminWeeks(
 
   filtered.forEach(sch => {
     const d = getScheduleCalendarDateObj(sch)!;
-    const depObj = new Date(sch.departureDate);
-    const arrObj = sch.estimatedArrival ? new Date(sch.estimatedArrival) : d;
+    const depInfo = parseWibIsoParts(sch.departureDate || sch.deliveryDate);
+    const arrInfo = parseWibIsoParts(sch.estimatedArrival || sch.returnDate);
     const dayNum = d.getDate();
     const dayNameStr = DAY_NAMES[d.getDay()] || 'SENIN';
     const dayNumFormatted = String(dayNum).padStart(2, '0');
@@ -539,18 +558,10 @@ export function convertSchedulesToAdminWeeks(
       }
     }
 
-    const depIsoDate = !isNaN(depObj.getTime())
-      ? `${depObj.getFullYear()}-${String(depObj.getMonth() + 1).padStart(2, '0')}-${String(depObj.getDate()).padStart(2, '0')}`
-      : undefined;
-    const retIsoDate = !isNaN(arrObj.getTime())
-      ? `${arrObj.getFullYear()}-${String(arrObj.getMonth() + 1).padStart(2, '0')}-${String(arrObj.getDate()).padStart(2, '0')}`
-      : undefined;
-    const depTimeStr = !isNaN(depObj.getTime())
-      ? `${String(depObj.getHours()).padStart(2, '0')}:${String(depObj.getMinutes()).padStart(2, '0')}`
-      : '07:30';
-    const retTimeStr = !isNaN(arrObj.getTime())
-      ? `${String(arrObj.getHours()).padStart(2, '0')}:${String(arrObj.getMinutes()).padStart(2, '0')}`
-      : '17:00';
+    const depIsoDate = depInfo?.ymd;
+    const retIsoDate = arrInfo?.ymd;
+    const depTimeStr = sch.departureTime || depInfo?.timeHhMm || '07:30';
+    const retTimeStr = sch.targetReturnTime || arrInfo?.timeHhMm || '17:00';
 
     if (!dayObj.pengiriman.some(existing => existing.id && existing.id === sch.id)) {
       dayObj.pengiriman.push({

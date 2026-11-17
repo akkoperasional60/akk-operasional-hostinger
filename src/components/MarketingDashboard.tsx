@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { logisticsStore } from '../services/store';
 import {
   Globe,
   Megaphone,
@@ -183,7 +184,7 @@ const INITIAL_TO_VO_RO_DATA: ToVoRoRecord[] = [
   }
 ];
 
-const LS_KEY_TO_VO_RO = 'akk_marketing_to_vo_ro_v1';
+const LEGACY_LS_KEY_TO_VO_RO = 'akk_marketing_to_vo_ro_v1';
 
 // ============================================================
 // INITIAL DATA
@@ -390,9 +391,9 @@ const initialSalesReports: OfflineSalesReport[] = [
   }
 ];
 
-const LS_KEY_ONLINE_LEADS = 'akk_marketing_online_leads_v2';
-const LS_KEY_VISIT_REPORTS = 'akk_marketing_offline_visit_reports_v2';
-const LS_KEY_SALES_REPORTS = 'akk_marketing_offline_sales_reports_v2';
+const LEGACY_LS_KEY_ONLINE_LEADS = 'akk_marketing_online_leads_v2';
+const LEGACY_LS_KEY_VISIT_REPORTS = 'akk_marketing_offline_visit_reports_v2';
+const LEGACY_LS_KEY_SALES_REPORTS = 'akk_marketing_offline_sales_reports_v2';
 
 export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTab, onNavigateTab }) => {
   // --- Sub-tab for Marketing Offline: 'kunjungan' | 'penjualan' | 'tagihan' ---
@@ -463,59 +464,87 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [popupModal]);
 
-  // --- Persistent Online Leads State ---
-  const [onlineLeads, setOnlineLeads] = useState<OnlineLead[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_ONLINE_LEADS);
-      return saved ? JSON.parse(saved) : initialOnlineLeads;
-    } catch {
-      return initialOnlineLeads;
-    }
-  });
+  // --- Persistent Online Leads State (Hostinger MySQL /api/marketing/state) ---
+  const [onlineLeads, setOnlineLeads] = useState<OnlineLead[]>(initialOnlineLeads);
 
-  // --- Persistent Offline Visit Reports State ---
-  const [visitReports, setVisitReports] = useState<OfflineVisitReport[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_VISIT_REPORTS);
-      return saved ? JSON.parse(saved) : initialVisitReports;
-    } catch {
-      return initialVisitReports;
-    }
-  });
+  // --- Persistent Offline Visit Reports State (Hostinger MySQL /api/marketing/state) ---
+  const [visitReports, setVisitReports] = useState<OfflineVisitReport[]>(initialVisitReports);
 
-  // --- Persistent Offline Sales Reports State ---
-  const [salesReports, setSalesReports] = useState<OfflineSalesReport[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_SALES_REPORTS);
-      return saved ? JSON.parse(saved) : initialSalesReports;
-    } catch {
-      return initialSalesReports;
-    }
-  });
+  // --- Persistent Offline Sales Reports State (Hostinger MySQL /api/marketing/state) ---
+  const [salesReports, setSalesReports] = useState<OfflineSalesReport[]>(initialSalesReports);
+
+  // --- Persistent TO, VO & RO State (Hostinger MySQL /api/marketing/state) ---
+  const [toVoRoList, setToVoRoList] = useState<ToVoRoRecord[]>(INITIAL_TO_VO_RO_DATA);
+
+  const hasHydratedMarketingDbRef = useRef(false);
+  const suppressNextMarketingSaveRef = useRef(false);
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_KEY_ONLINE_LEADS, JSON.stringify(onlineLeads));
-    } catch {}
-  }, [onlineLeads]);
-
-  // --- Persistent TO, VO & RO State ---
-  const [toVoRoList, setToVoRoList] = useState<ToVoRoRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_TO_VO_RO);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LEGACY_LS_KEY_ONLINE_LEADS);
+        localStorage.removeItem(LEGACY_LS_KEY_VISIT_REPORTS);
+        localStorage.removeItem(LEGACY_LS_KEY_SALES_REPORTS);
+        localStorage.removeItem(LEGACY_LS_KEY_TO_VO_RO);
       }
     } catch {}
-    return INITIAL_TO_VO_RO_DATA;
-  });
+
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/marketing/state', {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: logisticsStore.buildSessionAuthHeaders({ Accept: 'application/json' })
+        });
+        if (res.ok && active) {
+          const json = await res.json();
+          const remote = json?.data;
+          if (remote && typeof remote === 'object') {
+            suppressNextMarketingSaveRef.current = true;
+            if (Array.isArray(remote.onlineLeads)) setOnlineLeads(remote.onlineLeads);
+            if (Array.isArray(remote.visitReports)) setVisitReports(remote.visitReports);
+            if (Array.isArray(remote.salesReports)) setSalesReports(remote.salesReports);
+            if (Array.isArray(remote.toVoRoList) && remote.toVoRoList.length > 0) {
+              setToVoRoList(remote.toVoRoList);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Hostinger Marketing] Gagal memuat state marketing dari MySQL:', err);
+      } finally {
+        if (active) {
+          hasHydratedMarketingDbRef.current = true;
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_TO_VO_RO, JSON.stringify(toVoRoList));
-    } catch {}
-  }, [toVoRoList]);
+    if (!hasHydratedMarketingDbRef.current) return;
+    if (suppressNextMarketingSaveRef.current) {
+      suppressNextMarketingSaveRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      fetch('/api/marketing/state', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          onlineLeads,
+          visitReports,
+          salesReports,
+          toVoRoList
+        })
+      }).catch(err => console.warn('[Hostinger Marketing] Gagal menyimpan state marketing ke MySQL:', err));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [onlineLeads, visitReports, salesReports, toVoRoList]);
 
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
   useEffect(() => {
@@ -544,18 +573,6 @@ export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTa
     nilaiOmsetIdr: 95000000,
     catatan: ''
   });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_VISIT_REPORTS, JSON.stringify(visitReports));
-    } catch {}
-  }, [visitReports]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_SALES_REPORTS, JSON.stringify(salesReports));
-    } catch {}
-  }, [salesReports]);
 
   // --- Online Filters ---
   const [onlineSearch, setOnlineSearch] = useState('');

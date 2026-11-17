@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import { jsPDF } from 'jspdf';
+import { logisticsStore } from '../services/store';
 
 export type FleetFormType = 'service' | 'washing' | 'procurement';
 
@@ -77,8 +78,15 @@ export interface FormPrintHistoryItem {
   summary: string;
 }
 
-const STORAGE_KEY_TEMPLATES = 'akk_fleet_form_templates_v3';
-const STORAGE_KEY_PRINT_LOGS = 'akk_fleet_form_print_logs_v3';
+export const FLEET_FORMS_UPDATED_EVENT = 'akk-fleet-forms-updated';
+const LEGACY_FLEET_FORM_LS_KEYS = [
+  'akk_fleet_form_templates_v3',
+  'akk_fleet_form_print_logs_v3',
+  'akk_fleet_form_templates_v1',
+  'akk_fleet_form_print_logs_v1',
+  'procurement_form_draft',
+  'service_form_draft'
+];
 
 export const DEFAULT_AKK_LOGO_PATH = '/assets/aistudio/image_c8ea86e5.png';
 
@@ -239,65 +247,157 @@ export const DEFAULT_TEMPLATES: Record<FleetFormType, FleetFormTemplateConfig> =
   }
 };
 
-export function loadAllFleetFormTemplates(): Record<FleetFormType, FleetFormTemplateConfig> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_TEMPLATES);
-    if (!raw) return DEFAULT_TEMPLATES;
-    const parsed = JSON.parse(raw);
-    return {
-      service: { ...DEFAULT_TEMPLATES.service, ...(parsed.service || {}) },
-      washing: { ...DEFAULT_TEMPLATES.washing, ...(parsed.washing || {}) },
-      procurement: { ...DEFAULT_TEMPLATES.procurement, ...(parsed.procurement || {}) }
-    };
-  } catch {
-    return DEFAULT_TEMPLATES;
+const DEFAULT_PRINT_LOGS: FormPrintHistoryItem[] = [
+  {
+    id: 'log-1',
+    formType: 'service',
+    docType: 'Formulir Service Armada',
+    nomorDokumen: '01/LOG-MTC/XI-2026',
+    timestamp: '2026-11-05 09:15',
+    userId: 'BayuN791',
+    summary: 'Permohonan Service & Pemeliharaan Armada P 8848 U'
+  },
+  {
+    id: 'log-2',
+    formType: 'washing',
+    docType: 'Formulir Cuci Armada',
+    nomorDokumen: 'CUCI/LOG/XI-2026/01',
+    timestamp: '2026-11-05 08:30',
+    userId: 'BayuN791',
+    summary: 'Form Kegiatan Driver & Pencucian Armada Rutin'
+  },
+  {
+    id: 'log-3',
+    formType: 'procurement',
+    docType: 'Formulir Pengadaan Armada',
+    nomorDokumen: '2/RO/LOG/XI-2026',
+    timestamp: '2026-11-04 16:20',
+    userId: 'BayuN791',
+    summary: 'Permintaan Pengadaan Barang Distribusi & Suku Cadang'
   }
+];
+
+let memoryFleetFormTemplates: Record<FleetFormType, FleetFormTemplateConfig> = {
+  service: { ...DEFAULT_TEMPLATES.service },
+  washing: { ...DEFAULT_TEMPLATES.washing },
+  procurement: { ...DEFAULT_TEMPLATES.procurement }
+};
+let memoryFleetFormPrintLogs: FormPrintHistoryItem[] = [...DEFAULT_PRINT_LOGS];
+let memoryFleetModalDrafts: { procurement?: any; service?: any } = {};
+let fleetFormsHydrated = false;
+let fleetFormsHydrationPromise: Promise<void> | null = null;
+
+function purgeLegacyFleetFormLocalStorage() {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  LEGACY_FLEET_FORM_LS_KEYS.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  });
+}
+
+function emitFleetFormsUpdated() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(FLEET_FORMS_UPDATED_EVENT));
+  }
+}
+
+export async function persistFleetFormStateToMysql(): Promise<void> {
+  purgeLegacyFleetFormLocalStorage();
+  try {
+    await fetch('/api/fleet-forms/state', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        templates: memoryFleetFormTemplates,
+        printLogs: memoryFleetFormPrintLogs,
+        modalDrafts: memoryFleetModalDrafts
+      })
+    });
+  } catch (err) {
+    console.warn('[Hostinger FleetForms] Gagal menyimpan rancangan formulir ke MySQL:', err);
+  }
+}
+
+export async function hydrateFleetFormStateFromMysql(force = false): Promise<void> {
+  purgeLegacyFleetFormLocalStorage();
+  if (fleetFormsHydrated && !force) return;
+  if (fleetFormsHydrationPromise && !force) return fleetFormsHydrationPromise;
+
+  fleetFormsHydrationPromise = (async () => {
+    try {
+      const res = await fetch('/api/fleet-forms/state', {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: logisticsStore.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const remote = json?.data;
+        if (remote && typeof remote === 'object') {
+          if (remote.templates && typeof remote.templates === 'object') {
+            memoryFleetFormTemplates = {
+              service: { ...DEFAULT_TEMPLATES.service, ...(remote.templates.service || {}) },
+              washing: { ...DEFAULT_TEMPLATES.washing, ...(remote.templates.washing || {}) },
+              procurement: { ...DEFAULT_TEMPLATES.procurement, ...(remote.templates.procurement || {}) }
+            };
+          }
+          if (Array.isArray(remote.printLogs)) {
+            memoryFleetFormPrintLogs = remote.printLogs;
+          }
+          if (remote.modalDrafts && typeof remote.modalDrafts === 'object') {
+            memoryFleetModalDrafts = remote.modalDrafts;
+          }
+          emitFleetFormsUpdated();
+        }
+        fleetFormsHydrated = true;
+      }
+    } catch (err) {
+      console.warn('[Hostinger FleetForms] Gagal memuat rancangan formulir dari MySQL:', err);
+    } finally {
+      fleetFormsHydrationPromise = null;
+    }
+  })();
+
+  return fleetFormsHydrationPromise;
+}
+
+export function getFleetModalDraft<T>(draftKey: 'procurement' | 'service'): T | null {
+  purgeLegacyFleetFormLocalStorage();
+  if (!fleetFormsHydrated && typeof window !== 'undefined') {
+    void hydrateFleetFormStateFromMysql();
+  }
+  const val = memoryFleetModalDrafts[draftKey];
+  return val ? (val as T) : null;
+}
+
+export function saveFleetModalDraft(draftKey: 'procurement' | 'service', draft: any): void {
+  memoryFleetModalDrafts = { ...memoryFleetModalDrafts, [draftKey]: draft };
+  void persistFleetFormStateToMysql();
+}
+
+export function loadAllFleetFormTemplates(): Record<FleetFormType, FleetFormTemplateConfig> {
+  purgeLegacyFleetFormLocalStorage();
+  if (!fleetFormsHydrated && typeof window !== 'undefined') {
+    void hydrateFleetFormStateFromMysql();
+  }
+  return memoryFleetFormTemplates;
 }
 
 export function saveFleetFormTemplate(formType: FleetFormType, config: FleetFormTemplateConfig) {
-  const current = loadAllFleetFormTemplates();
-  const updated = { ...current, [formType]: config };
-  localStorage.setItem(STORAGE_KEY_TEMPLATES, JSON.stringify(updated));
+  memoryFleetFormTemplates = { ...memoryFleetFormTemplates, [formType]: config };
+  emitFleetFormsUpdated();
+  void persistFleetFormStateToMysql();
 }
 
 export function loadFormPrintLogs(): FormPrintHistoryItem[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_PRINT_LOGS);
-    if (!raw) {
-      return [
-        {
-          id: 'log-1',
-          formType: 'service',
-          docType: 'Formulir Service Armada',
-          nomorDokumen: '01/LOG-MTC/XI-2026',
-          timestamp: '2026-11-05 09:15',
-          userId: 'BayuN791',
-          summary: 'Permohonan Service & Pemeliharaan Armada P 8848 U'
-        },
-        {
-          id: 'log-2',
-          formType: 'washing',
-          docType: 'Formulir Cuci Armada',
-          nomorDokumen: 'CUCI/LOG/XI-2026/01',
-          timestamp: '2026-11-05 08:30',
-          userId: 'BayuN791',
-          summary: 'Form Kegiatan Driver & Pencucian Armada Rutin'
-        },
-        {
-          id: 'log-3',
-          formType: 'procurement',
-          docType: 'Formulir Pengadaan Armada',
-          nomorDokumen: '2/RO/LOG/XI-2026',
-          timestamp: '2026-11-04 16:20',
-          userId: 'BayuN791',
-          summary: 'Permintaan Pengadaan Barang Distribusi & Suku Cadang'
-        }
-      ];
-    }
-    return JSON.parse(raw);
-  } catch {
-    return [];
+  purgeLegacyFleetFormLocalStorage();
+  if (!fleetFormsHydrated && typeof window !== 'undefined') {
+    void hydrateFleetFormStateFromMysql();
   }
+  return memoryFleetFormPrintLogs;
 }
 
 export function appendFormPrintLog(item: Omit<FormPrintHistoryItem, 'id' | 'timestamp'>): FormPrintHistoryItem[] {
@@ -310,7 +410,9 @@ export function appendFormPrintLog(item: Omit<FormPrintHistoryItem, 'id' | 'time
     timestamp
   };
   const updated = [newItem, ...existing];
-  localStorage.setItem(STORAGE_KEY_PRINT_LOGS, JSON.stringify(updated));
+  memoryFleetFormPrintLogs = updated;
+  emitFleetFormsUpdated();
+  void persistFleetFormStateToMysql();
   return updated;
 }
 

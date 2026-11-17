@@ -101,8 +101,11 @@ export interface SalesOrderInvoice {
   items: SalesOrderItem[];
 }
 
-const STORAGE_KEY_SALES_RFID = 'akk_sales_rfid_invoices_v1';
-const ACTIVE_INVOICE_KEY = 'akk_sales_rfid_active_invoice_id';
+const LEGACY_STORAGE_KEY_SALES_RFID = 'akk_sales_rfid_invoices_v1';
+const LEGACY_ACTIVE_INVOICE_KEY = 'akk_sales_rfid_active_invoice_id';
+
+let memorySalesRfidInvoices: SalesOrderInvoice[] | null = null;
+let memoryActiveInvoiceId = '';
 
 const MASTER_PACKAGING_CATALOG: Array<{
   skuCode: string;
@@ -409,22 +412,13 @@ function useSharedSalesRfidInvoices() {
         return it;
       })
     }));
-    if (mutated) {
-      try {
-        localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(cleaned));
-      } catch {}
-    }
     return cleaned;
   };
 
   const [invoices, setInvoices] = useState<SalesOrderInvoice[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SALES_RFID);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return sanitizeSavedInvoices(parsed);
-      }
-    } catch {}
+    if (Array.isArray(memorySalesRfidInvoices) && memorySalesRfidInvoices.length > 0) {
+      return sanitizeSavedInvoices(memorySalesRfidInvoices);
+    }
     return getInitialInvoices(defaultFleet, defaultAdmin);
   });
 
@@ -529,8 +523,16 @@ function useSharedSalesRfidInvoices() {
     return { merged, localChanged, remoteNeedsPush };
   };
 
-  // Cross-device two-way synchronization via server /api/sales-rfid-invoices + localStorage (PC <-> HP)
+  // Cross-device synchronization exclusively via Hostinger MySQL (/api/sales-rfid-invoices, tanpa localStorage)
   useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LEGACY_STORAGE_KEY_SALES_RFID);
+        localStorage.removeItem(LEGACY_ACTIVE_INVOICE_KEY);
+        localStorage.removeItem(LEGACY_SCAN_HISTORY_STORAGE_KEY);
+      }
+    } catch {}
+
     let active = true;
     let lastFetchAt = 0;
     let rateLimitedUntil = 0;
@@ -539,7 +541,8 @@ function useSharedSalesRfidInvoices() {
       try {
         const res = await fetch('/api/sales-rfid-invoices', {
           method: 'GET',
-          credentials: 'include',
+          credentials: 'same-origin',
+          headers: logisticsStore.buildSessionAuthHeaders({ Accept: 'application/json' }),
           cache: 'no-store'
         });
         if (res.status === 429) {
@@ -552,16 +555,12 @@ function useSharedSalesRfidInvoices() {
             const remoteCleaned = sanitizeSavedInvoices(json.data);
             setInvoices(prev => {
               const { merged, localChanged, remoteNeedsPush } = mergeClientAndRemoteInvoices(prev, remoteCleaned);
-              if (localChanged) {
-                try {
-                  localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(merged));
-                } catch {}
-              }
+              memorySalesRfidInvoices = merged;
               if (remoteNeedsPush && merged.length > 0) {
                 fetch('/api/sales-rfid-invoices', {
                   method: 'POST',
-                  credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin',
+                  headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
                   body: JSON.stringify({ invoices: merged })
                 }).catch(() => {});
               }
@@ -584,14 +583,10 @@ function useSharedSalesRfidInvoices() {
     lastFetchAt = Date.now();
     void fetchRemote();
 
-    const syncFromStorage = () => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY_SALES_RFID);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) setInvoices(sanitizeSavedInvoices(parsed));
-        }
-      } catch {}
+    const syncFromMemory = () => {
+      if (Array.isArray(memorySalesRfidInvoices)) {
+        setInvoices(sanitizeSavedInvoices(memorySalesRfidInvoices));
+      }
     };
 
     const handleVisibilityOrFocus = () => {
@@ -600,8 +595,7 @@ function useSharedSalesRfidInvoices() {
       }
     };
 
-    window.addEventListener('akk-sales-rfid-updated', syncFromStorage);
-    window.addEventListener('storage', syncFromStorage);
+    window.addEventListener('akk-sales-rfid-updated', syncFromMemory);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
     const interval = window.setInterval(throttledFetchRemote, 20000);
@@ -609,8 +603,7 @@ function useSharedSalesRfidInvoices() {
     return () => {
       active = false;
       window.clearInterval(interval);
-      window.removeEventListener('akk-sales-rfid-updated', syncFromStorage);
-      window.removeEventListener('storage', syncFromStorage);
+      window.removeEventListener('akk-sales-rfid-updated', syncFromMemory);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
@@ -622,15 +615,15 @@ function useSharedSalesRfidInvoices() {
   ) => {
     setInvoices(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
+      memorySalesRfidInvoices = next;
       try {
-        localStorage.setItem(STORAGE_KEY_SALES_RFID, JSON.stringify(next));
         window.dispatchEvent(new CustomEvent('akk-sales-rfid-updated'));
       } catch {}
-      // Sync to server in background (two-way PC <-> HP)
+      // Sync to Hostinger MySQL in background
       fetch('/api/sales-rfid-invoices', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ invoices: next, replaceAll })
       }).catch(() => {});
       return next;
@@ -2750,7 +2743,19 @@ const LOADING_GATE_OPTIONS = [
   'Ram 3'
 ];
 
-const SCAN_HISTORY_STORAGE_KEY = 'akk_wms_rfid_recent_scan_logs_v1';
+const LEGACY_SCAN_HISTORY_STORAGE_KEY = 'akk_wms_rfid_recent_scan_logs_v1';
+let memoryRecentScanLogs: RealtimeScanFeedback[] = [];
+
+const persistSalesRfidMetaToMysql = (patch: { activeInvoiceId?: string; recentScansLog?: RealtimeScanFeedback[] }) => {
+  if (patch.activeInvoiceId !== undefined) memoryActiveInvoiceId = patch.activeInvoiceId;
+  if (patch.recentScansLog !== undefined) memoryRecentScanLogs = patch.recentScansLog.slice(0, 30);
+  fetch('/api/sales-rfid-meta', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(patch)
+  }).catch(() => {});
+};
 
 // Web Audio API Sound Synthesizer: 1200Hz Beep Sukses & 250Hz Buzzer Gagal
 function playScannerFeedbackBeep(type: 'success' | 'error', enabled: boolean = true) {
@@ -2853,14 +2858,13 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   }, [invoices, hasFullSalesAccess, currentUserName]);
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(() => {
-    const savedId = localStorage.getItem(ACTIVE_INVOICE_KEY);
-    return initialInvoiceId || savedId || availableInvoices[0]?.id || invoices[0]?.id || '';
+    return initialInvoiceId || memoryActiveInvoiceId || availableInvoices[0]?.id || invoices[0]?.id || '';
   });
 
   useEffect(() => {
     if (initialInvoiceId && availableInvoices.some(i => i.id === initialInvoiceId)) {
       setSelectedInvoiceId(initialInvoiceId);
-      localStorage.setItem(ACTIVE_INVOICE_KEY, initialInvoiceId);
+      persistSalesRfidMetaToMysql({ activeInvoiceId: initialInvoiceId });
     } else if (!availableInvoices.some(i => i.id === selectedInvoiceId) && availableInvoices[0]) {
       setSelectedInvoiceId(availableInvoices[0].id);
     }
@@ -2911,16 +2915,41 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
 
   // Real-Time Feedback Card & Recent Scans Log
   const [, setLastFeedback] = useState<RealtimeScanFeedback | null>(null);
-  const [recentScansLog, setRecentScansLog] = useState<RealtimeScanFeedback[]>(() => {
+  const [recentScansLog, setRecentScansLog] = useState<RealtimeScanFeedback[]>(() => memoryRecentScanLogs);
+
+  useEffect(() => {
+    let active = true;
     try {
-      const raw = localStorage.getItem(SCAN_HISTORY_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.slice(0, 30);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LEGACY_STORAGE_KEY_SALES_RFID);
+        localStorage.removeItem(LEGACY_ACTIVE_INVOICE_KEY);
+        localStorage.removeItem(LEGACY_SCAN_HISTORY_STORAGE_KEY);
       }
     } catch {}
-    return [];
-  });
+    fetch('/api/sales-rfid-meta', {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: logisticsStore.buildSessionAuthHeaders({ Accept: 'application/json' }),
+      cache: 'no-store'
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => {
+        if (!active || !json?.success || !json?.data) return;
+        if (Array.isArray(json.data.recentScansLog)) {
+          const logs = json.data.recentScansLog.slice(0, 30);
+          memoryRecentScanLogs = logs;
+          setRecentScansLog(logs);
+        }
+        if (!initialInvoiceId && json.data.activeInvoiceId) {
+          memoryActiveInvoiceId = String(json.data.activeInvoiceId);
+          setSelectedInvoiceId(String(json.data.activeInvoiceId));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [initialInvoiceId]);
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'SUCCESS' | 'ERROR'>('ALL');
 
   // Modals for Overload Warning & Item Photo Gallery
@@ -4668,9 +4697,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         setLastFeedback(feedbackObj);
         setRecentScansLog(prev => {
           const next = [feedbackObj, ...prev].slice(0, 30);
-          try {
-            localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
-          } catch {}
+          persistSalesRfidMetaToMysql({ recentScansLog: next });
           return next;
         });
 
@@ -4751,9 +4778,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         setLastFeedback(errorFeedback);
         setRecentScansLog(prev => {
           const next = [errorFeedback, ...prev].slice(0, 30);
-          try {
-            localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(next));
-          } catch {}
+          persistSalesRfidMetaToMysql({ recentScansLog: next });
           return next;
         });
 
@@ -5119,7 +5144,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                             type="button"
                             onClick={() => {
                               setSelectedInvoiceId(inv.id);
-                              localStorage.setItem(ACTIVE_INVOICE_KEY, inv.id);
+                              persistSalesRfidMetaToMysql({ activeInvoiceId: inv.id });
                               setTargetScanMode('AUTO');
                               setOpenCustomDropdown(null);
                             }}
@@ -5541,7 +5566,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                           onClick={() => {
                             if (scanErrorLock) return;
                             setSelectedInvoiceId(inv.id);
-                            localStorage.setItem(ACTIVE_INVOICE_KEY, inv.id);
+                            persistSalesRfidMetaToMysql({ activeInvoiceId: inv.id });
                             setTargetScanMode('AUTO');
                             setOpenCustomDropdown(null);
                           }}
@@ -6118,7 +6143,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   type="button"
                   onClick={() => {
                     setRecentScansLog([]);
-                    localStorage.removeItem(SCAN_HISTORY_STORAGE_KEY);
+                    persistSalesRfidMetaToMysql({ recentScansLog: [] });
                   }}
                   className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 text-[10px] font-bold cursor-pointer"
                 >

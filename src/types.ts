@@ -39,6 +39,9 @@ export interface UserProfile {
   password?: string;
 }
 
+export type FleetAngleKey = 'front' | 'rear' | 'right' | 'left' | 'top' | 'cab';
+export type FleetAnglePhotos = Partial<Record<FleetAngleKey, string>>;
+
 export interface Fleet {
   id: string;
   plateNumber: string;
@@ -62,6 +65,7 @@ export interface Fleet {
   taxDueDate?: string; // Tanggal Jatuh Tempo Pajak (Tahunan)
   stnkExpiryDate?: string; // Masa Berlaku STNK / Plat (5 Tahunan)
   kirExpiryDate?: string; // Masa Berlaku Uji KIR Dishub (6 Bulanan / Berkala)
+  photos3d?: FleetAnglePhotos; // Foto kondisi armada 6 sudut (depan, belakang, kanan, kiri, atas, kabin)
   // Optional backwards compatibility fields
   tonnageCapacity?: number;
   currentTonnage?: number;
@@ -599,6 +603,50 @@ export interface SparePartUsage {
   performedBy: string;
 }
 
+export type MaintenanceCategory =
+  | 'servis_berkala'
+  | 'ganti_oli'
+  | 'ban_velg'
+  | 'rem_kopling'
+  | 'aki_kelistrikan'
+  | 'mesin_transmisi'
+  | 'body_box_ac'
+  | 'pajak_kir_surat'
+  | 'darurat_derek'
+  | 'lainnya';
+
+export type MaintenancePaymentStatus =
+  | 'Lunas'
+  | 'Menunggu Approval'
+  | 'Cicilan / Tempo'
+  | 'Dibatalkan';
+
+export interface FleetMaintenanceCost {
+  id: string;
+  fleetId: string;
+  plateNumber: string;
+  initialCode?: string;
+  vehicleType: VehicleType;
+  branchId?: string;
+  serviceDate: string; // YYYY-MM-DD
+  category: MaintenanceCategory;
+  workTitle: string;
+  workshopName: string;
+  odometerKm: number;
+  partsCost: number;
+  laborCost: number;
+  otherCost: number;
+  totalCost: number;
+  paymentStatus: MaintenancePaymentStatus;
+  invoiceNumber?: string;
+  nextServiceKm?: number;
+  nextServiceDate?: string;
+  receiptPhotoUrl?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export type FuelType = 'BioSolar' | 'Dexlite' | 'Pertamina Dex' | 'Pertalite' | 'Pertamax';
 export type EfficiencyStatus = 'Sangat Efisien' | 'Efisien / Normal' | 'Boros' | 'Kritis / Potensi Anomali';
 
@@ -685,9 +733,16 @@ export interface DriverShiftCheckin {
   id: string; // e.g. 'SHIFT-20261008-001'
   driverId: string;
   driverName: string;
+  checkinRole?: 'driver' | 'helper';
+  selectedArea?: string;
   fleetId?: string;
+  fleetInitialCode?: string;
   plateNumber?: string;
   vehicleType?: string;
+  helper1Id?: string;
+  helper1Name?: string;
+  helper2Id?: string;
+  helper2Name?: string;
   date: string; // YYYY-MM-DD
   checkinTime: string; // ISO string
   checkinTimeFormatted: string; // e.g. "07:15 WIB"
@@ -702,8 +757,54 @@ export interface DriverShiftCheckin {
   shiftName: string; // 'Shift Pagi (06:00 - 15:00 WIB)' | 'Shift Siang' | 'Shift Khusus Antar-Kota'
   odometerStartKm?: number;
   notes?: string;
+  checklistCompletedAt?: string;
+  securityValidatedAt?: string;
+  securityValidatedBy?: string;
+  gateOutAt?: string;
+  arrivedAtWarehouseAt?: string;
   synced: boolean;
   createdAt: string;
+}
+
+export interface PortalValidationSnapshot {
+  id: string;
+  validationDate: string;
+  branchId: string;
+  cocokCount: number;
+  tidakCocokCount: number;
+  totalCount: number;
+  rows: any[];
+  validatedBy?: string;
+  updatedAt: string;
+}
+
+export interface LiveGpsTripPoint {
+  lat: number;
+  lng: number;
+  timestamp: string;
+  locationName?: string;
+  speedKmh?: number;
+}
+
+export interface LiveGpsTripRecord {
+  id: string;
+  tripDate: string;
+  branchId: string;
+  fleetId?: string;
+  plateNumber: string;
+  initialCode?: string;
+  vehicleType?: string;
+  driverName: string;
+  helper1Name?: string;
+  helper2Name?: string;
+  areaName: string;
+  status: 'active' | 'completed';
+  startedAt: string;
+  endedAt?: string;
+  currentLat?: number;
+  currentLng?: number;
+  points: LiveGpsTripPoint[];
+  updatedAt?: string;
 }
 
 export interface SwapShiftRequest {

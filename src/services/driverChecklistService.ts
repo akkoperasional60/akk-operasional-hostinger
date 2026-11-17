@@ -85,6 +85,7 @@ const LEGACY_NAME_ALIASES: Record<string, string> = {
 class DriverChecklistService {
   private memoryChecklists: DriverVehicleChecklist[] | null = null;
   private isSyncing: boolean = false;
+  private lastSyncAt: number = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -170,11 +171,16 @@ class DriverChecklistService {
     return this.memoryChecklists;
   }
 
-  public async syncFromServer(): Promise<DriverVehicleChecklist[]> {
+  public async syncFromServer(force: boolean = false): Promise<DriverVehicleChecklist[]> {
     if (typeof window === 'undefined' || this.isSyncing) {
       return this.loadAllChecklists();
     }
+    const nowMs = Date.now();
+    if (!force && this.lastSyncAt > 0 && nowMs - this.lastSyncAt < 8000) {
+      return this.loadAllChecklists();
+    }
     this.isSyncing = true;
+    this.lastSyncAt = nowMs;
     try {
       const res = await fetch('/api/fleet-checklists', {
         method: 'GET',
@@ -227,8 +233,12 @@ class DriverChecklistService {
       const merged = Array.from(mergedMap.values()).sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
+      const prevSig = JSON.stringify(localList.map(c => `${c.id}:${c.overallStatus}:${c.passedCount}:${c.issueCount}`));
+      const nextSig = JSON.stringify(merged.map(c => `${c.id}:${c.overallStatus}:${c.passedCount}:${c.issueCount}`));
       this.persistLocal(merged);
-      window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+      if (prevSig !== nextSig) {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+      }
       return merged;
     } catch {
       return this.loadAllChecklists();
