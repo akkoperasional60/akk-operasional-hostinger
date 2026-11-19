@@ -1643,36 +1643,37 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                                 )}
                               </div>
                               <p className="text-xs leading-relaxed text-slate-300">{notReadyFleetPopup.description}</p>
+                              <div className={`rounded-xl border px-3.5 py-2.5 text-xs font-bold ${
+                                notReadyFleetPopup.reasonType === 'maintenance'
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                              }`}>
+                                Yakin untuk memilih armada ini?
+                              </div>
                             </div>
                             <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => setNotReadyFleetPopup(null)}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                                  notReadyFleetPopup.canForceProceed
-                                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const chosenId = notReadyFleetPopup.fleet.id;
+                                  setNotReadyFleetPopup(null);
+                                  setNewSchedule({ ...newSchedule, fleetId: chosenId });
+                                }}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold text-white transition cursor-pointer ${
+                                  notReadyFleetPopup.reasonType === 'maintenance'
+                                    ? 'bg-rose-600 hover:bg-rose-500'
+                                    : 'bg-blue-600 hover:bg-blue-500'
                                 }`}
                               >
-                                Pilih Armada Ready Lain
+                                Iya, Saya Yakin
                               </button>
-                              {notReadyFleetPopup.canForceProceed && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const chosenId = notReadyFleetPopup.fleet.id;
-                                    setNotReadyFleetPopup(null);
-                                    setNewSchedule({ ...newSchedule, fleetId: chosenId });
-                                  }}
-                                  className={`px-4 py-2 rounded-xl text-xs font-bold text-white transition cursor-pointer ${
-                                    notReadyFleetPopup.reasonType === 'maintenance'
-                                      ? 'bg-rose-600 hover:bg-rose-500'
-                                      : 'bg-amber-600 hover:bg-amber-500'
-                                  }`}
-                                >
-                                  Tetap Jadwalkan Armada Ini
-                                </button>
-                              )}
                             </div>
                           </div>
                         </div>,

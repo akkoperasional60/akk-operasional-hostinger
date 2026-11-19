@@ -54,12 +54,14 @@ import {
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
-import { driverReportService } from '../services/driverReportService';
 import { canAccess } from '../utils/rbac';
 import { preloadTabModule } from '../utils/tabLoaders';
+
+const AndroidApkDownloadModal = React.lazy(() =>
+  import('./AndroidApkDownloadModal').then(m => ({ default: m.AndroidApkDownloadModal }))
+);
 
 export type NavTab =
   | 'dashboard'
@@ -103,6 +105,7 @@ export type NavTab =
   | 'ga_aset'
   | 'training_videos'
   | 'training_karyawan'
+  | 'finance_overview'
   | 'finance_dashboard'
   | 'finance_customer_mapping'
   | 'finance_validasi_form_kirim'
@@ -191,15 +194,23 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   const [mobileExpandedCat, setMobileExpandedCat] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     const updateReports = () => {
-      try {
-        const reps = driverReportService.getReports();
-        setPendingReportsCount(reps.filter(r => r.status === 'pending').length);
-      } catch {}
+      void import('../services/driverReportService')
+        .then(({ driverReportService }) => {
+          if (!active) return;
+          const reps = driverReportService.getReports();
+          setPendingReportsCount(reps.filter(r => r.status === 'pending').length);
+        })
+        .catch(() => {});
     };
-    updateReports();
+    const initTimer = setTimeout(updateReports, 400);
     window.addEventListener('driver-report-updated', updateReports);
-    return () => window.removeEventListener('driver-report-updated', updateReports);
+    return () => {
+      active = false;
+      clearTimeout(initTimer);
+      window.removeEventListener('driver-report-updated', updateReports);
+    };
   }, []);
 
   useEffect(() => {
@@ -534,9 +545,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
             },
             {
               tab: 'warehouse_opname',
-              label: 'Opname Gudang (Integrasi Pembelian)',
+              label: 'Opname Gudang',
               icon: <ClipboardCheck className="w-4 h-4 text-purple-500" />,
-              description: 'Audit fisik vs sistem & kirim restock ke Adm Pembelian'
+              description: 'Pencatatan hasil hitung fisik barang gudang'
             }
           ]
         }
@@ -683,12 +694,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               tab: 'purchasing_stok_opname',
               label: 'Stok Opname',
               icon: <ClipboardCheck className="w-4 h-4 text-indigo-500" />,
-              badge: (
-                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
-                  Integrasi Gudang
-                </span>
-              ),
-              description: 'Rekapitulasi selisih opname fisik gudang & tindak lanjut PO restock'
+              description: 'Analisa dan pencatatan hasil stok opname barang'
             },
             {
               tab: 'purchasing_kartu_stok',
@@ -806,9 +812,15 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       groups: [
         {
           groupId: 'finance-master',
-          groupTitle: 'Tagihan & Master Pelanggan',
-          groupIcon: <FileText className="w-4 h-4 text-emerald-500" />,
+          groupTitle: 'Ringkasan, Tagihan & Master Pelanggan',
+          groupIcon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
           items: [
+            {
+              tab: 'finance_overview',
+              label: 'Dashboard',
+              icon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
+              description: 'Ringkasan piutang, jatuh tempo, limit kredit & validasi form kirim'
+            },
             {
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
@@ -870,14 +882,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       groups: [
         {
           groupId: 'hr-personalia',
-          groupTitle: 'Personalia & Kehadiran',
+          groupTitle: 'Data, Rolling & History Karyawan',
           groupIcon: <Users className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'hr_dashboard',
               label: 'HR',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
-              description: 'Data karyawan, presensi kru & rekap kehadiran'
+              description: 'Data karyawan, rolling posisi & history departemen'
             }
           ]
         },
@@ -1546,11 +1558,15 @@ const SidebarComponent: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Android APK Modal */}
-      <AndroidApkDownloadModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-      />
+      {/* Android APK Modal (lazy-loaded only when opened) */}
+      {isApkModalOpen && (
+        <React.Suspense fallback={null}>
+          <AndroidApkDownloadModal
+            isOpen={isApkModalOpen}
+            onClose={() => setIsApkModalOpen(false)}
+          />
+        </React.Suspense>
+      )}
     </>
   );
 };

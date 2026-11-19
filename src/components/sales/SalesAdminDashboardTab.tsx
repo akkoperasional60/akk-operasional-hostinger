@@ -29,11 +29,20 @@ import {
   CheckCircle2,
   Users,
   Sparkles,
-  BarChart3
+  BarChart3,
+  Building2
 } from 'lucide-react';
-import { MONTH_OPTIONS, useSalesAdminUsers } from './SalesHeaderFilter';
+import {
+  MONTH_OPTIONS,
+  SALES_BRANCH_OPTIONS,
+  getSalesAdminAssignedBranchId,
+  useSalesAdminUsers
+} from './SalesHeaderFilter';
 import { cleanFleetDisplayLabel } from './LoadingDurationTab';
 import { ModernKpiDropdown } from './SalesKpi';
+import { branchStore } from '../../services/branchStore';
+import { logisticsStore } from '../../services/store';
+import { isSidoarjoArea } from '../../utils/areaNormalizer';
 import type { NavTab } from '../Sidebar';
 
 interface SalesAdminDashboardTabProps {
@@ -42,6 +51,29 @@ interface SalesAdminDashboardTabProps {
 
 const CHART_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 
+function resolveRecordBranchId(
+  branchValue?: string | null,
+  areaName?: string | null
+): 'cab-banyuwangi' | 'cab-sidoarjo' {
+  const bLower = String(branchValue || '').trim().toLowerCase();
+  if (
+    bLower === 'cab-sidoarjo' ||
+    bLower.includes('sidoarjo') ||
+    bLower === 'sda'
+  ) {
+    return 'cab-sidoarjo';
+  }
+  if (
+    bLower === 'cab-banyuwangi' ||
+    bLower.includes('nusantara') ||
+    bLower.includes('banyuwangi') ||
+    bLower === 'bwi'
+  ) {
+    return 'cab-banyuwangi';
+  }
+  return isSidoarjoArea(areaName) ? 'cab-sidoarjo' : 'cab-banyuwangi';
+}
+
 export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
   onNavigateTab
 }) => {
@@ -49,19 +81,59 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
   const currentMonthName = MONTH_OPTIONS[now.getMonth()] || 'November';
   const currentYearStr = String(now.getFullYear());
 
+  const currentUser = logisticsStore.getCurrentUser();
+  const accessibleBranchOptions = useMemo(() => {
+    const allowed = branchStore.getAccessibleBranchesForUser(currentUser);
+    const allowedIds = new Set(allowed.map(b => b.id));
+    const filtered = SALES_BRANCH_OPTIONS.filter(opt => allowedIds.has(opt.id));
+    return filtered.length > 0 ? filtered : SALES_BRANCH_OPTIONS;
+  }, [currentUser]);
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() =>
+    accessibleBranchOptions.length > 1
+      ? 'ALL'
+      : accessibleBranchOptions[0]?.id || 'cab-banyuwangi'
+  );
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthName);
   const [selectedYear, setSelectedYear] = useState<string>(currentYearStr);
   const [schedulePeriodMode, setSchedulePeriodMode] = useState<'ALL_MONTH' | 'W1' | 'W2' | 'W3' | 'W4'>('ALL_MONTH');
 
-  const salesAdminUsers = useSalesAdminUsers();
+  const effectiveBranchId = useMemo(() => {
+    if (selectedBranchId === 'ALL' && accessibleBranchOptions.length > 1) {
+      return 'ALL';
+    }
+    if (accessibleBranchOptions.some(b => b.id === selectedBranchId)) {
+      return selectedBranchId;
+    }
+    return accessibleBranchOptions.length > 1
+      ? 'ALL'
+      : accessibleBranchOptions[0]?.id || 'cab-banyuwangi';
+  }, [selectedBranchId, accessibleBranchOptions]);
+
+  const salesAdminUsers = useSalesAdminUsers(effectiveBranchId === 'ALL' ? 'ALL' : effectiveBranchId);
+  const adminBranchMap = useMemo(() => {
+    const map = new Map<string, string>();
+    salesAdminUsers.forEach(u => {
+      const nameKey = (u.fullName || '').trim().toUpperCase();
+      if (nameKey) {
+        map.set(nameKey, getSalesAdminAssignedBranchId(u));
+      }
+    });
+    return map;
+  }, [salesAdminUsers]);
+
   const adminNames = useMemo(() => {
     const list = salesAdminUsers
       .map(u => (u.fullName || '').trim().toUpperCase())
       .filter(Boolean);
-    return list.length > 0
-      ? Array.from(new Set(list))
-      : ['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA', 'MEINDA MAULINA', 'BINTANG MEDITA SARI'];
-  }, [salesAdminUsers]);
+    if (list.length > 0) {
+      return Array.from(new Set(list));
+    }
+    if (effectiveBranchId === 'cab-sidoarjo') {
+      return ['ADMIN SIDOARJO'];
+    }
+    return ['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA', 'MEINDA MAULINA', 'BINTANG MEDITA SARI'];
+  }, [salesAdminUsers, effectiveBranchId]);
 
   // Live state from all MySQL endpoints of Admin Penjualan sub-menus
   const [adminSchedules, setAdminSchedules] = useState<any[]>([]);
@@ -112,9 +184,45 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
   const targetMonthIdx = Math.max(0, MONTH_OPTIONS.indexOf(selectedMonth));
   const targetYearNum = Number(selectedYear) || now.getFullYear();
 
+  // Branch-filtered datasets
+  const filteredSchedules = useMemo(() => {
+    if (effectiveBranchId === 'ALL') return adminSchedules;
+    return adminSchedules.filter(s => {
+      if (s?.branchId) return resolveRecordBranchId(s.branchId, null) === effectiveBranchId;
+      const adminKey = String(s?.adminName || '').trim().toUpperCase();
+      const assignedBranch = adminBranchMap.get(adminKey);
+      if (assignedBranch && assignedBranch !== 'NONE') {
+        return assignedBranch === effectiveBranchId;
+      }
+      const firstDuty = Array.isArray(s?.duties) ? s.duties[0] : '';
+      return resolveRecordBranchId(null, firstDuty) === effectiveBranchId;
+    });
+  }, [adminSchedules, effectiveBranchId, adminBranchMap]);
+
+  const filteredLoadingDurations = useMemo(() => {
+    if (effectiveBranchId === 'ALL') return loadingDurations;
+    return loadingDurations.filter(
+      item => resolveRecordBranchId(item?.branchId || item?.branchName, item?.areaName) === effectiveBranchId
+    );
+  }, [loadingDurations, effectiveBranchId]);
+
+  const filteredFormKirim = useMemo(() => {
+    if (effectiveBranchId === 'ALL') return formKirimList;
+    return formKirimList.filter(
+      fk => resolveRecordBranchId(fk?.branchId || fk?.branchName, fk?.areaKirim) === effectiveBranchId
+    );
+  }, [formKirimList, effectiveBranchId]);
+
+  const filteredRfidInvoices = useMemo(() => {
+    if (effectiveBranchId === 'ALL') return rfidInvoices;
+    return rfidInvoices.filter(
+      inv => resolveRecordBranchId(inv?.branchId || inv?.branchName, inv?.areaName) === effectiveBranchId
+    );
+  }, [rfidInvoices, effectiveBranchId]);
+
   // 1. Analitik Jadwal & Penugasan Admin (Sebulan vs Seminggu)
   const scheduleAnalytics = useMemo(() => {
-    const monthSchedules = adminSchedules.filter(s => {
+    const monthSchedules = filteredSchedules.filter(s => {
       if (!s?.date) return true;
       const [y, m] = String(s.date).split('-').map(Number);
       if (!y || !m) return true;
@@ -196,10 +304,9 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       }
     });
 
-    // If database has very few schedules yet, provide clear visual baseline for the chart
     let adminRows = Array.from(byAdminMap.values());
     const totalMonthSchedules = adminRows.reduce((a, b) => a + b.totalSebulan, 0);
-    if (totalMonthSchedules === 0) {
+    if (totalMonthSchedules === 0 && adminSchedules.length === 0) {
       adminRows = adminRows.map((r, i) => ({
         ...r,
         totalSebulan: 18 + ((i * 3) % 7),
@@ -223,7 +330,9 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
             ? r.w3
             : schedulePeriodMode === 'W4'
             ? r.w4
-            : Math.max(1, Math.round(r.totalSebulan / 4))
+            : r.totalSebulan > 0
+            ? Math.max(1, Math.round(r.totalSebulan / 4))
+            : 0
       }));
     }
 
@@ -256,18 +365,25 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       totalSebulanAll: adminRows.reduce((s, r) => s + r.totalSebulan, 0),
       totalSemingguAll: adminRows.reduce((s, r) => s + r.totalSeminggu, 0)
     };
-  }, [adminSchedules, adminNames, targetMonthIdx, targetYearNum, schedulePeriodMode]);
+  }, [filteredSchedules, adminSchedules.length, adminNames, targetMonthIdx, targetYearNum, schedulePeriodMode]);
 
   // 2. Analitik Durasi & Kecepatan Muat Armada
   const loadingChartData = useMemo(() => {
-    const source =
-      loadingDurations.length > 0
-        ? loadingDurations
+    const fallbackList =
+      effectiveBranchId === 'cab-sidoarjo'
+        ? [
+            { areaName: 'SIDOARJO', fleetDisplay: '[S1] L 9997 UO', durationMinutes: 95, helpingCrews: ['Tim Muat Sidoarjo'] }
+          ]
         : [
             { areaName: 'DENPASAR 1', fleetDisplay: '[N1 / NP1] P 8125 VC', durationMinutes: 105, helpingCrews: ['Faisol Arifin', 'Bintang Wahyu Pratama'] },
             { areaName: 'KALIBARU', fleetDisplay: '[A3 / NP3] P 8509 VQ', durationMinutes: 135, helpingCrews: ['Ahmad Yani', 'Rizky Pratama'] },
             { areaName: 'JEMBER KOTA', fleetDisplay: '[N3 / NS1] P 8848 U', durationMinutes: 90, helpingCrews: ['Hendra Wijaya', 'Dedi Kurniawan'] }
           ];
+
+    const source =
+      loadingDurations.length > 0
+        ? filteredLoadingDurations
+        : fallbackList;
 
     return source.slice(0, 8).map(item => ({
       label: `${item.areaName} (${cleanFleetDisplayLabel(item.fleetDisplay)})`,
@@ -277,7 +393,7 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       targetSlaMenit: 120,
       jumlahKru: Array.isArray(item.helpingCrews) ? item.helpingCrews.length : 2
     }));
-  }, [loadingDurations]);
+  }, [filteredLoadingDurations, loadingDurations.length, effectiveBranchId]);
 
   const avgLoadingMinutes = useMemo(() => {
     if (loadingChartData.length === 0) return 0;
@@ -292,7 +408,7 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
     let totalCodValue = 0;
     let totalTempoValue = 0;
 
-    formKirimList.forEach(fk => {
+    filteredFormKirim.forEach(fk => {
       const items = Array.isArray(fk.invoiceItems) ? fk.invoiceItems : [];
       items.forEach((it: any) => {
         if (it.paymentCategory === 'COD') {
@@ -305,16 +421,19 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       });
     });
 
-    if (codInvoices === 0 && tempoInvoices === 0) {
+    if (formKirimList.length === 0 && codInvoices === 0 && tempoInvoices === 0) {
       codInvoices = 14;
       tempoInvoices = 22;
       totalCodValue = 38500000;
       totalTempoValue = 64200000;
     }
 
-    const totalSoCount = rfidInvoices.length || 12;
+    const totalSoCount =
+      rfidInvoices.length > 0 ? filteredRfidInvoices.length : 12;
     const verifiedScanCount =
-      rfidInvoices.filter(inv => inv.status === 'verified' || inv.status === 'completed').length || 9;
+      rfidInvoices.length > 0
+        ? filteredRfidInvoices.filter(inv => inv.status === 'verified' || inv.status === 'completed').length
+        : 9;
 
     const pieData = [
       { name: 'Faktur COD', value: codInvoices, color: '#10b981' },
@@ -323,7 +442,7 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
     ];
 
     return {
-      formKirimCount: formKirimList.length || 4,
+      formKirimCount: formKirimList.length > 0 ? filteredFormKirim.length : 4,
       codInvoices,
       tempoInvoices,
       totalCodValue,
@@ -332,14 +451,28 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       verifiedScanCount,
       pieData
     };
-  }, [formKirimList, rfidInvoices]);
+  }, [filteredFormKirim, formKirimList.length, filteredRfidInvoices, rfidInvoices.length]);
 
-  // 4. Analitik Data KPI Penjualan (KPI Individu, Denda, Persentase Kiriman, Omset Admin)
+  // 4. Analitik Data KPI Penjualan (KPI Individu, Denda, Persentase Kiriman & Omset Admin)
   const kpiChartSummary = useMemo(() => {
-    const indList = Array.isArray(salesKpiData.individualKpiList) ? salesKpiData.individualKpiList : [];
-    const omsetList = Array.isArray(salesKpiData.adminOmsetRows) ? salesKpiData.adminOmsetRows : [];
-    const dendaList = Array.isArray(salesKpiData.dendaCheckerList) ? salesKpiData.dendaCheckerList : [];
-    const reorderList = Array.isArray(salesKpiData.reorderList) ? salesKpiData.reorderList : [];
+    const filterByBranch = (arr: any[]) => {
+      if (effectiveBranchId === 'ALL') return arr;
+      return arr.filter((row: any) => {
+        if (row?.branchId || row?.branchName) {
+          return resolveRecordBranchId(row.branchId || row.branchName, row.area) === effectiveBranchId;
+        }
+        const adminKey = String(row?.adminName || row?.checkerName || '').trim().toUpperCase();
+        if (adminKey && adminBranchMap.has(adminKey)) {
+          return adminBranchMap.get(adminKey) === effectiveBranchId;
+        }
+        return true;
+      });
+    };
+
+    const indList = filterByBranch(Array.isArray(salesKpiData.individualKpiList) ? salesKpiData.individualKpiList : []);
+    const omsetList = filterByBranch(Array.isArray(salesKpiData.adminOmsetRows) ? salesKpiData.adminOmsetRows : []);
+    const dendaList = filterByBranch(Array.isArray(salesKpiData.dendaCheckerList) ? salesKpiData.dendaCheckerList : []);
+    const reorderList = filterByBranch(Array.isArray(salesKpiData.reorderList) ? salesKpiData.reorderList : []);
 
     // Build combined chart per admin for KPI & Omset
     const map = new Map<
@@ -410,6 +543,8 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
     const persentaseKiriman =
       terkirimTotal + belumTerkirimTotal > 0
         ? Math.round((terkirimTotal / (terkirimTotal + belumTerkirimTotal)) * 1000) / 10
+        : reorderList.length === 0 && effectiveBranchId !== 'ALL'
+        ? 0
         : 94.2;
 
     return {
@@ -419,7 +554,7 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
       persentaseKiriman,
       totalDendaCases: dendaList.length
     };
-  }, [salesKpiData, adminNames, selectedMonth, selectedYear]);
+  }, [salesKpiData, adminNames, selectedMonth, selectedYear, effectiveBranchId, adminBranchMap]);
 
   return (
     <div className="space-y-6">
@@ -431,46 +566,66 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
               <Briefcase className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Dashboard Admin Penjualan
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
-                  Analitik Terpadu Semua Sub-Menu
-                </span>
-              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                Dashboard Admin Penjualan
+              </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 Ringkasan grafik jadwal penugasan admin (sebulan &amp; seminggu), durasi muat armada, faktur SO &amp; form kirim, scan muat, hingga KPI penjualan.
               </p>
             </div>
           </div>
 
-          {/* Filter Periode Bulan & Tahun */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="w-44">
+          {/* Filter Cabang, Bulan & Tahun (Full Width Labels Tanpa Terpotong) */}
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <div className="min-w-[175px]">
+              <ModernKpiDropdown
+                value={effectiveBranchId}
+                onChange={val => setSelectedBranchId(val)}
+                icon={<Building2 className="w-3.5 h-3.5" />}
+                searchable={false}
+                options={[
+                  ...(accessibleBranchOptions.length > 1
+                    ? [
+                        {
+                          value: 'ALL',
+                          label: 'Semua Cabang',
+                          subLabel: 'Gabungan Nusantara & Sidoarjo'
+                        }
+                      ]
+                    : []),
+                  ...accessibleBranchOptions.map(br => ({
+                    value: br.id,
+                    label: `Cabang ${br.name}`,
+                    subLabel: br.badge
+                  }))
+                ]}
+              />
+            </div>
+
+            <div className="min-w-[155px]">
               <ModernKpiDropdown
                 value={selectedMonth}
                 onChange={val => setSelectedMonth(val)}
                 icon={<Calendar className="w-3.5 h-3.5" />}
+                searchable={false}
                 options={MONTH_OPTIONS.map((m, idx) => ({
                   value: m,
                   label: m,
-                  subLabel: `Bulan ke-${idx + 1}`,
-                  badge: m.slice(0, 3).toUpperCase(),
-                  badgeTone: m === currentMonthName ? 'indigo' : 'slate'
+                  subLabel: m === currentMonthName ? `Bulan ke-${idx + 1} (Saat Ini)` : `Bulan ke-${idx + 1}`
                 }))}
               />
             </div>
-            <div className="w-32">
+
+            <div className="min-w-[140px]">
               <ModernKpiDropdown
                 value={selectedYear}
                 onChange={val => setSelectedYear(val)}
                 icon={<Sparkles className="w-3.5 h-3.5" />}
+                searchable={false}
                 options={['2025', '2026', '2027'].map(y => ({
                   value: y,
                   label: `Tahun ${y}`,
-                  badge: y === currentYearStr ? 'AKTIF' : undefined,
-                  badgeTone: 'emerald'
+                  subLabel: y === currentYearStr ? 'Tahun Aktif Saat Ini' : 'Arsip / Proyeksi'
                 }))}
               />
             </div>

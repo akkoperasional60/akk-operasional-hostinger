@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   User,
   ChevronDown,
   Calendar,
   CheckCircle2,
   ClipboardList,
-  ShieldCheck,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Building2,
+  Lock
 } from 'lucide-react';
 import { logisticsStore } from '../../services/store';
 import { branchStore } from '../../services/branchStore';
@@ -38,22 +39,48 @@ export interface SalesHeaderFilterProps {
   onExportExcel?: () => void;
 }
 
+const NON_SALES_ADMIN_ROLES = new Set([
+  'driver',
+  'crew_helper',
+  'security',
+  'driver_coordinator',
+  'warehouse_coordinator',
+  'hr_admin',
+  'finance_tax',
+  'spv_purchase_admin',
+  'spv_marketing_offline'
+]);
+
 export function getSalesAdminAssignedBranchId(u: UserProfile): string {
   if (!u || u.status !== 'approved') return 'NONE';
+
+  // Never include field crew, security, or unrelated operational roles in Admin Penjualan mapping
+  if (NON_SALES_ADMIN_ROLES.has(u.role)) {
+    return 'NONE';
+  }
+
   const deptClean = (u.department || '').trim().toLowerCase();
-  const deptMatch = deptClean === 'adm. penjualan' || deptClean === 'admin penjualan';
+  const isSalesRole = u.role === 'sales_admin' || u.role === 'spv_sales_admin';
+  const deptMatch =
+    deptClean.includes('adm. penjualan') ||
+    deptClean.includes('admin penjualan') ||
+    deptClean.includes('sales admin') ||
+    deptClean.includes('penjualan');
+
   if (u.role === 'super_admin' && !deptMatch) {
     return 'NONE';
   }
 
-  if (u.role !== 'super_admin') {
+  if (!isSalesRole && u.role !== 'super_admin') {
+    const hasExplicitSalesModule = Boolean(u.permissions?.modules?.sales_admin?.enabled);
     const hasSalesAccess = canAccess(u, 'sales_admin');
-    if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
+    if (!hasExplicitSalesModule || !hasSalesAccess || !deptMatch) {
       return 'NONE';
     }
-    if (u.role !== 'sales_admin' && !hasSalesAccess) {
-      return 'NONE';
-    }
+  }
+
+  if (u.permissions?.modules?.sales_admin && u.permissions.modules.sales_admin.enabled === false) {
+    return 'NONE';
   }
 
   const branchPerms = branchStore.getUserBranchPermissions(
@@ -71,13 +98,14 @@ export function getSalesAdminAssignedBranchId(u: UserProfile): string {
     if (!bEntry || !bEntry.enabled) return;
     const salesMod = bEntry.modules?.sales_admin;
     if (salesMod && salesMod.enabled) {
-      const hasSub = Object.values(salesMod.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
+      const subVals = Object.values(salesMod.subMenus || {});
+      const hasSub = subVals.length === 0 || subVals.some(v => v === 'full_access' || v === 'read_only');
       if (hasSub) {
         enabledSalesBranches.push(br.id);
         return;
       }
     }
-    if (u.role === 'sales_admin' && (!salesMod || salesMod.enabled !== false)) {
+    if (isSalesRole && (!salesMod || salesMod.enabled !== false)) {
       enabledSalesBranches.push(br.id);
     }
   });
@@ -89,7 +117,31 @@ export function getSalesAdminAssignedBranchId(u: UserProfile): string {
     return enabledSalesBranches[0];
   }
 
-  // When multiple branches are enabled on the user record, resolve primary branch so admins never mix across branches
+  // Priority 1: explicit saved branchPermissions on user profile (User Management RBAC)
+  const rawSavedPerms = u.permissions?.branchPermissions;
+  if (rawSavedPerms && typeof rawSavedPerms === 'object') {
+    const rawSda = Boolean(rawSavedPerms['cab-sidoarjo']?.enabled);
+    const rawBwi = Boolean(rawSavedPerms['cab-banyuwangi']?.enabled);
+    if (rawSda && !rawBwi && enabledSalesBranches.includes('cab-sidoarjo')) return 'cab-sidoarjo';
+    if (rawBwi && !rawSda && enabledSalesBranches.includes('cab-banyuwangi')) return 'cab-banyuwangi';
+
+    // Also check if sales_admin module is enabled only in one branch inside rawSavedPerms
+    const sdaSalesOn = Boolean(rawSavedPerms['cab-sidoarjo']?.enabled && rawSavedPerms['cab-sidoarjo']?.modules?.sales_admin?.enabled);
+    const bwiSalesOn = Boolean(rawSavedPerms['cab-banyuwangi']?.enabled && rawSavedPerms['cab-banyuwangi']?.modules?.sales_admin?.enabled);
+    if (sdaSalesOn && !bwiSalesOn && enabledSalesBranches.includes('cab-sidoarjo')) return 'cab-sidoarjo';
+    if (bwiSalesOn && !sdaSalesOn && enabledSalesBranches.includes('cab-banyuwangi')) return 'cab-banyuwangi';
+  }
+
+  // Priority 2: explicit text hint from User Management profile (department / notes / email)
+  const textHint = `${u.department || ''} ${u.notes || ''} ${u.email || ''}`.toLowerCase();
+  if ((textHint.includes('sidoarjo') || textHint.includes('sda')) && enabledSalesBranches.includes('cab-sidoarjo')) {
+    return 'cab-sidoarjo';
+  }
+  if ((textHint.includes('nusantara') || textHint.includes('banyuwangi') || textHint.includes('bwi')) && enabledSalesBranches.includes('cab-banyuwangi')) {
+    return 'cab-banyuwangi';
+  }
+
+  // Priority 3: manual admin-branch override map
   try {
     const rawMap = localStorage.getItem('akk_sales_admin_branch_map_v1');
     if (rawMap) {
@@ -100,22 +152,6 @@ export function getSalesAdminAssignedBranchId(u: UserProfile): string {
       }
     }
   } catch {}
-
-  const rawSavedPerms = u.permissions?.branchPermissions;
-  if (rawSavedPerms && typeof rawSavedPerms === 'object') {
-    const rawSda = Boolean(rawSavedPerms['cab-sidoarjo']?.enabled);
-    const rawBwi = Boolean(rawSavedPerms['cab-banyuwangi']?.enabled);
-    if (rawSda && !rawBwi && enabledSalesBranches.includes('cab-sidoarjo')) return 'cab-sidoarjo';
-    if (rawBwi && !rawSda && enabledSalesBranches.includes('cab-banyuwangi')) return 'cab-banyuwangi';
-  }
-
-  const textHint = `${u.department || ''} ${u.notes || ''} ${u.email || ''}`.toLowerCase();
-  if ((textHint.includes('sidoarjo') || textHint.includes('sda')) && enabledSalesBranches.includes('cab-sidoarjo')) {
-    return 'cab-sidoarjo';
-  }
-  if ((textHint.includes('nusantara') || textHint.includes('banyuwangi') || textHint.includes('bwi')) && enabledSalesBranches.includes('cab-banyuwangi')) {
-    return 'cab-banyuwangi';
-  }
 
   const crewBranch = branchStore.getCrewBranchId(u.id, u.fullName);
   if (crewBranch && enabledSalesBranches.includes(crewBranch)) {
@@ -211,10 +247,40 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
   showBranchFilter = false,
   onExportExcel
 }) => {
-  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
+  const currentUser = logisticsStore.getCurrentUser();
+  const accessibleBranchOptions = useMemo(() => {
+    const allowed = branchStore.getAccessibleBranchesForUser(currentUser);
+    const allowedIds = new Set(allowed.map(b => b.id));
+    const filtered = SALES_BRANCH_OPTIONS.filter(opt => allowedIds.has(opt.id));
+    return filtered.length > 0 ? filtered : SALES_BRANCH_OPTIONS;
+  }, [currentUser]);
+
+  const effectiveBranchId = useMemo(() => {
+    if (selectedBranchId && selectedBranchId !== 'ALL' && accessibleBranchOptions.some(b => b.id === selectedBranchId)) {
+      return selectedBranchId;
+    }
+    return accessibleBranchOptions[0]?.id || 'cab-banyuwangi';
+  }, [selectedBranchId, accessibleBranchOptions]);
+
+  useEffect(() => {
+    if (showBranchFilter && onBranchChange && selectedBranchId !== effectiveBranchId) {
+      onBranchChange(effectiveBranchId);
+    }
+  }, [showBranchFilter, onBranchChange, selectedBranchId, effectiveBranchId]);
+
   const liveSalesAdminOptions = useSalesAdminOptions(effectiveBranchId);
-  const salesAdminUsers = useSalesAdminUsers(effectiveBranchId);
   const [openMenu, setOpenMenu] = useState<null | 'admin' | 'month' | 'year' | 'branch'>(null);
+  const filterBarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onOutside = (ev: MouseEvent) => {
+      if (filterBarRef.current && !filterBarRef.current.contains(ev.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, []);
 
   const optionsToRender = useMemo(() => {
     if (liveSalesAdminOptions.length > 1) {
@@ -234,45 +300,40 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
 
   const displayPeriod = periodeLabel || `${selectedMonth.slice(0, 3)} ${selectedYear}`;
   const activeBranchMeta =
-    SALES_BRANCH_OPTIONS.find(b => b.id === effectiveBranchId) || SALES_BRANCH_OPTIONS[0];
+    accessibleBranchOptions.find(b => b.id === effectiveBranchId) || accessibleBranchOptions[0] || SALES_BRANCH_OPTIONS[0];
 
   return (
     <div className="space-y-4">
       {/* Page Title Header (Clean & Minimalist) */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-            {title}
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {subtitle}
-          </p>
-        </div>
-
-        {!hideAdminFilter && (
-          <div className="flex items-center gap-2 self-start sm:self-auto text-xs text-slate-500 dark:text-slate-400">
-            <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-            <span>
-              Terintegrasi Hak Akses User (<strong className="text-slate-800 dark:text-slate-200">{salesAdminUsers.length} User Akses Penjualan</strong>)
-            </span>
-          </div>
-        )}
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          {title}
+        </h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          {subtitle}
+        </p>
       </div>
 
-      {/* Unified Filter Bar with Refreshed Modern Color Tone */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
+      {/* Unified Filter Bar — Clean Single-Row Alignment */}
+      <div
+        ref={filterBarRef}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs"
+      >
+        <div
+          className={`grid grid-cols-1 gap-3.5 items-end ${
+            hideStatsCards && !onExportExcel
+              ? !hideAdminFilter && showBranchFilter
+                ? 'md:grid-cols-3'
+                : 'md:grid-cols-2'
+              : 'lg:grid-cols-12'
+          }`}
+        >
           {/* Admin Selector (Only rendered when hideAdminFilter is false) */}
           {!hideAdminFilter && (
-            <div className="lg:col-span-4 relative">
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  Filter Admin Pengguna (Adm. Penjualan)
-                </label>
-                <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                  Hak Akses: Adm. Penjualan
-                </span>
-              </div>
+            <div className={hideStatsCards && !onExportExcel ? 'relative' : showBranchFilter ? 'lg:col-span-3 relative' : 'lg:col-span-4 relative'}>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Filter Nama Admin
+              </label>
               <button
                 type="button"
                 onClick={() => setOpenMenu(openMenu === 'admin' ? null : 'admin')}
@@ -281,7 +342,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                 <div className="flex items-center gap-2.5 min-w-0">
                   <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                   <span className="truncate">
-                    {selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN (ADM. PENJUALAN)' : selectedAdmin}
+                    {selectedAdmin === 'SEMUA ADMIN' ? 'Semua Admin' : selectedAdmin}
                   </span>
                 </div>
                 <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openMenu === 'admin' ? 'rotate-180 text-indigo-500' : ''}`} />
@@ -305,7 +366,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200'
                         }`}
                       >
-                        <span>{admin === 'SEMUA ADMIN' ? 'SEMUA ADMIN (ADM. PENJUALAN)' : admin}</span>
+                        <span>{admin === 'SEMUA ADMIN' ? 'Semua Admin' : admin}</span>
                         {isSel && <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />}
                       </button>
                     );
@@ -317,29 +378,37 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
 
           {/* Cabang Selector (When showBranchFilter is enabled) */}
           {showBranchFilter && (
-            <div className={hideAdminFilter ? 'lg:col-span-4 relative' : 'lg:col-span-3 relative'}>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  Filter Cabang Admin Penjualan
-                </label>
-              </div>
+            <div className={hideStatsCards && !onExportExcel ? 'relative' : hideAdminFilter ? 'lg:col-span-4 relative' : 'lg:col-span-3 relative'}>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Filter Cabang
+              </label>
               <button
                 type="button"
-                onClick={() => setOpenMenu(openMenu === 'branch' ? null : 'branch')}
-                className="w-full px-3.5 py-2.5 bg-slate-50/90 dark:bg-slate-950 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-900 dark:text-white transition flex items-center justify-between gap-2 cursor-pointer"
+                disabled={accessibleBranchOptions.length <= 1}
+                onClick={() => accessibleBranchOptions.length > 1 && setOpenMenu(openMenu === 'branch' ? null : 'branch')}
+                className={`w-full px-3.5 py-2.5 bg-slate-50/90 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-900 dark:text-white transition flex items-center justify-between gap-2 ${
+                  accessibleBranchOptions.length > 1
+                    ? 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 cursor-pointer'
+                    : 'cursor-default opacity-90'
+                }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
                   <span className="truncate">
-                    {activeBranchMeta.id === 'ALL' ? 'Semua Cabang (Nusantara & Sidoarjo)' : `Cabang ${activeBranchMeta.name}`}
+                    Cabang {activeBranchMeta.name}
                   </span>
                 </div>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openMenu === 'branch' ? 'rotate-180 text-indigo-500' : ''}`} />
+                {accessibleBranchOptions.length > 1 ? (
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openMenu === 'branch' ? 'rotate-180 text-indigo-500' : ''}`} />
+                ) : (
+                  <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                )}
               </button>
 
-              {openMenu === 'branch' && (
+              {openMenu === 'branch' && accessibleBranchOptions.length > 1 && (
                 <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
-                  {SALES_BRANCH_OPTIONS.map(br => {
-                    const isSel = selectedBranchId === br.id;
+                  {accessibleBranchOptions.map(br => {
+                    const isSel = effectiveBranchId === br.id;
                     return (
                       <button
                         key={br.id}
@@ -355,7 +424,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                         }`}
                       >
                         <div>
-                          <span className="block">{br.id === 'ALL' ? 'Semua Cabang' : `Cabang ${br.name}`}</span>
+                          <span className="block">Cabang {br.name}</span>
                           <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">{br.badge}</span>
                         </div>
                         {isSel && <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />}
@@ -370,10 +439,12 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
           {/* Month & Year Selectors */}
           <div
             className={
-              showBranchFilter
+              hideStatsCards && !onExportExcel
+                ? ''
+                : showBranchFilter
                 ? hideAdminFilter
-                  ? 'lg:col-span-4'
-                  : 'lg:col-span-3'
+                  ? 'lg:col-span-5'
+                  : 'lg:col-span-4'
                 : hideAdminFilter
                 ? hideStatsCards
                   ? 'lg:col-span-8'
@@ -381,7 +452,7 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
                 : 'lg:col-span-4'
             }
           >
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
               Periode Bulan &amp; Tahun
             </label>
             <div className="grid grid-cols-2 gap-2.5">
@@ -464,22 +535,20 @@ export const SalesHeaderFilter: React.FC<SalesHeaderFilterProps> = ({
             </div>
           </div>
 
-          {/* KPI Summary Cards Right Side + Ekspor to Excel */}
+          {/* Optional Export Button (Single Row) OR KPI Summary Cards Right Side */}
           {hideStatsCards ? (
-            <div className={showBranchFilter ? 'lg:col-span-4' : 'lg:col-span-4'}>
-              <div className="flex items-center justify-end">
-                {onExportExcel && (
-                  <button
-                    type="button"
-                    onClick={onExportExcel}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 shrink-0" />
-                    <span>Ekspor to Excel</span>
-                  </button>
-                )}
+            onExportExcel ? (
+              <div className={showBranchFilter ? 'lg:col-span-2' : 'lg:col-span-4'}>
+                <button
+                  type="button"
+                  onClick={onExportExcel}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer whitespace-nowrap"
+                >
+                  <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                  <span>Ekspor Excel</span>
+                </button>
               </div>
-            </div>
+            ) : null
           ) : (
             <div className={`${hideAdminFilter ? 'lg:col-span-6' : 'lg:col-span-4'} grid grid-cols-3 gap-2.5`}>
               <div className="bg-slate-50/90 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 rounded-xl p-2.5 text-center">

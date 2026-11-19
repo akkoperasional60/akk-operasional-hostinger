@@ -72,7 +72,13 @@ import {
   ParsedSheetTrip 
 } from '../services/googleSheetsApiService';
 import { googleSheetsSyncService } from '../services/googleSheetsSyncService';
-import { standardizeAreaName, getAreaSubDetail, OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
+import {
+  standardizeAreaName,
+  getAreaSubDetail,
+  OFFICIAL_DESTINATION_AREAS,
+  SIDOARJO_DESTINATION_AREAS,
+  getOfficialAreasForBranch
+} from '../utils/areaNormalizer';
 import { areaAutoMapper, AreaMappingEntry, OfficialAreaItem } from '../services/areaAutoMapper';
 import { crewAutoMapper, CrewMappingEntry, OfficialCrewItem } from '../services/crewAutoMapper';
 import { persistSchedulesToDatabase, fetchPersistedSchedulesFromServer } from '../services/supabaseService';
@@ -991,12 +997,16 @@ const FleetCustomSelectDropdown: React.FC<{
                   {warningModal.description}
                 </p>
 
-                {!warningModal.canForceProceed && (
-                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 px-3.5 py-2.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-                    <span>Silakan pilih armada lain yang berstatus <strong>Ready</strong> atau sesuaikan tanggal pengiriman terlebih dahulu.</span>
-                  </div>
-                )}
+                <div className={`rounded-xl border px-3.5 py-2.5 text-xs font-bold flex items-start gap-2 ${
+                  warningModal.reasonType === 'maintenance'
+                    ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-500/30 text-rose-800 dark:text-rose-200'
+                    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-500/30 text-amber-900 dark:text-amber-200'
+                }`}>
+                  <Info className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    warningModal.reasonType === 'maintenance' ? 'text-rose-500' : 'text-amber-500'
+                  }`} />
+                  <span>Yakin untuk memilih armada ini?</span>
+                </div>
               </div>
 
               {/* Footer Actions */}
@@ -1005,34 +1015,27 @@ const FleetCustomSelectDropdown: React.FC<{
                   type="button"
                   onClick={() => {
                     setWarningModal(null);
-                    setIsOpen(true);
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    warningModal.canForceProceed
-                      ? 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm'
-                  }`}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition cursor-pointer"
                 >
-                  Pilih Armada Ready Lain
+                  Batal
                 </button>
 
-                {warningModal.canForceProceed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const chosenCode = warningModal.fleetCode;
-                      setWarningModal(null);
-                      onChange(chosenCode);
-                    }}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition cursor-pointer ${
-                      warningModal.reasonType === 'maintenance'
-                        ? 'bg-rose-600 hover:bg-rose-500'
-                        : 'bg-amber-600 hover:bg-amber-500'
-                    }`}
-                  >
-                    Tetap Jadwalkan Armada Ini
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const chosenCode = warningModal.fleetCode;
+                    setWarningModal(null);
+                    onChange(chosenCode);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition cursor-pointer ${
+                    warningModal.reasonType === 'maintenance'
+                      ? 'bg-rose-600 hover:bg-rose-500'
+                      : 'bg-blue-600 hover:bg-blue-500'
+                  }`}
+                >
+                  Iya, Saya Yakin
+                </button>
               </div>
             </div>
           </div>,
@@ -1665,7 +1668,56 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   }, []);
 
   const currentUserProfile = logisticsStore.getCurrentUser();
-  const canEditSchedules = canEdit(currentUserProfile, 'schedules');
+  const accessibleBranches = useMemo(() => {
+    const list = branchStore.getAccessibleBranchesForUser(currentUserProfile);
+    return list.length > 0 ? list : branches;
+  }, [currentUserProfile, branches]);
+
+  // Enforce RBAC branch isolation: lock user to an accessible branch
+  useEffect(() => {
+    if (accessibleBranches.length === 0) return;
+    const isAllowed = accessibleBranches.some(b => b.id === selectedBranchId);
+    if (!isAllowed) {
+      const fallbackId = accessibleBranches[0].id;
+      setSelectedBranchId(fallbackId);
+      branchStore.setActiveBranchId(fallbackId);
+    }
+  }, [accessibleBranches, selectedBranchId]);
+
+  const effectiveActiveBranchId = useMemo(() => {
+    if (selectedBranchId && selectedBranchId !== 'ALL' && accessibleBranches.some(b => b.id === selectedBranchId)) {
+      return selectedBranchId;
+    }
+    return accessibleBranches[0]?.id || 'cab-banyuwangi';
+  }, [selectedBranchId, accessibleBranches]);
+
+  const isSidoarjoBranch = effectiveActiveBranchId === 'cab-sidoarjo';
+  const activeBranchRecord = useMemo(
+    () => branches.find(b => b.id === effectiveActiveBranchId) || branchStore.getBranchById(effectiveActiveBranchId),
+    [branches, effectiveActiveBranchId]
+  );
+
+  const canEditSchedules =
+    canEdit(currentUserProfile, 'schedules') &&
+    branchStore.canUserAccessBranch(currentUserProfile, effectiveActiveBranchId);
+
+  const branchOfficialAreas = useMemo(
+    () => getOfficialAreasForBranch(effectiveActiveBranchId),
+    [effectiveActiveBranchId]
+  );
+
+  const getFleetsForBranch = (targetBranchId?: string): Fleet[] => {
+    const branchFilter = targetBranchId && targetBranchId !== 'ALL' ? targetBranchId : effectiveActiveBranchId;
+    return logisticsStore.getFleets().filter(
+      f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === branchFilter
+    );
+  };
+
+  useEffect(() => {
+    setCategoryFilter('all');
+    setAreaCategoryFilter('all');
+    setAreaSearchFilter('');
+  }, [effectiveActiveBranchId]);
 
   const [openPeriodDropdown, setOpenPeriodDropdown] = useState<'month' | 'year' | 'branch' | null>(null);
   const periodDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -1679,8 +1731,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const effectiveActiveBranchId = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
 
   const getIntegratedDrivers = (targetBranchId?: string) => {
     const branchFilter = targetBranchId && targetBranchId !== 'ALL' ? targetBranchId : effectiveActiveBranchId;
@@ -1873,7 +1923,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [areaCategoryFilter, setAreaCategoryFilter] = useState<'all' | 'bali' | 'banyuwangi' | 'jember' | 'pantura'>('all');
   const [isAreaPickerExpanded, setIsAreaPickerExpanded] = useState<boolean>(false);
 
-  const getAreaRegionCategory = (areaName: string): { category: 'bali' | 'jember' | 'pantura' | 'banyuwangi'; label: string; badgeColor: string } => {
+  const getAreaRegionCategory = (areaName: string): { category: 'bali' | 'jember' | 'pantura' | 'banyuwangi' | 'sidoarjo'; label: string; badgeColor: string } => {
+    if (isSidoarjoBranch || SIDOARJO_DESTINATION_AREAS.some(a => a.toUpperCase() === areaName.trim().toUpperCase())) {
+      return {
+        category: 'sidoarjo',
+        label: 'Area Kirim Cabang Sidoarjo',
+        badgeColor: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+      };
+    }
     const upper = areaName.toUpperCase();
     if (upper.includes('DENPASAR') || upper.includes('SINGARAJA') || upper.includes('NEGARA')) {
       return { category: 'bali', label: 'Pulau Bali', badgeColor: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30' };
@@ -1888,14 +1945,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const filteredOfficialAreas = useMemo(() => {
-    return OFFICIAL_DESTINATION_AREAS.filter(areaName => {
+    return branchOfficialAreas.filter(areaName => {
       const matchSearch = areaName.toLowerCase().includes(areaSearchFilter.toLowerCase().trim());
       if (!matchSearch) return false;
-      if (areaCategoryFilter === 'all') return true;
+      if (isSidoarjoBranch || areaCategoryFilter === 'all') return true;
       const cat = getAreaRegionCategory(areaName).category;
       return cat === areaCategoryFilter;
     });
-  }, [areaSearchFilter, areaCategoryFilter]);
+  }, [branchOfficialAreas, isSidoarjoBranch, areaSearchFilter, areaCategoryFilter]);
 
   const [stagedCombinedTrips, setStagedCombinedTrips] = useState<Array<ParsedSheetTrip & { source: 'excel' | 'manual'; tempId: string }>>([]);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
@@ -2962,8 +3019,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     let addedManualCount = 0;
 
     incomingTrips.forEach((t, idx) => {
-      const stdArea = standardizeAreaName(t.area || '-');
-      const isLuarKota = isLuarKotaArea(stdArea);
+      const tripBranchId = (t as any).branchId || effectiveActiveBranchId;
+      const tripBranchInfo = branchStore.getBranchById(tripBranchId);
+      const branchFleets = fleets.filter(
+        f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === tripBranchId
+      );
+      const stdArea = standardizeAreaName(t.area || '-', tripBranchId);
+      const isLuarKota = tripBranchId === 'cab-sidoarjo' ? false : isLuarKotaArea(stdArea);
       const depTime = (t.departureTime || '07:30').trim();
       const retTime = (t.targetReturnTime || '17:00').trim();
 
@@ -3004,11 +3066,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const estArrivalIso = `${retDateIso}T${retTime}:00+07:00`;
 
       const matchedFleet =
-        logisticsStore.findFleetByCodeOrPlate(armadaCode) ||
-        fleets.find(f =>
+        branchFleets.find(f =>
           f.initialCode?.toUpperCase() === armadaCode ||
           f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armadaCode.replace(/\s+/g, ''))
         ) ||
+        logisticsStore.findFleetByCodeOrPlate(armadaCode) ||
+        branchFleets[0] ||
         fleets[0];
 
       const resolvedArmadaDisplay = matchedFleet?.initialCode || (armadaCode !== '-' ? armadaCode : (matchedFleet?.plateNumber || 'DS1'));
@@ -3063,16 +3126,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         helper2Name.toLowerCase().includes(c.name.toLowerCase())
       ) || crews.find(c => c.name.toLowerCase().includes(helper2Name.toLowerCase()))) : undefined;
 
-      const isBali = stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI');
+      const isBali = tripBranchId !== 'cab-sidoarjo' && (stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI'));
       const uniqSuffix = `${Date.now().toString(36).slice(-4).toUpperCase()}${idx + 1}`;
       const newSchId = `sch-comb-${yr}${monthPadded}${dayPadded}-${armadaCode}-${uniqSuffix}`;
       const nowIso = new Date().toISOString();
+      const originWarehouseName =
+        tripBranchInfo?.warehouseName ||
+        (tripBranchId === 'cab-sidoarjo' ? 'Gudang Sidoarjo' : 'Gudang Pusat AKK Banyuwangi DC');
+      const originCityName = tripBranchInfo?.city || (tripBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Banyuwangi');
+      const originCoordinates: [number, number] =
+        tripBranchId === 'cab-sidoarjo' ? [-7.4478, 112.7183] : [-8.1906, 114.3708];
+
+      branchStore.setScheduleBranchId(newSchId, tripBranchId);
 
       const newSch: Schedule = {
         id: newSchId,
         trackingNumber: `PO-AKK-${yr}${monthPadded}${dayPadded}-${armadaCode}-${uniqSuffix}`,
-        originName: 'Gudang Pusat AKK Banyuwangi DC',
-        originCoords: [-8.1906, 114.3708],
+        originName: originWarehouseName,
+        originCoords: originCoordinates,
         storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
         store: {
           id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -3080,10 +3151,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           storeName: stdArea,
           island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
           province: isBali ? 'Bali' : 'Jawa Timur',
-          city: isBali ? 'Denpasar' : 'Banyuwangi',
+          city: isBali ? 'Denpasar' : originCityName,
           address: `Area Pengiriman ${stdArea}`,
-          latitude: isBali ? -8.6705 : -8.219,
-          longitude: isBali ? 115.2126 : 114.369,
+          latitude: isBali ? -8.6705 : originCoordinates[0],
+          longitude: isBali ? 115.2126 : originCoordinates[1],
           contactPerson: 'PIC Distribusi Area',
           phone: '-',
           deliveryWindow: `${depTime} - ${retTime}`,
@@ -3158,12 +3229,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const dayEntry = dayMap.get(dayNum)!;
       dayEntry.pengiriman.push({
         id: newSchId,
+        branchId: tripBranchId,
         driver: driverName,
         helper: helperName,
         helper2: helper2Name,
         area: stdArea,
         armada: resolvedArmadaDisplay,
-        target: t.target || 'Gudang Pusat AKK Banyuwangi DC',
+        target: t.target || originWarehouseName,
         departureTime: depTime,
         targetReturnTime: retTime,
         departureDateIso: depDateIso,
@@ -3252,8 +3324,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const defaultDayPadded = String(dayNumber).padStart(2, '0');
     const fallbackIso = `${selectedYear}-${defaultMonthPadded}-${defaultDayPadded}`;
 
-    const stdArea = standardizeAreaName(area);
-    const isLuarKota = isLuarKotaArea(stdArea);
+    const modalBranchId = editingTripModal.branchId || effectiveActiveBranchId;
+    if (!branchStore.canUserAccessBranch(currentUserProfile, modalBranchId)) {
+      const permErr = 'Anda tidak memiliki hak akses untuk mengubah jadwal pada cabang ini.';
+      setEditTripModalError(permErr);
+      setUploadToast({ type: 'error', message: permErr });
+      return;
+    }
+
+    const stdArea = standardizeAreaName(area, modalBranchId);
+    const isLuarKota = modalBranchId === 'cab-sidoarjo' ? false : isLuarKotaArea(stdArea);
     const depTime = (departureTime || '07:30').trim();
     const retTime = (targetReturnTime || '17:00').trim();
 
@@ -3283,16 +3363,23 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const departureIso = `${depIsoDate}T${depTime}:00+07:00`;
     const estArrivalIso = `${retIsoDate}T${retTime}:00+07:00`;
 
-    const fleets = logisticsStore.getFleets();
+    const fleets = getFleetsForBranch(modalBranchId);
     const crews = logisticsStore.getCrews();
 
     const matchedFleet =
-      logisticsStore.findFleetByCodeOrPlate(armada) ||
       fleets.find(f =>
         f.initialCode?.toUpperCase() === armada.toUpperCase() ||
         f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armada.replace(/\s+/g, '').toUpperCase())
       ) ||
-      fleets[0];
+      logisticsStore.findFleetByCodeOrPlate(armada);
+
+    if (matchedFleet && branchStore.getFleetBranchId(matchedFleet.id, matchedFleet.plateNumber, matchedFleet.initialCode) !== modalBranchId) {
+      const brName = branchStore.getBranchById(modalBranchId)?.name || modalBranchId;
+      const fleetBranchErr = `Armada ${matchedFleet.initialCode || matchedFleet.plateNumber} tidak terdaftar di Cabang ${brName}. Pilih armada sesuai cabang aktif.`;
+      setEditTripModalError(fleetBranchErr);
+      setUploadToast({ type: 'error', message: fleetBranchErr });
+      return;
+    }
     const resolvedArmadaCode = matchedFleet?.initialCode || armada;
 
     // Validasi ketat: 1 Armada hanya boleh memiliki 1 penugasan pada tanggal yang sama
@@ -3338,15 +3425,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       helper2.toLowerCase().includes(c.name.toLowerCase())
     ) : undefined;
 
-    const isBali = stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI');
+    const isBali = modalBranchId !== 'cab-sidoarjo' && (stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI'));
+    const modalBranchInfo = branchStore.getBranchById(modalBranchId);
+    const modalOriginWarehouse =
+      modalBranchInfo?.warehouseName ||
+      (modalBranchId === 'cab-sidoarjo' ? 'Gudang Sidoarjo' : 'Gudang Pusat AKK Banyuwangi DC');
+    const modalOriginCoords: [number, number] =
+      modalBranchId === 'cab-sidoarjo' ? [-7.4478, 112.7183] : [-8.1906, 114.3708];
 
     if (isNew) {
       const newSchId = `sch-man-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+      branchStore.setScheduleBranchId(newSchId, modalBranchId);
       const newSch: Schedule = {
         id: newSchId,
         trackingNumber: `PO-AKK-${targetYr}${monthPadded}${dayPadded}-${resolvedArmadaCode}-${Date.now().toString().slice(-4)}`,
-        originName: 'Gudang Pusat AKK Banyuwangi DC',
-        originCoords: [-8.1906, 114.3708],
+        originName: modalOriginWarehouse,
+        originCoords: modalOriginCoords,
         storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
         store: {
           id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -3354,10 +3448,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           storeName: stdArea,
           island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
           province: isBali ? 'Bali' : 'Jawa Timur',
-          city: isBali ? 'Denpasar' : 'Banyuwangi',
+          city: isBali ? 'Denpasar' : (modalBranchInfo?.city || 'Banyuwangi'),
           address: `Area Pengiriman ${stdArea}`,
-          latitude: isBali ? -8.6705 : -8.219,
-          longitude: isBali ? 115.2126 : 114.369,
+          latitude: isBali ? -8.6705 : modalOriginCoords[0],
+          longitude: isBali ? 115.2126 : modalOriginCoords[1],
           contactPerson: 'PIC Distribusi Area',
           phone: '-',
           deliveryWindow: `${depTime} - ${retTime}`,
@@ -3406,6 +3500,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       const newTripObj: DeliveryAssignment = {
         id: newSchId,
+        branchId: modalBranchId,
         driver,
         helper: helper || '-',
         helper2: helper2 || '-',
@@ -3838,6 +3933,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       luarKotaCount: number;
       baliCount: number;
       kanvasCount: number;
+      uniqueAreaCount: number;
+      areaPreviewList: string[];
     }> = [];
 
     for (let i = 0; i < startDayOfWeek; i++) {
@@ -3847,7 +3944,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         lokalCount: 0,
         luarKotaCount: 0,
         baliCount: 0,
-        kanvasCount: 0
+        kanvasCount: 0,
+        uniqueAreaCount: 0,
+        areaPreviewList: []
       });
     }
 
@@ -3864,11 +3963,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       let baliCount = 0;
       let kanvasCount = 0;
       let totalTrips = 0;
+      const uniqueAreaSet = new Set<string>();
+      const areaShortLabels: string[] = [];
 
       if (scheduleDay) {
         totalTrips = scheduleDay.pengiriman.length;
         scheduleDay.pengiriman.forEach((p: DeliveryAssignment) => {
-          const std = standardizeAreaName(p.area).toUpperCase();
+          const stdName = standardizeAreaName(p.area, effectiveActiveBranchId);
+          const std = stdName.toUpperCase();
+          if (std && !uniqueAreaSet.has(std)) {
+            uniqueAreaSet.add(std);
+            const shortCode = stdName.split('(')[0].trim();
+            if (shortCode) areaShortLabels.push(shortCode);
+          }
           const isKanvas = std.includes('KANVAS LKT') || (p.area || '').toUpperCase().includes('KANVAS LKT');
           if (isKanvas) {
             kanvasCount++;
@@ -3893,12 +4000,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         lokalCount,
         luarKotaCount,
         baliCount,
-        kanvasCount
+        kanvasCount,
+        uniqueAreaCount: uniqueAreaSet.size,
+        areaPreviewList: areaShortLabels
       });
     }
 
     return { monthName, year, startDayOfWeek, daysInMonth, cells };
-  }, [selectedYear, selectedMonth, filteredWeeks]);
+  }, [selectedYear, selectedMonth, filteredWeeks, effectiveActiveBranchId]);
 
   // Extract raw areas from currently active week/sheet
   const currentSheetAreas = useMemo(() => {
@@ -4762,13 +4871,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <button
                   onClick={() => {
                     const today = getTodayIso();
-                    setManualScheduleForm(prev => ({
-                      ...prev,
+                    const branchDrivers = getIntegratedDrivers(effectiveActiveBranchId);
+                    const branchHelpers = getIntegratedHelpers(effectiveActiveBranchId);
+                    setManualScheduleFormError(null);
+                    setAreaSearchFilter('');
+                    setAreaCategoryFilter('all');
+                    setIsAreaPickerExpanded(false);
+                    setManualScheduleForm({
                       dateIso: today,
                       departureDateIso: today,
                       returnDateIso: today,
-                      area: ''
-                    }));
+                      driver: branchDrivers[0]?.name || '',
+                      helper: branchHelpers[0]?.name || '',
+                      helper2: '',
+                      area: '',
+                      armada: '',
+                      target: '',
+                      departureTime: '07:30',
+                      targetReturnTime: '17:00',
+                      branchId: effectiveActiveBranchId,
+                      bypassChecklistDirectComplete: false
+                    });
                     setIsUploadConfigModalOpen(true);
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-xs transition cursor-pointer"
@@ -4997,22 +5120,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <span className="flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                   <span>
-                    Cabang {branches.find(b => b.id === effectiveActiveBranchId)?.name || 'Nusantara'}
+                    Cabang {activeBranchRecord?.name || 'Nusantara'}
                   </span>
                 </span>
-                <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                    openPeriodDropdown === 'branch' ? 'rotate-180 text-blue-500' : ''
-                  }`}
-                />
+                {accessibleBranches.length > 1 && (
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                      openPeriodDropdown === 'branch' ? 'rotate-180 text-blue-500' : ''
+                    }`}
+                  />
+                )}
               </button>
 
-              {openPeriodDropdown === 'branch' && (
+              {openPeriodDropdown === 'branch' && accessibleBranches.length > 1 && (
                 <div className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
                   <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
                     Pilih Cabang Operasional
                   </div>
-                  {branches.map(b => {
+                  {accessibleBranches.map(b => {
                     const isAct = effectiveActiveBranchId === b.id;
                     return (
                       <button
@@ -5065,18 +5190,33 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Luar Kota / Bali</span>
-              <Ship className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+          {isSidoarjoBranch ? (
+            <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-slate-600 dark:text-slate-400">Total Area Kirim</span>
+                <MapPin className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
+                {stats.totalUniqueAreas}{' '}
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  / {branchOfficialAreas.length} Area Resmi
+                </span>
+              </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5 leading-none">
-              {stats.totalLuarKota}{' '}
-              <span className="text-[11px] font-semibold text-blue-600/80 dark:text-blue-400">
-                ({stats.totalLuarKotaOnly} LK • {stats.totalBaliOnly} Bali)
-              </span>
+          ) : (
+            <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Luar Kota / Bali</span>
+                <Ship className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5 leading-none tabular-nums">
+                {stats.totalLuarKota}{' '}
+                <span className="text-[11px] font-semibold text-blue-600/80 dark:text-blue-400">
+                  ({stats.totalLuarKotaOnly} LK • {stats.totalBaliOnly} Bali)
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
@@ -5110,30 +5250,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
               </div>
 
-              {/* Legend Badges */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
-                  title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  <span>Area Banyuwangi</span>
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800"
-                  title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                  <span>Area Luar Kota</span>
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800"
-                  title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                  <span>Area Bali</span>
-                </span>
-              </div>
+              {/* Legend Badges — Branch-Specific */}
+              {isSidoarjoBranch ? (
+                <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>Ringkasan Total Area Kirim Harian · Cabang Sidoarjo</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                    title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>Area Banyuwangi</span>
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800"
+                    title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <span>Area Luar Kota</span>
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800"
+                    title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <span>Area Bali</span>
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* 7-Column Calendar Grid Header */}
@@ -5207,26 +5354,41 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     </div>
 
                     {hasDeliveries ? (
-                      <div className="space-y-0.5 mt-1">
-                        {cell.lokalCount > 0 && (
-                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 flex items-center justify-between">
-                            <span className="truncate">🚛 Banyuwangi</span>
-                            <span className="font-mono font-black">{cell.lokalCount}</span>
+                      isSidoarjoBranch ? (
+                        <div className="space-y-1 mt-1">
+                          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                            <span className="truncate">Total Area Kirim</span>
+                            <span className="font-mono font-black tabular-nums">{cell.uniqueAreaCount}</span>
                           </div>
-                        )}
-                        {cell.luarKotaCount > 0 && (
-                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-blue-100 dark:bg-blue-950/90 text-blue-800 dark:text-blue-300 border border-blue-300/80 dark:border-blue-800 flex items-center justify-between">
-                            <span className="truncate">🏙️ Luar Kota</span>
-                            <span className="font-mono font-black">{cell.luarKotaCount}</span>
-                          </div>
-                        )}
-                        {cell.baliCount > 0 && (
-                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 dark:bg-purple-950/90 text-purple-800 dark:text-purple-300 border border-purple-300/80 dark:border-purple-800 flex items-center justify-between">
-                            <span className="truncate">🚢 Bali</span>
-                            <span className="font-mono font-black">{cell.baliCount}</span>
-                          </div>
-                        )}
-                      </div>
+                          {cell.areaPreviewList.length > 0 && (
+                            <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 truncate px-0.5">
+                              {cell.areaPreviewList.slice(0, 2).join(', ')}
+                              {cell.areaPreviewList.length > 2 ? ` +${cell.areaPreviewList.length - 2}` : ''}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5 mt-1">
+                          {cell.lokalCount > 0 && (
+                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 flex items-center justify-between">
+                              <span className="truncate">🚛 Banyuwangi</span>
+                              <span className="font-mono font-black">{cell.lokalCount}</span>
+                            </div>
+                          )}
+                          {cell.luarKotaCount > 0 && (
+                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-blue-100 dark:bg-blue-950/90 text-blue-800 dark:text-blue-300 border border-blue-300/80 dark:border-blue-800 flex items-center justify-between">
+                              <span className="truncate">🏙️ Luar Kota</span>
+                              <span className="font-mono font-black">{cell.luarKotaCount}</span>
+                            </div>
+                          )}
+                          {cell.baliCount > 0 && (
+                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 dark:bg-purple-950/90 text-purple-800 dark:text-purple-300 border border-purple-300/80 dark:border-purple-800 flex items-center justify-between">
+                              <span className="truncate">🚢 Bali</span>
+                              <span className="font-mono font-black">{cell.baliCount}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
                     ) : (
                       <div className={`text-[9px] text-center py-1 ${
                         isSunday
@@ -5401,64 +5563,77 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => setCategoryFilter('all')}
-                          className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
-                            categoryFilter === 'all'
-                              ? 'bg-emerald-600 text-white shadow-2xs'
-                              : 'bg-slate-200 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          Semua ({activeDayObj.pengiriman.length})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCategoryFilter(categoryFilter === 'lokal' ? 'all' : 'lokal')}
-                          title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
-                          className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                            categoryFilter === 'lokal'
-                              ? 'bg-emerald-600 text-white border-emerald-500'
-                              : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                          }`}
-                        >
-                          🚛 {lokalInSelected} Area Banyuwangi
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCategoryFilter(categoryFilter === 'luar_kota' ? 'all' : 'luar_kota')}
-                          title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
-                          className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                            categoryFilter === 'luar_kota'
-                              ? 'bg-blue-600 text-white border-blue-500'
-                              : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800'
-                          }`}
-                        >
-                          🏙️ {luarKotaInSelected} Area Luar Kota
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCategoryFilter(categoryFilter === 'bali' ? 'all' : 'bali')}
-                          title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
-                          className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                            categoryFilter === 'bali'
-                              ? 'bg-purple-600 text-white border-purple-500'
-                              : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-800'
-                          }`}
-                        >
-                          🚢 {baliInSelected} Area Bali
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCategoryFilter(categoryFilter === 'kanvas_lkt' ? 'all' : 'kanvas_lkt')}
-                          className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                            categoryFilter === 'kanvas_lkt'
-                              ? 'bg-indigo-600 text-white border-indigo-500'
-                              : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
-                          }`}
-                        >
-                          📦 {kanvasLktInSelected} Kanvas LKT
-                        </button>
+                        {isSidoarjoBranch ? (
+                          <>
+                            <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 tabular-nums">
+                              Total Kirim: {activeDayObj.pengiriman.length} Rit
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 tabular-nums">
+                              Total Area Kirim: {new Set(activeDayObj.pengiriman.map(item => standardizeAreaName(item.area, effectiveActiveBranchId).toUpperCase())).size} Area
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter('all')}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                                categoryFilter === 'all'
+                                  ? 'bg-emerald-600 text-white shadow-2xs'
+                                  : 'bg-slate-200 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              Semua ({activeDayObj.pengiriman.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter(categoryFilter === 'lokal' ? 'all' : 'lokal')}
+                              title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                categoryFilter === 'lokal'
+                                  ? 'bg-emerald-600 text-white border-emerald-500'
+                                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                              }`}
+                            >
+                              🚛 {lokalInSelected} Area Banyuwangi
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter(categoryFilter === 'luar_kota' ? 'all' : 'luar_kota')}
+                              title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                categoryFilter === 'luar_kota'
+                                  ? 'bg-blue-600 text-white border-blue-500'
+                                  : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+                              }`}
+                            >
+                              🏙️ {luarKotaInSelected} Area Luar Kota
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter(categoryFilter === 'bali' ? 'all' : 'bali')}
+                              title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                categoryFilter === 'bali'
+                                  ? 'bg-purple-600 text-white border-purple-500'
+                                  : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+                              }`}
+                            >
+                              🚢 {baliInSelected} Area Bali
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter(categoryFilter === 'kanvas_lkt' ? 'all' : 'kanvas_lkt')}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                categoryFilter === 'kanvas_lkt'
+                                  ? 'bg-indigo-600 text-white border-indigo-500'
+                                  : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
+                              }`}
+                            >
+                              📦 {kanvasLktInSelected} Kanvas LKT
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -5505,11 +5680,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             </tr>
                           ) : (
                             filteredPengiriman.map((p: DeliveryAssignment, pIdx: number) => {
-                              const standardArea = standardizeAreaName(p.area);
+                              const standardArea = standardizeAreaName(p.area, effectiveActiveBranchId);
                               const upperArea = standardArea.toUpperCase();
-                              const isKanvasLkt = upperArea.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS');
-                              const isBali = isAreaBaliSchedule(p.area);
-                              const isLuarKota = isAreaLuarKotaSchedule(p.area);
+                              const isKanvasLkt = !isSidoarjoBranch && (upperArea.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS'));
+                              const isBali = !isSidoarjoBranch && isAreaBaliSchedule(p.area);
+                              const isLuarKota = !isSidoarjoBranch && isAreaLuarKotaSchedule(p.area);
 
                               const activeDayMonthIdx = MONTH_NAMES.findIndex(m =>
                                 (activeDayObj.dateString || '').toLowerCase().includes(m.toLowerCase())
@@ -5594,7 +5769,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 <tr
                                   key={`cal-detail-${pIdx}-${displayDriver}-${p.armada}`}
                                   className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
-                                    isKanvasLkt
+                                    isSidoarjoBranch
+                                      ? ''
+                                      : isKanvasLkt
                                       ? 'bg-purple-50/30 dark:bg-purple-950/15'
                                       : isBali
                                       ? 'bg-purple-50/30 dark:bg-purple-950/15'
@@ -5668,7 +5845,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-md border ${
-                                        isKanvasLkt
+                                        isSidoarjoBranch
+                                          ? 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700'
+                                          : isKanvasLkt
                                           ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-200 border-purple-300 dark:border-purple-700'
                                           : isBali
                                           ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-200 border-purple-300 dark:border-purple-700'
@@ -6840,7 +7019,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <CrewCustomSelectDropdown
                 label="Driver / Pengemudi *"
                 value={editingTripModal.driver}
-                options={getIntegratedDrivers()}
+                options={getIntegratedDrivers(editingTripModal.branchId || effectiveActiveBranchId)}
                 onChange={(val) => setEditingTripModal({ ...editingTripModal, driver: val })}
                 roleBadgeText="Kru Supir"
                 accentColor="blue"
@@ -6851,7 +7030,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <CrewCustomSelectDropdown
                   label="Helper / Kernet 1"
                   value={editingTripModal.helper}
-                  options={getIntegratedHelpers()}
+                  options={getIntegratedHelpers(editingTripModal.branchId || effectiveActiveBranchId)}
                   onChange={(val) => setEditingTripModal({ ...editingTripModal, helper: val })}
                   emptyLabel="- Tanpa Helper 1 -"
                   emptyValue=""
@@ -6863,7 +7042,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <CrewCustomSelectDropdown
                   label="Helper / Kernet 2 (Opsional)"
                   value={editingTripModal.helper2}
-                  options={getIntegratedHelpers()}
+                  options={getIntegratedHelpers(editingTripModal.branchId || effectiveActiveBranchId)}
                   onChange={(val) => setEditingTripModal({ ...editingTripModal, helper2: val })}
                   emptyLabel="- Tanpa Helper 2 -"
                   emptyValue=""
@@ -6875,7 +7054,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1.5">
-                  Kirim Area / Tujuan ({OFFICIAL_DESTINATION_AREAS.length} Area Resmi) *
+                  Kirim Area / Tujuan ({getOfficialAreasForBranch(editingTripModal.branchId || effectiveActiveBranchId).length} Area Resmi Cabang {branchStore.getBranchById(editingTripModal.branchId || effectiveActiveBranchId)?.name || 'Aktif'}) *
                 </label>
                 <select
                   value={editingTripModal.area}
@@ -6883,7 +7062,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   <option value="">-- Pilih Area Tujuan --</option>
-                  {OFFICIAL_DESTINATION_AREAS.map(areaOpt => (
+                  {getOfficialAreasForBranch(editingTripModal.branchId || effectiveActiveBranchId).map(areaOpt => (
                     <option key={areaOpt} value={areaOpt}>
                       {areaOpt}
                     </option>
@@ -6892,9 +7071,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
 
               <FleetCustomSelectDropdown
-                label="Armada Truk (Inisial & Plat Nomor) *"
+                label={`Armada Truk Cabang ${branchStore.getBranchById(editingTripModal.branchId || effectiveActiveBranchId)?.name || 'Aktif'} *`}
                 value={editingTripModal.armada}
-                fleets={logisticsStore.getFleets()}
+                fleets={getFleetsForBranch(editingTripModal.branchId || effectiveActiveBranchId)}
                 dateIso={editingTripModal.returnDateIso || editingTripModal.departureDateIso}
                 excludeScheduleId={editingTripModal.scheduleId}
                 onChange={(val) => {
@@ -7010,6 +7189,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <h3 className="text-base font-black text-slate-900 dark:text-white">
                     Form Tambah Jadwal Baru (Manual)
                   </h3>
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    Cabang Aktif: <span className="text-emerald-600 dark:text-emerald-400 font-bold">Cabang {activeBranchRecord?.name || 'Nusantara'}</span> · Data armada, kru, dan area otomatis terkunci per cabang
+                  </p>
                 </div>
               </div>
               <button
@@ -7056,9 +7238,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
                 <div className="w-full">
                   <FleetCustomSelectDropdown
-                    label="Armada Truk *"
+                    label={`Armada Truk (Cabang ${activeBranchRecord?.name || 'Nusantara'}) *`}
                     value={manualScheduleForm.armada}
-                    fleets={logisticsStore.getFleets()}
+                    fleets={getFleetsForBranch(effectiveActiveBranchId)}
                     dateIso={manualScheduleForm.returnDateIso || manualScheduleForm.dateIso}
                     onChange={(val) => {
                       setManualScheduleFormError(null);
@@ -7205,7 +7387,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       <span>Tambah Area</span>
                     </button>
                     <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      {OFFICIAL_DESTINATION_AREAS.length} Area Terdaftar
+                      {branchOfficialAreas.length} Area Resmi Cabang {activeBranchRecord?.name || 'Nusantara'}
                     </span>
                   </div>
                 </div>
@@ -7225,12 +7407,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           {manualScheduleForm.area || 'Klik untuk Pilih Area Tujuan'}
                         </div>
                         {manualScheduleForm.area ? (
-                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${getAreaRegionCategory(manualScheduleForm.area).badgeColor}`}>
-                            {getAreaRegionCategory(manualScheduleForm.area).label}
-                          </span>
+                          !isSidoarjoBranch && (
+                            <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${getAreaRegionCategory(manualScheduleForm.area).badgeColor}`}>
+                              {getAreaRegionCategory(manualScheduleForm.area).label}
+                            </span>
+                          )
                         ) : (
                           <span className="text-[10px] text-slate-500 dark:text-slate-400 italic">
-                            Pilih dari {OFFICIAL_DESTINATION_AREAS.length} area pengiriman resmi
+                            Pilih dari {branchOfficialAreas.length} area pengiriman resmi Cabang {activeBranchRecord?.name || 'Nusantara'}
                           </span>
                         )}
                       </div>
@@ -7280,7 +7464,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               }
                             }
                           }}
-                          placeholder="Cari area (misal: Denpasar, Toko DR. Soetomo)... (Tekan Enter untuk memilih)"
+                          placeholder={
+                            isSidoarjoBranch
+                              ? 'Cari area Sidoarjo (misal: BLIKETUT, PONOMADI, SURABAYA, MALANG)...'
+                              : 'Cari area (misal: Denpasar, Toko DR. Soetomo)... (Tekan Enter untuk memilih)'
+                          }
                           className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-emerald-500"
                           autoFocus
                         />
@@ -7295,29 +7483,31 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         )}
                       </div>
 
-                      {/* Region Category Chips */}
-                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
-                        {[
-                          { id: 'all', label: `Semua (${OFFICIAL_DESTINATION_AREAS.length})` },
-                          { id: 'bali', label: 'Bali (4)' },
-                          { id: 'banyuwangi', label: 'Banyuwangi & Khusus (26)' },
-                          { id: 'jember', label: 'Jember (3)' },
-                          { id: 'pantura', label: 'Situbondo/Bw (3)' },
-                        ].map(cat => (
-                          <button
-                            key={cat.id}
-                            type="button"
-                            onClick={() => setAreaCategoryFilter(cat.id as any)}
-                            className={`px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition cursor-pointer ${
-                              areaCategoryFilter === cat.id
-                                ? 'bg-emerald-600 text-white shadow-xs'
-                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
-                          >
-                            {cat.label}
-                          </button>
-                        ))}
-                      </div>
+                      {/* Region Category Chips (Cabang Nusantara only) */}
+                      {!isSidoarjoBranch && (
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
+                          {[
+                            { id: 'all', label: `Semua (${OFFICIAL_DESTINATION_AREAS.length})` },
+                            { id: 'bali', label: 'Bali (4)' },
+                            { id: 'banyuwangi', label: 'Banyuwangi & Khusus (26)' },
+                            { id: 'jember', label: 'Jember (3)' },
+                            { id: 'pantura', label: 'Situbondo/Bw (3)' },
+                          ].map(cat => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => setAreaCategoryFilter(cat.id as any)}
+                              className={`px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition cursor-pointer ${
+                                areaCategoryFilter === cat.id
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              {cat.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Interactive Area Options Grid */}
                       <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -7350,10 +7540,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               }`}
                             >
                               <div className="min-w-0 pr-2">
-                                <div className="text-xs truncate">{areaName}</div>
-                                <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${meta.badgeColor}`}>
-                                  {meta.label}
-                                </span>
+                                <div className="text-xs font-semibold truncate">{areaName}</div>
+                                {!isSidoarjoBranch && (
+                                  <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${meta.badgeColor}`}>
+                                    {meta.label}
+                                  </span>
+                                )}
                               </div>
                               {isSelected ? (
                                 <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
@@ -7413,6 +7605,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 type="button"
                 onClick={() => {
                   setManualScheduleFormError(null);
+                  const targetBranchId = effectiveActiveBranchId;
+                  if (!canEditSchedules || !branchStore.canUserAccessBranch(currentUserProfile, targetBranchId)) {
+                    setManualScheduleFormError('Anda tidak memiliki hak akses untuk membuat jadwal pada cabang ini.');
+                    return;
+                  }
                   if (!manualScheduleForm.driver.trim()) {
                     setManualScheduleFormError('Mohon pilih Driver / Supir terlebih dahulu.');
                     return;
@@ -7425,12 +7622,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setManualScheduleFormError('Mohon pilih Area Kirim Tujuan terlebih dahulu.');
                     return;
                   }
-                  const stdArea = standardizeAreaName(manualScheduleForm.area.trim());
+                  const stdArea = standardizeAreaName(manualScheduleForm.area.trim(), targetBranchId);
                   const retIso = manualScheduleForm.returnDateIso || manualScheduleForm.dateIso;
                   const depIso = manualScheduleForm.departureDateIso || retIso;
                   const effectiveDateStr = retIso;
                   const armadaVal = manualScheduleForm.armada.trim();
-                  const matchedFleetObj = logisticsStore.findFleetByCodeOrPlate(armadaVal);
+                  const branchFleetsNow = getFleetsForBranch(targetBranchId);
+                  const matchedFleetObj =
+                    branchFleetsNow.find(
+                      f =>
+                        f.initialCode?.toUpperCase() === armadaVal.toUpperCase() ||
+                        f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armadaVal.replace(/\s+/g, '').toUpperCase())
+                    ) || logisticsStore.findFleetByCodeOrPlate(armadaVal);
+
+                  if (
+                    matchedFleetObj &&
+                    branchStore.getFleetBranchId(matchedFleetObj.id, matchedFleetObj.plateNumber, matchedFleetObj.initialCode) !== targetBranchId
+                  ) {
+                    const brErr = `Armada ${matchedFleetObj.initialCode || matchedFleetObj.plateNumber} bukan milik Cabang ${activeBranchRecord?.name || targetBranchId}.`;
+                    setManualScheduleFormError(brErr);
+                    setUploadToast({ type: 'error', message: brErr });
+                    return;
+                  }
 
                   const fleetConflict =
                     logisticsStore.findFleetAssignmentConflict(matchedFleetObj?.id || armadaVal, effectiveDateStr) ||
@@ -7465,9 +7678,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     return;
                   }
 
-                  const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string; bypassChecklistDirectComplete?: boolean } = {
+                  const defaultWarehouse =
+                    activeBranchRecord?.warehouseName ||
+                    (targetBranchId === 'cab-sidoarjo' ? 'Gudang Sidoarjo' : 'Gudang Pusat AKK Banyuwangi DC');
+
+                  const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string; branchId: string; bypassChecklistDirectComplete?: boolean } = {
                     tempId: `man-direct-${Date.now()}`,
                     source: 'manual',
+                    branchId: targetBranchId,
                     dateStr: effectiveDateStr,
                     departureDateIso: depIso,
                     returnDateIso: retIso,
@@ -7476,35 +7694,34 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     helper2: manualScheduleForm.helper2.trim() || '-',
                     area: stdArea,
                     armada: armadaVal,
-                    target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC',
+                    target: manualScheduleForm.target.trim() || defaultWarehouse,
                     departureTime: manualScheduleForm.departureTime || '07:30',
                     targetReturnTime: manualScheduleForm.targetReturnTime || '17:00',
                     bypassChecklistDirectComplete: manualScheduleForm.bypassChecklistDirectComplete
                   };
-                  branchStore.setScheduleBranchId(manualEntry.tempId, manualScheduleForm.branchId);
                   const savedOk = mergeAndSaveCombinedTrips(
                     [manualEntry],
                     'tambahkan',
-                    'Form Tambah Jadwal Baru'
+                    `Form Tambah Jadwal Baru (Cabang ${activeBranchRecord?.name || 'Nusantara'})`
                   );
                   if (!savedOk) return;
-                  // Reset form after submitting so old data never sticks
-                  const initDrivers = getIntegratedDrivers();
-                  const initHelpers = getIntegratedHelpers();
+                  // Reset form after submitting strictly scoped to active branch
+                  const initDrivers = getIntegratedDrivers(targetBranchId);
+                  const initHelpers = getIntegratedHelpers(targetBranchId);
                   const today = getTodayIso();
                   setManualScheduleForm({
                     dateIso: today,
                     departureDateIso: today,
                     returnDateIso: today,
-                    driver: initDrivers[0]?.name || 'Budiono',
-                    helper: initHelpers[0]?.name || 'Saifur Rizal',
+                    driver: initDrivers[0]?.name || '',
+                    helper: initHelpers[0]?.name || '',
                     helper2: '',
                     area: '',
                     armada: '',
                     target: '',
                     departureTime: '07:30',
                     targetReturnTime: '17:00',
-                    branchId: manualScheduleForm.branchId,
+                    branchId: targetBranchId,
                     bypassChecklistDirectComplete: false
                   });
                   setAreaSearchFilter('');

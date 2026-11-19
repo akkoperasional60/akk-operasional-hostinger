@@ -43,6 +43,39 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
   const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  const currentUserProfile = logisticsStore.getCurrentUser();
+
+  const accessibleBranches = useMemo(() => {
+    return branchStore.getAccessibleBranchesForUser(currentUserProfile);
+  }, [branches, currentUserProfile]);
+
+  const effectiveBranchId = useMemo(() => {
+    if (accessibleBranches.length === 1) return accessibleBranches[0].id;
+    if (selectedBranchId === 'ALL') return 'ALL';
+    if (accessibleBranches.some(b => b.id === selectedBranchId)) return selectedBranchId;
+    return accessibleBranches[0]?.id || 'ALL';
+  }, [accessibleBranches, selectedBranchId]);
+
+  const accessibleBranchIdSet = useMemo(
+    () => new Set(accessibleBranches.map(b => b.id)),
+    [accessibleBranches]
+  );
+
+  const branchScopedCrews = useMemo(() => {
+    return crews.filter(cr => {
+      const bId = branchStore.getCrewBranchId(cr.id, cr.name);
+      if (effectiveBranchId === 'ALL') return accessibleBranchIdSet.has(bId);
+      return bId === effectiveBranchId;
+    });
+  }, [crews, effectiveBranchId, accessibleBranchIdSet]);
+
+  const branchScopedFleets = useMemo(() => {
+    return fleets.filter(fl => {
+      const bId = branchStore.getFleetBranchId(fl.id, fl.plateNumber, fl.initialCode);
+      if (effectiveBranchId === 'ALL') return accessibleBranchIdSet.has(bId);
+      return bId === effectiveBranchId;
+    });
+  }, [fleets, effectiveBranchId, accessibleBranchIdSet]);
 
   useEffect(() => {
     return branchStore.subscribe(() => {
@@ -54,6 +87,14 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   // Filter & Search States (Text Fields & Selectors)
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
   const [selectedFleetFilter, setSelectedFleetFilter] = useState<string>('all');
+
+  // Reset personel & armada filter automatically when branch changes so data never mixes across branches
+  useEffect(() => {
+    setSelectedCrewId('all');
+    setSelectedFleetFilter('all');
+    setCrewFilterSearch('');
+    setFleetFilterSearch('');
+  }, [effectiveBranchId]);
   const [selectedMonth, setSelectedMonth] = useState<number>(() => {
     const schedules = logisticsStore.getSchedules();
     const validDates = schedules
@@ -313,8 +354,17 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         (qNorm.length > 0 && fleetFullNorm.includes(qNorm)) ||
         item.area.toLowerCase().includes(q);
 
-      const crewBranch = branchStore.getCrewBranch(item.crewId, item.crewName);
-      const matchesBranch = selectedBranchId === 'ALL' || crewBranch.id === selectedBranchId;
+      const activeSch = item.scheduleId
+        ? activeSchedules.find(s => s.id === item.scheduleId)
+        : undefined;
+      const crewBranchId = branchStore.getCrewBranchId(item.crewId, item.crewName);
+      const itemBranchId = activeSch
+        ? branchStore.getScheduleBranchId(activeSch.id, activeSch.originName, activeSch.fleetId)
+        : crewBranchId;
+      const matchesBranch =
+        effectiveBranchId === 'ALL'
+          ? accessibleBranchIdSet.has(itemBranchId) && accessibleBranchIdSet.has(crewBranchId)
+          : itemBranchId === effectiveBranchId && crewBranchId === effectiveBranchId;
 
       return (
         matchesBranch &&
@@ -327,7 +377,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         matchesSearch
       );
     });
-  }, [history, selectedBranchId, selectedCrewId, selectedFleetFilter, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery, resolveCanonicalFleet]);
+  }, [history, effectiveBranchId, accessibleBranchIdSet, selectedCrewId, selectedFleetFilter, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery, resolveCanonicalFleet]);
 
   // Integrated Real-time Crew Area Stats from History Log
   const crewAreaStatsList = useMemo(() => {
@@ -1106,12 +1156,12 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Pilih Personel Kru Custom Dropdown */}
+                {/* Pilih Personel Kru Custom Dropdown (Tersaring Ketat per Cabang) */}
                 <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
                   {(() => {
-                    const activeCrewObj = crews.find(cr => cr.id === selectedCrewId);
-                    const filteredCrewList = crews.filter(cr => {
+                    const activeCrewObj = branchScopedCrews.find(cr => cr.id === selectedCrewId);
+                    const filteredCrewList = branchScopedCrews.filter(cr => {
                       const q = crewFilterSearch.trim().toLowerCase();
                       if (!q) return true;
                       return cr.name.toLowerCase().includes(q) || (cr.role || '').toLowerCase().includes(q);
@@ -1127,7 +1177,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                           <div className="flex items-center gap-2 min-w-0">
                             <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                             <span className="truncate">
-                              {activeCrewObj ? activeCrewObj.name : `Semua Pengemudi (${crews.length})`}
+                              {activeCrewObj ? activeCrewObj.name : `Semua Pengemudi (${branchScopedCrews.length})`}
                             </span>
                           </div>
                           <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'crew' ? 'rotate-180 text-blue-400' : ''}`} />
@@ -1159,32 +1209,38 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                   selectedCrewId === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
                                 }`}
                               >
-                                <span>Semua Pengemudi ({crews.length})</span>
+                                <span>Semua Pengemudi ({branchScopedCrews.length})</span>
                                 {selectedCrewId === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
                               </button>
-                              {filteredCrewList.map(cr => {
-                                const isSel = selectedCrewId === cr.id;
-                                return (
-                                  <button
-                                    key={cr.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedCrewId(cr.id);
-                                      setOpenFilterDropdown(null);
-                                      setCrewFilterSearch('');
-                                    }}
-                                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                      isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
-                                    }`}
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="font-bold truncate">{cr.name}</div>
-                                      <div className="text-[10px] text-slate-400 truncate">{cr.role || 'Kru Armada'}</div>
-                                    </div>
-                                    {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                  </button>
-                                );
-                              })}
+                              {filteredCrewList.length === 0 ? (
+                                <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
+                                  Tidak ada personel kru di cabang ini.
+                                </div>
+                              ) : (
+                                filteredCrewList.map(cr => {
+                                  const isSel = selectedCrewId === cr.id;
+                                  return (
+                                    <button
+                                      key={cr.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedCrewId(cr.id);
+                                        setOpenFilterDropdown(null);
+                                        setCrewFilterSearch('');
+                                      }}
+                                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                        isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-bold truncate">{cr.name}</div>
+                                        <div className="text-[10px] text-slate-400 truncate">{cr.role || 'Kru Armada'}</div>
+                                      </div>
+                                      {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                    </button>
+                                  );
+                                })
+                              )}
                             </div>
                           </div>
                         )}
@@ -1200,21 +1256,27 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Cabang</label>
                   {(() => {
-                    const activeBranchObj = branches.find(b => b.id === selectedBranchId);
+                    const activeBranchObj = accessibleBranches.find(b => b.id === effectiveBranchId);
+                    const canSwitchBranch = accessibleBranches.length > 1;
                     return (
                       <>
                         <button
                           type="button"
-                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'branch' ? null : 'branch')}
-                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-xs font-bold text-emerald-400 flex items-center justify-between gap-2 transition cursor-pointer"
+                          disabled={!canSwitchBranch}
+                          onClick={() => canSwitchBranch && setOpenFilterDropdown(openFilterDropdown === 'branch' ? null : 'branch')}
+                          className={`w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400 flex items-center justify-between gap-2 transition ${
+                            canSwitchBranch ? 'hover:bg-slate-900 hover:border-emerald-500/50 cursor-pointer' : 'opacity-90 cursor-default'
+                          }`}
                         >
                           <span className="truncate">
-                            {selectedBranchId === 'ALL' || !activeBranchObj ? 'Semua Cabang' : `Cabang ${activeBranchObj.name}`}
+                            {effectiveBranchId === 'ALL' || !activeBranchObj ? 'Semua Cabang' : `Cabang ${activeBranchObj.name}`}
                           </span>
-                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'branch' ? 'rotate-180 text-emerald-400' : ''}`} />
+                          {canSwitchBranch && (
+                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'branch' ? 'rotate-180 text-emerald-400' : ''}`} />
+                          )}
                         </button>
 
-                        {openFilterDropdown === 'branch' && (
+                        {openFilterDropdown === 'branch' && canSwitchBranch && (
                           <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
                             <button
                               type="button"
@@ -1224,14 +1286,14 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                 setOpenFilterDropdown(null);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                selectedBranchId === 'ALL' ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
+                                effectiveBranchId === 'ALL' ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
                               }`}
                             >
                               <span>Semua Cabang</span>
-                              {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                              {effectiveBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
                             </button>
-                            {branches.map(b => {
-                              const isSel = selectedBranchId === b.id;
+                            {accessibleBranches.map(b => {
+                              const isSel = effectiveBranchId === b.id;
                               return (
                                 <button
                                   key={b.id}
@@ -1257,12 +1319,12 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                   })()}
                 </div>
 
-                {/* Pilih Armada Custom Dropdown */}
+                {/* Pilih Armada Custom Dropdown (Tersaring Ketat per Cabang) */}
                 <div className="space-y-1 relative">
                   <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
                   {(() => {
-                    const activeFleetObj = fleets.find(fl => (fl.initialCode || fl.plateNumber) === selectedFleetFilter);
-                    const filteredFleetList = fleets.filter(fl => {
+                    const activeFleetObj = branchScopedFleets.find(fl => (fl.initialCode || fl.plateNumber) === selectedFleetFilter);
+                    const filteredFleetList = branchScopedFleets.filter(fl => {
                       const q = fleetFilterSearch.trim().toLowerCase();
                       if (!q) return true;
                       return (
@@ -1284,7 +1346,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                             <span className="truncate">
                               {activeFleetObj
                                 ? `${activeFleetObj.initialCode ? `[${activeFleetObj.initialCode}] ` : ''}${activeFleetObj.plateNumber}`
-                                : `Semua Armada (${fleets.length})`}
+                                : `Semua Armada (${branchScopedFleets.length})`}
                             </span>
                           </div>
                           <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'fleet' ? 'rotate-180 text-blue-400' : ''}`} />
@@ -1316,38 +1378,44 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                                   selectedFleetFilter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
                                 }`}
                               >
-                                <span>Semua Armada ({fleets.length})</span>
+                                <span>Semua Armada ({branchScopedFleets.length})</span>
                                 {selectedFleetFilter === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
                               </button>
-                              {filteredFleetList.map(fl => {
-                                const valKey = fl.initialCode || fl.plateNumber;
-                                const isSel = selectedFleetFilter === valKey;
-                                return (
-                                  <button
-                                    key={fl.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedFleetFilter(valKey);
-                                      setOpenFilterDropdown(null);
-                                      setFleetFilterSearch('');
-                                    }}
-                                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                      isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
-                                        {fl.initialCode || 'UNIT'}
-                                      </span>
-                                      <div className="min-w-0">
-                                        <div className="font-mono font-bold text-white truncate">{fl.plateNumber}</div>
-                                        <div className="text-[10px] text-slate-400 truncate">{fl.vehicleType}</div>
+                              {filteredFleetList.length === 0 ? (
+                                <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
+                                  Belum ada unit armada terdaftar di cabang ini.
+                                </div>
+                              ) : (
+                                filteredFleetList.map(fl => {
+                                  const valKey = fl.initialCode || fl.plateNumber;
+                                  const isSel = selectedFleetFilter === valKey;
+                                  return (
+                                    <button
+                                      key={fl.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedFleetFilter(valKey);
+                                        setOpenFilterDropdown(null);
+                                        setFleetFilterSearch('');
+                                      }}
+                                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                        isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                                          {fl.initialCode || 'UNIT'}
+                                        </span>
+                                        <div className="min-w-0">
+                                          <div className="font-mono font-bold text-white truncate">{fl.plateNumber}</div>
+                                          <div className="text-[10px] text-slate-400 truncate">{fl.vehicleType}</div>
+                                        </div>
                                       </div>
-                                    </div>
-                                    {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                  </button>
-                                );
-                              })}
+                                      {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                    </button>
+                                  );
+                                })
+                              )}
                             </div>
                           </div>
                         )}

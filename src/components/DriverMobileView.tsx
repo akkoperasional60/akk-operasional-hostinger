@@ -426,6 +426,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     lastUpdated: string;
     isSyncing: boolean;
     source: 'native' | 'dc_fallback';
+    permissionState: 'prompt' | 'granted' | 'denied' | 'unavailable';
+    errorMsg: string | null;
   }>({
     lat: -8.1906,
     lng: 114.3708,
@@ -433,67 +435,167 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     speedKmh: 0,
     lastUpdated: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
     isSyncing: false,
-    source: 'dc_fallback'
+    source: 'dc_fallback',
+    permissionState: 'prompt',
+    errorMsg: null
+  });
+
+  const [gpsGateModal, setGpsGateModal] = useState<{
+    open: boolean;
+    delivery: Schedule | null;
+    reason: string;
+    isChecking: boolean;
+  }>({
+    open: false,
+    delivery: null,
+    reason: '',
+    isChecking: false
   });
 
   const [expandedRouteDeliveryId, setExpandedRouteDeliveryId] = useState<string | null>(null);
 
-  const syncDeviceGps = (showToast = false) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      if (showToast) {
-        addNotification('delivery', 'GPS Fallback DC Aktif', 'Perangkat menggunakan titik referensi Gudang Pusat Banyuwangi DC.');
-      }
-      return;
-    }
-
-    setDeviceGps(prev => ({ ...prev, isSyncing: true }));
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
-        const speedMs = pos.coords.speed || 0;
-        setDeviceGps({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: Math.round(pos.coords.accuracy || 10),
-          speedKmh: Math.max(0, Math.round(speedMs * 3.6)),
-          lastUpdated: nowTime,
-          isSyncing: false,
-          source: 'native'
-        });
-        if (showToast) {
-          addNotification(
-            'delivery',
-            'GPS Perangkat Tersinkronisasi',
-            `Koordinat terkunci: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (±${Math.round(pos.coords.accuracy || 10)}m)`
-          );
-        }
-      },
-      () => {
-        const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+  const requestNativeGpsLock = (
+    showToast = false
+  ): Promise<{
+    ok: boolean;
+    lat: number;
+    lng: number;
+    accuracy: number;
+    speedKmh: number;
+    reason?: string;
+  }> => {
+    return new Promise(resolve => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        const msg = 'Perangkat atau browser tidak mendukung layanan GPS (Geolocation).';
         setDeviceGps(prev => ({
           ...prev,
-          lastUpdated: nowTime,
           isSyncing: false,
-          source: 'dc_fallback'
+          source: 'dc_fallback',
+          permissionState: 'unavailable',
+          errorMsg: msg
         }));
         if (showToast) {
-          addNotification(
-            'delivery',
-            'Titik GPS Referensi DC',
-            'Menggunakan koordinat Gudang Pusat Sukowidi DC (-8.1906, 114.3708).'
-          );
+          addNotification('sla_warning', 'GPS Tidak Tersedia', msg);
         }
-      },
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
-    );
+        resolve({
+          ok: false,
+          lat: deviceGps.lat,
+          lng: deviceGps.lng,
+          accuracy: deviceGps.accuracy,
+          speedKmh: 0,
+          reason: msg
+        });
+        return;
+      }
+
+      setDeviceGps(prev => ({ ...prev, isSyncing: true, errorMsg: null }));
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const nowTime =
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+            ' WIB';
+          const speedMs = pos.coords.speed || 0;
+          const speedKmh = Math.max(0, Math.round(speedMs * 3.6));
+          const acc = Math.round(pos.coords.accuracy || 10);
+          setDeviceGps({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: acc,
+            speedKmh,
+            lastUpdated: nowTime,
+            isSyncing: false,
+            source: 'native',
+            permissionState: 'granted',
+            errorMsg: null
+          });
+          if (showToast) {
+            addNotification(
+              'delivery',
+              'GPS Live Perangkat Aktif',
+              `Koordinat terkunci: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (±${acc}m)`
+            );
+          }
+          resolve({
+            ok: true,
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: acc,
+            speedKmh
+          });
+        },
+        err => {
+          const nowTime =
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+          const isDenied = err?.code === 1;
+          const reason = isDenied
+            ? 'Izin akses lokasi (GPS) ditolak. Aktifkan izin Lokasi/GPS di pengaturan browser atau HP Anda agar Live Trips dapat melacak rute.'
+            : err?.code === 2
+            ? 'Sinyal GPS perangkat belum terdeteksi. Pastikan fitur Lokasi/GPS di HP sudah dinyalakan.'
+            : 'Waktu pencarian sinyal GPS habis. Pastikan GPS aktif dan coba lagi di area terbuka.';
+          setDeviceGps(prev => ({
+            ...prev,
+            lastUpdated: nowTime,
+            isSyncing: false,
+            source: 'dc_fallback',
+            permissionState: isDenied ? 'denied' : 'prompt',
+            errorMsg: reason
+          }));
+          if (showToast) {
+            addNotification('sla_warning', 'GPS Belum Aktif', reason);
+          }
+          resolve({
+            ok: false,
+            lat: deviceGps.lat,
+            lng: deviceGps.lng,
+            accuracy: deviceGps.accuracy,
+            speedKmh: 0,
+            reason
+          });
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+      );
+    });
+  };
+
+  const syncDeviceGps = (showToast = false) => {
+    void requestNativeGpsLock(showToast);
   };
 
   useEffect(() => {
-    syncDeviceGps(false);
+    void requestNativeGpsLock(false);
+
+    // Pantau perubahan status izin Geolocation browser secara real-time
+    let permStatusRef: PermissionStatus | null = null;
+    if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: 'geolocation' as PermissionName })
+        .then(status => {
+          permStatusRef = status;
+          setDeviceGps(prev => ({
+            ...prev,
+            permissionState:
+              status.state === 'granted' ? 'granted' : status.state === 'denied' ? 'denied' : 'prompt'
+          }));
+          status.onchange = () => {
+            setDeviceGps(prev => ({
+              ...prev,
+              permissionState:
+                status.state === 'granted' ? 'granted' : status.state === 'denied' ? 'denied' : 'prompt'
+            }));
+            if (status.state === 'granted') {
+              void requestNativeGpsLock(false);
+            }
+          };
+        })
+        .catch(() => {});
+    }
+
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       const watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+        pos => {
+          const nowTime =
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+            ' WIB';
           const speedMs = pos.coords.speed || 0;
           setDeviceGps({
             lat: pos.coords.latitude,
@@ -502,14 +604,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             speedKmh: Math.max(0, Math.round(speedMs * 3.6)),
             lastUpdated: nowTime,
             isSyncing: false,
-            source: 'native'
+            source: 'native',
+            permissionState: 'granted',
+            errorMsg: null
           });
         },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 20000 }
+        err => {
+          if (err?.code === 1) {
+            setDeviceGps(prev => ({
+              ...prev,
+              source: 'dc_fallback',
+              permissionState: 'denied',
+              errorMsg: 'Izin GPS ditolak oleh perangkat/browser.'
+            }));
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
       );
-      return () => navigator.geolocation.clearWatch(watchId);
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+        if (permStatusRef) permStatusRef.onchange = null;
+      };
     }
+    return () => {
+      if (permStatusRef) permStatusRef.onchange = null;
+    };
   }, []);
 
   const calculateRouteMetrics = (destLat: number, destLng: number) => {
@@ -2654,30 +2773,69 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     activeShift?.selectedArea
   ]);
 
-  // 🛰️ Kirim ping GPS berkala (throttle 15 detik) ke Hostinger MySQL selama armada sedang dalam perjalanan (in_transit / picked_up)
+  // 🛰️ Kirim ping GPS berkala (heartbeat 15 detik + watchPosition real-time) ke Hostinger MySQL selama armada sedang dalam perjalanan
   useEffect(() => {
     const activeTrip = activeDeliveries.find(
       d => d.status === 'in_transit' || d.status === 'picked_up'
     );
     if (!activeTrip) return;
-    if (!Number.isFinite(deviceGps.lat) || !Number.isFinite(deviceGps.lng)) return;
 
-    const nowMs = Date.now();
-    if (nowMs - lastGpsPingAtRef.current < 15000) return;
-    lastGpsPingAtRef.current = nowMs;
+    const pushGpsPing = (lat: number, lng: number, speedKmh: number) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const nowMs = Date.now();
+      if (nowMs - lastGpsPingAtRef.current < 12000) return;
+      lastGpsPingAtRef.current = nowMs;
 
-    void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeTrip.id}`)}/ping`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lat: deviceGps.lat,
-        lng: deviceGps.lng,
-        speedKmh: deviceGps.speedKmh || 0,
-        locationName: activeTrip.areaName || activeTrip.store?.storeName || 'Dalam Perjalanan'
+      void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeTrip.id}`)}/ping`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat,
+          lng,
+          speedKmh: speedKmh || 0,
+          locationName: activeTrip.areaName || activeTrip.store?.storeName || 'Dalam Perjalanan'
+        })
       })
-    }).catch(() => {});
-  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, activeDeliveries]);
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('gps-trip-updated'));
+        })
+        .catch(() => {});
+    };
+
+    if (deviceGps.source === 'native') {
+      pushGpsPing(deviceGps.lat, deviceGps.lng, deviceGps.speedKmh);
+    }
+
+    // Active 15-second GPS heartbeat polling agar track Live Trips tetap terekam meskipun perangkat sempat idle
+    const heartbeatTimer = window.setInterval(() => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const speedKmh = Math.max(0, Math.round((pos.coords.speed || 0) * 3.6));
+          const nowTime =
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+            ' WIB';
+          setDeviceGps({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: Math.round(pos.coords.accuracy || 10),
+            speedKmh,
+            lastUpdated: nowTime,
+            isSyncing: false,
+            source: 'native',
+            permissionState: 'granted',
+            errorMsg: null
+          });
+          pushGpsPing(pos.coords.latitude, pos.coords.longitude, speedKmh);
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
+      );
+    }, 15000);
+
+    return () => window.clearInterval(heartbeatTimer);
+  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, deviceGps.source, activeDeliveries]);
 
   // 🧭 Deteksi Posisi Jobdesk Terjadwal (Driver vs Helper) untuk Jadwal Tertentu maupun Portal Utama
   const getScheduledJobdeskForDelivery = (delivery?: Schedule | null): 'driver' | 'helper' => {
@@ -2740,11 +2898,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   ]);
 
   // 📋 Integrasi Form Kirim dengan Isolasi Area Ketat:
-  // Apabila Admin Penjualan input Form Kirim area A, hanya muncul di portal kru yang mengirim area A (tidak muncul di kru area B).
+  // Form Kirim HANYA muncul apabila kru sudah Check-In dan memiliki jadwal pengiriman aktif hari ini,
+  // serta hanya menampilkan Form Kirim yang sesuai dengan area pengiriman aktif tersebut.
   const todayFormKirimIntegration = useMemo<{
     record: FormKirimRecord | null;
     matchedArea: string;
   }>(() => {
+    // Jika belum Check-In atau belum ada jadwal pengiriman aktif, Form Kirim WAJIB kosong
+    if (!activeShift || activeDeliveries.length === 0) {
+      return {
+        record: null,
+        matchedArea: ''
+      };
+    }
+
     const todayWibIso = getPortalTodayWibIso();
     const todayLocalIso = getLocalDateStr();
     const isTodayDate = (iso?: string) => {
@@ -2752,18 +2919,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       return Boolean(clean && (clean === todayWibIso || clean === todayLocalIso));
     };
 
-    const todaySchedules = [
-      ...activeDeliveries,
-      ...deliveries.filter(
-        d => isScheduleMatchingTargetDate(d, todayWibIso) || isScheduleMatchingTargetDate(d, todayLocalIso)
-      )
-    ];
-    const primarySch = activeDeliveries[0] || todaySchedules[0] || null;
+    const primarySch = activeDeliveries[0] || null;
     const expectedAreaSet = new Set<string>(
       [
         activeShift?.selectedArea || '',
-        ...activeDeliveries.map(d => d.areaName || d.store?.city || ''),
-        ...todaySchedules.map(d => d.areaName || d.store?.city || '')
+        ...activeDeliveries.map(d => d.areaName || d.store?.city || '')
       ]
         .map(a => standardizeAreaName(a))
         .filter(Boolean)
@@ -2771,21 +2931,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const primaryAreaStd = standardizeAreaName(
       activeShift?.selectedArea || primarySch?.areaName || primarySch?.store?.city || ''
     );
-    const isUnscopedAdminView = Boolean(
-      (isSuperAdminUser || canManageAllPortalSchedules) &&
-      spvCrewFilter === 'all' &&
-      expectedAreaSet.size === 0
-    );
     const activeCrewName = currentDriver?.name || portalDisplayName || '';
 
     const areaMatchesUserScope = (areaRaw?: string): boolean => {
       const fkStd = standardizeAreaName(areaRaw || '');
-      if (!fkStd) return false;
-      if (expectedAreaSet.size === 0) return isUnscopedAdminView;
+      if (!fkStd || expectedAreaSet.size === 0) return false;
       return expectedAreaSet.has(fkStd);
     };
 
-    // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim — WAJIB cocok dengan area kru!
+    if (expectedAreaSet.size === 0) {
+      return {
+        record: null,
+        matchedArea: ''
+      };
+    }
+
+    // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim — WAJIB cocok dengan area aktif kru!
     let preferredId = '';
     try {
       preferredId = localStorage.getItem('akk_active_form_kirim_id') || '';
@@ -2802,15 +2963,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     }
 
-    // Jika kru belum punya area Check-In / Jadwal hari ini dan bukan unscoped admin, jangan tampilkan Form Kirim area lain
-    if (expectedAreaSet.size === 0 && !isUnscopedAdminView) {
-      return {
-        record: null,
-        matchedArea: ''
-      };
-    }
-
-    // Filter Form Kirim tanggal hari ini yang cocok dengan area pengiriman kru ini
+    // Filter Form Kirim tanggal hari ini yang cocok dengan area pengiriman aktif kru ini
     const todayForms = formKirimList.filter(
       fk =>
         isTodayDate(fk.tanggalKirim) &&
@@ -2865,13 +3018,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }, [
     formKirimList,
     activeDeliveries,
-    deliveries,
-    activeShift?.selectedArea,
+    activeShift,
     currentDriver?.name,
-    portalDisplayName,
-    canManageAllPortalSchedules,
-    isSuperAdminUser,
-    spvCrewFilter
+    portalDisplayName
   ]);
 
   const readyFormKirimCount = useMemo(() => {
@@ -4104,8 +4253,28 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
   };
 
-  // Konfirmasi Gate-Out Terintegrasi (Driver & Helper): Saat salah satu klik Gate-Out, status jadwal & SJ langsung menjadi Di Jalan / Siap Print SJ + mulai rekam Live GPS Trip ke MySQL
-  const handleConfirmSharedGateOut = async (delivery: Schedule) => {
+  // Konfirmasi Gate-Out Terintegrasi (Driver & Helper): Pastikan GPS aktif terlebih dahulu agar Live Trips mendeteksi track armada secara akurat
+  const handleConfirmSharedGateOut = async (delivery: Schedule, bypassGpsCheck = false) => {
+    let lockedLat = deviceGps.lat;
+    let lockedLng = deviceGps.lng;
+
+    if (!bypassGpsCheck) {
+      const gpsResult = await requestNativeGpsLock(false);
+      if (!gpsResult.ok) {
+        setGpsGateModal({
+          open: true,
+          delivery,
+          reason:
+            gpsResult.reason ||
+            'GPS perangkat belum aktif. Aktifkan GPS terlebih dahulu agar rute perjalanan terekam di Live Trips.',
+          isChecking: false
+        });
+        return;
+      }
+      lockedLat = gpsResult.lat;
+      lockedLng = gpsResult.lng;
+    }
+
     const preparedSchedule: Schedule = {
       ...delivery,
       status: 'in_transit',
@@ -4146,7 +4315,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       gateOutTimestamp: gateOutIso
     });
 
-    // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips)
+    // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips) dengan koordinat GPS asli yang baru terkunci
     const { driverName: tripDriver, helper1Name: tripHelper1, helper2Name: tripHelper2 } = getDeliveryCrewComposition(preparedSchedule);
     void fetch('/api/gps-trips', {
       method: 'POST',
@@ -4166,8 +4335,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         areaName: delivery.areaName || delivery.store?.storeName || activeShift?.selectedArea || '-',
         status: 'active',
         startedAt: gateOutIso,
-        lat: deviceGps.lat,
-        lng: deviceGps.lng,
+        lat: lockedLat,
+        lng: lockedLng,
         locationName: 'Gate-Out Gudang DC PT AKK'
       })
     })
@@ -5510,25 +5679,49 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </button>
               </div>
 
-              {/* Baris 3: Status GPS Ringkas */}
+              {/* Baris 3: Status GPS Live Real-Time */}
               <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-xs flex-wrap">
                 <div
-                  className="flex items-center gap-1.5 min-w-0 text-slate-500 dark:text-slate-400"
-                  title={`Koordinat: ${deviceGps.lat.toFixed(5)}, ${deviceGps.lng.toFixed(5)}`}
+                  className="flex items-center gap-1.5 min-w-0"
+                  title={`Koordinat: ${deviceGps.lat.toFixed(5)}, ${deviceGps.lng.toFixed(5)} (${deviceGps.lastUpdated})`}
                 >
-                  <Compass className={`w-3.5 h-3.5 shrink-0 ${deviceGps.source === 'native' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`} />
-                  <span className="truncate">
-                    GPS {deviceGps.source === 'native' ? 'Aktif' : 'Siap'} · ±{deviceGps.accuracy}m
-                  </span>
+                  {deviceGps.source === 'native' ? (
+                    <>
+                      <span className="relative flex h-2.5 w-2.5 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                      </span>
+                      <span className="truncate font-semibold text-emerald-700 dark:text-emerald-400">
+                        GPS Live Aktif · ±{deviceGps.accuracy}m
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Compass className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                      <span className="truncate font-semibold text-amber-700 dark:text-amber-400">
+                        GPS Belum Aktif (Perlu Izin Lokasi)
+                      </span>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
                   onClick={() => syncDeviceGps(true)}
                   disabled={deviceGps.isSyncing}
-                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-[11px] flex items-center gap-1 shrink-0 transition cursor-pointer whitespace-nowrap"
+                  className={`min-h-[34px] px-2.5 py-1 rounded-lg font-semibold text-[11px] flex items-center gap-1 shrink-0 transition cursor-pointer whitespace-nowrap ${
+                    deviceGps.source === 'native'
+                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs'
+                  }`}
                 >
                   <RefreshCw className={`w-3 h-3 ${deviceGps.isSyncing ? 'animate-spin' : ''}`} />
-                  <span>{deviceGps.isSyncing ? 'Sinkron...' : 'Sync GPS'}</span>
+                  <span>
+                    {deviceGps.isSyncing
+                      ? 'Mengunci GPS...'
+                      : deviceGps.source === 'native'
+                      ? 'Sync GPS'
+                      : 'Aktifkan GPS'}
+                  </span>
                 </button>
               </div>
             </div>
@@ -7566,38 +7759,44 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
         {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD + KM PAGI/PULANG) */}
         {bottomNav === 'form_kirim' && (() => {
-          const activePlateClean = (
-            todayFormKirimIntegration.record?.plateNumber ||
-            assignedFleet?.plateNumber ||
-            activeShift?.plateNumber ||
-            ''
-          )
-            .replace(/\s+/g, '')
-            .toLowerCase();
+          const hasActiveScheduleForForm = Boolean(activeShift && activeDeliveries.length > 0);
+          const activePlateClean = hasActiveScheduleForForm
+            ? (
+                todayFormKirimIntegration.record?.plateNumber ||
+                assignedFleet?.plateNumber ||
+                activeShift?.plateNumber ||
+                ''
+              )
+                .replace(/\s+/g, '')
+                .toLowerCase()
+            : '';
           const currentDriverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
-          const todayMatchingChecklists = checklists.filter(c => {
-            const cDate = String(c.date || c.createdAt || '').slice(0, 10);
-            if (cDate && cDate !== todayLocalStr) return false;
-            const cPlateClean = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
-            const cDriverLower = String(c.driverName || '').trim().toLowerCase();
-            if (activePlateClean && activePlateClean !== '-' && cPlateClean === activePlateClean) return true;
-            if (c.driverId && c.driverId === selectedDriverId) return true;
-            if (currentDriverNameLower && cDriverLower && (cDriverLower.includes(currentDriverNameLower) || currentDriverNameLower.includes(cDriverLower))) return true;
-            return false;
-          });
+          const todayMatchingChecklists = hasActiveScheduleForForm
+            ? checklists.filter(c => {
+                const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+                if (cDate && cDate !== todayLocalStr) return false;
+                const cPlateClean = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+                const cDriverLower = String(c.driverName || '').trim().toLowerCase();
+                if (activePlateClean && activePlateClean !== '-' && cPlateClean === activePlateClean) return true;
+                if (c.driverId && c.driverId === selectedDriverId) return true;
+                if (currentDriverNameLower && cDriverLower && (cDriverLower.includes(currentDriverNameLower) || currentDriverNameLower.includes(cDriverLower))) return true;
+                return false;
+              })
+            : [];
           const latestPreTrip = todayMatchingChecklists.find(c => c.inspectionType === 'pre_trip' && Number(c.odometerKm) > 0);
           const latestPostTrip = todayMatchingChecklists.find(c => c.inspectionType === 'post_trip' && Number(c.odometerKm) > 0);
 
           return (
             <DriverFormKirimPanel
-              todayFormKirim={todayFormKirimIntegration.record}
+              todayFormKirim={hasActiveScheduleForForm ? todayFormKirimIntegration.record : null}
               todayDisplayDate={realtimeDayDateStr}
-              matchedScheduleArea={todayFormKirimIntegration.matchedArea}
+              matchedScheduleArea={hasActiveScheduleForForm ? todayFormKirimIntegration.matchedArea : ''}
+              hasActiveSchedule={hasActiveScheduleForForm}
               portalDisplayName={portalDisplayName}
               userRole={isUserHelperRole ? 'Helper' : 'Driver'}
               deviceGps={deviceGps}
-              checklistKmPagi={latestPreTrip?.odometerKm ?? null}
-              checklistKmPulang={latestPostTrip?.odometerKm ?? null}
+              checklistKmPagi={hasActiveScheduleForForm ? (latestPreTrip?.odometerKm ?? null) : null}
+              checklistKmPulang={hasActiveScheduleForForm ? (latestPostTrip?.odometerKm ?? null) : null}
               onRefresh={() => {
                 void formKirimStore.hydrateFromServer(true);
                 void driverChecklistService.syncFromServer().then(setChecklists);
@@ -9940,6 +10139,83 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             >
               Tutup Rincian
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Wajib Aktifkan GPS untuk Live Trips saat Gate-Out */}
+      {gpsGateModal.open && gpsGateModal.delivery && (
+        <div className="fixed inset-0 z-[130] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Compass className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                  Aktifkan GPS untuk Live Trips
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {gpsGateModal.reason}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+              <div className="font-bold text-slate-800 dark:text-slate-100">Langkah Cepat:</div>
+              <div>1. Pastikan <strong>Lokasi / GPS</strong> di HP Anda dalam kondisi aktif.</div>
+              <div>2. Tekan <strong>Izinkan (Allow)</strong> saat browser meminta akses lokasi.</div>
+              <div>3. Klik tombol <strong>Aktifkan &amp; Kunci GPS</strong> di bawah ini.</div>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={gpsGateModal.isChecking}
+                onClick={async () => {
+                  const targetDelivery = gpsGateModal.delivery;
+                  if (!targetDelivery) return;
+                  setGpsGateModal(prev => ({ ...prev, isChecking: true }));
+                  const res = await requestNativeGpsLock(true);
+                  if (res.ok) {
+                    setGpsGateModal({ open: false, delivery: null, reason: '', isChecking: false });
+                    await handleConfirmSharedGateOut(targetDelivery, true);
+                  } else {
+                    setGpsGateModal(prev => ({
+                      ...prev,
+                      isChecking: false,
+                      reason: res.reason || prev.reason
+                    }));
+                  }
+                }}
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${gpsGateModal.isChecking ? 'animate-spin' : ''}`} />
+                <span>{gpsGateModal.isChecking ? 'Mencari Sinyal GPS...' : 'Aktifkan & Kunci GPS Sekarang'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGpsGateModal({ open: false, delivery: null, reason: '', isChecking: false })}
+                className="w-full min-h-[40px] py-2 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+              >
+                Tutup
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const targetDelivery = gpsGateModal.delivery;
+                  setGpsGateModal({ open: false, delivery: null, reason: '', isChecking: false });
+                  if (targetDelivery) {
+                    await handleConfirmSharedGateOut(targetDelivery, true);
+                  }
+                }}
+                className="w-full py-1.5 text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition cursor-pointer text-center"
+              >
+                Lanjutkan Gate-Out Tanpa Kunci GPS (Darurat)
+              </button>
+            </div>
           </div>
         </div>
       )}

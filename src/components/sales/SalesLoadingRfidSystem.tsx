@@ -37,7 +37,6 @@ import {
   RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import * as ort from 'onnxruntime-web';
 import { logisticsStore } from '../../services/store';
 import { Fleet } from '../../types';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
@@ -2991,7 +2990,8 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     reason: 'Arahkan kamera ke label kemasan barang'
   });
   const isLiveCheckingRef = useRef<boolean>(false);
-  const ortSessionRef = useRef<ort.InferenceSession | null>(null);
+  const ortModuleRef = useRef<any>(null);
+  const ortSessionRef = useRef<any>(null);
   const yoloClassesRef = useRef<string[]>([]);
   const yoloIsCocoBaseRef = useRef<boolean>(false);
   const yoloCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -3632,14 +3632,6 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   useEffect(() => {
     let mounted = true;
     const initLocalYolo26Onnx = async () => {
-      try {
-        // Point onnxruntime-web to dedicated /onnx-wasm/ route served with Content-Type: application/wasm
-        ort.env.wasm.wasmPaths = '/onnx-wasm/';
-        ort.env.wasm.numThreads = 1;
-        ort.env.logLevel = 'fatal';
-      } catch {
-        // Ignore env setup issues
-      }
 
       try {
         const clsResp = await fetch('/models/classes.json', { cache: 'no-store' });
@@ -3712,7 +3704,17 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           yoloIsCocoBaseRef.current = false;
         }
 
-        let session: ort.InferenceSession | null = null;
+        const ort = await import('onnxruntime-web');
+        ortModuleRef.current = ort;
+        try {
+          ort.env.wasm.wasmPaths = '/onnx-wasm/';
+          ort.env.wasm.numThreads = 1;
+          ort.env.logLevel = 'fatal';
+        } catch {
+          // Ignore env setup issues
+        }
+
+        let session: any = null;
         try {
           session = await ort.InferenceSession.create(bytes, {
             executionProviders: ['webgl', 'wasm']
@@ -3924,8 +3926,10 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         float32Data[2 * numPixels + i] = rgba[idx + 2] / 255.0;
       }
 
+      const ortMod = ortModuleRef.current;
+      if (!ortMod) return { loaded: false, inferenceMs: 0, best: null };
       const inputName = session.inputNames[0] || 'images';
-      const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+      const inputTensor = new ortMod.Tensor('float32', float32Data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
       const outputMap = await session.run({ [inputName]: inputTensor });
       const outputName = session.outputNames[0] || Object.keys(outputMap)[0];
       const outputTensor = outputMap[outputName];

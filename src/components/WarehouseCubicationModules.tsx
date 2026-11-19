@@ -1536,7 +1536,8 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
       setBoxPanjangCm(found.panjangBoxCm);
       setBoxLebarCm(found.lebarBoxCm);
       setBoxTinggiCm(found.tinggiBoxCm);
-      setBoxKubikasiM3(found.kubikasiBoxGrossM3);
+      const calcGrossM3 = Number(((found.panjangBoxCm * found.lebarBoxCm * found.tinggiBoxCm) / 1_000_000).toFixed(2));
+      setBoxKubikasiM3(calcGrossM3 > 0 ? calcGrossM3 : found.kubikasiBoxGrossM3);
       setInnerMultiplierPct(found.innerMultiplierPct);
       setMaxPayloadKg(found.maxPayloadKg);
     }
@@ -1599,10 +1600,14 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
     setCargoList(prev => prev.filter(item => item.id !== id));
   };
 
-  // Calculations: Hasil Kubikasi Dalam (Netto) = Kubikasi Luar * (Faktor Pengali Dimensi Dalam / 100)
+  // Calculations: Kubikasi Luar = P × L × T, Hasil Kubikasi Dalam (Netto) = Kubikasi Luar * (Faktor Pengali Dimensi Dalam / 100)
+  const computedGrossBoxM3 = useMemo(
+    () => Number(((boxPanjangCm * boxLebarCm * boxTinggiCm) / 1_000_000).toFixed(2)),
+    [boxPanjangCm, boxLebarCm, boxTinggiCm]
+  );
   const effectiveBoxCapacityM3 = useMemo(
-    () => Number(((boxKubikasiM3 * innerMultiplierPct) / 100).toFixed(2)),
-    [boxKubikasiM3, innerMultiplierPct]
+    () => Number((((computedGrossBoxM3 || boxKubikasiM3) * innerMultiplierPct) / 100).toFixed(2)),
+    [computedGrossBoxM3, boxKubikasiM3, innerMultiplierPct]
   );
 
   // Dimensi Dalam Efektif (cm) setelah dikalikan Faktor Pengali Dimensi Dalam (cbrt dari rasio volume dalam)
@@ -1932,16 +1937,16 @@ export const WarehouseFleetCubicationSimulator: React.FC<{
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1">
-                    Kubikasi Luar / Gross (m&sup3;)
+                  <label className="block font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase mb-1 flex items-center justify-between">
+                    <span>Kubikasi Luar / Gross (m&sup3;)</span>
+                    <span className="text-[9px] text-cyan-600 dark:text-cyan-400 normal-case font-semibold">Otomatis P × L × T</span>
                   </label>
                   <input
-                    type="number"
-                    step="0.1"
-                    min={0.5}
-                    value={boxKubikasiM3}
-                    onChange={e => setBoxKubikasiM3(Number(e.target.value))}
-                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-amber-600 dark:text-amber-400 font-mono font-black"
+                    type="text"
+                    readOnly
+                    value={Number(((boxPanjangCm * boxLebarCm * boxTinggiCm) / 1_000_000).toFixed(2))}
+                    title="Dihitung otomatis dari perkalian Panjang × Lebar × Tinggi box"
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-amber-600 dark:text-amber-400 font-mono font-black cursor-not-allowed"
                   />
                 </div>
                 <div>

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import type { WmsSubTab } from './components/WarehouseManagementSystem';
-import { AuthModal } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
 import { AkkLogo } from './components/AkkLogo';
+
+const AuthModal = React.lazy(() =>
+  import('./components/AuthModal').then(m => ({ default: m.AuthModal }))
+);
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
@@ -503,10 +506,10 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const authTimeout = setTimeout(() => {
-      if (active && isAuthChecking) {
+      if (active) {
         setIsAuthChecking(false);
       }
-    }, 3000);
+    }, 1800);
 
     void logisticsStore.restoreServerSession().catch(() => {}).finally(() => {
       if (active) {
@@ -524,6 +527,7 @@ export default function App() {
     });
     return () => {
       active = false;
+      clearTimeout(authTimeout);
       unsubscribe();
     };
   }, []);
@@ -655,14 +659,17 @@ export default function App() {
       case 'sales_kpi_fines': return 'Data Akumulasi Denda Checker';
       case 'sales_kpi_nusantara': return 'Persentase Kiriman Nusantara';
       case 'sales_kpi_omset': return 'Omset Admin Penjualan';
-      case 'hr_dashboard': return 'Dashboard Departemen HR (Presensi & Master Staff)';
+      case 'hr_dashboard': return 'HR: Data Karyawan, Rolling & History Departemen';
       case 'ga_security': return 'General Affair (GA): Security & Pos Keamanan Pabrik';
       case 'ga_hk': return 'General Affair (GA): Housekeeping (HK) & Kebersihan 5R';
       case 'ga_aset': return 'General Affair (GA): Manajemen Aset & Fasilitas Pabrik';
       case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
       case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
+      case 'finance_overview': return 'Finance & Tax: Dashboard Ringkasan Piutang & Penagihan';
       case 'finance_dashboard': return 'Finance & Tax: Tagihan Pelanggan Belum Terlunasi';
+      case 'finance_customer_mapping': return 'Finance & Tax: Mapping Master Pelanggan';
       case 'finance_validasi_form_kirim': return 'Finance & Tax: Validasi Form Kirim';
+      case 'finance_billing_app': return 'Finance & Tax: Aplikasi Penagihan Pelanggan';
       case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
       case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
       case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
@@ -714,7 +721,9 @@ export default function App() {
 
       const targetPath = getTabPath(currentTab);
       if (currentPath !== targetPath) {
-        if (currentPath === '/' || currentPath === '/login') {
+        const resolvedCurrent = resolveTabFromUrl(window.location);
+        const isSameTabAlias = resolvedCurrent.tab === currentTab;
+        if (currentPath === '/' || currentPath === '/login' || isSameTabAlias) {
           window.history.replaceState({ tab: currentTab }, '', targetPath);
         } else {
           window.history.pushState({ tab: currentTab }, '', targetPath);
@@ -1128,6 +1137,13 @@ export default function App() {
               } 
             />
           )}
+          {currentTab === 'finance_overview' && (
+            <DepartmentDashboard
+              dashboardType="finance"
+              initialFinanceMode="overview"
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
+            />
+          )}
           {currentTab === 'finance_dashboard' && (
             <DepartmentDashboard
               dashboardType="finance"
@@ -1473,12 +1489,16 @@ export default function App() {
         </div>
       )}
 
-      {/* Authentication Modal (Login & Register) */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        defaultTab={authDefaultTab}
-      />
+      {/* Authentication Modal (lazy-loaded only when opened) */}
+      {isAuthOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthOpen}
+            onClose={() => setIsAuthOpen(false)}
+            defaultTab={authDefaultTab}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

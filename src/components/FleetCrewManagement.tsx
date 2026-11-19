@@ -115,7 +115,22 @@ export const getDefaultBoxDimensions = (vehicleType: VehicleType | string, brand
   return '3.5 x 1.8 x 1.8 m';
 };
 
+export const calculateOuterCubicationFromDimensions = (dimStr?: string | null): number | null => {
+  if (!dimStr || typeof dimStr !== 'string') return null;
+  const matches = dimStr.match(/\d+(?:[.,]\d+)?/g);
+  if (!matches || matches.length < 3) return null;
+  const nums = matches.slice(0, 3).map(v => parseFloat(v.replace(',', '.')));
+  if (nums.some(n => !Number.isFinite(n) || n <= 0)) return null;
+  // Jika diinput dalam satuan sentimeter (misal 420 x 180 x 180), konversi ke meter
+  const [p, l, t] = nums.every(n => n >= 50) ? nums.map(n => n / 100) : nums;
+  const gross = p * l * t;
+  if (!Number.isFinite(gross) || gross <= 0) return null;
+  return Number(gross.toFixed(2));
+};
+
 export const getFleetBoxCapacity = (fleet: Fleet): number => {
+  const fromDim = calculateOuterCubicationFromDimensions(fleet.boxDimensions);
+  if (fromDim !== null) return fromDim;
   if (fleet.boxCapacityM3 && fleet.boxCapacityM3 > 0) return fleet.boxCapacityM3;
   return getDefaultBoxCapacityM3(fleet.vehicleType, fleet.brand);
 };
@@ -800,16 +815,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
   const handleCreateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validateFleet(newFleet, fleets, false);
+    const computedOuterM3 = calculateOuterCubicationFromDimensions(newFleet.boxDimensions);
+    const fleetToValidate = {
+      ...newFleet,
+      boxCapacityM3: computedOuterM3 !== null ? computedOuterM3 : newFleet.boxCapacityM3
+    };
+    const validation = validateFleet(fleetToValidate, fleets, false);
     const mergedErrors: Record<string, string> = { ...validation.errors };
-    if (!newFleet.vehicleType) {
+    if (!fleetToValidate.vehicleType) {
       mergedErrors.vehicleType = 'Tipe kendaraan wajib dipilih.';
     }
-    if (!newFleet.brand) {
+    if (!fleetToValidate.brand) {
       mergedErrors.brand = 'Merk mobil wajib dipilih.';
     }
-    if (!newFleet.year) {
+    if (!fleetToValidate.year) {
       mergedErrors.year = 'Tahun produksi wajib dipilih.';
+    }
+    if (computedOuterM3 === null) {
+      mergedErrors.boxCapacityM3 = 'Isi Dimensi Box (P x L x T) agar Kubikasi Luar terhitung otomatis.';
     }
     if (Object.keys(mergedErrors).length > 0) {
       setFleetFormErrors(mergedErrors);
@@ -822,9 +845,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
+    const grossM3 = computedOuterM3 ?? fleetToValidate.boxCapacityM3;
+    const innerM3 = Number((grossM3 * 0.9).toFixed(2));
     const created = logisticsStore.addFleet({
-      ...newFleet,
-      kirExpiryDate: newFleet.lastMaintenance,
+      ...fleetToValidate,
+      boxCapacityM3: grossM3,
+      boxInnerMultiplierPercent: 90,
+      boxInnerCapacityM3: innerM3,
+      kirExpiryDate: fleetToValidate.lastMaintenance,
       driverId: newFleetAssignedCrewId || undefined
     });
     if (created) {
@@ -908,23 +936,23 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
     const brand = pickStr(fleet.brand, existingInStore?.brand, canonical?.brand) || 'Mitsubishi L300';
     const vType = (pickStr(fleet.vehicleType, existingInStore?.vehicleType, canonical?.vehicleType) || 'Pick Up Box') as VehicleType;
+    const boxDim =
+      pickStr(fleet.boxDimensions, existingInStore?.boxDimensions, canonical?.boxDimensions) ||
+      getDefaultBoxDimensions(vType, brand);
+    const parsedDimM3 = calculateOuterCubicationFromDimensions(boxDim);
     const boxM3 =
-      fleet.boxCapacityM3 !== undefined && fleet.boxCapacityM3 > 0
+      parsedDimM3 !== null
+        ? parsedDimM3
+        : fleet.boxCapacityM3 !== undefined && fleet.boxCapacityM3 > 0
         ? fleet.boxCapacityM3
         : existingInStore?.boxCapacityM3 && existingInStore.boxCapacityM3 > 0
         ? existingInStore.boxCapacityM3
         : canonical?.boxCapacityM3 || getFleetBoxCapacity(fleet);
-    const boxDim =
-      pickStr(fleet.boxDimensions, existingInStore?.boxDimensions, canonical?.boxDimensions) ||
-      getDefaultBoxDimensions(vType, brand);
     const multiplier =
       fleet.boxInnerMultiplierPercent !== undefined && fleet.boxInnerMultiplierPercent > 0
         ? fleet.boxInnerMultiplierPercent
         : existingInStore?.boxInnerMultiplierPercent || canonical?.boxInnerMultiplierPercent || 90;
-    const innerM3 =
-      fleet.boxInnerCapacityM3 !== undefined && fleet.boxInnerCapacityM3 > 0
-        ? fleet.boxInnerCapacityM3
-        : Number((boxM3 * (multiplier / 100)).toFixed(2));
+    const innerM3 = Number((boxM3 * (multiplier / 100)).toFixed(2));
 
     const pickExplicitOrCanon = (primary?: string, existingVal?: string, canonVal?: string, defaultVal = '') => {
       if (primary !== undefined) return primary;
@@ -1008,7 +1036,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetFormErrors({});
 
     const multiplier = mergedForSave.boxInnerMultiplierPercent !== undefined ? mergedForSave.boxInnerMultiplierPercent : 90;
-    const grossM3 = mergedForSave.boxCapacityM3 !== undefined ? mergedForSave.boxCapacityM3 : getFleetBoxCapacity(mergedForSave);
+    const parsedSaveGross = calculateOuterCubicationFromDimensions(mergedForSave.boxDimensions);
+    const grossM3 =
+      parsedSaveGross !== null
+        ? parsedSaveGross
+        : mergedForSave.boxCapacityM3 !== undefined
+        ? mergedForSave.boxCapacityM3
+        : getFleetBoxCapacity(mergedForSave);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
     setIsSavingFleet(true);
@@ -1366,14 +1400,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
           <div className="min-w-0">
-            <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-              <span className="font-semibold text-blue-400">Logistik AKK</span>
-              <span>&middot;</span>
-              <span>{!isCrewsMode ? 'Manajemen Armada Terpadu' : 'Manajemen Personel & Rotasi Kru'}</span>
-            </div>
+            {isCrewsMode && (
+              <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span>Manajemen Personel &amp; Rotasi Kru</span>
+              </div>
+            )}
             <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
               {!isCrewsMode
-                ? 'Data Armada Terpadu (Spesifikasi, BBM, Sparepart & Ritase)'
+                ? 'Data Armada Terpadu'
                 : 'Kru Pengiriman & Audit Rotasi Wilayah'}
             </h2>
           </div>
@@ -2986,22 +3020,21 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1 flex items-center justify-between">
-                    <span>Kubikasi Box (m³)</span>
-                    <span className="text-[10px] text-cyan-400 font-medium">Volume CBM</span>
+                    <span>Kubikasi Luar (m³)</span>
+                    <span className="text-[10px] text-cyan-400 font-medium">Otomatis P × L × T</span>
                   </label>
                   <input
-                    type="number"
-                    step="0.1"
-                    min="1"
-                    max="100"
-                    required
-                    placeholder={`Contoh: ${getDefaultBoxCapacityM3(newFleet.vehicleType || 'Pick Up Box', newFleet.brand || 'Mitsubishi L300')}`}
-                    value={newFleet.boxCapacityM3 || ''}
-                    onChange={(e) => {
-                      setNewFleet({ ...newFleet, boxCapacityM3: parseFloat(e.target.value) || 0 });
-                      if (fleetFormErrors.boxCapacityM3) setFleetFormErrors({ ...fleetFormErrors, boxCapacityM3: '' });
-                    }}
-                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-white placeholder:text-slate-500/70 font-mono ${
+                    type="text"
+                    readOnly
+                    placeholder="Otomatis dari P x L x T"
+                    value={
+                      calculateOuterCubicationFromDimensions(newFleet.boxDimensions) !== null
+                        ? String(calculateOuterCubicationFromDimensions(newFleet.boxDimensions))
+                        : newFleet.boxCapacityM3 > 0
+                        ? String(newFleet.boxCapacityM3)
+                        : ''
+                    }
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-900/70 border text-cyan-300 placeholder:text-slate-500/70 font-mono font-bold cursor-not-allowed ${
                       fleetFormErrors.boxCapacityM3 ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
                     }`}
                   />
@@ -3032,7 +3065,18 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     type="text"
                     placeholder={`Contoh: ${getDefaultBoxDimensions(newFleet.vehicleType || 'Pick Up Box', newFleet.brand || 'Mitsubishi L300')}`}
                     value={newFleet.boxDimensions || ''}
-                    onChange={(e) => setNewFleet({ ...newFleet, boxDimensions: e.target.value })}
+                    onChange={(e) => {
+                      const nextDim = e.target.value;
+                      const calcGross = calculateOuterCubicationFromDimensions(nextDim);
+                      setNewFleet({
+                        ...newFleet,
+                        boxDimensions: nextDim,
+                        boxCapacityM3: calcGross !== null ? calcGross : 0
+                      });
+                      if (calcGross !== null && fleetFormErrors.boxCapacityM3) {
+                        setFleetFormErrors({ ...fleetFormErrors, boxCapacityM3: '' });
+                      }
+                    }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder:text-slate-500/70 font-mono"
                   />
                 </div>
@@ -3339,11 +3383,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     value={editingFleet.vehicleType}
                     onChange={(val) => {
                       const vType = val as VehicleType;
+                      const nextDim = getDefaultBoxDimensions(vType, editingFleet.brand);
+                      const nextGross =
+                        calculateOuterCubicationFromDimensions(nextDim) ??
+                        getDefaultBoxCapacityM3(vType, editingFleet.brand);
+                      const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
                       setEditingFleet({
                         ...editingFleet,
                         vehicleType: vType,
-                        boxCapacityM3: getDefaultBoxCapacityM3(vType, editingFleet.brand),
-                        boxDimensions: getDefaultBoxDimensions(vType, editingFleet.brand)
+                        boxDimensions: nextDim,
+                        boxCapacityM3: nextGross,
+                        boxInnerCapacityM3: Number((nextGross * (mul / 100)).toFixed(2))
                       });
                     }}
                     options={FLEET_VEHICLE_TYPE_OPTIONS}
@@ -3412,11 +3462,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <FleetFormDropdown
                     value={editingFleet.brand || 'Mitsubishi L300'}
                     onChange={(brand) => {
+                      const nextDim = getDefaultBoxDimensions(editingFleet.vehicleType, brand);
+                      const nextGross =
+                        calculateOuterCubicationFromDimensions(nextDim) ??
+                        getDefaultBoxCapacityM3(editingFleet.vehicleType, brand);
+                      const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
                       setEditingFleet({
                         ...editingFleet,
                         brand,
-                        boxCapacityM3: getDefaultBoxCapacityM3(editingFleet.vehicleType, brand),
-                        boxDimensions: getDefaultBoxDimensions(editingFleet.vehicleType, brand)
+                        boxDimensions: nextDim,
+                        boxCapacityM3: nextGross,
+                        boxInnerCapacityM3: Number((nextGross * (mul / 100)).toFixed(2))
                       });
                     }}
                     options={FLEET_BRAND_OPTIONS}
@@ -3488,91 +3544,109 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Dimensi Box Luar (P x L x T)</label>
-                    <input
-                      type="text"
-                      placeholder="Contoh: 4.2 x 1.8 x 1.8 m"
-                      value={editingFleet.boxDimensions || ''}
-                      onChange={(e) => setEditingFleet({ ...editingFleet, boxDimensions: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1 flex items-center justify-between">
-                      <span>Kubikasi Luar (m³)</span>
-                      <span className="text-[10px] text-cyan-400 font-medium">Gross CBM</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="1"
-                      max="100"
-                      placeholder="Contoh: 14.0"
-                      value={editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet)}
-                      onChange={(e) => {
-                        const gross = parseFloat(e.target.value) || 0;
-                        const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
-                        setEditingFleet({
-                          ...editingFleet,
-                          boxCapacityM3: gross,
-                          boxInnerCapacityM3: Number((gross * (mul / 100)).toFixed(2))
-                        });
-                      }}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  const computedGrossFromDim = calculateOuterCubicationFromDimensions(editingFleet.boxDimensions);
+                  const activeGrossM3 =
+                    computedGrossFromDim !== null
+                      ? computedGrossFromDim
+                      : editingFleet.boxCapacityM3 !== undefined
+                      ? editingFleet.boxCapacityM3
+                      : getFleetBoxCapacity(editingFleet);
+                  const activeMul =
+                    editingFleet.boxInnerMultiplierPercent !== undefined
+                      ? editingFleet.boxInnerMultiplierPercent
+                      : 90;
+                  const activeInnerM3 = Number((activeGrossM3 * (activeMul / 100)).toFixed(2));
 
-                {/* Pengali Dimensi Dalam Box (... %) */}
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
-                  <div>
-                    <label className="text-cyan-300 font-bold block mb-1 flex items-center justify-between text-xs">
-                      <span>Faktor Pengali Dimensi Dalam</span>
-                      <span className="text-amber-400 font-mono font-black">{editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}%</span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="50"
-                        max="100"
-                        step="1"
-                        required
-                        value={editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}
-                        onChange={(e) => {
-                          const mul = parseInt(e.target.value) || 90;
-                          const gross = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
-                          setEditingFleet({
-                            ...editingFleet,
-                            boxInnerMultiplierPercent: mul,
-                            boxInnerCapacityM3: Number((gross * (mul / 100)).toFixed(2))
-                          });
-                        }}
-                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500/50 text-amber-300 font-mono font-black text-xs"
-                        placeholder="90"
-                      />
-                      <span className="text-xs font-bold text-slate-400">%</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      Dimensi box dikali {editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}% karena tebal dinding luar &amp; dalam berbeda.
-                    </span>
-                  </div>
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-slate-400 block mb-1">Dimensi Box Luar (P x L x T)</label>
+                          <input
+                            type="text"
+                            placeholder="Contoh: 5,9 x 1,9 x 2,09"
+                            value={editingFleet.boxDimensions || ''}
+                            onChange={(e) => {
+                              const nextDim = e.target.value;
+                              const nextGross = calculateOuterCubicationFromDimensions(nextDim);
+                              setEditingFleet({
+                                ...editingFleet,
+                                boxDimensions: nextDim,
+                                boxCapacityM3: nextGross !== null ? nextGross : 0,
+                                boxInnerCapacityM3:
+                                  nextGross !== null
+                                    ? Number((nextGross * (activeMul / 100)).toFixed(2))
+                                    : 0
+                              });
+                            }}
+                            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                            <span>Kubikasi Luar (m³)</span>
+                            <span className="text-[10px] text-cyan-400 font-medium">Otomatis P × L × T</span>
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={computedGrossFromDim !== null ? String(computedGrossFromDim) : activeGrossM3 > 0 ? String(activeGrossM3) : '0'}
+                            title="Dihitung otomatis dari perkalian Dimensi Box Luar (P × L × T)"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-700/80 text-cyan-300 font-mono font-bold text-xs cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
 
-                  <div className="bg-cyan-950/40 p-2.5 rounded-lg border border-cyan-500/40 flex flex-col justify-between">
-                    <span className="text-[10px] font-bold text-cyan-300">
-                      Hasil Kubikasi Dalam (Netto):
-                    </span>
-                    <div className="text-lg font-black text-white font-mono">
-                      {editingFleet.boxInnerCapacityM3 !== undefined
-                        ? editingFleet.boxInnerCapacityM3
-                        : Number(((editingFleet.boxCapacityM3 || getFleetBoxCapacity(editingFleet)) * ((editingFleet.boxInnerMultiplierPercent || 90) / 100)).toFixed(2))} <span className="text-xs text-cyan-400">m³</span>
-                    </div>
-                    <span className="text-[10px] text-emerald-400 font-medium">
-                      ✓ Kapasitas bersih efektif muat
-                    </span>
-                  </div>
-                </div>
+                      {/* Pengali Dimensi Dalam Box (... %) */}
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                        <div>
+                          <label className="text-cyan-300 font-bold block mb-1 flex items-center justify-between text-xs">
+                            <span>Faktor Pengali Dimensi Dalam</span>
+                            <span className="text-amber-400 font-mono font-black">{activeMul}%</span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="50"
+                              max="100"
+                              step="1"
+                              required
+                              value={activeMul}
+                              onChange={(e) => {
+                                const mul = parseInt(e.target.value) || 90;
+                                setEditingFleet({
+                                  ...editingFleet,
+                                  boxCapacityM3: activeGrossM3,
+                                  boxInnerMultiplierPercent: mul,
+                                  boxInnerCapacityM3: Number((activeGrossM3 * (mul / 100)).toFixed(2))
+                                });
+                              }}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500/50 text-amber-300 font-mono font-black text-xs"
+                              placeholder="90"
+                            />
+                            <span className="text-xs font-bold text-slate-400">%</span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-1 block">
+                            Dimensi box dikali {activeMul}% karena tebal dinding luar &amp; dalam berbeda.
+                          </span>
+                        </div>
+
+                        <div className="bg-cyan-950/40 p-2.5 rounded-lg border border-cyan-500/40 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-cyan-300">
+                            Hasil Kubikasi Dalam (Netto):
+                          </span>
+                          <div className="text-lg font-black text-white font-mono">
+                            {activeInnerM3} <span className="text-xs text-cyan-400">m³</span>
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-medium">
+                            ✓ Kapasitas bersih efektif muat
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* 📑 BUKTI FILE DOKUMEN KIR PADA SETIAP ARMADA */}

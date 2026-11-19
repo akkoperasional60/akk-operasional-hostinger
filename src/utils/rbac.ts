@@ -117,7 +117,7 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
     case 'security':
       return 'ga_security';
     case 'finance_tax_admin':
-      return 'finance_dashboard';
+      return 'finance_overview';
     case 'warehouse_admin':
     case 'koordinator_gudang':
       return 'warehouse_scanner';
@@ -232,8 +232,8 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       subMenus: {
         marketing_online: isAll || isMktOnline ? 'full_access' : isSpvMktOffline ? 'read_only' : 'none',
         marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
-        marketing_invoice_validation: isAll || isMktOffline || isMktOnline || isSales ? 'full_access' : 'none',
-        marketing_sales_mapping: isAll || isMktOffline || isMktOnline || isSales || isFinance ? 'full_access' : 'none',
+        marketing_invoice_validation: isAll || isMktOffline || isMktOnline ? 'full_access' : 'none',
+        marketing_sales_mapping: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
         marketing_to_vo_ro: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         marketing_billing_app: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
@@ -260,6 +260,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
     finance_tax: {
       enabled: isAll || isFinance,
       subMenus: {
+        finance_overview: isAll || isFinance ? 'full_access' : 'none',
         finance_dashboard: isAll || isFinance ? 'full_access' : 'none',
         finance_customer_mapping: isAll || isFinance ? 'full_access' : 'none',
         finance_validasi_form_kirim: isAll || isFinance ? 'full_access' : 'none',
@@ -415,6 +416,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   purchasing_kartu_stok: { moduleId: 'purchasing', subMenuId: 'purchasing_kartu_stok' },
   purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_overview' },
   purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'purchasing_stock_forecast' },
+  finance_overview: { moduleId: 'finance_tax', subMenuId: 'finance_overview' },
   finance_dashboard: { moduleId: 'finance_tax', subMenuId: 'finance_dashboard' },
   finance_customer_mapping: { moduleId: 'finance_tax', subMenuId: 'finance_customer_mapping' },
   finance_validasi_form_kirim: { moduleId: 'finance_tax', subMenuId: 'finance_validasi_form_kirim' },
@@ -479,6 +481,7 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   purchasing_kartu_stok: ['purchasing_stok_opname', 'permintaan_pembelian', 'po_vendor', 'purchasing_dashboard', 'warehouse_opname'],
   purchasing_stock_overview: ['po_vendor'],
   purchasing_stock_forecast: ['po_vendor'],
+  finance_overview: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   finance_dashboard: ['kas_bank', 'faktur_pajak'],
   finance_customer_mapping: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
   finance_validasi_form_kirim: ['finance_dashboard', 'kas_bank', 'faktur_pajak'],
@@ -537,7 +540,7 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'warehouse',
     name: 'Gudang (WMS)',
-    description: 'Database barang, denah rak, inbound/outbound, dan opname gudang integrasi pembelian.',
+    description: 'Database barang, denah rak, inbound/outbound, dan opname gudang.',
     borderClass: 'border-emerald-500/30',
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     subMenus: [
@@ -545,7 +548,7 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
       { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
       { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
-      { id: 'warehouse_opname', name: 'Opname Gudang (Integrasi Pembelian)' }
+      { id: 'warehouse_opname', name: 'Opname Gudang' }
     ]
   },
   {
@@ -600,10 +603,11 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'finance_tax',
     name: 'Finance & Tax',
-    description: 'Monitoring tagihan & piutang pelanggan, mapping master pelanggan Tempo & COD, validasi form kirim, dan Aplikasi Penagihan Pelanggan.',
+    description: 'Dashboard ringkasan finance, monitoring tagihan & piutang pelanggan, mapping master pelanggan Tempo & COD, validasi form kirim, dan Aplikasi Penagihan Pelanggan.',
     borderClass: 'border-cyan-500/30',
     iconBgClass: 'bg-cyan-500/15 text-cyan-400',
     subMenus: [
+      { id: 'finance_overview', name: 'Dashboard' },
       { id: 'finance_dashboard', name: 'Finance & Tagihan Pelanggan' },
       { id: 'finance_customer_mapping', name: 'Mapping Master Pelanggan' },
       { id: 'finance_validasi_form_kirim', name: 'Validasi Form Kirim' },
@@ -613,13 +617,13 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'hr',
     name: 'HR (HR, GA & Training Development)',
-    description: '3 Sub-Menu Utama Departemen HR: 1. HR (Presensi & SDM), 2. GA (Security, Housekeeping, Aset), dan 3. Training & Development.',
+    description: 'Departemen HR: Data Karyawan & Rolling Departemen, GA (Security, Housekeeping, Aset), dan Training & Development.',
     borderClass: 'border-rose-500/30',
     iconBgClass: 'bg-rose-500/15 text-rose-400',
     subMenus: [
-      { id: 'hr_dashboard', name: '1. HR (Presensi & SDM)' },
-      { id: 'ga_security', name: '2. GA (Security, Housekeeping & Aset)' },
-      { id: 'training_videos', name: '3. Training & Development' }
+      { id: 'hr_dashboard', name: 'HR (Data Karyawan, Rolling & History)' },
+      { id: 'ga_security', name: 'GA (Security, Housekeeping & Aset)' },
+      { id: 'training_videos', name: 'Training & Development' }
     ]
   },
   {
@@ -917,9 +921,9 @@ export const getAccessLevel = (
 
   // If branchPermissions are configured on the user profile, evaluate branch-level permissions accurately
   if (hasBranchPerms && branchPerms) {
-    if (branchId && branchPerms[branchId]) {
+    if (branchId) {
       const bEntry = branchPerms[branchId];
-      if (!bEntry.enabled) return 'none';
+      if (!bEntry || !bEntry.enabled) return 'none';
       const bMod = bEntry.modules?.[resolvedModuleId];
       return resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId);
     }

@@ -32,6 +32,7 @@ interface DriverFormKirimPanelProps {
   todayFormKirim: FormKirimRecord | null;
   todayDisplayDate: string;
   matchedScheduleArea?: string;
+  hasActiveSchedule?: boolean;
   portalDisplayName: string;
   userRole?: 'Driver' | 'Helper';
   deviceGps?: {
@@ -139,6 +140,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
   todayFormKirim,
   todayDisplayDate,
   matchedScheduleArea,
+  hasActiveSchedule = true,
   portalDisplayName,
   userRole = 'Driver',
   deviceGps,
@@ -975,54 +977,60 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
     setCalcDisplay(prev => (prev.length <= 1 ? '0' : prev.slice(0, -1)));
   };
 
-  // Empty State: No Form Kirim matching today's schedule yet
-  if (!todayFormKirim) {
+  // Empty State: Belum ada jadwal aktif atau belum ada Form Kirim yang cocok
+  if (!hasActiveSchedule || !todayFormKirim) {
     return (
       <div className="space-y-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2.5 shadow-lg">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-            <span className="flex items-center gap-1.5">
-              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Odometer Checklist Armada</span>
-            </span>
-            {totalJarakKm !== null && (
-              <span className="text-[10px] font-mono font-black text-emerald-400 tabular-nums">
-                Jarak: {totalJarakKm.toLocaleString('id-ID')} km
+        {hasActiveSchedule && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2.5 shadow-lg">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Odometer Checklist Armada</span>
               </span>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
-              <div className="text-[9px] font-bold uppercase text-amber-300">KM Pagi</div>
-              <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
-                {effectiveKmPagi !== null ? `${effectiveKmPagi.toLocaleString('id-ID')} km` : '-'}
+              {totalJarakKm !== null && (
+                <span className="text-[10px] font-mono font-black text-emerald-400 tabular-nums">
+                  Jarak: {totalJarakKm.toLocaleString('id-ID')} km
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-[9px] font-bold uppercase text-amber-300">KM Pagi</div>
+                <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
+                  {effectiveKmPagi !== null ? `${effectiveKmPagi.toLocaleString('id-ID')} km` : '-'}
+                </div>
+              </div>
+              <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-[9px] font-bold uppercase text-cyan-300">KM Pulang</div>
+                <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
+                  {effectiveKmPulang !== null ? `${effectiveKmPulang.toLocaleString('id-ID')} km` : '-'}
+                </div>
               </div>
             </div>
-            <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
-              <div className="text-[9px] font-bold uppercase text-cyan-300">KM Pulang</div>
-              <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
-                {effectiveKmPulang !== null ? `${effectiveKmPulang.toLocaleString('id-ID')} km` : '-'}
-              </div>
-            </div>
           </div>
-        </div>
+        )}
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-3 shadow-lg">
           <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-400 flex items-center justify-center mx-auto">
             <FileSpreadsheet className="w-6 h-6" />
           </div>
           <div className="space-y-1">
-            <h2 className="text-sm font-black text-white">Belum Ada Form Kirim Hari Ini</h2>
+            <h2 className="text-sm font-black text-white">
+              {hasActiveSchedule ? 'Belum Ada Form Kirim Hari Ini' : 'Belum Ada Form Kirim'}
+            </h2>
             <p className="text-xs text-slate-400 leading-relaxed">
               Tanggal: <strong className="text-slate-200">{todayDisplayDate}</strong>
-              {matchedScheduleArea ? (
+              {hasActiveSchedule && matchedScheduleArea ? (
                 <>
                   {' '}• Area Jadwal: <strong className="text-amber-300">{matchedScheduleArea}</strong>
                 </>
               ) : null}
             </p>
             <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-              Form Kirim Barang akan tampil otomatis di sini (1 form untuk hari ini) setelah Admin membuat jadwal dan menyimpan Form Kirim sesuai area pengiriman hari ini.
+              {hasActiveSchedule
+                ? 'Form Kirim Barang akan tampil otomatis di sini (1 form untuk hari ini) setelah Admin membuat jadwal dan menyimpan Form Kirim sesuai area pengiriman hari ini.'
+                : 'Belum ada jadwal pengiriman yang aktif. Form Kirim Barang akan tampil otomatis di sini setelah Anda melakukan Check-In dan memiliki jadwal pengiriman aktif hari ini.'}
             </p>
           </div>
           <button

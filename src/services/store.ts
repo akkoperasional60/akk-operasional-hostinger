@@ -114,7 +114,6 @@ import {
 import { canAccess, canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
 import { branchStore, UserBranchPermissionEntry } from './branchStore';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
-import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
 import {
   createFleetInSupabase,
@@ -703,8 +702,10 @@ class LogisticsStore {
     this.systemActivities = [];
     if (typeof window !== 'undefined') {
       setTimeout(() => {
-        void this.hydrateSystemActivitiesFromServer();
-      }, 150);
+        if (this.isAuthenticated()) {
+          void this.hydrateSystemActivitiesFromServer();
+        }
+      }, 1800);
     }
     // Legacy config object retained only so older UI state does not crash after migration.
     // No Supabase URL/key is embedded in the browser anymore; Hostinger MySQL is accessed via /api/*.
@@ -1315,10 +1316,9 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'schedule') {
-          if (googleSheetsApiService) {
-            if (event.action === 'create' || event.action === 'update' || event.action === 'status_change') {
-              googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
-            }
+          if (event.action === 'create' || event.action === 'update' || event.action === 'status_change') {
+            const { googleSheetsApiService } = await import('./googleSheetsApiService');
+            googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
           }
         }
       } catch (err) {
@@ -1336,13 +1336,12 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'fleet' && (event.action === 'status_change' || event.action === 'update')) {
-          if (googleSheetsApiService) {
-            googleSheetsApiService.writeFleetStatusToGoogleSheets(
-              event.id,
-              event.data?.status || 'available',
-              event.data
-            ).catch(() => {});
-          }
+          const { googleSheetsApiService } = await import('./googleSheetsApiService');
+          googleSheetsApiService.writeFleetStatusToGoogleSheets(
+            event.id,
+            event.data?.status || 'available',
+            event.data
+          ).catch(() => {});
         }
       } catch (err) {
         console.warn('[Fleet Status Auto-Sync Warning]', err);
@@ -1377,15 +1376,17 @@ class LogisticsStore {
           this.saveToStorage(STORAGE_KEYS.IMAGES, this.imageRecords);
         }
 
-        // Send to backend attachment proxy
-        if (googleSheetsApiService) {
-          googleSheetsApiService.writeImageAttachmentToBackend(
-            newImg.entityId,
-            newImg.imageUrl,
-            newImg.category,
-            newImg.notes
-          ).catch(() => {});
-        }
+        // Send to backend attachment proxy lazily
+        void import('./googleSheetsApiService')
+          .then(({ googleSheetsApiService }) =>
+            googleSheetsApiService.writeImageAttachmentToBackend(
+              newImg.entityId,
+              newImg.imageUrl,
+              newImg.category,
+              newImg.notes
+            )
+          )
+          .catch(() => {});
       }
     } catch (err) {
       console.warn('[Image Auto-Sync Warning]', err);
@@ -3503,15 +3504,12 @@ class LogisticsStore {
           authHeaders['x-akk-session-token'] = savedToken;
         }
 
-        const [fleetRes, crewRes, storeRes, scheduleRes, fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
+        // Priority 1: muat 4 data inti operasional terlebih dahulu agar UI tampil cepat tanpa membanjiri koneksi server
+        const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
           fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
+          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
         ]);
 
         if (
@@ -3524,36 +3522,63 @@ class LogisticsStore {
           return false;
         }
 
-        const [fleetPayload, crewPayload, storePayload, schedulePayload, fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
+        const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
           fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
           crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
           storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
-          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({}),
-          fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
-          scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
-          rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
-          adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
+          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
         ]);
 
-        if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
-          this.fuelLogs = fuelPayload.data;
-        }
-        if (scanRes.ok && Array.isArray(scanPayload?.data)) {
-          this.scannedDocuments = scanPayload.data;
-        }
-        if (rotationRes.ok && rotationPayload?.data && typeof rotationPayload.data === 'object') {
-          if (typeof rotationPayload.data.areaThreshold === 'number') {
-            this.areaThreshold = rotationPayload.data.areaThreshold;
-          }
-          if (Array.isArray(rotationPayload.data.areaApprovals)) {
-            this.areaApprovals = rotationPayload.data.areaApprovals;
-          }
-          if (Array.isArray(rotationPayload.data.crewHistory)) {
-            this.crewHistory = rotationPayload.data.crewHistory;
-          }
-        }
-        if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
-          this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+        // Priority 2: muat data sekunder secara tertunda setelah tampilan utama siap agar tidak memperlambat reload awal
+        if (fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok) {
+          setTimeout(() => {
+            void (async () => {
+              try {
+                const [fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
+                  fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
+                ]);
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
+                  fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
+                  scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
+                  rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
+                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
+                ]);
+                let secondaryUpdated = false;
+                if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
+                  this.fuelLogs = fuelPayload.data;
+                  secondaryUpdated = true;
+                }
+                if (scanRes.ok && Array.isArray(scanPayload?.data)) {
+                  this.scannedDocuments = scanPayload.data;
+                  secondaryUpdated = true;
+                }
+                if (rotationRes.ok && rotationPayload?.data && typeof rotationPayload.data === 'object') {
+                  if (typeof rotationPayload.data.areaThreshold === 'number') {
+                    this.areaThreshold = rotationPayload.data.areaThreshold;
+                  }
+                  if (Array.isArray(rotationPayload.data.areaApprovals)) {
+                    this.areaApprovals = rotationPayload.data.areaApprovals;
+                  }
+                  if (Array.isArray(rotationPayload.data.crewHistory)) {
+                    this.crewHistory = rotationPayload.data.crewHistory;
+                  }
+                  secondaryUpdated = true;
+                }
+                if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
+                  this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+                  secondaryUpdated = true;
+                }
+                if (secondaryUpdated) {
+                  this.notify();
+                }
+              } catch {
+                // ignore secondary background sync error
+              }
+            })();
+          }, 650);
         }
 
         if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
@@ -3700,13 +3725,14 @@ class LogisticsStore {
 
   public async restoreServerSession(): Promise<boolean> {
     try {
-      // Mulai hydrate jadwal & armada secara paralel sejak milidetik pertama reload halaman tanpa menunggu /api/auth/me selesai
-      void this.hydrateOperationalDataFromHostinger();
-
       const savedToken =
         (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
         (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
         '';
+      // Mulai hydrate paralel hanya bila sudah ada sesi/token lokal agar halaman login tidak mengirim 401 massal
+      if (savedToken || this.isAuthenticated()) {
+        void this.hydrateOperationalDataFromHostinger();
+      }
       const reqHeaders: Record<string, string> = { 'Accept': 'application/json' };
       if (savedToken) {
         reqHeaders['Authorization'] = `Bearer ${savedToken}`;

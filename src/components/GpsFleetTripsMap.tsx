@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Play,
   Pause,
@@ -48,6 +49,7 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
   vehicleType = 'Armada Box',
   tripLegs = [],
   stops = [],
+  stores = [],
   selectedDateFilter = 'all',
   onSelectDateFilter,
   dateScopeMode = 'harian',
@@ -59,6 +61,7 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
+  const storesLayerRef = useRef<L.LayerGroup | null>(null);
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
   const playbackTimerRef = useRef<number | null>(null);
 
@@ -73,6 +76,20 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
   const [showTripListPanel, setShowTripListPanel] = useState<boolean>(true);
   const [showHistoricalPolyline, setShowHistoricalPolyline] = useState<boolean>(true);
   const [showWaypointNumbers, setShowWaypointNumbers] = useState<boolean>(true);
+  const [showCustomerStores, setShowCustomerStores] = useState<boolean>(true);
+
+  const validCustomerStores = useMemo(() => {
+    return (stores || []).filter(
+      s =>
+        s &&
+        typeof s.latitude === 'number' &&
+        typeof s.longitude === 'number' &&
+        Number.isFinite(s.latitude) &&
+        Number.isFinite(s.longitude) &&
+        Math.abs(s.latitude) > 0.01 &&
+        Math.abs(s.longitude) > 0.01
+    );
+  }, [stores]);
 
   // Reset selected leg when switching fleet units
   useEffect(() => {
@@ -213,6 +230,8 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
 
       const layerGroup = L.layerGroup().addTo(map);
       routeLayerRef.current = layerGroup;
+      const storesGroup = L.layerGroup().addTo(map);
+      storesLayerRef.current = storesGroup;
       mapInstanceRef.current = map;
     }
 
@@ -253,6 +272,133 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
       map.invalidateSize();
     }, 100);
   }, [mapTheme, isFullscreen]);
+
+  // Render Integrated Customer Store Pins (Jaringan Toko & Mitra Pelanggan)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const storesGroup = storesLayerRef.current;
+    if (!map || !storesGroup) return;
+
+    storesGroup.clearLayers();
+    if (!showCustomerStores || validCustomerStores.length === 0) return;
+
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const calcMeters = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+      const R = 6371000;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    const escapeHtml = (val?: string | number | null) =>
+      String(val ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const legPoints: Array<{ lat: number; lng: number; matchedName?: string; legNumber: number; time: string }> = [];
+    chronologicalLegs.forEach(leg => {
+      if (Number.isFinite(leg.startLat) && Number.isFinite(leg.startLng)) {
+        legPoints.push({
+          lat: leg.startLat,
+          lng: leg.startLng,
+          matchedName: leg.matchedStoreName,
+          legNumber: leg.legNumber,
+          time: leg.startTime
+        });
+      }
+      if (Number.isFinite(leg.endLat) && Number.isFinite(leg.endLng)) {
+        legPoints.push({
+          lat: leg.endLat,
+          lng: leg.endLng,
+          matchedName: leg.matchedStoreName,
+          legNumber: leg.legNumber,
+          time: leg.endTime
+        });
+      }
+    });
+
+    validCustomerStores.forEach(store => {
+      const storeNameNorm = (store.storeName || '').trim().toLowerCase();
+      let nearestMeters = Infinity;
+      let visitedLeg: { legNumber: number; time: string } | null = null;
+
+      for (const lp of legPoints) {
+        const d = calcMeters(store.latitude, store.longitude, lp.lat, lp.lng);
+        if (d < nearestMeters) nearestMeters = d;
+        const nameMatch =
+          Boolean(lp.matchedName) &&
+          Boolean(storeNameNorm) &&
+          lp.matchedName!.trim().toLowerCase() === storeNameNorm;
+        if (nameMatch || d <= 350) {
+          visitedLeg = { legNumber: lp.legNumber, time: lp.time };
+        }
+      }
+
+      const isVisited = Boolean(visitedLeg);
+      const pinColor = isVisited ? '#10b981' : '#f59e0b';
+      const ringShadow = isVisited
+        ? '0 0 0 4px rgba(16,185,129,0.28), 0 4px 10px rgba(0,0,0,0.45)'
+        : '0 2px 8px rgba(0,0,0,0.35)';
+      const pinSize = isVisited ? 26 : 20;
+
+      const storeIcon = L.divIcon({
+        className: 'custom-customer-store-pin',
+        html: `<div style="width:${pinSize}px;height:${pinSize}px;border-radius:9999px;background:${pinColor};border:2px solid #ffffff;box-shadow:${ringShadow};display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:${isVisited ? '12px' : '10px'};font-weight:800;line-height:1;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="${isVisited ? 13 : 11}" height="${isVisited ? 13 : 11}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/></svg>
+        </div>`,
+        iconSize: [pinSize, pinSize],
+        iconAnchor: [pinSize / 2, pinSize / 2]
+      });
+
+      const marker = L.marker([store.latitude, store.longitude], {
+        icon: storeIcon,
+        zIndexOffset: isVisited ? 500 : 120
+      });
+
+      const distLabel = Number.isFinite(nearestMeters)
+        ? nearestMeters < 1000
+          ? `${Math.round(nearestMeters)} m dari rute`
+          : `${(nearestMeters / 1000).toFixed(2)} km dari rute`
+        : '-';
+
+      const areaText = [store.kecamatan, store.kabupaten].filter(Boolean).join(', ') || store.city || '-';
+
+      marker.bindTooltip(
+        `<div style="font-size:11px;font-weight:700;color:#0f172a;">${isVisited ? '✓ ' : ''}${escapeHtml(store.storeName)}</div><div style="font-size:10px;color:#475569;">${escapeHtml(areaText)}</div>`,
+        { direction: 'top', offset: [0, -10] }
+      );
+
+      marker.bindPopup(
+        `<div style="min-width:210px;font-family:Inter,system-ui,sans-serif;font-size:11px;line-height:1.45;color:#0f172a;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px;">
+            <span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;${
+              isVisited
+                ? 'background:#d1fae5;color:#065f46;'
+                : 'background:#fef3c7;color:#92400e;'
+            }">
+              ${isVisited ? `✓ Dikunjungi (Ritase #${visitedLeg?.legNumber})` : 'Toko Mitra Pelanggan'}
+            </span>
+            ${store.nomor ? `<span style="font-family:monospace;font-size:10px;color:#64748b;">#${escapeHtml(store.nomor)}</span>` : ''}
+          </div>
+          <div style="font-weight:800;font-size:13px;color:#0f172a;margin-bottom:2px;">${escapeHtml(store.storeName)}</div>
+          <div style="color:#475569;margin-bottom:4px;">${escapeHtml(store.address || areaText)}</div>
+          <div style="border-top:1px solid #e2e8f0;padding-top:4px;margin-top:4px;display:grid;gap:2px;font-size:10px;color:#334155;">
+            <div><strong>Wilayah:</strong> ${escapeHtml(areaText)}</div>
+            ${store.contactPerson ? `<div><strong>PIC:</strong> ${escapeHtml(store.contactPerson)} ${store.phone ? `(${escapeHtml(store.phone)})` : ''}</div>` : ''}
+            <div><strong>Koordinat:</strong> <span style="font-family:monospace;">${store.latitude.toFixed(5)}, ${store.longitude.toFixed(5)}</span></div>
+            <div><strong>Jarak ke Track:</strong> <span style="font-weight:700;color:${isVisited ? '#059669' : '#334155'};">${escapeHtml(distLabel)}</span></div>
+          </div>
+        </div>`
+      );
+
+      storesGroup.addLayer(marker);
+    });
+  }, [validCustomerStores, showCustomerStores, chronologicalLegs, mapTheme]);
 
   // Render Continuous Historical Trips Polyline and Markers
   useEffect(() => {
@@ -648,6 +794,21 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
               </select>
             </div>
 
+            {/* Toggle Lapisan Titik Toko Pelanggan (Jaringan Toko & Mitra) */}
+            <button
+              type="button"
+              onClick={() => setShowCustomerStores(prev => !prev)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                showCustomerStores
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs'
+                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+              }`}
+              title="Tampilkan / sembunyikan titik toko pelanggan dari Jaringan Toko & Mitra Pelanggan"
+            >
+              <Store className={`w-3.5 h-3.5 ${showCustomerStores ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <span>Toko Pelanggan ({validCustomerStores.length})</span>
+            </button>
+
             {/* Toggle Lapisan Visual Polyline Jejak Historis */}
             <button
               type="button"
@@ -713,7 +874,11 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
             </span>
             <span className="flex items-center gap-2 font-medium">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white" />
-              Berhenti di Toko Pelanggan (Mitra)
+              Toko Pelanggan Dikunjungi Armada
+            </span>
+            <span className="flex items-center gap-2 font-medium text-amber-300">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 border border-white" />
+              Titik Toko Mitra Pelanggan ({validCustomerStores.length})
             </span>
             <span className="flex items-center gap-2 font-medium text-rose-400">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-600 border border-white animate-pulse" />

@@ -292,14 +292,10 @@ class BranchStoreService {
   // ============================================================
   // ENTITY <-> ORIGIN WAREHOUSE (CABANG) ASSIGNMENT & RESOLUTION
   // ============================================================
-  public getFleetBranchId(fleetId: string, plateNumber?: string, initialCode?: string): string {
+  public getFleetBranchId(fleetId: string, _plateNumber?: string, _initialCode?: string): string {
     const mapped = this.entityBranches.fleets[fleetId];
     if (mapped && this.branches.some(b => b.id === mapped)) {
       return mapped;
-    }
-    const code = `${initialCode || ''} ${plateNumber || ''}`.toUpperCase();
-    if (code.includes('W ') || code.includes('L ') || code.includes('SDA')) {
-      return 'cab-sidoarjo';
     }
     return 'cab-banyuwangi';
   }
@@ -355,7 +351,18 @@ class BranchStoreService {
     }
     if (originName) {
       const lower = originName.toLowerCase();
-      if (lower.includes('sidoarjo') || lower.includes('surabaya')) return 'cab-sidoarjo';
+      if (
+        lower.includes('sidoarjo') ||
+        lower.includes('surabaya') ||
+        lower.includes('bliketut') ||
+        lower.includes('ponomadi') ||
+        lower.includes('latubo') ||
+        lower.includes('prolujem') ||
+        lower.includes('madura') ||
+        lower === 'malang'
+      ) {
+        return 'cab-sidoarjo';
+      }
       if (lower.includes('nusantara') || lower.includes('banyuwangi')) return 'cab-banyuwangi';
       const customMatch = this.branches.find(
         b => lower.includes(b.name.toLowerCase()) || lower.includes(b.slug.toLowerCase())

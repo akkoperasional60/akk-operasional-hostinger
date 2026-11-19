@@ -62,6 +62,37 @@ export default defineConfig(() => {
     build: {
       outDir,
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) {
+              return 'react-vendor';
+            }
+            if (id.includes('lucide-react')) {
+              return 'icons-vendor';
+            }
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'charts-vendor';
+            }
+            if (id.includes('leaflet')) {
+              return 'map-vendor';
+            }
+            if (id.includes('three')) {
+              return 'three-vendor';
+            }
+            if (id.includes('jspdf') || id.includes('html2canvas')) {
+              return 'pdf-vendor';
+            }
+            if (id.includes('xlsx')) {
+              return 'xlsx-vendor';
+            }
+            if (id.includes('firebase')) {
+              return 'firebase-vendor';
+            }
+          },
+        },
+      },
     },
     define: {
       'import.meta.env.VITE_BUILD_TARGET': JSON.stringify(buildTarget),
@@ -73,33 +104,20 @@ export default defineConfig(() => {
       },
     },
     optimizeDeps: {
-      entries: ['index.html', 'src/**/*.{ts,tsx}'],
+      entries: ['index.html'],
       include: [
-        'firebase/app',
-        'firebase/auth',
-        'html2canvas-pro',
-        'jspdf',
-        'leaflet',
-        'leaflet.markercluster',
-        'lucide-react',
-        'motion/react',
-        'onnxruntime-web',
         'react',
         'react-dom',
         'react-dom/client',
         'react/jsx-dev-runtime',
         'react/jsx-runtime',
-        'react-to-print',
-        'reactflow',
-        'recharts',
-        'three',
-        'three/examples/jsm/controls/OrbitControls.js',
-        'xlsx',
+        'lucide-react',
       ],
+      exclude: ['onnxruntime-web'],
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      // HMR is disabled in AI Studio via DISABLE_HMR env var or K_SERVICE.
+      hmr: process.env.DISABLE_HMR !== 'true' && !process.env.K_SERVICE,
       watch: {},
     },
   };

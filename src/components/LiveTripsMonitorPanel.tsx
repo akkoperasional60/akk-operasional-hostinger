@@ -15,10 +15,10 @@ import {
   Truck,
   Users
 } from 'lucide-react';
-import { LiveGpsTripPoint, LiveGpsTripRecord, TracksolidTripLeg } from '../types';
+import { LiveGpsTripPoint, LiveGpsTripRecord, RetailStore, TracksolidTripLeg } from '../types';
 import { GpsFleetTripsMap } from './GpsFleetTripsMap';
 import { logisticsStore } from '../services/store';
-import { branchStore } from '../services/branchStore';
+import { branchStore, BranchRecord } from '../services/branchStore';
 import { getLocalDateStr } from '../services/driverReportService';
 
 interface LiveTripsMonitorPanelProps {
@@ -46,7 +46,29 @@ function formatWibTime(iso?: string): string {
   return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
-function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
+function findNearestStoreName(lat: number, lng: number, stores: RetailStore[]): string | undefined {
+  if (!stores.length || !Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  let bestDist = 0.35; // 350 meters
+  let bestName: string | undefined;
+  for (const s of stores) {
+    if (
+      typeof s.latitude !== 'number' ||
+      typeof s.longitude !== 'number' ||
+      !Number.isFinite(s.latitude) ||
+      !Number.isFinite(s.longitude)
+    ) {
+      continue;
+    }
+    const d = haversineKm(lat, lng, s.latitude, s.longitude);
+    if (d <= bestDist) {
+      bestDist = d;
+      bestName = s.storeName;
+    }
+  }
+  return bestName;
+}
+
+function buildLegsFromTrip(trip: LiveGpsTripRecord, stores: RetailStore[] = []): TracksolidTripLeg[] {
   const dateGroup = (trip.tripDate || trip.startedAt || getLocalDateStr()).slice(0, 10);
   const pts: LiveGpsTripPoint[] = Array.isArray(trip.points) && trip.points.length > 0
     ? trip.points
@@ -64,6 +86,7 @@ function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
     const originLat = trip.branchId === 'cab-sidoarjo' ? -7.4478 : -8.1906;
     const originLng = trip.branchId === 'cab-sidoarjo' ? 112.7183 : 114.3708;
     const dist = haversineKm(originLat, originLng, p.lat, p.lng);
+    const matchedStore = findNearestStoreName(p.lat, p.lng, stores);
     return [
       {
         legNumber: 1,
@@ -71,7 +94,7 @@ function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
         startTime: formatWibTime(trip.startedAt || p.timestamp),
         startLocation: trip.branchId === 'cab-sidoarjo' ? 'Gudang Sidoarjo' : 'Gudang Banyuwangi DC',
         endTime: formatWibTime(p.timestamp),
-        endLocation: p.locationName || trip.areaName || 'Lokasi Armada Terkini',
+        endLocation: matchedStore || p.locationName || trip.areaName || 'Lokasi Armada Terkini',
         mileageKm: dist > 0.05 ? dist : 0.2,
         travelTime: 'Aktif',
         travelMinutes: 1,
@@ -83,7 +106,7 @@ function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
         startLng: originLng,
         endLat: p.lat,
         endLng: p.lng,
-        matchedStoreName: trip.areaName
+        matchedStoreName: matchedStore || trip.areaName
       }
     ];
   }
@@ -97,13 +120,14 @@ function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
     const diffMin = !isNaN(tA) && !isNaN(tB) ? Math.max(1, Math.round((tB - tA) / 60000)) : 5;
     const dist = haversineKm(a.lat, a.lng, b.lat, b.lng);
     const computedSpeed = b.speedKmh ?? Math.min(85, Math.max(12, Math.round((dist / (diffMin / 60)) || 32)));
+    const matchedStore = findNearestStoreName(b.lat, b.lng, stores);
     legs.push({
       legNumber: i + 1,
       dateGroup,
       startTime: formatWibTime(a.timestamp),
       startLocation: a.locationName || (i === 0 ? 'Gudang DC PT AKK' : `Titik #${i + 1}`),
       endTime: formatWibTime(b.timestamp),
-      endLocation: b.locationName || (i === pts.length - 2 ? trip.areaName || 'Tujuan Akhir' : `Titik #${i + 2}`),
+      endLocation: matchedStore || b.locationName || (i === pts.length - 2 ? trip.areaName || 'Tujuan Akhir' : `Titik #${i + 2}`),
       mileageKm: dist > 0 ? dist : 0.1,
       travelTime: `${diffMin} mnt`,
       travelMinutes: diffMin,
@@ -115,7 +139,7 @@ function buildLegsFromTrip(trip: LiveGpsTripRecord): TracksolidTripLeg[] {
       startLng: a.lng,
       endLat: b.lat,
       endLng: b.lng,
-      matchedStoreName: i === pts.length - 2 ? trip.areaName : undefined
+      matchedStoreName: matchedStore || (i === pts.length - 2 ? trip.areaName : undefined)
     });
   }
   return legs;
@@ -129,10 +153,45 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [mode, setMode] = useState<'live' | 'history'>(defaultMode);
   const [selectedDate, setSelectedDate] = useState<string>(getLocalDateStr());
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getActiveBranches());
+  const [registeredStores, setRegisteredStores] = useState<RetailStore[]>(() => logisticsStore.getStores());
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    const originId = branchStore.getSelectedOriginBranchId();
+    return originId && originId !== 'ALL' ? originId : 'all';
+  });
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedTripId, setSelectedTripId] = useState<string>('');
-  const [branches] = useState(() => branchStore.getActiveBranches());
+
+  const currentUserProfile = logisticsStore.getCurrentUser();
+  const accessibleBranches = useMemo(
+    () => branchStore.getAccessibleBranchesForUser(currentUserProfile),
+    [branches, currentUserProfile]
+  );
+  const accessibleBranchIdSet = useMemo(
+    () => new Set(accessibleBranches.map(b => b.id)),
+    [accessibleBranches]
+  );
+  const effectiveBranchId = useMemo(() => {
+    if (accessibleBranches.length === 1) return accessibleBranches[0].id;
+    if (selectedBranchId === 'all' || selectedBranchId === 'ALL') return 'all';
+    if (accessibleBranches.some(b => b.id === selectedBranchId)) return selectedBranchId;
+    return 'all';
+  }, [accessibleBranches, selectedBranchId]);
+
+  useEffect(() => {
+    const unsubBranch = branchStore.subscribe(() => {
+      setBranches(branchStore.getActiveBranches());
+      const originId = branchStore.getSelectedOriginBranchId();
+      setSelectedBranchId(originId && originId !== 'ALL' ? originId : 'all');
+    });
+    const unsubStore = logisticsStore.subscribe(() => {
+      setRegisteredStores(logisticsStore.getStores());
+    });
+    return () => {
+      unsubBranch();
+      unsubStore();
+    };
+  }, []);
 
   const fetchTrips = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -216,21 +275,33 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
     const timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void fetchTrips(true);
-    }, 15000);
+    }, mode === 'live' ? 10000 : 20000);
     const onTripUpdated = () => void fetchTrips(true);
     window.addEventListener('gps-trip-updated', onTripUpdated);
     return () => {
       clearInterval(timer);
       window.removeEventListener('gps-trip-updated', onTripUpdated);
     };
-  }, []);
+  }, [mode]);
+
+  // Trips strictly isolated by user-accessible & selected branch
+  const branchScopedTrips = useMemo(() => {
+    return trips.filter(t => {
+      const resolvedBranchId =
+        t.branchId ||
+        (t.fleetId ? branchStore.getFleetBranchId(t.fleetId, t.plateNumber, t.initialCode) : 'cab-banyuwangi');
+      if (effectiveBranchId === 'all') {
+        return accessibleBranchIdSet.has(resolvedBranchId);
+      }
+      return resolvedBranchId === effectiveBranchId;
+    });
+  }, [trips, effectiveBranchId, accessibleBranchIdSet]);
 
   const filteredTrips = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return trips.filter(t => {
+    return branchScopedTrips.filter(t => {
       if (mode === 'live' && t.status !== 'active') return false;
       if (mode === 'history' && selectedDate && t.tripDate !== selectedDate) return false;
-      if (selectedBranchId !== 'all' && t.branchId !== selectedBranchId) return false;
       if (!q) return true;
       return (
         t.driverName.toLowerCase().includes(q) ||
@@ -241,7 +312,7 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
         t.areaName.toLowerCase().includes(q)
       );
     });
-  }, [trips, mode, selectedDate, selectedBranchId, searchQuery]);
+  }, [branchScopedTrips, mode, selectedDate, searchQuery]);
 
   const activeSelectedTrip = useMemo(() => {
     return filteredTrips.find(t => t.id === selectedTripId) || filteredTrips[0] || null;
@@ -249,11 +320,11 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
 
   const mapLegs = useMemo(() => {
     if (!activeSelectedTrip) return [];
-    return buildLegsFromTrip(activeSelectedTrip);
-  }, [activeSelectedTrip]);
+    return buildLegsFromTrip(activeSelectedTrip, registeredStores);
+  }, [activeSelectedTrip, registeredStores]);
 
-  const activeCount = trips.filter(t => t.status === 'active').length;
-  const completedCount = trips.filter(t => t.status === 'completed').length;
+  const activeCount = branchScopedTrips.filter(t => t.status === 'active').length;
+  const completedCount = branchScopedTrips.filter(t => t.status === 'completed').length;
 
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
@@ -351,14 +422,19 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
           )}
 
           <select
-            value={selectedBranchId}
-            onChange={(e) => setSelectedBranchId(e.target.value)}
+            value={effectiveBranchId}
+            disabled={accessibleBranches.length <= 1}
+            onChange={(e) => {
+              const nextVal = e.target.value;
+              setSelectedBranchId(nextVal);
+              branchStore.setSelectedOriginBranchId(nextVal === 'all' ? 'ALL' : nextVal);
+            }}
             aria-label="Filter cabang"
-            className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+            className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 cursor-pointer disabled:opacity-80"
           >
-            <option value="all">Semua Cabang</option>
-            {branches.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
+            {accessibleBranches.length > 1 && <option value="all">Semua Cabang</option>}
+            {accessibleBranches.map(b => (
+              <option key={b.id} value={b.id}>Cabang {b.name}</option>
             ))}
           </select>
         </div>
@@ -472,6 +548,7 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
                 initialCode={activeSelectedTrip.initialCode || 'AKK'}
                 vehicleType={activeSelectedTrip.vehicleType || 'Armada Box'}
                 tripLegs={mapLegs}
+                stores={registeredStores}
                 selectedDateFilter={activeSelectedTrip.tripDate}
                 dateScopeMode="semua"
                 heightClass={compact ? 'h-[360px] w-full' : 'h-[540px] w-full'}

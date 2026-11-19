@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import zlib from "zlib";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
@@ -164,7 +165,7 @@ Silakan gunakan data pada Dashboard/Jadwal/Armada yang berasal dari Hostinger My
 async function startServer() {
   const app = express();
 
-  app.use(express.json({ limit: '35mb' }));
+  app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ limit: '35mb', extended: true }));
 
   // Enterprise Security Headers Middleware (iFrame allowed for AI Studio preview)
@@ -172,6 +173,157 @@ async function startServer() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
+  // Lightweight GZIP Response Compression Middleware (cuts JS/CSS/JSON reload transfer by ~80%, including Vite dev assets)
+  app.use((req, res, next) => {
+    const acceptEncoding = String(req.headers['accept-encoding'] || '');
+    const acceptHeader = String(req.headers.accept || '');
+    if (
+      req.method === 'HEAD' ||
+      !acceptEncoding.includes('gzip') ||
+      Boolean(req.headers.range) ||
+      acceptHeader.includes('text/event-stream') ||
+      req.path.includes('/realtime/') ||
+      req.path.endsWith('.apk') ||
+      req.path.endsWith('.wasm') ||
+      req.path.startsWith('/downloads/')
+    ) {
+      return next();
+    }
+
+    const isCompressibleType = (contentType: string): boolean => {
+      const ct = contentType.toLowerCase();
+      if (!ct || ct.includes('text/event-stream')) return false;
+      return (
+        ct.includes('application/json') ||
+        ct.includes('javascript') ||
+        ct.includes('text/css') ||
+        ct.includes('text/html') ||
+        ct.includes('text/plain') ||
+        ct.includes('image/svg+xml')
+      );
+    };
+
+    const origWrite = res.write.bind(res);
+    const origEnd = res.end.bind(res);
+    let bufferedChunks: Buffer[] | null = [];
+    let bufferedBytes = 0;
+    const MAX_GZIP_BUFFER_BYTES = 16 * 1024 * 1024;
+
+    const restoreAndFlushRaw = () => {
+      res.write = origWrite;
+      res.end = origEnd;
+      if (bufferedChunks && bufferedChunks.length > 0) {
+        const pending = bufferedChunks;
+        bufferedChunks = null;
+        for (const c of pending) {
+          origWrite(c);
+        }
+      } else {
+        bufferedChunks = null;
+      }
+    };
+
+    const shouldBypassBuffering = (): boolean => {
+      if (bufferedChunks === null) return true;
+      if (res.headersSent) return true;
+      if (res.getHeader('Content-Encoding') || res.getHeader('Content-Range')) return true;
+      if (res.statusCode === 204 || res.statusCode === 304 || res.statusCode === 206) return true;
+      return false;
+    };
+
+    res.write = ((chunk: any, encoding?: any, cb?: any): boolean => {
+      const callback = typeof encoding === 'function' ? encoding : cb;
+      if (shouldBypassBuffering()) {
+        restoreAndFlushRaw();
+        return origWrite(chunk, encoding, cb);
+      }
+      const ct = String(res.getHeader('Content-Type') || '');
+      if (ct && !isCompressibleType(ct)) {
+        restoreAndFlushRaw();
+        return origWrite(chunk, encoding, cb);
+      }
+      if (chunk !== undefined && chunk !== null) {
+        const enc = typeof encoding === 'string' ? (encoding as BufferEncoding) : 'utf8';
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), enc);
+        if (bufferedBytes + buf.length > MAX_GZIP_BUFFER_BYTES) {
+          restoreAndFlushRaw();
+          return origWrite(buf, callback);
+        }
+        bufferedChunks!.push(buf);
+        bufferedBytes += buf.length;
+      }
+      if (typeof callback === 'function') callback();
+      return true;
+    }) as typeof res.write;
+
+    res.end = ((chunk?: any, encoding?: any, cb?: any): any => {
+      let actualChunk = chunk;
+      let actualEncoding: BufferEncoding = 'utf8';
+      let actualCb = cb;
+      if (typeof chunk === 'function') {
+        actualCb = chunk;
+        actualChunk = undefined;
+      } else if (typeof encoding === 'function') {
+        actualCb = encoding;
+      } else if (typeof encoding === 'string') {
+        actualEncoding = encoding as BufferEncoding;
+      }
+
+      res.write = origWrite;
+      res.end = origEnd;
+
+      if (shouldBypassBuffering()) {
+        restoreAndFlushRaw();
+        return origEnd(actualChunk, encoding, cb);
+      }
+
+      if (actualChunk !== undefined && actualChunk !== null) {
+        const buf = Buffer.isBuffer(actualChunk)
+          ? actualChunk
+          : Buffer.from(String(actualChunk), actualEncoding);
+        bufferedChunks!.push(buf);
+        bufferedBytes += buf.length;
+      }
+
+      const chunksToSend = bufferedChunks || [];
+      bufferedChunks = null;
+      let payload: Buffer = chunksToSend.length === 1 ? chunksToSend[0] : Buffer.concat(chunksToSend);
+      const ct = String(res.getHeader('Content-Type') || '');
+
+      // Strip multi-MB base64 inline sourcemaps from Vite prebundled vendor chunks in dev preview
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        req.path.startsWith('/node_modules/.vite/deps/') &&
+        ct.toLowerCase().includes('javascript') &&
+        payload.length > 200000
+      ) {
+        const text = payload.toString('utf8');
+        const mapIdx = text.lastIndexOf('//# sourceMappingURL=data:application/json;base64,');
+        if (mapIdx > 0 && !text.slice(mapIdx).trimEnd().includes('\n')) {
+          payload = Buffer.from(text.slice(0, mapIdx), 'utf8');
+          res.setHeader('Content-Length', String(payload.length));
+        }
+      }
+
+      if (isCompressibleType(ct) && payload.length >= 1024) {
+        try {
+          const gz = zlib.gzipSync(payload, { level: 5 });
+          res.removeHeader('Content-Length');
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Vary', 'Accept-Encoding');
+          res.setHeader('Content-Length', String(gz.length));
+          return origEnd(gz, actualCb);
+        } catch {
+          // Fallback to uncompressed buffer
+        }
+      }
+
+      return origEnd(payload, actualCb);
+    }) as typeof res.end;
+
     next();
   });
 
@@ -1030,7 +1182,7 @@ async function startServer() {
         tinggi_cm DECIMAL(10,2) DEFAULT 0.00,
         vol_m3 DECIMAL(12,4) DEFAULT 0.0000,
         berat_kg DECIMAL(10,2) DEFAULT 0.00,
-        dokumentasi_url MEDIUMTEXT NULL,
+        dokumentasi_url LONGTEXT NULL,
         dokumentasi_urls_json LONGTEXT NULL,
         payload_json LONGTEXT NULL,
         updated_at VARCHAR(32) NULL,
@@ -2851,6 +3003,147 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
     }
     return res.json({ success: true, validation: record, persisted: 'memory' });
+  });
+
+  // =========================================================================
+  // OPNAME GUDANG PERSISTENCE (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryWarehouseOpname: { items: any[]; sessions: Record<string, any> } | null = null;
+
+  const parseOpnameStatePayload = (raw: any): { items: any[]; sessions: Record<string, any> } | null => {
+    if (!raw) return null;
+    if (Array.isArray(raw)) {
+      return { items: raw, sessions: {} };
+    }
+    if (typeof raw === 'object' && Array.isArray(raw.items)) {
+      return {
+        items: raw.items,
+        sessions: raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {}
+      };
+    }
+    return null;
+  };
+
+  app.get("/api/warehouse/opname", async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    if (isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = 'wms_opname_audit_list' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string'
+            ? JSON.parse(rows[0].state_json)
+            : rows[0].state_json;
+          const normalized = parseOpnameStatePayload(parsed);
+          if (normalized) {
+            inMemoryWarehouseOpname = normalized;
+            return res.json({ success: true, items: normalized.items, sessions: normalized.sessions, source: 'mysql' });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Warehouse Opname GET Warning]', err?.message || err);
+      }
+    }
+    if (inMemoryWarehouseOpname) {
+      return res.json({
+        success: true,
+        items: inMemoryWarehouseOpname.items,
+        sessions: inMemoryWarehouseOpname.sessions,
+        source: 'memory'
+      });
+    }
+    const diskSaved = parseOpnameStatePayload(readPersistentAppState('wms_opname_audit_list'));
+    if (diskSaved) {
+      inMemoryWarehouseOpname = diskSaved;
+      return res.json({ success: true, items: diskSaved.items, sessions: diskSaved.sessions, source: 'disk' });
+    }
+    return res.json({ success: true, items: null, sessions: {}, source: 'none' });
+  });
+
+  app.post("/api/warehouse/opname", express.json({ limit: '15mb' }), async (req, res) => {
+    const items = req.body?.items;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, error: 'Expected items array' });
+    }
+    const sessions =
+      req.body?.sessions && typeof req.body.sessions === 'object'
+        ? req.body.sessions
+        : inMemoryWarehouseOpname?.sessions || {};
+    const payload = { items, sessions };
+    inMemoryWarehouseOpname = payload;
+    writePersistentAppState('wms_opname_audit_list', payload);
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('wms_opname_audit_list', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(payload)]
+        );
+        return res.json({ success: true, count: items.length, persisted: 'mysql' });
+      } catch (err: any) {
+        console.warn('[Warehouse Opname POST Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, count: items.length, persisted: 'memory' });
+  });
+
+  // =========================================================================
+  // GPS FLEET ROUTE EVALUATIONS PERSISTENCE (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryGpsEvaluations: any[] | null = null;
+
+  app.get("/api/gps-evaluations", async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    if (isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>(
+          "SELECT state_json FROM app_state WHERE state_key = 'gps_fleet_evaluations_v1' LIMIT 1"
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+          const parsed = typeof rows[0].state_json === 'string'
+            ? JSON.parse(rows[0].state_json)
+            : rows[0].state_json;
+          if (Array.isArray(parsed)) {
+            inMemoryGpsEvaluations = parsed;
+            return res.json({ success: true, evaluations: parsed, source: 'mysql' });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[GPS Evaluations GET Warning]', err?.message || err);
+      }
+    }
+    if (Array.isArray(inMemoryGpsEvaluations)) {
+      return res.json({ success: true, evaluations: inMemoryGpsEvaluations, source: 'memory' });
+    }
+    const diskSaved = readPersistentAppState('gps_fleet_evaluations_v1');
+    if (Array.isArray(diskSaved)) {
+      inMemoryGpsEvaluations = diskSaved;
+      return res.json({ success: true, evaluations: diskSaved, source: 'disk' });
+    }
+    return res.json({ success: true, evaluations: null, source: 'none' });
+  });
+
+  app.post("/api/gps-evaluations", express.json({ limit: '25mb' }), async (req, res) => {
+    const evaluations = req.body?.evaluations;
+    if (!Array.isArray(evaluations)) {
+      return res.status(400).json({ success: false, error: 'Expected evaluations array' });
+    }
+    inMemoryGpsEvaluations = evaluations;
+    writePersistentAppState('gps_fleet_evaluations_v1', evaluations);
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('gps_fleet_evaluations_v1', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(evaluations)]
+        );
+        return res.json({ success: true, count: evaluations.length, persisted: 'mysql' });
+      } catch (err: any) {
+        console.warn('[GPS Evaluations POST Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, count: evaluations.length, persisted: 'memory' });
   });
 
   // =========================================================================
@@ -6009,6 +6302,163 @@ Kembalikan HANYA JSON valid:
     }
   });
 
+  app.patch('/api/marketing-invoice-validations/status', express.json({ limit: '5mb' }), async (req, res) => {
+    try {
+      if (isDatabaseConfigured() && !inMemoryMarketingValidationsLoaded) {
+        await Promise.race([
+          refreshMarketingValidationsFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      }
+      const targetIds: string[] = Array.isArray(req.body?.ids)
+        ? req.body.ids.map(String)
+        : req.body?.id
+        ? [String(req.body.id)]
+        : [];
+      if (targetIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'Missing invoice id(s).' });
+      }
+      const idSet = new Set(targetIds);
+      const patchFields: Record<string, any> = {};
+      if (typeof req.body?.validationStatus === 'string') {
+        patchFields.validationStatus =
+          req.body.validationStatus === 'Tervalidasi Siap Kirim'
+            ? 'Tervalidasi Siap Kirim'
+            : req.body.validationStatus.toLowerCase().includes('revisi')
+            ? 'Revisi'
+            : 'Menunggu Validasi';
+      }
+      if (typeof req.body?.validatedBy === 'string') patchFields.validatedBy = req.body.validatedBy;
+      if (typeof req.body?.validatedAt === 'string') patchFields.validatedAt = req.body.validatedAt;
+      if (typeof req.body?.salesWhatsapp === 'string') patchFields.salesWhatsapp = req.body.salesWhatsapp;
+      if (typeof req.body?.waNotifiedAt === 'string') patchFields.waNotifiedAt = req.body.waNotifiedAt;
+
+      inMemoryMarketingValidations = sanitizeMarketingValidations(
+        inMemoryMarketingValidations.map(item =>
+          idSet.has(String(item.id)) ? { ...item, ...patchFields } : item
+        )
+      );
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(inMemoryMarketingValidations)]
+          );
+        } catch (dbErr: any) {
+          console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Patch]', dbErr?.message);
+        }
+      }
+      inMemoryMarketingValidationsLoaded = true;
+      lastMarketingValidationsSyncAt = Date.now();
+      return res.json({
+        success: true,
+        records: inMemoryMarketingValidations,
+        count: inMemoryMarketingValidations.length
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 👥 HR: Data Karyawan, Rolling Departemen & Riwayat Kerja — Tersimpan di MySQL app_state + Disk
+  const HR_EMPLOYEES_STATE_KEY = 'hr_employees_rolling_v1';
+  let inMemoryHrEmployeesState: { initialized: boolean; records: any[] } = (() => {
+    const disk = readPersistentAppState(HR_EMPLOYEES_STATE_KEY);
+    if (disk && typeof disk === 'object' && Array.isArray((disk as any).records)) {
+      return { initialized: Boolean((disk as any).initialized), records: (disk as any).records };
+    }
+    if (Array.isArray(disk)) {
+      return { initialized: disk.length > 0, records: disk };
+    }
+    return { initialized: false, records: [] };
+  })();
+  let inMemoryHrEmployeesLoaded = false;
+  let lastHrEmployeesSyncAt = 0;
+
+  const refreshHrEmployeesFromDb = async (): Promise<{ initialized: boolean; records: any[] } | null> => {
+    if (!isDatabaseConfigured()) return null;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        'SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1',
+        [HR_EMPLOYEES_STATE_KEY]
+      );
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
+          inMemoryHrEmployeesState = {
+            initialized: Boolean(parsed.initialized),
+            records: parsed.records
+          };
+        } else if (Array.isArray(parsed)) {
+          inMemoryHrEmployeesState = { initialized: true, records: parsed };
+        }
+      }
+      inMemoryHrEmployeesLoaded = true;
+      lastHrEmployeesSyncAt = Date.now();
+      return inMemoryHrEmployeesState;
+    } catch {
+      return null;
+    }
+  };
+
+  app.get('/api/hr-employees', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      if (isDatabaseConfigured() && (!inMemoryHrEmployeesLoaded || Date.now() - lastHrEmployeesSyncAt > 3000)) {
+        await Promise.race([
+          refreshHrEmployeesFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      }
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    } catch (err: any) {
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    }
+  });
+
+  app.post('/api/hr-employees', express.json({ limit: '15mb' }), async (req, res) => {
+    try {
+      const records = Array.isArray(req.body?.records) ? req.body.records : [];
+      const initialized = req.body?.initialized !== false;
+      inMemoryHrEmployeesState = { initialized, records };
+      writePersistentAppState(HR_EMPLOYEES_STATE_KEY, inMemoryHrEmployeesState);
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [HR_EMPLOYEES_STATE_KEY, JSON.stringify(inMemoryHrEmployeesState)]
+          );
+        } catch (dbErr: any) {
+          console.warn('[Hostinger MySQL Sync Warning for HR Employees]', dbErr?.message);
+        }
+      }
+      inMemoryHrEmployeesLoaded = true;
+      lastHrEmployeesSyncAt = Date.now();
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
   // 📦 Form Kirim Sales (Terintegrasi Area Kirim & Portal Driver - Persistent di MySQL app_state & Disk)
   const LEGACY_DUMMY_FK_IDS = new Set(['FK-202611-001', 'FK-202611-002']);
   const sanitizeFormKirimRecords = (list: any[]): any[] =>
@@ -6914,42 +7364,228 @@ Kembalikan HANYA JSON valid:
   const preservedServerPhotosByCode = new Map<string, string[]>();
   const serverDeletedPhotoUrls = new Set<string>();
   const serverClearedPhotoCodes = new Set<string>();
+  const serverDeletedItemCodes = new Set<string>();
   const PRODUCTION_BRIDGE_ORIGIN = 'https://akkoperasional.com';
   const isHostingerEnv = process.env.NODE_ENV === 'production' && !process.env.K_SERVICE;
 
-  app.get('/api/database-barang', async (_req, res) => {
+  const mapScalarRowToCatalogItem = (row: any, fallbackIdx: number) => {
+    const code = String(row.no_barang || '').trim().toUpperCase();
+    const hasPhoto = Number(row.has_photo) === 1;
+    const r2Raw = row.rasio2 !== undefined && row.rasio2 !== null ? String(row.rasio2) : '0';
+    const r3Raw = row.rasio3 !== undefined && row.rasio3 !== null ? String(row.rasio3) : '0';
+    return {
+      id: String(row.id || `dbb-${fallbackIdx + 1}`),
+      orderIndex: typeof row.order_index === 'number' ? row.order_index : fallbackIdx,
+      noBarang: code,
+      deskripsiBarang: String(row.deskripsi_barang || ''),
+      keteranganBarang: String(row.deskripsi_barang || ''),
+      unit1: String(row.unit1 || 'Pcs'),
+      satuan: String(row.unit1 || 'Pcs'),
+      unit2: String(row.unit2 ?? ''),
+      unit3: String(row.unit3 ?? ''),
+      rasio2: !isNaN(Number(r2Raw)) && r2Raw.trim() !== '' ? Number(r2Raw) : r2Raw,
+      rasio3: !isNaN(Number(r3Raw)) && r3Raw.trim() !== '' ? Number(r3Raw) : r3Raw,
+      panjangCm: Number(row.panjang_cm ?? 0) || 0,
+      lebarCm: Number(row.lebar_cm ?? 0) || 0,
+      tinggiCm: Number(row.tinggi_cm ?? 0) || 0,
+      volM3: Number(row.vol_m3 ?? 0) || 0,
+      beratKg: Number(row.berat_kg ?? 0) || 0,
+      hasPhoto,
+      dokumentasiUrl: '',
+      dokumentasiUrls: [] as string[],
+      compressedSizeKb: 0,
+      originalSizeKb: 0,
+      compressionSavingsPct: 0,
+      kategoriBarang: 'Karton Box Corrugated',
+      stokTersedia: 1000,
+      cabang: 'Banyuwangi',
+      updatedAt: String(row.updated_at || new Date().toISOString().split('T')[0])
+    };
+  };
+
+  const deduplicateCatalogItems = (rawItems: any[]): any[] => {
+    const byCode = new Map<string, any>();
+    for (let i = 0; i < rawItems.length; i++) {
+      const item = rawItems[i];
+      const code = String(item?.noBarang || '').trim().toUpperCase();
+      if (!code) continue;
+      const existing = byCode.get(code);
+      if (!existing) {
+        byCode.set(code, { ...item, noBarang: code });
+      } else {
+        const hasNewDim = (Number(item.panjangCm) || 0) > 0 || (Number(item.volM3) || 0) > 0;
+        const hasOldDim = (Number(existing.panjangCm) || 0) > 0 || (Number(existing.volM3) || 0) > 0;
+        byCode.set(code, {
+          ...existing,
+          ...item,
+          id: existing.id || item.id,
+          orderIndex: Math.min(existing.orderIndex ?? i, item.orderIndex ?? i),
+          noBarang: code,
+          hasPhoto: Boolean(existing.hasPhoto || item.hasPhoto),
+          deskripsiBarang: item.deskripsiBarang || existing.deskripsiBarang,
+          keteranganBarang: item.keteranganBarang || existing.keteranganBarang,
+          unit1: existing.unit1 || item.unit1 || 'Pcs',
+          satuan: existing.satuan || item.satuan || 'Pcs',
+          unit2: existing.unit2 || item.unit2 || '',
+          unit3: existing.unit3 || item.unit3 || '',
+          rasio2: existing.rasio2 || item.rasio2 || 0,
+          rasio3: existing.rasio3 || item.rasio3 || 0,
+          panjangCm: hasOldDim ? existing.panjangCm : (hasNewDim ? item.panjangCm : existing.panjangCm),
+          lebarCm: hasOldDim ? existing.lebarCm : (hasNewDim ? item.lebarCm : existing.lebarCm),
+          tinggiCm: hasOldDim ? existing.tinggiCm : (hasNewDim ? item.tinggiCm : existing.tinggiCm),
+          volM3: hasOldDim ? existing.volM3 : (hasNewDim ? item.volM3 : existing.volM3),
+          beratKg: (Number(existing.beratKg) || 0) > 0 ? existing.beratKg : item.beratKg,
+          dokumentasiUrl: '',
+          dokumentasiUrls: []
+        });
+      }
+    }
+    return Array.from(byCode.values()).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  };
+
+  // Endpoint katalog super ringan (~200 KB) tanpa transfer base64 foto, agar daftar ribuan SKU langsung tampil instan
+  app.get('/api/database-barang/catalog', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let mysqlLoaded = false;
     if (isDatabaseConfigured()) {
       try {
         const rows = await mysqlQuery<any[]>(
           `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
-                  panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
-                  payload_json, updated_at
-           FROM wms_database_barang
-           ORDER BY order_index ASC, no_barang ASC`
+                  panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, updated_at,
+                  CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '' AND dokumentasi_url NOT LIKE 'data:image/svg+xml%')
+                         OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
+                       THEN 1 ELSE 0 END AS has_photo
+           FROM wms_database_barang`
         );
         mysqlLoaded = true;
-        if (Array.isArray(rows) && rows.length > 0) {
-          const mapped = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
-          const deduped = deduplicateAndMergeDatabaseBarangRows(mapped);
-          memoryDatabaseBarang = deduped;
-          deduped.forEach(it => {
-            if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
-              preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
-            }
+        const mapped = Array.isArray(rows) ? rows.map((r, i) => mapScalarRowToCatalogItem(r, i)) : [];
+        const catalogItems = deduplicateCatalogItems(mapped);
+        return res.json({ success: true, source: 'mysql', count: catalogItems.length, items: catalogItems });
+      } catch (dbErr: any) {
+        console.error('[GET /api/database-barang/catalog] MySQL error:', dbErr?.message || dbErr);
+        if (isHostingerEnv) {
+          return res.status(503).json({
+            success: false,
+            error: `Gagal membaca katalog barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
           });
-          return res.json({ success: true, source: 'mysql', count: deduped.length, items: deduped });
         }
-        return res.json({ success: true, source: 'mysql', count: memoryDatabaseBarang.length, items: memoryDatabaseBarang });
-      } catch {
-        console.log('[GET /api/database-barang] MySQL host unavailable, using in-memory database storage');
+      }
+    }
+
+    if (!mysqlLoaded && !isHostingerEnv && memoryDatabaseBarang.length === 0) {
+      try {
+        let bridged = false;
+        try {
+          const bridgeCatalogRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/catalog`, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(8000)
+          });
+          if (bridgeCatalogRes.ok) {
+            const bridgeData: any = await bridgeCatalogRes.json();
+            if (Array.isArray(bridgeData?.items) && bridgeData.items.length > 0) {
+              memoryDatabaseBarang = deduplicateAndMergeDatabaseBarangRows(bridgeData.items);
+              bridged = true;
+            }
+          }
+        } catch {}
+        if (!bridged) {
+          const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang`, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(20000)
+          });
+          if (bridgeRes.ok) {
+            const bridgeData: any = await bridgeRes.json();
+            if (Array.isArray(bridgeData?.items) && bridgeData.items.length > 0) {
+              memoryDatabaseBarang = deduplicateAndMergeDatabaseBarangRows(bridgeData.items);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const dedupedMem = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang).filter(
+      it => !serverDeletedItemCodes.has(String(it?.noBarang || '').trim().toUpperCase())
+    );
+    memoryDatabaseBarang = dedupedMem;
+    const catalogFromMem = dedupedMem.map(it => {
+      const code = String(it?.noBarang || '').trim().toUpperCase();
+      const preserved = preservedServerPhotosByCode.get(code) || [];
+      const hasPhoto =
+        !serverClearedPhotoCodes.has(code) &&
+        (Boolean(it.hasPhoto) ||
+          preserved.length > 0 ||
+          (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
+          (typeof it.dokumentasiUrl === 'string' && it.dokumentasiUrl.trim() !== '' && !it.dokumentasiUrl.startsWith('data:image/svg+xml')));
+      return {
+        ...it,
+        hasPhoto,
+        dokumentasiUrl: '',
+        dokumentasiUrls: []
+      };
+    });
+    return res.json({
+      success: true,
+      source: 'memory',
+      count: catalogFromMem.length,
+      items: catalogFromMem
+    });
+  });
+
+  app.get('/api/database-barang', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const lightweight = String(req.query?.lightweight || req.query?.includePhotos || '') === '1' || String(req.query?.includePhotos || '') === '0';
+    let mysqlLoaded = false;
+    if (isDatabaseConfigured()) {
+      try {
+        if (lightweight) {
+          const rows = await mysqlQuery<any[]>(
+            `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                    panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, updated_at,
+                    CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '' AND dokumentasi_url NOT LIKE 'data:image/svg+xml%')
+                           OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
+                         THEN 1 ELSE 0 END AS has_photo
+             FROM wms_database_barang`
+          );
+          mysqlLoaded = true;
+          const mapped = Array.isArray(rows) ? rows.map((r, i) => mapScalarRowToCatalogItem(r, i)) : [];
+          const catalogItems = deduplicateCatalogItems(mapped);
+          return res.json({ success: true, source: 'mysql', count: catalogItems.length, items: catalogItems });
+        }
+        // Tidak menggunakan ORDER BY di SQL agar MySQL tidak pernah kehabisan sort buffer saat membaca kolom LONGTEXT; pengurutan dilakukan di JS
+        const rows = await mysqlQuery<any[]>(
+          `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                  panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
+                  payload_json, updated_at
+           FROM wms_database_barang`
+        );
+        mysqlLoaded = true;
+        const mapped = Array.isArray(rows) ? rows.map((r, i) => mapRowToDatabaseBarang(r, i)) : [];
+        const deduped = deduplicateAndMergeDatabaseBarangRows(mapped);
+        // Server database adalah satu-satunya sumber kebenaran: sinkronkan RAM & cache foto persis sesuai isi database saat ini
+        memoryDatabaseBarang = deduped;
+        preservedServerPhotosByCode.clear();
+        deduped.forEach(it => {
+          const code = String(it.noBarang || '').trim().toUpperCase();
+          if (code && Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
+            preservedServerPhotosByCode.set(code, it.dokumentasiUrls);
+          }
+        });
+        return res.json({ success: true, source: 'mysql', count: deduped.length, items: deduped });
+      } catch (dbErr: any) {
+        console.error('[GET /api/database-barang] MySQL error:', dbErr?.message || dbErr);
+        if (isHostingerEnv) {
+          return res.status(503).json({
+            success: false,
+            error: `Gagal membaca data barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
+          });
+        }
       }
     }
     if (!mysqlLoaded && !isHostingerEnv && memoryDatabaseBarang.length === 0) {
       try {
         const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang`, {
-          headers: { Accept: 'application/json' }
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000)
         });
         if (bridgeRes.ok) {
           const bridgeData: any = await bridgeRes.json();
@@ -6959,7 +7595,9 @@ Kembalikan HANYA JSON valid:
         }
       } catch {}
     }
-    const dedupedMem = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang);
+    const dedupedMem = deduplicateAndMergeDatabaseBarangRows(memoryDatabaseBarang).filter(
+      it => !serverDeletedItemCodes.has(String(it?.noBarang || '').trim().toUpperCase())
+    );
     memoryDatabaseBarang = dedupedMem;
     return res.json({
       success: true,
@@ -6970,18 +7608,16 @@ Kembalikan HANYA JSON valid:
   });
 
   // Endpoint ringan Real-Time Multi-Device Sync khusus untuk menyinkronkan foto dokumentasi & perubahan barang antar HP dan PC
-  // Ringkasan ringan dari MySQL, tanpa mentransfer foto/base64 ke browser.
-  // Dipakai untuk verifikasi pemulihan foto lama dari IndexedDB perangkat asal.
   app.get('/api/database-barang/photos-summary', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!isDatabaseConfigured() && isHostingerEnv) {
-      return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi.' });
+      return res.status(503).json({ success: false, error: 'Database belum dikonfigurasi.' });
     }
     if (isDatabaseConfigured()) {
       try {
         const rows = await mysqlQuery<any[]>(`
           SELECT UPPER(TRIM(no_barang)) AS code,
-                 CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '')
+                 CASE WHEN (dokumentasi_url IS NOT NULL AND dokumentasi_url != '' AND dokumentasi_url NOT LIKE 'data:image/svg+xml%')
                         OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))
                       THEN 1 ELSE 0 END AS has_photo
           FROM wms_database_barang
@@ -6998,7 +7634,7 @@ Kembalikan HANYA JSON valid:
       } catch (err: any) {
         if (isHostingerEnv) {
           console.warn('[Database Barang Photos] Gagal membaca ringkasan MySQL:', err?.message || err);
-          return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca MySQL' });
+          return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca database' });
         }
       }
     }
@@ -7010,7 +7646,8 @@ Kembalikan HANYA JSON valid:
       memCodes.add(code);
       const hasPhoto =
         (Array.isArray(item?.dokumentasiUrls) && item.dokumentasiUrls.length > 0) ||
-        (typeof item?.dokumentasiUrl === 'string' && item.dokumentasiUrl.trim() !== '' && !item.dokumentasiUrl.startsWith('data:image/svg+xml'));
+        (typeof item?.dokumentasiUrl === 'string' && item.dokumentasiUrl.trim() !== '' && !item.dokumentasiUrl.startsWith('data:image/svg+xml')) ||
+        Boolean(item?.hasPhoto);
       if (hasPhoto) memPhotoCodes.add(code);
     }
     for (const [code, urls] of preservedServerPhotosByCode.entries()) {
@@ -7022,87 +7659,260 @@ Kembalikan HANYA JSON valid:
     return res.json({ success: true, totalSkuCount: memCodes.size, photoSkuCount: memPhotoCodes.size });
   });
 
-  app.get('/api/database-barang/photos-sync', async (_req, res) => {
+  // Ambil foto resolusi penuh untuk satu No. Barang secara instan (dipakai saat user klik Lihat/Edit/Kamera sebelum batch selesai)
+  app.get('/api/database-barang/item-photos/:code', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const code = decodeURIComponent(String(req.params.code || '')).trim().toUpperCase();
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'Kode barang tidak valid' });
+    }
+    try {
+      if (isDatabaseConfigured()) {
+        try {
+          const rows = await mysqlQuery<any[]>(
+            `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                    panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
+                    payload_json, updated_at
+             FROM wms_database_barang
+             WHERE UPPER(TRIM(no_barang)) = ?`,
+            [code]
+          );
+          if (Array.isArray(rows) && rows.length > 0) {
+            const mapped = deduplicateAndMergeDatabaseBarangRows(rows.map((r, i) => mapRowToDatabaseBarang(r, i)));
+            const matched = mapped[0];
+            const cleanUrls = (matched?.dokumentasiUrls || []).filter((u: any) => typeof u === 'string' && u.trim() && !serverDeletedPhotoUrls.has(u));
+            if (cleanUrls.length > 0) {
+              preservedServerPhotosByCode.set(code, cleanUrls);
+            }
+            return res.json({
+              success: true,
+              noBarang: code,
+              dokumentasiUrls: cleanUrls,
+              dokumentasiUrl: cleanUrls[0] || ''
+            });
+          }
+          if (isHostingerEnv) {
+            return res.json({ success: true, noBarang: code, dokumentasiUrls: [], dokumentasiUrl: '' });
+          }
+        } catch (dbErr: any) {
+          if (isHostingerEnv) {
+            return res.status(503).json({ success: false, error: dbErr?.message || 'Gagal membaca foto barang dari database' });
+          }
+        }
+      }
+
+      const memMatch = memoryDatabaseBarang.find(x => String(x?.noBarang || '').trim().toUpperCase() === code);
+      const memUrls = Array.isArray(memMatch?.dokumentasiUrls)
+        ? memMatch.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+        : memMatch?.dokumentasiUrl && !String(memMatch.dokumentasiUrl).startsWith('data:image/svg+xml')
+        ? [memMatch.dokumentasiUrl]
+        : [];
+      const preserved = preservedServerPhotosByCode.get(code) || [];
+      let combined = Array.from(new Set([...memUrls, ...preserved])).filter(u => !serverDeletedPhotoUrls.has(u));
+
+      if (combined.length === 0 && !isHostingerEnv) {
+        try {
+          const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/item-photos/${encodeURIComponent(code)}`, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(8000)
+          });
+          if (bridgeRes.ok) {
+            const bridgeData: any = await bridgeRes.json();
+            if (Array.isArray(bridgeData?.dokumentasiUrls) && bridgeData.dokumentasiUrls.length > 0) {
+              combined = bridgeData.dokumentasiUrls;
+            }
+          }
+        } catch {}
+      }
+
+      return res.json({
+        success: true,
+        noBarang: code,
+        dokumentasiUrls: serverClearedPhotoCodes.has(code) ? [] : combined,
+        dokumentasiUrl: serverClearedPhotoCodes.has(code) ? '' : (combined[0] || '')
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal memuat foto barang' });
+    }
+  });
+
+  app.get('/api/database-barang/photos-sync', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const hasPagination = req.query?.limit !== undefined && String(req.query.limit).trim() !== '';
+    const limit = hasPagination ? Math.max(1, Math.min(50, Number(req.query.limit) || 8)) : 0;
+    const offset = hasPagination ? Math.max(0, Number(req.query?.offset) || 0) : 0;
+
     try {
       let totalCount = memoryDatabaseBarang.length;
+      let totalPhotoCount = 0;
       let dbPhotoItems: any[] = [];
       let mysqlLoaded = false;
 
       if (isDatabaseConfigured()) {
         try {
           const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS cnt FROM wms_database_barang`);
-          mysqlLoaded = true;
-          if (Array.isArray(countRows) && countRows.length > 0) {
-            totalCount = Math.max(totalCount, Number(countRows[0]?.cnt) || 0);
-          }
-          // Query cepat khusus baris yang memiliki foto dokumentasi agar polling 3 detik sangat ringan dan tidak membebani MySQL
-          const rows = await mysqlQuery<any[]>(
-            `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
-                    panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
-                    payload_json, updated_at
+          totalCount = Array.isArray(countRows) && countRows.length > 0 ? Number(countRows[0]?.cnt) || 0 : 0;
+
+          // Langkah 1: Ambil hanya daftar kode ringan yang memiliki foto (TANPA kolom LONGTEXT & TANPA ORDER BY SQL agar bebas ER_OUT_OF_SORTMEMORY)
+          const indexRows = await mysqlQuery<any[]>(
+            `SELECT order_index, UPPER(TRIM(no_barang)) AS code
              FROM wms_database_barang
              WHERE (dokumentasi_url IS NOT NULL AND dokumentasi_url != '' AND dokumentasi_url NOT LIKE 'data:image/svg+xml%')
-                OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json != '' AND dokumentasi_urls_json != '[]')
-             ORDER BY order_index ASC, no_barang ASC`
+                OR (dokumentasi_urls_json IS NOT NULL AND dokumentasi_urls_json NOT IN ('', '[]', 'null'))`
           );
-          if (Array.isArray(rows) && rows.length > 0) {
-            dbPhotoItems = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
+          mysqlLoaded = true;
+
+          const codeOrderMap = new Map<string, number>();
+          for (const r of indexRows || []) {
+            const c = String(r?.code || '').trim().toUpperCase();
+            if (!c) continue;
+            const oi = Number(r?.order_index ?? 0) || 0;
+            if (!codeOrderMap.has(c) || oi < (codeOrderMap.get(c) ?? 0)) {
+              codeOrderMap.set(c, oi);
+            }
           }
-        } catch {
-          // Gunakan memoryDatabaseBarang / bridge jika MySQL lokal tidak aktif di preview
+          const orderedPhotoCodes = Array.from(codeOrderMap.entries())
+            .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+            .map(([c]) => c);
+
+          totalPhotoCount = orderedPhotoCodes.length;
+          const targetCodes = hasPagination
+            ? orderedPhotoCodes.slice(offset, offset + limit)
+            : orderedPhotoCodes;
+
+          if (targetCodes.length > 0) {
+            // Langkah 2: Ambil kolom LONGTEXT foto HANYA untuk potongan kecil (batch) kode barang
+            const chunkSize = 25;
+            const fetchedRows: any[] = [];
+            for (let i = 0; i < targetCodes.length; i += chunkSize) {
+              const slice = targetCodes.slice(i, i + chunkSize);
+              const placeholders = slice.map(() => '?').join(', ');
+              const rows = await mysqlQuery<any[]>(
+                `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                        panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
+                        payload_json, updated_at
+                 FROM wms_database_barang
+                 WHERE UPPER(TRIM(no_barang)) IN (${placeholders})`,
+                slice
+              );
+              if (Array.isArray(rows)) {
+                fetchedRows.push(...rows);
+              }
+            }
+            if (fetchedRows.length > 0) {
+              dbPhotoItems = fetchedRows.map((r, i) => mapRowToDatabaseBarang(r, i));
+            }
+          }
+        } catch (dbErr: any) {
+          console.error('[GET /api/database-barang/photos-sync] MySQL error:', dbErr?.message || dbErr);
+          if (isHostingerEnv) {
+            return res.status(503).json({
+              success: false,
+              error: `Gagal memuat foto barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
+            });
+          }
         }
       }
 
       if (!mysqlLoaded && !isHostingerEnv) {
-        try {
-          const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
-            headers: { Accept: 'application/json' }
-          });
-          if (bridgeRes.ok) {
-            const bridgeData: any = await bridgeRes.json();
-            if (typeof bridgeData?.totalCount === 'number') {
-              totalCount = Math.max(totalCount, bridgeData.totalCount);
+        const hasAnyMemPhotos = memoryDatabaseBarang.some(
+          it =>
+            (Array.isArray(it?.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
+            (typeof it?.dokumentasiUrl === 'string' && it.dokumentasiUrl.trim() !== '' && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
+        );
+        if (!hasAnyMemPhotos) {
+          try {
+            const bridgeRes = await fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
+              headers: { Accept: 'application/json' },
+              signal: AbortSignal.timeout(20000)
+            });
+            if (bridgeRes.ok) {
+              const bridgeData: any = await bridgeRes.json();
+              if (typeof bridgeData?.totalCount === 'number') {
+                totalCount = bridgeData.totalCount;
+              }
+              if (Array.isArray(bridgeData?.photoItems)) {
+                dbPhotoItems = bridgeData.photoItems;
+                // Simpan sementara di RAM agar pemanggilan halaman pagination berikutnya di preview langsung cepat
+                const byCode = new Map<string, number>();
+                memoryDatabaseBarang.forEach((m, idx) => byCode.set(String(m?.noBarang || '').trim().toUpperCase(), idx));
+                for (const pItem of bridgeData.photoItems) {
+                  const code = String(pItem?.noBarang || '').trim().toUpperCase();
+                  if (!code) continue;
+                  const idx = byCode.get(code);
+                  if (idx !== undefined) {
+                    memoryDatabaseBarang[idx] = {
+                      ...memoryDatabaseBarang[idx],
+                      dokumentasiUrls: pItem.dokumentasiUrls,
+                      dokumentasiUrl: pItem.dokumentasiUrl,
+                      hasPhoto: true
+                    };
+                  } else {
+                    byCode.set(code, memoryDatabaseBarang.length);
+                    memoryDatabaseBarang.push(pItem);
+                  }
+                }
+              }
             }
-            if (Array.isArray(bridgeData?.photoItems) && bridgeData.photoItems.length > 0) {
-              dbPhotoItems = bridgeData.photoItems;
-            }
-          }
-        } catch {}
+          } catch {}
+        }
       }
 
-      const memPhotoItems = memoryDatabaseBarang.filter(
-        it =>
-          (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
-          (typeof it.dokumentasiUrl === 'string' &&
-            it.dokumentasiUrl.trim() !== '' &&
-            !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
-      );
+      const sourcePhotoItems = mysqlLoaded
+        ? dbPhotoItems
+        : [
+            ...dbPhotoItems,
+            ...memoryDatabaseBarang.filter(
+              it =>
+                !serverDeletedItemCodes.has(String(it.noBarang || '').trim().toUpperCase()) &&
+                ((Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
+                  (typeof it.dokumentasiUrl === 'string' &&
+                    it.dokumentasiUrl.trim() !== '' &&
+                    !it.dokumentasiUrl.startsWith('data:image/svg+xml')))
+            )
+          ];
 
-      const combinedPhotoItems = deduplicateAndMergeDatabaseBarangRows([...dbPhotoItems, ...memPhotoItems])
-        .filter(it => !serverClearedPhotoCodes.has(String(it.noBarang || '').trim().toUpperCase()))
-        .map(it => {
+      const allFilteredPhotoItems = deduplicateAndMergeDatabaseBarangRows(sourcePhotoItems)
+        .filter(it => {
           const code = String(it.noBarang || '').trim().toUpperCase();
+          return Boolean(code) && !serverClearedPhotoCodes.has(code) && !serverDeletedItemCodes.has(code);
+        })
+        .map(it => {
           const cleanUrls = (it.dokumentasiUrls || []).filter((u: any) => typeof u === 'string' && u.trim() && !serverDeletedPhotoUrls.has(u));
           return {
             ...it,
+            hasPhoto: cleanUrls.length > 0,
             dokumentasiUrls: cleanUrls,
             dokumentasiUrl: cleanUrls[0] || ''
           };
         })
         .filter(it => it.dokumentasiUrls.length > 0);
 
-      combinedPhotoItems.forEach(it => {
-        if (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
-          preservedServerPhotosByCode.set(it.noBarang, it.dokumentasiUrls);
+      if (mysqlLoaded && !hasPagination) {
+        preservedServerPhotosByCode.clear();
+      }
+      allFilteredPhotoItems.forEach(it => {
+        const code = String(it.noBarang || '').trim().toUpperCase();
+        if (code && Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) {
+          preservedServerPhotosByCode.set(code, it.dokumentasiUrls);
         }
       });
+
+      const resolvedTotalPhotoCount = mysqlLoaded ? totalPhotoCount : allFilteredPhotoItems.length;
+      const pagedPhotoItems =
+        !mysqlLoaded && hasPagination
+          ? allFilteredPhotoItems.slice(offset, offset + limit)
+          : allFilteredPhotoItems;
+      const hasMore = hasPagination ? offset + limit < resolvedTotalPhotoCount : false;
 
       return res.json({
         success: true,
         totalCount,
-        photoCount: combinedPhotoItems.length,
-        photoItems: combinedPhotoItems,
+        photoCount: resolvedTotalPhotoCount,
+        offset,
+        limit: hasPagination ? limit : resolvedTotalPhotoCount,
+        hasMore,
+        photoItems: pagedPhotoItems,
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
@@ -7113,16 +7923,15 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // Endpoint POST batch khusus foto dokumentasi agar 69+ foto dari HP/device lain langsung tersinkronisasi sekaligus tanpa blokir role/sesi
+  // Endpoint POST batch khusus foto dokumentasi: HANYA memperbarui barang yang MASIH ADA di database (anti-kebangkitan barang terhapus!)
   app.post('/api/database-barang/photos-sync', async (req: any, res: any) => {
     try {
       if (!isDatabaseConfigured() && isHostingerEnv) {
-        return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; foto tidak disimpan di server.' });
+        return res.status(503).json({ success: false, error: 'Database belum dikonfigurasi; foto tidak disimpan di server.' });
       }
-      // Tabel disiapkan saat server startup. Hindari CREATE TABLE untuk setiap foto yang dikirim.
       const incomingPhotoItems = Array.isArray(req.body?.photoItems) ? req.body.photoItems : [];
       if (incomingPhotoItems.length === 0) {
-        return res.json({ success: true, updatedCount: 0 });
+        return res.json({ success: true, updatedCount: 0, skippedDeletedCount: 0 });
       }
 
       const byCode = new Map<string, number>();
@@ -7131,10 +7940,14 @@ Kembalikan HANYA JSON valid:
       });
 
       let updatedCount = 0;
+      let skippedDeletedCount = 0;
       let mysqlAvailable = isDatabaseConfigured();
+      const updatedForBridge: any[] = [];
+
       for (const rawItem of incomingPhotoItems) {
         const code = String(rawItem?.noBarang || '').trim().toUpperCase();
         if (!code) continue;
+
         const incomingUrls = Array.isArray(rawItem?.dokumentasiUrls)
           ? rawItem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
           : [];
@@ -7144,146 +7957,122 @@ Kembalikan HANYA JSON valid:
         }
         if (incomingUrls.length === 0) continue;
 
-        const prevSaved = preservedServerPhotosByCode.get(code) || [];
+        const replacePhotos = Boolean(rawItem?.replacePhotos);
         const existingIdx = byCode.get(code);
         const existingMem = existingIdx !== undefined ? memoryDatabaseBarang[existingIdx] : null;
-        const existingUrls = existingMem && Array.isArray(existingMem.dokumentasiUrls)
-          ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
-          : [];
-        const mergedUrls = Array.from(new Set([...existingUrls, ...prevSaved, ...incomingUrls]));
-        serverClearedPhotoCodes.delete(code);
-        for (const u of incomingUrls) {
-          serverDeletedPhotoUrls.delete(u);
-        }
 
         let canonicalId = String(existingMem?.id || rawItem?.id || `dbb-${code}`);
+        let dbExistingUrls: string[] = [];
+
         if (mysqlAvailable) {
           try {
             const dbRows = await mysqlQuery<any[]>(
               `SELECT id, order_index, dokumentasi_url, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC LIMIT 1`,
               [code]
             );
-            if (Array.isArray(dbRows) && dbRows.length > 0) {
-              canonicalId = String(dbRows[0].id);
-              const legacySingleUrl = String(dbRows[0].dokumentasi_url || '').trim();
-              if (legacySingleUrl && !legacySingleUrl.startsWith('data:image/svg+xml') && !mergedUrls.includes(legacySingleUrl)) {
-                mergedUrls.push(legacySingleUrl);
-              }
-              if (dbRows[0].dokumentasi_urls_json) {
-                try {
-                  const parsedDbUrls = typeof dbRows[0].dokumentasi_urls_json === 'string'
-                    ? JSON.parse(dbRows[0].dokumentasi_urls_json)
-                    : dbRows[0].dokumentasi_urls_json;
-                  if (Array.isArray(parsedDbUrls)) {
-                    for (const u of parsedDbUrls) {
-                      if (typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !mergedUrls.includes(u)) {
-                        mergedUrls.push(u);
-                      }
+            // GUARD ANTI-RESURRECTION: Jika barang sudah dihapus dari MySQL, JANGAN INSERT ulang! Lewati saja.
+            if (!Array.isArray(dbRows) || dbRows.length === 0) {
+              skippedDeletedCount++;
+              preservedServerPhotosByCode.delete(code);
+              continue;
+            }
+            canonicalId = String(dbRows[0].id);
+            const legacySingleUrl = String(dbRows[0].dokumentasi_url || '').trim();
+            if (legacySingleUrl && !legacySingleUrl.startsWith('data:image/svg+xml')) {
+              dbExistingUrls.push(legacySingleUrl);
+            }
+            if (dbRows[0].dokumentasi_urls_json) {
+              try {
+                const parsedDbUrls = typeof dbRows[0].dokumentasi_urls_json === 'string'
+                  ? JSON.parse(dbRows[0].dokumentasi_urls_json)
+                  : dbRows[0].dokumentasi_urls_json;
+                if (Array.isArray(parsedDbUrls)) {
+                  for (const u of parsedDbUrls) {
+                    if (typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !dbExistingUrls.includes(u)) {
+                      dbExistingUrls.push(u);
                     }
                   }
-                } catch {}
-              }
+                }
+              } catch {}
             }
           } catch (dbErr: any) {
             if (isHostingerEnv) {
-              throw new Error(`Gagal membaca foto barang ${code} dari MySQL: ${dbErr?.message || 'Database tidak tersedia'}`);
+              throw new Error(`Gagal membaca foto barang ${code} dari database: ${dbErr?.message || 'Database tidak tersedia'}`);
             }
             mysqlAvailable = false;
           }
         }
 
-        const rec = {
-          id: canonicalId,
-          orderIndex: typeof existingMem?.orderIndex === 'number' ? existingMem.orderIndex : (typeof rawItem?.orderIndex === 'number' ? rawItem.orderIndex : memoryDatabaseBarang.length),
-          noBarang: code,
-          deskripsiBarang: String(existingMem?.deskripsiBarang || rawItem?.deskripsiBarang || rawItem?.keteranganBarang || 'Barang Kemasan AKK'),
-          keteranganBarang: String(existingMem?.keteranganBarang || rawItem?.deskripsiBarang || rawItem?.keteranganBarang || 'Barang Kemasan AKK'),
-          unit1: String(existingMem?.unit1 || rawItem?.unit1 || rawItem?.satuan || 'Pcs'),
-          satuan: String(existingMem?.satuan || rawItem?.unit1 || rawItem?.satuan || 'Pcs'),
-          unit2: String(existingMem?.unit2 ?? rawItem?.unit2 ?? ''),
-          unit3: String(existingMem?.unit3 ?? rawItem?.unit3 ?? ''),
-          rasio2: existingMem?.rasio2 ?? rawItem?.rasio2 ?? 0,
-          rasio3: existingMem?.rasio3 ?? rawItem?.rasio3 ?? 0,
-          panjangCm: Number(existingMem?.panjangCm ?? rawItem?.panjangCm) || 0,
-          lebarCm: Number(existingMem?.lebarCm ?? rawItem?.lebarCm) || 0,
-          tinggiCm: Number(existingMem?.tinggiCm ?? rawItem?.tinggiCm) || 0,
-          volM3: Number(existingMem?.volM3 ?? rawItem?.volM3) || 0,
-          beratKg: Number(existingMem?.beratKg ?? rawItem?.beratKg) || 0,
-          dokumentasiUrl: mergedUrls[0] || '',
-          dokumentasiUrls: mergedUrls,
-          compressedSizeKb: Number(rawItem?.compressedSizeKb || existingMem?.compressedSizeKb || 0),
-          originalSizeKb: Number(rawItem?.originalSizeKb || existingMem?.originalSizeKb || 0),
-          compressionSavingsPct: Number(rawItem?.compressionSavingsPct || existingMem?.compressionSavingsPct || 0),
-          kategoriBarang: String(existingMem?.kategoriBarang || rawItem?.kategoriBarang || 'Karton Box Corrugated'),
-          stokTersedia: Number(existingMem?.stokTersedia ?? rawItem?.stokTersedia ?? 1000),
-          cabang: String(existingMem?.cabang || rawItem?.cabang || 'Banyuwangi'),
-          updatedAt: new Date().toISOString().split('T')[0]
-        };
+        // Pada mode memory fallback (non-MySQL), tetap cegah item yang sudah dihapus muncul lagi
+        if (!mysqlAvailable) {
+          if (serverDeletedItemCodes.has(code) || (memoryDatabaseBarang.length > 0 && !existingMem)) {
+            skippedDeletedCount++;
+            preservedServerPhotosByCode.delete(code);
+            continue;
+          }
+          dbExistingUrls = existingMem && Array.isArray(existingMem.dokumentasiUrls)
+            ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+            : [];
+        }
+
+        const mergedUrls = replacePhotos
+          ? Array.from(new Set(incomingUrls))
+          : Array.from(new Set([...dbExistingUrls, ...incomingUrls]));
+
+        serverClearedPhotoCodes.delete(code);
+        for (const u of incomingUrls) {
+          serverDeletedPhotoUrls.delete(u);
+        }
+
+        const today = new Date().toISOString().split('T')[0];
 
         if (mysqlAvailable) {
           try {
             await mysqlQuery(
-              `INSERT INTO wms_database_barang (
-                id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
-                panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
-                dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON DUPLICATE KEY UPDATE
-                dokumentasi_url = VALUES(dokumentasi_url),
-                dokumentasi_urls_json = VALUES(dokumentasi_urls_json),
-                updated_at = VALUES(updated_at)`,
+              `UPDATE wms_database_barang
+               SET dokumentasi_url = ?, dokumentasi_urls_json = ?, updated_at = ?
+               WHERE id = ?`,
               [
-                rec.id,
-                rec.orderIndex,
-                rec.noBarang,
-                rec.deskripsiBarang,
-                rec.unit1,
-                rec.unit2,
-                rec.unit3,
-                String(rec.rasio2 ?? '0'),
-                String(rec.rasio3 ?? '0'),
-                rec.panjangCm,
-                rec.lebarCm,
-                rec.tinggiCm,
-                rec.volM3,
-                rec.beratKg,
-                rec.dokumentasiUrl || null,
-                JSON.stringify(rec.dokumentasiUrls),
-                JSON.stringify({
-                  kategoriBarang: rec.kategoriBarang,
-                  stokTersedia: rec.stokTersedia,
-                  cabang: rec.cabang,
-                  compressedSizeKb: rec.compressedSizeKb,
-                  originalSizeKb: rec.originalSizeKb,
-                  compressionSavingsPct: rec.compressionSavingsPct
-                }),
-                rec.updatedAt
+                mergedUrls[0] || null,
+                JSON.stringify(mergedUrls),
+                today,
+                canonicalId
               ]
             );
           } catch (dbErr: any) {
             if (isHostingerEnv) {
-              console.warn('[Database Barang Photos] Gagal simpan MySQL:', dbErr?.message || dbErr);
-              throw new Error(`Gagal simpan foto barang ${code} ke MySQL: ${dbErr?.message || 'Kesalahan database'}`);
+              console.warn('[Database Barang Photos] Gagal update MySQL:', dbErr?.message || dbErr);
+              throw new Error(`Gagal simpan foto barang ${code} ke database: ${dbErr?.message || 'Kesalahan database'}`);
             }
             mysqlAvailable = false;
           }
         }
-        // Jangan tandai sukses sebelum insert/update MySQL benar-benar selesai.
+
         preservedServerPhotosByCode.set(code, mergedUrls);
-        if (existingIdx !== undefined) {
-          memoryDatabaseBarang[existingIdx] = rec;
-        } else {
-          byCode.set(code, memoryDatabaseBarang.length);
-          memoryDatabaseBarang.push(rec);
+        if (existingIdx !== undefined && existingMem) {
+          memoryDatabaseBarang[existingIdx] = {
+            ...existingMem,
+            id: canonicalId,
+            dokumentasiUrl: mergedUrls[0] || '',
+            dokumentasiUrls: mergedUrls,
+            updatedAt: today
+          };
         }
+        updatedForBridge.push({
+          ...rawItem,
+          id: canonicalId,
+          noBarang: code,
+          dokumentasiUrl: mergedUrls[0] || '',
+          dokumentasiUrls: mergedUrls
+        });
         updatedCount++;
       }
 
-      if (!mysqlAvailable && !isHostingerEnv && updatedCount > 0) {
+      if (!mysqlAvailable && !isHostingerEnv && updatedForBridge.length > 0) {
         void fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/photos-sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ photoItems: incomingPhotoItems }),
+          body: JSON.stringify({ photoItems: updatedForBridge }),
           signal: AbortSignal.timeout(1500)
         }).catch(() => {});
       }
@@ -7291,6 +8080,7 @@ Kembalikan HANYA JSON valid:
       return res.json({
         success: true,
         updatedCount,
+        skippedDeletedCount,
         photoCount: preservedServerPhotosByCode.size
       });
     } catch (err: any) {
@@ -7536,18 +8326,19 @@ Kembalikan HANYA JSON valid:
   app.post('/api/database-barang/item', async (req: any, res: any) => {
     try {
       if (!isDatabaseConfigured() && isHostingerEnv) {
-        return res.status(503).json({ success: false, error: 'MySQL belum dikonfigurasi; data tidak dapat disimpan permanen.' });
+        return res.status(503).json({ success: false, error: 'Database belum dikonfigurasi; data tidak dapat disimpan permanen.' });
       }
       // Izinkan semua akun operasional (termasuk Admin Penjualan / Sales & Gudang) menambahkan foto dokumentasi barang ke server
       const item = req.body?.item || req.body;
       const replacePhotos = Boolean(req.body?.replacePhotos || item?.replacePhotos);
+      const onlyIfExists = Boolean(req.body?.onlyIfExists);
       if (!item || !item.noBarang) {
         return res.status(400).json({ success: false, error: 'Data barang tidak lengkap' });
       }
 
       const code = String(item.noBarang).trim().toUpperCase();
       const existingIdx = memoryDatabaseBarang.findIndex(
-        x => String(x.noBarang).toUpperCase() === code || x.id === item.id
+        x => String(x.noBarang).toUpperCase() === code || (item.id && x.id === item.id)
       );
       const existingMem = existingIdx >= 0 ? memoryDatabaseBarang[existingIdx] : null;
       const orderIndex = typeof item.orderIndex === 'number'
@@ -7565,10 +8356,86 @@ Kembalikan HANYA JSON valid:
         incomingUrls.unshift(cleanDocUrl);
       }
 
-      const prevUrls = !replacePhotos && existingMem && Array.isArray(existingMem.dokumentasiUrls)
-        ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+      let canonicalId = String(existingMem?.id || item.id || `dbb-${code}`);
+      let liveDbUrls: string[] | null = null;
+      let dbChecked = false;
+
+      if (isDatabaseConfigured()) {
+        try {
+          const existingDbRows = await mysqlQuery<any[]>(
+            `SELECT id, order_index, dokumentasi_url, dokumentasi_urls_json FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC`,
+            [code]
+          );
+          dbChecked = true;
+          if (Array.isArray(existingDbRows) && existingDbRows.length > 0) {
+            canonicalId = String(existingDbRows[0].id);
+            liveDbUrls = [];
+            const dbSingle = String(existingDbRows[0].dokumentasi_url || '').trim();
+            if (dbSingle && !dbSingle.startsWith('data:image/svg+xml')) {
+              liveDbUrls.push(dbSingle);
+            }
+            if (existingDbRows[0].dokumentasi_urls_json) {
+              try {
+                const parsedDbUrls = typeof existingDbRows[0].dokumentasi_urls_json === 'string'
+                  ? JSON.parse(existingDbRows[0].dokumentasi_urls_json)
+                  : existingDbRows[0].dokumentasi_urls_json;
+                if (Array.isArray(parsedDbUrls)) {
+                  for (const u of parsedDbUrls) {
+                    if (typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !liveDbUrls.includes(u)) {
+                      liveDbUrls.push(u);
+                    }
+                  }
+                }
+              } catch {}
+            }
+            if (existingDbRows.length > 1) {
+              const dupIds = existingDbRows.slice(1).map(r => String(r.id));
+              for (const dupId of dupIds) {
+                await mysqlQuery(`DELETE FROM wms_database_barang WHERE id = ?`, [dupId]);
+              }
+            }
+          } else if (onlyIfExists) {
+            // Barang ini sudah dihapus dari database oleh user lain -> jangan buat ulang!
+            preservedServerPhotosByCode.delete(code);
+            serverDeletedItemCodes.add(code);
+            return res.status(404).json({
+              success: false,
+              deleted: true,
+              error: `Barang ${code} sudah dihapus dari database.`
+            });
+          }
+        } catch (dbLookupErr: any) {
+          if (dbLookupErr?.code === 'ER_NO_SUCH_TABLE') {
+            try {
+              await ensureDatabaseSchema();
+            } catch {}
+          }
+        }
+      }
+
+      if (!dbChecked && onlyIfExists && (serverDeletedItemCodes.has(code) || (memoryDatabaseBarang.length > 0 && !existingMem))) {
+        preservedServerPhotosByCode.delete(code);
+        return res.status(404).json({
+          success: false,
+          deleted: true,
+          error: `Barang ${code} sudah dihapus dari database.`
+        });
+      }
+
+      // Gunakan foto dari baris MySQL yang masih aktif (bukan RAM lama) saat replacePhotos=false
+      const prevUrls = !replacePhotos
+        ? (liveDbUrls !== null
+            ? liveDbUrls
+            : existingMem && Array.isArray(existingMem.dokumentasiUrls)
+            ? existingMem.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+            : [])
         : [];
-      const finalUrls = replacePhotos ? incomingUrls : Array.from(new Set([...incomingUrls, ...prevUrls]));
+      const finalUrls = replacePhotos ? Array.from(new Set(incomingUrls)) : Array.from(new Set([...prevUrls, ...incomingUrls]));
+
+      if (!onlyIfExists) {
+        serverDeletedItemCodes.delete(code);
+      }
+
       if (finalUrls.length > 0) {
         preservedServerPhotosByCode.set(code, finalUrls);
         serverClearedPhotoCodes.delete(code);
@@ -7577,27 +8444,6 @@ Kembalikan HANYA JSON valid:
         }
       } else if (replacePhotos) {
         preservedServerPhotosByCode.delete(code);
-      }
-
-      let canonicalId = String(existingMem?.id || item.id || `dbb-${code}`);
-
-      if (isDatabaseConfigured()) {
-        try {
-          await ensureDatabaseSchema();
-          const existingDbRows = await mysqlQuery<any[]>(
-            `SELECT id, order_index FROM wms_database_barang WHERE UPPER(no_barang) = ? ORDER BY order_index ASC`,
-            [code]
-          );
-          if (Array.isArray(existingDbRows) && existingDbRows.length > 0) {
-            canonicalId = String(existingDbRows[0].id);
-            if (existingDbRows.length > 1) {
-              const dupIds = existingDbRows.slice(1).map(r => String(r.id));
-              for (const dupId of dupIds) {
-                await mysqlQuery(`DELETE FROM wms_database_barang WHERE id = ?`, [dupId]);
-              }
-            }
-          }
-        } catch {}
       }
 
       const rec = {
@@ -7628,81 +8474,95 @@ Kembalikan HANYA JSON valid:
         updatedAt: String(item.updatedAt || new Date().toISOString().split('T')[0])
       };
 
-      if (existingIdx >= 0) {
-        memoryDatabaseBarang[existingIdx] = rec;
-      } else {
-        memoryDatabaseBarang.push(rec);
-      }
-
       let savedToMysql = false;
       if (isDatabaseConfigured()) {
         try {
-          await mysqlQuery(
-            `INSERT INTO wms_database_barang (
-              id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
-              panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
-              dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-              order_index = VALUES(order_index),
-              no_barang = VALUES(no_barang),
-              deskripsi_barang = VALUES(deskripsi_barang),
-              unit1 = VALUES(unit1),
-              unit2 = VALUES(unit2),
-              unit3 = VALUES(unit3),
-              rasio2 = VALUES(rasio2),
-              rasio3 = VALUES(rasio3),
-              panjang_cm = VALUES(panjang_cm),
-              lebar_cm = VALUES(lebar_cm),
-              tinggi_cm = VALUES(tinggi_cm),
-              vol_m3 = VALUES(vol_m3),
-              berat_kg = VALUES(berat_kg),
-              dokumentasi_url = VALUES(dokumentasi_url),
-              dokumentasi_urls_json = VALUES(dokumentasi_urls_json),
-              payload_json = VALUES(payload_json),
-              updated_at = VALUES(updated_at)`,
-            [
-              rec.id,
-              rec.orderIndex,
-              rec.noBarang,
-              rec.deskripsiBarang,
-              rec.unit1,
-              rec.unit2,
-              rec.unit3,
-              String(rec.rasio2 ?? '0'),
-              String(rec.rasio3 ?? '0'),
-              rec.panjangCm,
-              rec.lebarCm,
-              rec.tinggiCm,
-              rec.volM3,
-              rec.beratKg,
-              rec.dokumentasiUrl || null,
-              rec.dokumentasiUrls.length > 0 ? JSON.stringify(rec.dokumentasiUrls) : null,
-              JSON.stringify({
-                kategoriBarang: rec.kategoriBarang,
-                stokTersedia: rec.stokTersedia,
-                cabang: rec.cabang,
-                compressedSizeKb: rec.compressedSizeKb,
-                originalSizeKb: rec.originalSizeKb,
-                compressionSavingsPct: rec.compressionSavingsPct
-              }),
-              rec.updatedAt
-            ]
-          );
+          if (onlyIfExists) {
+            await mysqlQuery(
+              `UPDATE wms_database_barang
+               SET dokumentasi_url = ?, dokumentasi_urls_json = ?, updated_at = ?
+               WHERE id = ?`,
+              [
+                rec.dokumentasiUrl || null,
+                rec.dokumentasiUrls.length > 0 ? JSON.stringify(rec.dokumentasiUrls) : null,
+                rec.updatedAt,
+                rec.id
+              ]
+            );
+          } else {
+            await mysqlQuery(
+              `INSERT INTO wms_database_barang (
+                id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
+                panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg,
+                dokumentasi_url, dokumentasi_urls_json, payload_json, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                order_index = VALUES(order_index),
+                no_barang = VALUES(no_barang),
+                deskripsi_barang = VALUES(deskripsi_barang),
+                unit1 = VALUES(unit1),
+                unit2 = VALUES(unit2),
+                unit3 = VALUES(unit3),
+                rasio2 = VALUES(rasio2),
+                rasio3 = VALUES(rasio3),
+                panjang_cm = VALUES(panjang_cm),
+                lebar_cm = VALUES(lebar_cm),
+                tinggi_cm = VALUES(tinggi_cm),
+                vol_m3 = VALUES(vol_m3),
+                berat_kg = VALUES(berat_kg),
+                dokumentasi_url = VALUES(dokumentasi_url),
+                dokumentasi_urls_json = VALUES(dokumentasi_urls_json),
+                payload_json = VALUES(payload_json),
+                updated_at = VALUES(updated_at)`,
+              [
+                rec.id,
+                rec.orderIndex,
+                rec.noBarang,
+                rec.deskripsiBarang,
+                rec.unit1,
+                rec.unit2,
+                rec.unit3,
+                String(rec.rasio2 ?? '0'),
+                String(rec.rasio3 ?? '0'),
+                rec.panjangCm,
+                rec.lebarCm,
+                rec.tinggiCm,
+                rec.volM3,
+                rec.beratKg,
+                rec.dokumentasiUrl || null,
+                rec.dokumentasiUrls.length > 0 ? JSON.stringify(rec.dokumentasiUrls) : null,
+                JSON.stringify({
+                  kategoriBarang: rec.kategoriBarang,
+                  stokTersedia: rec.stokTersedia,
+                  cabang: rec.cabang,
+                  compressedSizeKb: rec.compressedSizeKb,
+                  originalSizeKb: rec.originalSizeKb,
+                  compressionSavingsPct: rec.compressionSavingsPct
+                }),
+                rec.updatedAt
+              ]
+            );
+          }
           savedToMysql = true;
         } catch (dbErr: any) {
           if (isHostingerEnv) {
             console.warn('[Database Barang Item] MySQL gagal:', dbErr?.message || dbErr);
-            return res.status(503).json({ success: false, error: `Gagal menyimpan barang/foto ke MySQL: ${dbErr?.message || 'Database tidak tersedia'}` });
+            return res.status(503).json({ success: false, error: `Gagal menyimpan barang/foto ke database: ${dbErr?.message || 'Database tidak tersedia'}` });
           }
         }
       }
+
+      if (existingIdx >= 0) {
+        memoryDatabaseBarang[existingIdx] = rec;
+      } else if (!onlyIfExists) {
+        memoryDatabaseBarang.push(rec);
+      }
+
       if (!savedToMysql && !isHostingerEnv) {
-        // Asynchronous fire-and-forget dengan timeout singkat agar respon ke user instan
         void fetch(`${PRODUCTION_BRIDGE_ORIGIN}/api/database-barang/item`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item: rec, replacePhotos }),
+          body: JSON.stringify({ item: rec, replacePhotos, onlyIfExists }),
           signal: AbortSignal.timeout(1500)
         }).catch(() => {});
       }
@@ -7977,26 +8837,61 @@ Kembalikan HANYA JSON valid:
       }
 
       const targetId = String(req.params.id || '').trim();
+      const queryCode = String(req.query?.noBarang || '').trim().toUpperCase();
       if (!targetId) {
         return res.status(400).json({ success: false, error: 'ID barang tidak valid' });
       }
 
-      memoryDatabaseBarang = memoryDatabaseBarang.filter(
-        x => x.id !== targetId && String(x.noBarang).toUpperCase() !== targetId.toUpperCase()
-      );
+      const deletedCodes = new Set<string>();
+      if (queryCode) deletedCodes.add(queryCode);
+      for (const item of memoryDatabaseBarang) {
+        if (
+          item.id === targetId ||
+          String(item.noBarang || '').trim().toUpperCase() === targetId.toUpperCase() ||
+          (queryCode && String(item.noBarang || '').trim().toUpperCase() === queryCode)
+        ) {
+          const c = String(item.noBarang || '').trim().toUpperCase();
+          if (c) deletedCodes.add(c);
+        }
+      }
 
       if (isDatabaseConfigured()) {
         try {
-          await mysqlQuery(
-            `DELETE FROM wms_database_barang WHERE id = ? OR UPPER(no_barang) = UPPER(?)`,
-            [targetId, targetId]
+          const foundRows = await mysqlQuery<any[]>(
+            `SELECT id, no_barang FROM wms_database_barang WHERE id = ? OR UPPER(TRIM(no_barang)) = UPPER(TRIM(?)) OR (? != '' AND UPPER(TRIM(no_barang)) = UPPER(TRIM(?)))`,
+            [targetId, targetId, queryCode, queryCode]
           );
-        } catch {
+          if (Array.isArray(foundRows)) {
+            for (const row of foundRows) {
+              const c = String(row?.no_barang || '').trim().toUpperCase();
+              if (c) deletedCodes.add(c);
+            }
+          }
+          await mysqlQuery(
+            `DELETE FROM wms_database_barang WHERE id = ? OR UPPER(TRIM(no_barang)) = UPPER(TRIM(?)) OR (? != '' AND UPPER(TRIM(no_barang)) = UPPER(TRIM(?)))`,
+            [targetId, targetId, queryCode, queryCode]
+          );
+        } catch (dbErr: any) {
+          if (isHostingerEnv) {
+            console.warn('[Database Barang Delete] MySQL gagal:', dbErr?.message || dbErr);
+            return res.status(503).json({ success: false, error: `Gagal menghapus item di database: ${dbErr?.message || 'Database tidak tersedia'}` });
+          }
           console.log('[Database Barang Delete] MySQL host unavailable, operating in-memory storage mode');
         }
       }
 
-      return res.json({ success: true });
+      // Bersihkan total dari RAM server & cache foto agar barang terhapus tidak pernah bangkit lagi
+      memoryDatabaseBarang = memoryDatabaseBarang.filter(x => {
+        const c = String(x.noBarang || '').trim().toUpperCase();
+        return x.id !== targetId && c !== targetId.toUpperCase() && !deletedCodes.has(c);
+      });
+      for (const code of deletedCodes) {
+        preservedServerPhotosByCode.delete(code);
+        serverClearedPhotoCodes.add(code);
+        serverDeletedItemCodes.add(code);
+      }
+
+      return res.json({ success: true, deletedId: targetId, deletedCodes: Array.from(deletedCodes) });
     } catch (err: any) {
       console.error('[DELETE /api/database-barang/:id] Error:', err);
       return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus item barang' });
@@ -8015,11 +8910,10 @@ Kembalikan HANYA JSON valid:
           `SELECT id, order_index, no_barang, deskripsi_barang, unit1, unit2, unit3, rasio2, rasio3,
                   panjang_cm, lebar_cm, tinggi_cm, vol_m3, berat_kg, dokumentasi_url, dokumentasi_urls_json,
                   payload_json, updated_at
-           FROM wms_database_barang
-           ORDER BY order_index ASC, no_barang ASC`
+           FROM wms_database_barang`
         );
         if (Array.isArray(rows) && rows.length > 0) {
-          const mapped = rows.map((r, i) => mapRowToDatabaseBarang(r, i));
+          const mapped = deduplicateAndMergeDatabaseBarangRows(rows.map((r, i) => mapRowToDatabaseBarang(r, i)));
           memoryDatabaseBarang = mapped;
           return { source: 'mysql', items: mapped };
         }
@@ -8797,6 +9691,7 @@ Kembalikan HANYA JSON valid:
         appType: "spa",
       });
       void vite.warmupRequest('/src/main.tsx').catch(() => {});
+      void vite.warmupRequest('/src/index.css').catch(() => {});
       return vite.middlewares;
     })();
 

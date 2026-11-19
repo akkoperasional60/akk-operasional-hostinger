@@ -16,6 +16,7 @@ export interface DatabaseBarangRecord {
   beratKg: number;
   dokumentasiUrl?: string;
   dokumentasiUrls?: string[];
+  hasPhoto?: boolean;
   compressedSizeKb?: number;
   originalSizeKb?: number;
   compressionSavingsPct?: number;
@@ -35,8 +36,50 @@ export interface CompressedPhotoResult {
   format: string;
 }
 
+export interface PendingPhotoQueueEntry {
+  noBarang: string; // keyPath (UPPERCASE)
+  itemId: string;
+  deskripsiBarang: string;
+  photos: string[];
+  replacePhotos: boolean;
+  queuedAt: string;
+}
+
+export interface DirectPhotoUploadResult {
+  success: boolean;
+  queuedOffline: boolean;
+  deletedOnServer?: boolean;
+  record: DatabaseBarangRecord;
+  error?: string;
+}
+
+export interface DatabaseBarangUpsertInput {
+  id?: string;
+  noBarang: string;
+  deskripsiBarang?: string;
+  keteranganBarang?: string;
+  unit1?: string;
+  satuan?: string;
+  unit2?: string;
+  unit3?: string;
+  rasio2?: number | string;
+  rasio3?: number | string;
+  panjangCm?: number;
+  lebarCm?: number;
+  tinggiCm?: number;
+  volM3?: number;
+  beratKg?: number;
+  dokumentasiUrl?: string;
+  dokumentasiUrls?: string[];
+  compressedSizeKb?: number;
+  originalSizeKb?: number;
+  compressionSavingsPct?: number;
+  kategoriBarang?: string;
+  stokTersedia?: number;
+  cabang?: string;
+}
+
 export const LS_KEY_DATABASE_BARANG = 'akk_wms_database_barang_v1';
-const LS_KEY_MASTER_SKU = 'akk_wms_master_sku_v3';
 
 export function calculateVolM3(panjangCm: number, lebarCm: number, tinggiCm: number): number {
   const p = Number(panjangCm) || 0;
@@ -88,16 +131,13 @@ export function estimateDataUrlSizeKb(dataUrl: string): number {
 
 export async function compressDocumentationPhoto(
   fileOrDataUrl: File | string,
-  options?: {
+  _options?: {
     maxDimension?: number;
     targetMaxKb?: number;
     initialQuality?: number;
   }
 ): Promise<CompressedPhotoResult> {
-  // Pertahankan ukuran & ketajaman asli (HD hingga 1600px, kualitas 0.92) agar tulisan ukuran/OZ pada kardus tetap tajam dan verifikasi kamera sangat responsif
-  const maxDimension = Math.max(options?.maxDimension ?? 1600, 1440);
-  const initialQuality = Math.max(options?.initialQuality ?? 0.92, 0.90);
-
+  // Pertahankan ukuran file, resolusi, dan kualitas asli 100% TANPA kompresi
   let originalSizeKb = 0;
   let sourceDataUrl = '';
 
@@ -114,64 +154,39 @@ export async function compressDocumentationPhoto(
     });
   }
 
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Gagal memuat objek gambar'));
-    image.src = sourceDataUrl;
-  });
-
-  const origW = img.naturalWidth || img.width || 1280;
-  const origH = img.naturalHeight || img.height || 960;
-
-  // Jika ukuran gambar sudah wajar (<= 1600px dan <= 900 KB), langsung gunakan gambar ukuran semula (tanpa kompresi yang membuat buram)
-  if (Math.max(origW, origH) <= maxDimension && originalSizeKb <= 900) {
-    return {
-      dataUrl: sourceDataUrl,
-      originalSizeKb,
-      compressedSizeKb: originalSizeKb,
-      savingsPercent: 0,
-      width: origW,
-      height: origH,
-      format: sourceDataUrl.startsWith('data:image/png')
-        ? 'PNG'
-        : sourceDataUrl.startsWith('data:image/webp')
-        ? 'WebP'
-        : 'JPEG'
-    };
+  let origW = 0;
+  let origH = 0;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Gagal memuat objek gambar'));
+      image.src = sourceDataUrl;
+    });
+    origW = img.naturalWidth || img.width || 0;
+    origH = img.naturalHeight || img.height || 0;
+  } catch {
+    origW = 0;
+    origH = 0;
   }
 
-  const ratio = Math.min(1, maxDimension / Math.max(origW, origH));
-  const width = Math.max(320, Math.round(origW * ratio));
-  const height = Math.max(240, Math.round(origH * ratio));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, width, height);
-  }
-
-  const highResUrl = canvas.toDataURL('image/jpeg', initialQuality);
-  const finalSizeKb = estimateDataUrlSizeKb(highResUrl);
-  const effectiveOriginalKb = Math.max(originalSizeKb, finalSizeKb);
-  const savingsPercent =
-    effectiveOriginalKb > finalSizeKb
-      ? Math.min(99, Math.max(0, Math.round(((effectiveOriginalKb - finalSizeKb) / effectiveOriginalKb) * 100)))
-      : 0;
+  const format = sourceDataUrl.startsWith('data:image/png')
+    ? 'PNG'
+    : sourceDataUrl.startsWith('data:image/webp')
+    ? 'WebP'
+    : sourceDataUrl.startsWith('data:image/heic')
+    ? 'HEIC'
+    : 'JPEG';
 
   return {
-    dataUrl: highResUrl,
-    originalSizeKb: effectiveOriginalKb,
-    compressedSizeKb: finalSizeKb,
-    savingsPercent,
-    width,
-    height,
-    format: 'JPEG'
+    dataUrl: sourceDataUrl,
+    originalSizeKb,
+    compressedSizeKb: originalSizeKb,
+    savingsPercent: 0,
+    width: origW,
+    height: origH,
+    format
   };
 }
 
@@ -192,8 +207,6 @@ export function isLegacySeededBarang(noBarang?: string): boolean {
   if (/^(AKK-(KBX|PLS|MPK|PRD)-\d+|RFID-KB-\d+)$/i.test(code)) return true;
   return false;
 }
-
-const DEFAULT_DATABASE_BARANG: DatabaseBarangRecord[] = [];
 
 function normalizeText(str: string): string {
   return String(str || '')
@@ -229,8 +242,24 @@ function isLegacySyntheticDimensionFallback(p: number, l: number, t: number, v: 
   );
 }
 
+function extractCleanPhotosRaw(item?: Partial<DatabaseBarangRecord> | null): string[] {
+  if (!item) return [];
+  const list = Array.isArray(item.dokumentasiUrls)
+    ? item.dokumentasiUrls.filter(
+        (u): u is string => typeof u === 'string' && u.trim() !== '' && !u.startsWith('data:image/svg+xml')
+      )
+    : [];
+  const single = typeof item.dokumentasiUrl === 'string' ? item.dokumentasiUrl.trim() : '';
+  if (single && !single.startsWith('data:image/svg+xml') && !list.includes(single)) {
+    list.unshift(single);
+  }
+  return Array.from(new Set(list));
+}
+
 function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
-  const code = String(item?.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(fallbackIndex + 1).padStart(3, '0')}`;
+  const code =
+    String(item?.noBarang || '').trim().toUpperCase() ||
+    `AKK-BRG-${String(fallbackIndex + 1).padStart(3, '0')}`;
   const desc = String(item?.deskripsiBarang || item?.keteranganBarang || 'Barang Kemasan AKK').trim();
   const u1 = String(item?.unit1 || item?.satuan || 'Pcs').trim();
   const rawU2 = item?.unit2 !== undefined && item?.unit2 !== null ? String(item.unit2).trim() : '';
@@ -250,7 +279,6 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
         : item.rasio3
       : 0;
 
-  // Bersihkan nilai bawaan lama (Ikat / Palet / 25 / 500) yang sebelumnya memaksa kolom kosong terisi
   if (isLegacySyntheticUnitFallback(u2, u3, r2, r3)) {
     u2 = '';
     u3 = '';
@@ -272,7 +300,6 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
       ? Number(item.beratKg) || 0
       : 0;
 
-  // Bersihkan dimensi bawaan lama (50 x 35 x 30 = 0.0525 M3, berat 0.5 kg) yang sebelumnya memaksa kolom 0 terisi
   if (isLegacySyntheticDimensionFallback(p, l, t, v, b)) {
     p = 0;
     l = 0;
@@ -281,34 +308,15 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
     b = 0;
   }
 
-  // Hanya simpan foto jika memang foto kustom / unggahan pengguna, jangan simpan inline SVG ribuan kali di localStorage
-  let rawUrls: string[] = Array.isArray(item?.dokumentasiUrls)
-    ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
-    : [];
-  const singleDoc = item?.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
-    ? item.dokumentasiUrl
-    : '';
-  if (singleDoc && !rawUrls.includes(singleDoc)) {
-    rawUrls.unshift(singleDoc);
-  }
-
-  // Proteksi anti-hilang foto: jika item dari localStorage kehilangan base64 karena batas 5MB, pulihkan otomatis dari preservedPhotosByCode (IndexedDB/Memory)
-  if (rawUrls.length === 0 && code && preservedPhotosByCode.has(code) && !explicitlyClearedPhotoCodes.has(code)) {
-    rawUrls = [...(preservedPhotosByCode.get(code) || [])];
-  } else if (rawUrls.length > 0 && code && !explicitlyClearedPhotoCodes.has(code)) {
-    const existingPreserved = preservedPhotosByCode.get(code) || [];
-    const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
-    const mergedPreserved = hasExplicitReplace
-      ? rawUrls
-      : Array.from(new Set([...rawUrls, ...existingPreserved]));
-    rawUrls = mergedPreserved;
-    preservedPhotosByCode.set(code, mergedPreserved);
-  }
-
+  // Ambil foto murni dari data yang diberikan (TIDAK pernah menghidupkan kembali foto dari cache lokal)
+  const rawUrls = extractCleanPhotosRaw(item);
   const primaryDoc = rawUrls[0] || '';
+  const hasPhoto = Boolean(item?.hasPhoto || rawUrls.length > 0);
 
   const rec: DatabaseBarangRecordWithOrder = {
-    id: item?.id || `dbb-${ String(fallbackIndex + 1).padStart(6, '0') }-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id:
+      item?.id ||
+      `dbb-${String(fallbackIndex + 1).padStart(6, '0')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     orderIndex: typeof item?.orderIndex === 'number' ? item.orderIndex : fallbackIndex,
     noBarang: code,
     deskripsiBarang: desc,
@@ -324,6 +332,7 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
     tinggiCm: t,
     volM3: v,
     beratKg: b,
+    hasPhoto,
     dokumentasiUrl: primaryDoc,
     dokumentasiUrls: rawUrls,
     compressedSizeKb: item?.compressedSizeKb ?? 0,
@@ -337,9 +346,15 @@ function sanitizeRecord(item: any, fallbackIndex = 0): DatabaseBarangRecord {
   return rec;
 }
 
-const IDB_NAME = 'AKK_WMS_DATABASE_V1';
-const IDB_STORE = 'database_barang';
-const IDB_VERSION = 1;
+// Legacy IndexedDB yang dulu menyimpan seluruh katalog & foto (harus selalu dibersihkan agar tidak membangkitkan barang terhapus)
+const LEGACY_IDB_NAME = 'AKK_WMS_DATABASE_V1';
+const LEGACY_IDB_STORE = 'database_barang';
+const LEGACY_IDB_VERSION = 1;
+
+// Antrean sementara KHUSUS foto yang gagal terkirim karena sinyal jelek/offline (otomatis dihapus bersih saat 100% terunggah)
+const PENDING_QUEUE_IDB_NAME = 'AKK_WMS_PENDING_PHOTO_QUEUE_V1';
+const PENDING_QUEUE_STORE = 'pending_photos';
+const PENDING_QUEUE_VERSION = 1;
 
 const LS_KEY_CLEARED_PHOTO_CODES = 'akk_db_barang_cleared_photo_codes_v2';
 const LS_KEY_DELETED_PHOTO_URLS = 'akk_db_barang_deleted_photo_urls_v2';
@@ -372,40 +387,67 @@ function purgeDatabaseBarangLocalStorage(): void {
   } catch {}
 }
 
-// Bersihkan localStorage legacy saat modul dimuat karena Database Barang kini langsung tersimpan di MySQL
+// Hapus seluruh sisa localStorage lama segera saat modul dimuat
 purgeDatabaseBarangLocalStorage();
 
-function savePersistentSet(_key: string, _set: Set<string>): void {
-  purgeDatabaseBarangLocalStorage();
+function deleteIndexedDbByName(dbName: string): Promise<void> {
+  return new Promise(resolve => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      resolve();
+      return;
+    }
+    try {
+      const req = window.indexedDB.deleteDatabase(dbName);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
 }
 
-function savePersistentMap(_key: string, _map: Map<string, string[]>): void {
+// Kompatibilitas ekspor: Database Barang 100% langsung ke server database, tidak menggunakan IndexedDB/localStorage browser
+export async function purgeAllDevicePhotoStorage(): Promise<void> {
   purgeDatabaseBarangLocalStorage();
+  await Promise.all([
+    deleteIndexedDbByName(LEGACY_IDB_NAME),
+    deleteIndexedDbByName(PENDING_QUEUE_IDB_NAME)
+  ]);
+  updateSyncStatus({ pendingOfflineCount: 0 });
 }
 
-const preservedPhotosByCode = new Map<string, string[]>();
-const explicitPhotoReplaceTimestampByCode = new Map<string, number>();
-const explicitlyClearedPhotoCodes = new Set<string>();
-const deletedPhotoUrls = new Set<string>();
-const photoOverridesByCode = new Map<string, string[]>();
+export async function saveRecordsToIndexedDb(_records: DatabaseBarangRecord[]): Promise<void> {
+  purgeDatabaseBarangLocalStorage();
+  await deleteIndexedDbByName(LEGACY_IDB_NAME);
+}
+
+export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]> {
+  return [];
+}
 
 let inMemoryItems: DatabaseBarangRecord[] | null = null;
-let hasHydratedFromIdb = false;
+let hasHydratedFromServer = false;
 let hydrationPromise: Promise<DatabaseBarangRecord[]> | null = null;
+let photoBatchSyncPromise: Promise<boolean> | null = null;
 
 export interface DatabaseBarangSyncStatus {
   isSyncing: boolean;
+  isUploadingPhoto?: boolean;
   progressPct: number;
   lastSyncedAt: string | null;
   serverCount: number;
+  pendingOfflineCount: number;
   error: string | null;
 }
 
 let syncStatusState: DatabaseBarangSyncStatus = {
   isSyncing: false,
+  isUploadingPhoto: false,
   progressPct: 0,
   lastSyncedAt: null,
   serverCount: 0,
+  pendingOfflineCount: 0,
   error: null
 };
 
@@ -432,293 +474,6 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-function openIndexedDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      return reject(new Error('IndexedDB tidak didukung pada environment ini'));
-    }
-    const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) {
-        db.createObjectStore(IDB_STORE, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('Gagal membuka IndexedDB'));
-  });
-}
-
-export async function saveRecordsToIndexedDb(records: DatabaseBarangRecord[]): Promise<void> {
-  try {
-    const db = await openIndexedDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      const store = tx.objectStore(IDB_STORE);
-      store.clear();
-      records.forEach((r, idx) => {
-        const cleanPhotos = extractCleanPhotos(r);
-        const finalRec: DatabaseBarangRecord & { orderIndex: number } = {
-          ...r,
-          dokumentasiUrls: cleanPhotos,
-          dokumentasiUrl: cleanPhotos[0] || '',
-          orderIndex: idx
-        };
-        store.put(finalRec);
-      });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('Peringatan: Gagal menyimpan data barang ke IndexedDB:', err);
-  }
-}
-
-export async function loadRecordsFromIndexedDb(): Promise<DatabaseBarangRecord[]> {
-  try {
-    const db = await openIndexedDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const res = Array.isArray(req.result) ? req.result : [];
-        res.forEach((r: any) => {
-          const code = String(r?.noBarang || '').trim().toUpperCase();
-          if (!code || explicitlyClearedPhotoCodes.has(code)) return;
-          const urls = extractCleanPhotos(r);
-          if (urls.length > 0) {
-            const prev = preservedPhotosByCode.get(code) || [];
-            preservedPhotosByCode.set(code, Array.from(new Set([...urls, ...prev])));
-          }
-        });
-        res.sort((a: any, b: any) => {
-          const oa = typeof a?.orderIndex === 'number' ? a.orderIndex : 999999;
-          const ob = typeof b?.orderIndex === 'number' ? b.orderIndex : 999999;
-          if (oa !== ob) return oa - ob;
-          return String(a?.id || '').localeCompare(String(b?.id || ''), undefined, { numeric: true });
-        });
-        resolve(res);
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('Peringatan: Gagal memuat data barang dari IndexedDB:', err);
-    return [];
-  }
-}
-
-// Penyimpanan Database Barang TIDAK disimpan pada localStorage (langsung tersimpan pada MySQL Server)
-function writeSafeLocalStorageCache(_records: DatabaseBarangRecord[]): void {
-  purgeDatabaseBarangLocalStorage();
-}
-
-function extractCleanPhotos(item?: Partial<DatabaseBarangRecord> | null): string[] {
-  if (!item) return [];
-  const code = String(item.noBarang || '').trim().toUpperCase();
-  if (code && explicitlyClearedPhotoCodes.has(code)) {
-    return [];
-  }
-  if (code && photoOverridesByCode.has(code)) {
-    const overridden = photoOverridesByCode.get(code) || [];
-    return overridden.filter(u => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u));
-  }
-  const list = Array.isArray(item.dokumentasiUrls)
-    ? item.dokumentasiUrls.filter((u): u is string => typeof u === 'string' && u.trim() !== '' && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u))
-    : [];
-  const single = typeof item.dokumentasiUrl === 'string' ? item.dokumentasiUrl.trim() : '';
-  if (single && !single.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(single) && !list.includes(single)) {
-    list.unshift(single);
-  }
-  return list;
-}
-
-function mergeLocalAndRemoteRecords(
-  localRecords: DatabaseBarangRecord[],
-  remoteRecords: DatabaseBarangRecord[]
-): {
-  merged: DatabaseBarangRecord[];
-  shouldPushToServer: boolean;
-  shouldSaveLocally: boolean;
-  itemsWithLocalPhotosToPush: Array<{ record: DatabaseBarangRecord; idx: number }>;
-} {
-  if (localRecords.length === 0 && remoteRecords.length === 0) {
-    return { merged: [], shouldPushToServer: false, shouldSaveLocally: false, itemsWithLocalPhotosToPush: [] };
-  }
-  // Jika browser/perangkat belum punya data di memori tetapi MySQL punya data -> langsung pakai data MySQL
-  if (localRecords.length === 0 && remoteRecords.length > 0) {
-    remoteRecords.forEach(r => {
-      const code = String(r.noBarang || '').trim().toUpperCase();
-      const photos = extractCleanPhotos(r);
-      if (code && photos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
-        preservedPhotosByCode.set(code, photos);
-      }
-    });
-    return { merged: remoteRecords, shouldPushToServer: false, shouldSaveLocally: true, itemsWithLocalPhotosToPush: [] };
-  }
-  // Jika perangkat asal punya data tetapi MySQL masih kosong -> dorong ke MySQL
-  if (localRecords.length > 0 && remoteRecords.length === 0) {
-    const withPhotos = localRecords
-      .map((record, idx) => ({ record, idx }))
-      .filter(entry => extractCleanPhotos(entry.record).length > 0);
-    return {
-      merged: localRecords,
-      shouldPushToServer: true,
-      shouldSaveLocally: false,
-      itemsWithLocalPhotosToPush: withPhotos
-    };
-  }
-
-  // Utamakan daftar dari MySQL (remoteRecords) bila jumlahnya sama atau lebih banyak, dan gabungkan seluruh foto dokumentasi dari MySQL + perangkat lokal
-  const useRemoteAsPrimary = remoteRecords.length >= localRecords.length;
-  const primary = useRemoteAsPrimary ? remoteRecords : localRecords;
-  const secondary = useRemoteAsPrimary ? localRecords : remoteRecords;
-
-  const localByCode = new Map<string, DatabaseBarangRecord>();
-  localRecords.forEach(item => {
-    localByCode.set(item.noBarang.trim().toUpperCase(), item);
-  });
-
-  const remoteByCode = new Map<string, DatabaseBarangRecord>();
-  remoteRecords.forEach(item => {
-    remoteByCode.set(item.noBarang.trim().toUpperCase(), item);
-  });
-
-  const secondaryByCode = useRemoteAsPrimary ? localByCode : remoteByCode;
-
-  const primaryCodes = new Set<string>();
-  let shouldPush = localRecords.length > remoteRecords.length;
-  let shouldSaveLocal = true;
-  const itemsWithLocalPhotosToPush: Array<{ record: DatabaseBarangRecord; idx: number }> = [];
-
-  const merged = primary.map((item, idx) => {
-    const code = item.noBarang.trim().toUpperCase();
-    primaryCodes.add(code);
-    const sec = secondaryByCode.get(code);
-    const localItem = localByCode.get(code);
-    const remoteItem = remoteByCode.get(code);
-
-    const localPhotos = extractCleanPhotos(localItem);
-    const remotePhotos = extractCleanPhotos(remoteItem);
-    const isCleared = explicitlyClearedPhotoCodes.has(code);
-    const hasExplicitReplace = explicitPhotoReplaceTimestampByCode.has(code);
-
-    let combinedPhotos: string[] = [];
-    if (isCleared) {
-      combinedPhotos = [];
-    } else if (hasExplicitReplace || photoOverridesByCode.has(code)) {
-      combinedPhotos = localPhotos.length > 0 ? localPhotos : remotePhotos;
-    } else {
-      // Gabungkan foto dari MySQL (remotePhotos) dan perangkat lokal (localPhotos) agar browser lain selalu menampilkan foto yang sudah terdokumentasi di HP/MySQL
-      combinedPhotos = Array.from(new Set([...remotePhotos, ...localPhotos]));
-    }
-
-    if (combinedPhotos.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
-      preservedPhotosByCode.set(code, combinedPhotos);
-    }
-
-    if (combinedPhotos.length > localPhotos.length) {
-      shouldSaveLocal = true;
-    }
-
-    if (!sec) {
-      const sanitizedSingle = sanitizeRecord(
-        {
-          ...item,
-          dokumentasiUrls: combinedPhotos,
-          dokumentasiUrl: combinedPhotos[0] || ''
-        },
-        idx
-      );
-      if (combinedPhotos.length > remotePhotos.length) {
-        shouldPush = true;
-        itemsWithLocalPhotosToPush.push({ record: sanitizedSingle, idx });
-      }
-      return sanitizedSingle;
-    }
-
-    const hasPrimaryDim = (item.panjangCm || 0) > 0 || (item.volM3 || 0) > 0;
-    const hasSecDim = (sec.panjangCm || 0) > 0 || (sec.volM3 || 0) > 0;
-
-    const mergedRecord = sanitizeRecord(
-      {
-        ...item,
-        deskripsiBarang: item.deskripsiBarang && item.deskripsiBarang !== 'Barang Kemasan AKK' ? item.deskripsiBarang : (sec.deskripsiBarang || item.deskripsiBarang),
-        keteranganBarang: item.keteranganBarang && item.keteranganBarang !== 'Barang Kemasan AKK' ? item.keteranganBarang : (sec.keteranganBarang || item.keteranganBarang),
-        panjangCm: hasPrimaryDim ? item.panjangCm : (hasSecDim ? sec.panjangCm : item.panjangCm),
-        lebarCm: hasPrimaryDim ? item.lebarCm : (hasSecDim ? sec.lebarCm : item.lebarCm),
-        tinggiCm: hasPrimaryDim ? item.tinggiCm : (hasSecDim ? sec.tinggiCm : item.tinggiCm),
-        volM3: hasPrimaryDim ? item.volM3 : (hasSecDim ? sec.volM3 : item.volM3),
-        beratKg: (item.beratKg || 0) > 0 ? item.beratKg : ((sec.beratKg || 0) > 0 ? sec.beratKg : item.beratKg),
-        dokumentasiUrls: combinedPhotos,
-        dokumentasiUrl: combinedPhotos[0] || ''
-      },
-      idx
-    );
-
-    const remotePhotoSet = new Set(remotePhotos);
-    const hasUnpushedLocal = combinedPhotos.some(p => !remotePhotoSet.has(p));
-    if (hasUnpushedLocal) {
-      shouldPush = true;
-      itemsWithLocalPhotosToPush.push({ record: mergedRecord, idx });
-    }
-
-    return mergedRecord;
-  });
-
-  for (const secItem of secondary) {
-    const code = secItem.noBarang.trim().toUpperCase();
-    if (code && !primaryCodes.has(code)) {
-      primaryCodes.add(code);
-      const nextIdx = merged.length;
-      const sanitizedExtra = sanitizeRecord(secItem, nextIdx);
-      merged.push(sanitizedExtra);
-      if (!useRemoteAsPrimary) {
-        shouldSaveLocal = true;
-      } else {
-        shouldPush = true;
-        if (extractCleanPhotos(sanitizedExtra).length > 0) {
-          itemsWithLocalPhotosToPush.push({ record: sanitizedExtra, idx: nextIdx });
-        }
-      }
-    }
-  }
-
-  return {
-    merged,
-    shouldPushToServer: shouldPush,
-    shouldSaveLocally: shouldSaveLocal,
-    itemsWithLocalPhotosToPush
-  };
-}
-
-// Satu foto per request agar data lama dari IndexedDB tidak terkena HTTP 413.
-async function photoForServer(original: string, maxEdge: number, quality: number): Promise<string> {
-  if (typeof window === 'undefined' || !original.startsWith('data:image/')) return original;
-  try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error('Foto tidak bisa dibaca'));
-      img.src = original;
-    });
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
-    if (!w || !h) return original;
-    const scale = Math.min(1, maxEdge / Math.max(w, h));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(w * scale));
-    canvas.height = Math.max(1, Math.round(h * scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return original;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const compressed = canvas.toDataURL('image/jpeg', quality);
-    return compressed.length < original.length ? compressed : original;
-  } catch {
-    return original;
-  }
-}
-
 let photoUploadChain: Promise<void> = Promise.resolve();
 const pendingItemUploads = new Map<string, Promise<boolean>>();
 
@@ -727,9 +482,11 @@ export interface DatabaseBarangPhotoRecoveryResult {
   attemptedSkuCount: number;
   succeededSkuCount: number;
   failedSkuCount: number;
+  skippedDeletedCount: number;
   beforePhotoSkuCount: number;
   afterPhotoSkuCount: number;
   failedCodes: string[];
+  deviceStorageCleared: boolean;
 }
 
 export const databaseBarangService = {
@@ -737,21 +494,66 @@ export const databaseBarangService = {
     return { ...syncStatusState };
   },
 
-  async fetchFromServer(): Promise<DatabaseBarangRecord[] | null> {
+  async getPendingOfflinePhotoCount(): Promise<number> {
+    await purgeAllDevicePhotoStorage();
+    return 0;
+  },
+
+  async fetchCatalogFromServer(): Promise<DatabaseBarangRecord[] | null> {
     if (typeof window === 'undefined') return null;
     try {
-      const res = await fetch('/api/database-barang', {
+      let res = await fetch('/api/database-barang/catalog', {
         method: 'GET',
         credentials: 'include',
         headers: getAuthHeaders(),
         cache: 'no-store'
       });
-      if (!res.ok) return null;
+      if (res.status === 404) {
+        res = await fetch('/api/database-barang', {
+          method: 'GET',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          cache: 'no-store'
+        });
+      }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        updateSyncStatus({
+          isSyncing: false,
+          error: errData?.error || `Server mengembalikan HTTP ${res.status} saat memuat data barang.`
+        });
+        return null;
+      }
       const data = await res.json();
-      if (!data || !Array.isArray(data.items)) return null;
+      if (!data || !Array.isArray(data.items)) {
+        updateSyncStatus({ isSyncing: false, error: 'Format respons data barang dari server tidak valid.' });
+        return null;
+      }
+      const existingPhotoByCode = new Map<string, string[]>();
+      if (Array.isArray(inMemoryItems)) {
+        for (const ex of inMemoryItems) {
+          const c = String(ex?.noBarang || '').trim().toUpperCase();
+          const urls = extractCleanPhotosRaw(ex);
+          if (c && urls.length > 0) existingPhotoByCode.set(c, urls);
+        }
+      }
       const cleaned = data.items
         .filter((item: any) => !isLegacySeededBarang(item?.noBarang))
-        .map((item: any, idx: number) => sanitizeRecord(item, idx));
+        .map((item: any, idx: number) => {
+          const rec = sanitizeRecord(item, idx);
+          const code = String(rec.noBarang || '').trim().toUpperCase();
+          const existingUrls = existingPhotoByCode.get(code) || [];
+          const incomingUrls = extractCleanPhotosRaw(rec);
+          if (incomingUrls.length === 0 && existingUrls.length > 0 && rec.hasPhoto !== false) {
+            return {
+              ...rec,
+              hasPhoto: true,
+              dokumentasiUrls: existingUrls,
+              dokumentasiUrl: existingUrls[0] || ''
+            };
+          }
+          return rec;
+        });
       updateSyncStatus({
         serverCount: cleaned.length,
         lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
@@ -759,7 +561,71 @@ export const databaseBarangService = {
       });
       return cleaned;
     } catch (err: any) {
-      console.warn('Peringatan: Gagal mengambil Database Barang dari server MySQL:', err?.message || err);
+      console.warn('Peringatan: Gagal mengambil katalog Database Barang dari server:', err?.message || err);
+      updateSyncStatus({
+        isSyncing: false,
+        error: err?.message || 'Tidak dapat terhubung ke server untuk memuat Database Barang.'
+      });
+      return null;
+    }
+  },
+
+  async fetchFromServer(): Promise<DatabaseBarangRecord[] | null> {
+    if (typeof window === 'undefined') return null;
+    updateSyncStatus({ isSyncing: true, progressPct: 15, error: null });
+    const catalog = await this.fetchCatalogFromServer();
+    if (catalog === null) {
+      return null;
+    }
+    inMemoryItems = catalog;
+    hasHydratedFromServer = true;
+    const hasPendingPhotoDownload = catalog.some(it => it.hasPhoto && extractCleanPhotosRaw(it).length === 0);
+    updateSyncStatus({
+      isSyncing: hasPendingPhotoDownload,
+      progressPct: hasPendingPhotoDownload ? 35 : 100,
+      serverCount: catalog.length,
+      error: null
+    });
+    window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    if (hasPendingPhotoDownload) {
+      void this.syncRealtimePhotosFromServer();
+    }
+    return catalog;
+  },
+
+  async fetchItemPhotosFromServer(noBarang: string): Promise<DatabaseBarangRecord | null> {
+    if (typeof window === 'undefined') return null;
+    const cleanCode = String(noBarang || '').trim().toUpperCase();
+    if (!cleanCode) return null;
+    try {
+      const res = await fetch(`/api/database-barang/item-photos/${encodeURIComponent(cleanCode)}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        cache: 'no-store'
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data?.success) return null;
+      const urls = Array.isArray(data.dokumentasiUrls)
+        ? data.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+        : [];
+      const currentList = inMemoryItems ? [...inMemoryItems] : [];
+      const idx = currentList.findIndex(it => String(it.noBarang || '').trim().toUpperCase() === cleanCode);
+      if (idx >= 0) {
+        const updated: DatabaseBarangRecord = {
+          ...currentList[idx],
+          hasPhoto: urls.length > 0,
+          dokumentasiUrls: urls,
+          dokumentasiUrl: urls[0] || ''
+        };
+        currentList[idx] = updated;
+        inMemoryItems = currentList;
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        return updated;
+      }
+      return null;
+    } catch {
       return null;
     }
   },
@@ -796,7 +662,7 @@ export const databaseBarangService = {
         const offset = chunkIdx * CHUNK_SIZE;
         const slice = records.slice(offset, offset + CHUNK_SIZE).map((r, i) => {
           const globalIdx = offset + i;
-          const cleanPhotos = extractCleanPhotos(r);
+          const cleanPhotos = extractCleanPhotosRaw(r);
           if (cleanPhotos.length > 0) {
             itemsWithPhotos.push({ record: r, idx: globalIdx });
           }
@@ -840,11 +706,11 @@ export const databaseBarangService = {
       });
       return true;
     } catch (err: any) {
-      console.warn('Peringatan: Gagal sinkronisasi Database Barang ke server MySQL:', err?.message || err);
+      console.warn('Peringatan: Gagal sinkronisasi Database Barang ke server:', err?.message || err);
       updateSyncStatus({
         isSyncing: false,
         progressPct: 0,
-        error: err?.message || 'Gagal sinkronisasi ke server MySQL'
+        error: err?.message || 'Gagal sinkronisasi ke server database'
       });
       return false;
     }
@@ -853,30 +719,144 @@ export const databaseBarangService = {
   async pushItemToServer(
     record: DatabaseBarangRecord,
     orderIndex?: number,
-    replacePhotos = false
-  ): Promise<boolean> {
-    if (typeof window === 'undefined') return false;
-    try {
-      const res = await fetch('/api/database-barang/item', {
-        method: 'POST',
-        credentials: 'include',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ item: { ...record, orderIndex }, replacePhotos })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `HTTP ${res.status}: gagal simpan ke MySQL`);
-      }
-      if (res.ok) {
-        updateSyncStatus({
-          lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    replacePhotos = false,
+    onlyIfExists = false
+  ): Promise<{ ok: boolean; deleted?: boolean; item?: DatabaseBarangRecord; error?: string }> {
+    if (typeof window === 'undefined') return { ok: false, error: 'Bukan lingkungan browser' };
+
+    const payloadUrls = extractCleanPhotosRaw(record);
+    let lastError = 'Gagal menyimpan ke server database';
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch('/api/database-barang/item', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            item: {
+              ...record,
+              dokumentasiUrls: payloadUrls,
+              dokumentasiUrl: payloadUrls[0] || '',
+              orderIndex
+            },
+            replacePhotos,
+            onlyIfExists
+          })
         });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 404 && data?.deleted) {
+          return {
+            ok: false,
+            deleted: true,
+            error: data.error || `Barang ${record.noBarang} sudah dihapus dari database.`
+          };
+        }
+        if (res.ok && data.success) {
+          const savedItem = data.item ? sanitizeRecord(data.item, orderIndex ?? 0) : record;
+          updateSyncStatus({
+            lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+            error: null
+          });
+          return { ok: true, item: savedItem };
+        }
+        lastError = data.error || `HTTP ${res.status}: gagal simpan ke server database`;
+        break;
+      } catch (err: any) {
+        lastError = err?.message || 'Koneksi jaringan sedang tidak stabil';
+        if (attempt === 0) {
+          continue;
+        }
       }
-      return res.ok;
-    } catch (err: any) {
-      updateSyncStatus({ error: `Gagal simpan barang/foto ke MySQL: ${err?.message || err}` });
-      console.warn('Gagal sinkron item ke server:', err);
-      return false;
+    }
+
+    updateSyncStatus({ error: lastError });
+    return { ok: false, error: lastError };
+  },
+
+  // Upload foto LANGSUNG ke server database (100% langsung ke server, tanpa localStorage/IndexedDB)
+  async uploadPhotosForItem(
+    item: DatabaseBarangRecord,
+    newPhotoUrls: string[],
+    options?: { replaceAllUrls?: string[] }
+  ): Promise<DirectPhotoUploadResult> {
+    const cleanCode = String(item.noBarang || '').trim().toUpperCase();
+    const isReplace = Array.isArray(options?.replaceAllUrls);
+    const existingList = this.getAll();
+    const idx = existingList.findIndex(
+      i => (item.id && i.id === item.id) || String(i.noBarang || '').trim().toUpperCase() === cleanCode
+    );
+    const baseItem = idx >= 0 ? existingList[idx] : item;
+    const baseUrls = extractCleanPhotosRaw(baseItem);
+    const cleanNewUrls = newPhotoUrls.filter(u => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'));
+    const nextUrls = isReplace
+      ? (options!.replaceAllUrls || []).filter(u => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
+      : Array.from(new Set([...baseUrls, ...cleanNewUrls]));
+
+    const optimisticRecord: DatabaseBarangRecord = {
+      ...baseItem,
+      noBarang: cleanCode,
+      dokumentasiUrls: nextUrls,
+      dokumentasiUrl: nextUrls[0] || '',
+      compressedSizeKb: nextUrls.reduce((acc, u) => acc + estimateDataUrlSizeKb(u), 0),
+      updatedAt: new Date().toISOString().split('T')[0]
+    };
+
+    updateSyncStatus({ isUploadingPhoto: true, error: null });
+    try {
+      const photosToSend = isReplace ? nextUrls : cleanNewUrls;
+      const sendRecord: DatabaseBarangRecord = {
+        ...optimisticRecord,
+        dokumentasiUrls: photosToSend,
+        dokumentasiUrl: photosToSend[0] || ''
+      };
+
+      const res = await this.pushItemToServer(sendRecord, idx >= 0 ? idx : existingList.length, isReplace, true);
+
+      if (res.deleted) {
+        const filtered = this.getAll().filter(
+          i => i.id !== baseItem.id && String(i.noBarang || '').trim().toUpperCase() !== cleanCode
+        );
+        inMemoryItems = filtered;
+        await purgeAllDevicePhotoStorage();
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        return {
+          success: false,
+          queuedOffline: false,
+          deletedOnServer: true,
+          record: optimisticRecord,
+          error: res.error || `Barang ${cleanCode} sudah dihapus oleh pengguna lain.`
+        };
+      }
+
+      if (res.ok && res.item) {
+        const latestList = this.getAll();
+        const latestIdx = latestList.findIndex(
+          i => i.id === res.item!.id || String(i.noBarang || '').trim().toUpperCase() === cleanCode
+        );
+        if (latestIdx >= 0) {
+          latestList[latestIdx] = res.item;
+        } else {
+          latestList.push(res.item);
+        }
+        inMemoryItems = latestList;
+        await purgeAllDevicePhotoStorage();
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        return {
+          success: true,
+          queuedOffline: false,
+          record: res.item
+        };
+      }
+
+      return {
+        success: false,
+        queuedOffline: false,
+        record: baseItem,
+        error: res.error || 'Gagal mengunggah foto langsung ke server database. Periksa koneksi jaringan Anda lalu coba lagi.'
+      };
+    } finally {
+      updateSyncStatus({ isUploadingPhoto: false });
     }
   },
 
@@ -892,7 +872,7 @@ export const databaseBarangService = {
     const upload = async (): Promise<void> => {
       const validItemsPayload = entries
         .map(entry => {
-          const cleanPhotos = extractCleanPhotos(entry.record);
+          const cleanPhotos = extractCleanPhotosRaw(entry.record);
           if (cleanPhotos.length === 0) return null;
           return {
             ...entry.record,
@@ -913,7 +893,7 @@ export const databaseBarangService = {
           body: JSON.stringify({ photoItems: validItemsPayload })
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.success && Number(data.updatedCount) > 0) {
+        if (res.ok && data.success) {
           return;
         }
       } catch (err: any) {
@@ -921,7 +901,7 @@ export const databaseBarangService = {
       }
 
       for (const entry of entries) {
-        const photos = extractCleanPhotos(entry.record);
+        const photos = extractCleanPhotosRaw(entry.record);
         for (const originalPhoto of photos) {
           let photo = originalPhoto;
           let lastError = 'Gagal upload foto';
@@ -933,38 +913,22 @@ export const databaseBarangService = {
                 credentials: 'include',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
-                  photoItems: [{
-                    ...entry.record,
-                    orderIndex: entry.idx,
-                    dokumentasiUrl: photo,
-                    dokumentasiUrls: [photo]
-                  }]
+                  photoItems: [
+                    {
+                      ...entry.record,
+                      orderIndex: entry.idx,
+                      dokumentasiUrl: photo,
+                      dokumentasiUrls: [photo]
+                    }
+                  ]
                 })
               });
               const data = await res.json().catch(() => ({}));
-              if (res.ok && data.success && Number(data.updatedCount) > 0) {
+              if (res.ok && data.success) {
                 saved = true;
                 break;
               }
               lastError = data.error || `HTTP ${res.status}`;
-              if (res.status === 401 || res.status === 403 || res.status === 404) {
-                const fallbackOk = await this.pushItemToServer(
-                  {
-                    ...entry.record,
-                    dokumentasiUrl: photo,
-                    dokumentasiUrls: photos
-                  },
-                  entry.idx,
-                  false
-                );
-                if (fallbackOk) {
-                  saved = true;
-                  break;
-                }
-              }
-              if (res.status === 413 || /packet.*large|too.*large|payload.*large/i.test(lastError)) {
-                photo = await photoForServer(originalPhoto, attempt === 0 ? 1100 : 850, attempt === 0 ? 0.75 : 0.65);
-              }
             } catch (err: any) {
               lastError = err?.message || 'Jaringan gagal';
             }
@@ -980,387 +944,231 @@ export const databaseBarangService = {
     return job;
   },
 
-  // Sinkronisasi dua arah penuh antara perangkat (HP / Browser) dan MySQL Server tanpa pernah menghapus foto MySQL dari browser lain!
+  // Sinkronisasi murni 100% dari server database (TIDAK PERNAH menarik data dari localStorage / IndexedDB)
   async recoverLocalPhotosToMysql(): Promise<DatabaseBarangPhotoRecoveryResult> {
     if (typeof window === 'undefined') throw new Error('Hanya tersedia di browser.');
-    updateSyncStatus({ isSyncing: true, progressPct: 5, error: null });
+    updateSyncStatus({ isSyncing: true, progressPct: 20, error: null });
+
     try {
-      const readSummary = async (): Promise<number> => {
-        try {
-          const res = await fetch('/api/database-barang/photos-summary', {
-            credentials: 'include', headers: getAuthHeaders(), cache: 'no-store'
-          });
-          const data = await res.json().catch(() => ({}));
-          return Number(data.photoSkuCount) || 0;
-        } catch {
-          return 0;
-        }
-      };
-
-      const beforePhotoSkuCount = await readSummary();
-
-      // 1. Kumpulkan foto dari memori DAN IndexedDB perangkat ini (misal di HP)
-      const idbRecords = await loadRecordsFromIndexedDb();
-      const activeRecords = this.getAll();
-      const byCode = new Map<string, { record: DatabaseBarangRecord; idx: number; photos: string[] }>();
-
-      const collectFromList = (list: DatabaseBarangRecord[]) => {
-        list.forEach((record, idx) => {
-          const code = String(record?.noBarang || '').trim().toUpperCase();
-          if (!code || explicitlyClearedPhotoCodes.has(code)) return;
-          const cleanPhotos = extractCleanPhotos(record);
-          if (cleanPhotos.length > 0) {
-            const existing = byCode.get(code);
-            const mergedPhotos = existing
-              ? Array.from(new Set([...existing.photos, ...cleanPhotos]))
-              : cleanPhotos;
-            byCode.set(code, {
-              record: {
-                ...(existing?.record || record),
-                dokumentasiUrls: mergedPhotos,
-                dokumentasiUrl: mergedPhotos[0] || ''
-              },
-              idx: existing?.idx ?? idx,
-              photos: mergedPhotos
-            });
-          }
-        });
-      };
-
-      collectFromList(activeRecords);
-      if (idbRecords && idbRecords.length > 0) {
-        collectFromList(idbRecords);
+      await purgeAllDevicePhotoStorage();
+      const freshRemote = await this.fetchFromServer();
+      if (freshRemote === null) {
+        throw new Error('Tidak dapat terhubung ke server database. Periksa koneksi internet Anda lalu coba lagi.');
       }
 
-      const localPhotoSkuCount = byCode.size;
-      let succeededSkuCount = 0;
-      let failedSkuCount = 0;
-      const failedCodes: string[] = [];
-      let processed = 0;
+      inMemoryItems = freshRemote;
+      hasHydratedFromServer = true;
+      updateSyncStatus({ progressPct: 100, serverCount: freshRemote.length, error: null });
+      window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
 
-      // 2. Dorong seluruh foto dari perangkat ini ke MySQL Server
-      const allEntries = Array.from(byCode.values()).map(item => ({
-        record: {
-          ...item.record,
-          dokumentasiUrl: item.photos[0],
-          dokumentasiUrls: item.photos
-        },
-        idx: item.idx
-      }));
+      const serverPhotoCount = freshRemote.filter(
+        it => extractCleanPhotosRaw(it).length > 0
+      ).length;
 
-      const BATCH_SIZE = 8;
-      const batches: Array<typeof allEntries> = [];
-      for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
-        batches.push(allEntries.slice(i, i + BATCH_SIZE));
-      }
-
-      const CONCURRENCY = 3;
-      let currentBatchIdx = 0;
-      const worker = async () => {
-        while (currentBatchIdx < batches.length) {
-          const batchIndex = currentBatchIdx++;
-          const currentBatch = batches[batchIndex];
-          if (!currentBatch) break;
-          try {
-            await this.pushPhotosBatchToServer(currentBatch);
-            succeededSkuCount += currentBatch.length;
-          } catch {
-            failedSkuCount += currentBatch.length;
-            currentBatch.forEach(c => failedCodes.push(c.record.noBarang));
-          }
-          processed += currentBatch.length;
-          updateSyncStatus({ progressPct: Math.min(85, Math.round((processed / Math.max(1, localPhotoSkuCount)) * 85)) });
-        }
-      };
-
-      if (batches.length > 0) {
-        const workerPromises = Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker());
-        await Promise.all(workerPromises);
-      }
-
-      // 3. Tarik kembali seluruh foto & data terbaru dari MySQL agar browser lain langsung terupdate 100%
-      await this.syncRealtimePhotosFromServer();
-      const remoteList = await this.fetchFromServer();
-      if (remoteList && remoteList.length > 0) {
-        const { merged } = mergeLocalAndRemoteRecords(this.getAll(), remoteList);
-        inMemoryItems = merged;
-        hasHydratedFromIdb = true;
-        await saveRecordsToIndexedDb(merged);
-        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-      }
-
-      const afterPhotoSkuCount = await readSummary();
-      updateSyncStatus({
-        progressPct: 100,
-        lastSyncedAt: new Date().toLocaleTimeString('id-ID'),
-        error: failedSkuCount ? `${failedSkuCount} SKU foto gagal dikirim ke MySQL.` : null
-      });
       return {
-        localPhotoSkuCount: Math.max(localPhotoSkuCount, afterPhotoSkuCount),
-        attemptedSkuCount: processed || afterPhotoSkuCount,
-        succeededSkuCount: succeededSkuCount || afterPhotoSkuCount,
-        failedSkuCount,
-        beforePhotoSkuCount,
-        afterPhotoSkuCount,
-        failedCodes
+        localPhotoSkuCount: 0,
+        attemptedSkuCount: 0,
+        succeededSkuCount: 0,
+        failedSkuCount: 0,
+        skippedDeletedCount: 0,
+        beforePhotoSkuCount: serverPhotoCount,
+        afterPhotoSkuCount: serverPhotoCount,
+        failedCodes: [],
+        deviceStorageCleared: true
       };
     } catch (err: any) {
-      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto MySQL' });
+      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi dengan server database' });
       throw err;
     } finally {
       updateSyncStatus({ isSyncing: false });
     }
   },
 
-  async deleteItemFromServer(id: string): Promise<void> {
-    if (typeof window === 'undefined') return;
+  async deleteItemFromServer(id: string, noBarang?: string): Promise<{ ok: boolean; error?: string }> {
+    if (typeof window === 'undefined') return { ok: false, error: 'Bukan lingkungan browser' };
     try {
-      await fetch(`/api/database-barang/${encodeURIComponent(id)}`, {
+      const qs = noBarang ? `?noBarang=${encodeURIComponent(noBarang.trim().toUpperCase())}` : '';
+      const res = await fetch(`/api/database-barang/${encodeURIComponent(id)}${qs}`, {
         method: 'DELETE',
         credentials: 'include',
         headers: getAuthHeaders()
       });
-    } catch (err) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        return { ok: false, error: data.error || `HTTP ${res.status}: gagal menghapus barang dari server` };
+      }
+      return { ok: true };
+    } catch (err: any) {
       console.warn('Gagal hapus item di server:', err);
+      return { ok: false, error: err?.message || 'Gagal menghubungi server database' };
     }
   },
 
-  // Sinkronisasi Real-Time Dua Arah untuk Foto Dokumentasi & Spesifikasi Item antar Device (HP <-> PC Browser) via MySQL
+  // Tarik pembaruan foto & jumlah barang terbaru HANYA dari server database secara bertahap (aman untuk ratusan foto resolusi penuh)
   async syncRealtimePhotosFromServer(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
-    try {
-      purgeDatabaseBarangLocalStorage();
-      // 1. Muat IndexedDB untuk menyelamatkan foto yang pernah difoto di HP
-      const idbRecords = await loadRecordsFromIndexedDb();
-      let currentLocal = this.getAll();
-      if (idbRecords && idbRecords.length > 0) {
-        if (currentLocal.length === 0) {
-          currentLocal = idbRecords.map((it, idx) => sanitizeRecord(it, idx));
-          inMemoryItems = currentLocal;
-        } else {
-          const idbByCode = new Map<string, DatabaseBarangRecord>();
-          idbRecords.forEach(r => {
-            if (r?.noBarang) idbByCode.set(String(r.noBarang).trim().toUpperCase(), r);
+    if (photoBatchSyncPromise) {
+      return photoBatchSyncPromise;
+    }
+
+    photoBatchSyncPromise = (async () => {
+      try {
+        await purgeAllDevicePhotoStorage();
+
+        if (!hasHydratedFromServer || inMemoryItems === null) {
+          const freshCatalog = await this.fetchCatalogFromServer();
+          if (freshCatalog !== null) {
+            inMemoryItems = freshCatalog;
+            hasHydratedFromServer = true;
+            window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+          } else {
+            return false;
+          }
+        }
+
+        const BATCH_LIMIT = 8;
+        let offset = 0;
+        let hasMore = true;
+        let anyChanged = false;
+        let lastServerTotalCount = inMemoryItems ? inMemoryItems.length : 0;
+
+        while (hasMore && offset < 20000) {
+          const res = await fetch(`/api/database-barang/photos-sync?offset=${offset}&limit=${BATCH_LIMIT}`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: getAuthHeaders(),
+            cache: 'no-store'
           });
-          currentLocal = currentLocal.map((item) => {
-            const code = item.noBarang.trim().toUpperCase();
-            if (explicitlyClearedPhotoCodes.has(code)) return item;
-            const memPhotos = extractCleanPhotos(item);
-            const idbPhotos = extractCleanPhotos(idbByCode.get(code));
-            const combined = Array.from(new Set([...memPhotos, ...idbPhotos]));
-            if (combined.length > 0) {
-              preservedPhotosByCode.set(code, combined);
-              return {
-                ...item,
-                dokumentasiUrls: combined,
-                dokumentasiUrl: combined[0] || ''
-              };
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            updateSyncStatus({
+              isSyncing: false,
+              error: errData?.error || `HTTP ${res.status} saat sinkronisasi foto`
+            });
+            return anyChanged;
+          }
+
+          const data = await res.json();
+          if (!data || !data.success || !Array.isArray(data.photoItems)) {
+            return anyChanged;
+          }
+
+          const serverTotalCount = Number(data.totalCount) || 0;
+          const totalPhotoCount = Number(data.photoCount) || 0;
+          lastServerTotalCount = serverTotalCount;
+
+          if (offset === 0 && inMemoryItems !== null && serverTotalCount > 0 && inMemoryItems.length !== serverTotalCount) {
+            const refreshedCatalog = await this.fetchCatalogFromServer();
+            if (refreshedCatalog !== null) {
+              inMemoryItems = refreshedCatalog;
+              anyChanged = true;
             }
-            return item;
-          });
-        }
-      }
+          }
 
-      const res = await fetch('/api/database-barang/photos-sync', {
-        method: 'GET',
-        credentials: 'include',
-        headers: getAuthHeaders(),
-        cache: 'no-store'
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      if (!data || !data.success || !Array.isArray(data.photoItems)) return false;
+          const batchMap = new Map<string, DatabaseBarangRecord>();
+          for (const rawItem of data.photoItems) {
+            const code = String(rawItem?.noBarang || '').trim().toUpperCase();
+            if (!code) continue;
+            batchMap.set(code, sanitizeRecord(rawItem, rawItem.orderIndex ?? 0));
+          }
 
-      let localList = currentLocal;
-      // Jika browser ini belum memiliki daftar barang sama sekali, tarik daftar barang lengkap dari MySQL
-      if (localList.length === 0 && Number(data.totalCount) > 0) {
-        const remoteFull = await this.fetchFromServer();
-        if (remoteFull && remoteFull.length > 0) {
-          localList = remoteFull;
-          inMemoryItems = remoteFull;
-        }
-      }
-
-      const remotePhotoByCode = new Map<string, DatabaseBarangRecord>();
-      for (const rawItem of data.photoItems) {
-        const code = String(rawItem?.noBarang || '').trim().toUpperCase();
-        if (!code) continue;
-        const cleanUrls = extractCleanPhotos(rawItem);
-        const clean: DatabaseBarangRecord = {
-          ...sanitizeRecord(rawItem, rawItem.orderIndex ?? 0),
-          dokumentasiUrls: cleanUrls,
-          dokumentasiUrl: cleanUrls[0] || ''
-        };
-        remotePhotoByCode.set(code, clean);
-      }
-
-      let localChanged = false;
-      const localItemsToPushToServer: Array<{ record: DatabaseBarangRecord; idx: number }> = [];
-
-      const updatedLocal = localList.map((item, idx) => {
-        const code = item.noBarang.trim().toUpperCase();
-        const localUrls = extractCleanPhotos(item);
-        const remoteMatch = remotePhotoByCode.get(code);
-        const remoteUrls = extractCleanPhotos(remoteMatch);
-        const hasExplicitLocalReplace = explicitPhotoReplaceTimestampByCode.has(code);
-
-        const nextDesc = remoteMatch?.deskripsiBarang && remoteMatch.deskripsiBarang !== 'Barang Kemasan AKK'
-          ? remoteMatch.deskripsiBarang
-          : item.deskripsiBarang;
-        const nextUnit1 = remoteMatch?.unit1 || item.unit1;
-        const nextUnit2 = remoteMatch?.unit2 !== undefined && remoteMatch.unit2 !== '' ? remoteMatch.unit2 : item.unit2;
-        const nextRasio2 = remoteMatch?.rasio2 !== undefined && Number(remoteMatch.rasio2) > 0 ? remoteMatch.rasio2 : item.rasio2;
-        const nextP = (remoteMatch?.panjangCm || 0) > 0 ? remoteMatch!.panjangCm : item.panjangCm;
-        const nextL = (remoteMatch?.lebarCm || 0) > 0 ? remoteMatch!.lebarCm : item.lebarCm;
-        const nextT = (remoteMatch?.tinggiCm || 0) > 0 ? remoteMatch!.tinggiCm : item.tinggiCm;
-        const nextVol = (remoteMatch?.volM3 || 0) > 0 ? remoteMatch!.volM3 : item.volM3;
-        const nextBerat = (remoteMatch?.beratKg || 0) > 0 ? remoteMatch!.beratKg : item.beratKg;
-
-        const metaDiff =
-          nextDesc !== item.deskripsiBarang ||
-          nextUnit1 !== item.unit1 ||
-          nextUnit2 !== item.unit2 ||
-          nextRasio2 !== item.rasio2 ||
-          nextP !== item.panjangCm ||
-          nextL !== item.lebarCm ||
-          nextT !== item.tinggiCm ||
-          nextVol !== item.volM3 ||
-          nextBerat !== item.beratKg;
-
-        if (localUrls.length === 0 && remoteUrls.length === 0) {
-          if (metaDiff) {
-            localChanged = true;
+          const currentList: DatabaseBarangRecord[] = inMemoryItems ? [...inMemoryItems] : [];
+          let batchChanged = false;
+          const updatedList: DatabaseBarangRecord[] = currentList.map((item: DatabaseBarangRecord) => {
+            const code = String(item.noBarang || '').trim().toUpperCase();
+            const remoteMatch = batchMap.get(code);
+            if (!remoteMatch) {
+              // Jika server menyatakan 0 foto secara global pada offset 0, bersihkan foto lama yang sudah dihapus
+              if (offset === 0 && totalPhotoCount === 0 && extractCleanPhotosRaw(item).length > 0) {
+                batchChanged = true;
+                return {
+                  ...item,
+                  hasPhoto: false,
+                  dokumentasiUrls: [],
+                  dokumentasiUrl: ''
+                };
+              }
+              return item;
+            }
+            const serverUrls = extractCleanPhotosRaw(remoteMatch);
+            const localUrls = extractCleanPhotosRaw(item);
+            const urlsChanged =
+              serverUrls.length !== localUrls.length ||
+              serverUrls.some((u, i) => u !== localUrls[i]);
+            if (!urlsChanged && item.hasPhoto === (serverUrls.length > 0)) {
+              return item;
+            }
+            batchChanged = true;
             return {
               ...item,
-              deskripsiBarang: nextDesc,
-              keteranganBarang: nextDesc,
-              unit1: nextUnit1,
-              satuan: nextUnit1,
-              unit2: nextUnit2,
-              rasio2: nextRasio2,
-              panjangCm: nextP,
-              lebarCm: nextL,
-              tinggiCm: nextT,
-              volM3: nextVol,
-              beratKg: nextBerat
+              hasPhoto: serverUrls.length > 0,
+              dokumentasiUrls: serverUrls,
+              dokumentasiUrl: serverUrls[0] || ''
             };
+          });
+
+          if (batchChanged) {
+            inMemoryItems = updatedList;
+            anyChanged = true;
+            window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
           }
-          return item;
+
+          const processedCount = offset + data.photoItems.length;
+          const pct = totalPhotoCount > 0
+            ? Math.min(99, Math.max(40, Math.round((processedCount / totalPhotoCount) * 100)))
+            : 100;
+          const serverHasMore = Boolean(data.hasMore) && data.photoItems.length > 0;
+          updateSyncStatus({
+            isSyncing: serverHasMore,
+            progressPct: serverHasMore ? pct : 100,
+            serverCount: lastServerTotalCount,
+            error: null
+          });
+
+          hasMore = serverHasMore;
+          offset += BATCH_LIMIT;
         }
 
-        const isCleared = explicitlyClearedPhotoCodes.has(code);
-        let mergedUrls: string[] = [];
-        if (isCleared) {
-          mergedUrls = [];
-        } else if (hasExplicitLocalReplace || photoOverridesByCode.has(code)) {
-          mergedUrls = localUrls.length > 0 ? localUrls : remoteUrls;
-        } else {
-          // Gabungkan foto dari MySQL (remoteUrls) dan perangkat lokal (localUrls) agar semua browser menampilkan foto yang sudah ada di MySQL
-          mergedUrls = Array.from(new Set([...remoteUrls, ...localUrls]));
-        }
-
-        if (mergedUrls.length > 0 && !explicitlyClearedPhotoCodes.has(code)) {
-          preservedPhotosByCode.set(code, mergedUrls);
-        }
-
-        if (
-          metaDiff ||
-          mergedUrls.length !== localUrls.length ||
-          (mergedUrls[0] || '') !== (item.dokumentasiUrl || '')
-        ) {
-          localChanged = true;
-        }
-
-        const mergedRec: DatabaseBarangRecord = {
-          ...item,
-          deskripsiBarang: nextDesc,
-          keteranganBarang: nextDesc,
-          unit1: nextUnit1,
-          satuan: nextUnit1,
-          unit2: nextUnit2,
-          rasio2: nextRasio2,
-          panjangCm: nextP,
-          lebarCm: nextL,
-          tinggiCm: nextT,
-          volM3: nextVol,
-          beratKg: nextBerat,
-          dokumentasiUrls: mergedUrls,
-          dokumentasiUrl: mergedUrls[0] || ''
-        };
-
-        const remoteSet = new Set(remoteUrls);
-        const hasUnpushedLocalPhoto = mergedUrls.some(u => !remoteSet.has(u));
-        if (hasUnpushedLocalPhoto && !explicitlyClearedPhotoCodes.has(code)) {
-          localItemsToPushToServer.push({ record: mergedRec, idx });
-        }
-
-        return mergedRec;
-      });
-
-      const existingCodes = new Set(updatedLocal.map(i => i.noBarang.trim().toUpperCase()));
-      remotePhotoByCode.forEach((remoteItem, code) => {
-        if (!existingCodes.has(code)) {
-          updatedLocal.push(remoteItem);
-          localChanged = true;
-        }
-      });
-
-      if (localChanged) {
-        inMemoryItems = updatedLocal;
-        hasHydratedFromIdb = true;
-        await saveRecordsToIndexedDb(updatedLocal);
-        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        updateSyncStatus({
+          isSyncing: false,
+          progressPct: 100,
+          serverCount: lastServerTotalCount,
+          lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          error: null
+        });
+        return anyChanged;
+      } catch (err: any) {
+        updateSyncStatus({
+          isSyncing: false,
+          error: err?.message || 'Gagal sinkronisasi foto otomatis dari server'
+        });
+        return false;
+      } finally {
+        photoBatchSyncPromise = null;
       }
+    })();
 
-      if (localItemsToPushToServer.length > 0) {
-        await this.pushPhotosBatchToServer(localItemsToPushToServer);
-      }
-
-      updateSyncStatus({
-        serverCount: Number(data.totalCount) || updatedLocal.length,
-        lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        error: null
-      });
-      return localChanged;
-    } catch (err: any) {
-      updateSyncStatus({ error: err?.message || 'Gagal sinkronisasi foto otomatis dari MySQL' });
-      return false;
-    }
+    return photoBatchSyncPromise;
   },
 
   async forceSyncNow(): Promise<{ count: number; items: DatabaseBarangRecord[] }> {
-    hasHydratedFromIdb = false;
+    hasHydratedFromServer = false;
     hydrationPromise = null;
-    await this.syncRealtimePhotosFromServer();
-    const localList = this.getAll();
+    await purgeAllDevicePhotoStorage();
     const remoteList = await this.fetchFromServer();
-
-    if (localList.length > 0 && (!remoteList || remoteList.length === 0)) {
-      await this.syncAllToServer(localList, 'replace_all');
-      return { count: localList.length, items: localList };
-    }
-    if (remoteList && remoteList.length > 0) {
-      const { merged, shouldPushToServer, itemsWithLocalPhotosToPush } = mergeLocalAndRemoteRecords(localList, remoteList);
-      inMemoryItems = merged;
-      hasHydratedFromIdb = true;
-      await saveRecordsToIndexedDb(merged);
-      if (itemsWithLocalPhotosToPush.length > 0) {
-        await this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush);
-      }
-      if (shouldPushToServer) {
-        await this.syncAllToServer(merged, 'replace_all');
-      }
-      await this.syncRealtimePhotosFromServer();
-      const latest = this.getAll();
+    if (remoteList !== null) {
+      inMemoryItems = remoteList;
+      hasHydratedFromServer = true;
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-      return { count: latest.length, items: latest };
+      return { count: inMemoryItems.length, items: [...inMemoryItems] };
     }
-    return { count: localList.length, items: localList };
+    const current = this.getAll();
+    return { count: current.length, items: current };
   },
 
   async ensureHydrated(): Promise<DatabaseBarangRecord[]> {
-    purgeDatabaseBarangLocalStorage();
-    if (hasHydratedFromIdb && inMemoryItems && inMemoryItems.length > 0) {
+    await purgeAllDevicePhotoStorage();
+    if (hasHydratedFromServer && inMemoryItems !== null) {
       return [...inMemoryItems];
     }
     if (hydrationPromise) {
@@ -1369,53 +1177,18 @@ export const databaseBarangService = {
 
     hydrationPromise = (async () => {
       try {
-        // 1. Muat IndexedDB lokal (untuk penyelamatan foto di HP) DAN tarik data langsung dari MySQL Server
-        const [idbRawList, remoteList] = await Promise.all([
-          loadRecordsFromIndexedDb(),
-          this.fetchFromServer()
-        ]);
-
-        const filteredIdb = Array.isArray(idbRawList)
-          ? idbRawList
-              .filter(item => !isLegacySeededBarang(item?.noBarang))
-              .map((item, idx) => sanitizeRecord(item, idx))
-          : [];
-
-        if (remoteList && remoteList.length > 0) {
-          const {
-            merged,
-            shouldPushToServer,
-            itemsWithLocalPhotosToPush
-          } = mergeLocalAndRemoteRecords(filteredIdb, remoteList);
-
-          inMemoryItems = merged;
-          hasHydratedFromIdb = true;
-          await saveRecordsToIndexedDb(merged);
+        const remoteList = await this.fetchFromServer();
+        if (remoteList !== null) {
+          inMemoryItems = remoteList;
+          hasHydratedFromServer = true;
           window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-
-          if (itemsWithLocalPhotosToPush.length > 0) {
-            void this.pushPhotosBatchToServer(itemsWithLocalPhotosToPush).catch(() => {});
-          } else if (shouldPushToServer && merged.length > 0) {
-            void this.syncAllToServer(merged, 'replace_all');
-          }
-
-          // Sinkronkan juga tabel foto dedicated MySQL (/api/database-barang/photos-sync)
-          void this.syncRealtimePhotosFromServer();
           return [...inMemoryItems];
         }
-
-        if (filteredIdb.length > 0) {
-          inMemoryItems = filteredIdb;
-          hasHydratedFromIdb = true;
-          window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
-          void this.syncAllToServer(filteredIdb, 'replace_all');
-          return [...filteredIdb];
-        }
-
-        hasHydratedFromIdb = true;
-        return [];
+        // Jangan kunci hasHydratedFromServer=true jika gagal agar percobaan berikutnya tetap menarik data server
+        hasHydratedFromServer = false;
+        return this.getAll();
       } catch {
-        hasHydratedFromIdb = true;
+        hasHydratedFromServer = false;
         return this.getAll();
       } finally {
         hydrationPromise = null;
@@ -1443,9 +1216,7 @@ export const databaseBarangService = {
       .filter(r => !isLegacySeededBarang(r?.noBarang))
       .map((r, idx) => sanitizeRecord(r, idx));
     inMemoryItems = sanitized;
-    hasHydratedFromIdb = true;
-
-    void saveRecordsToIndexedDb(sanitized);
+    hasHydratedFromServer = true;
 
     if (syncRemote) {
       void this.syncAllToServer(sanitized, 'replace_all');
@@ -1454,14 +1225,29 @@ export const databaseBarangService = {
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
   },
 
-  getItemThumbnail(item: { noBarang?: string; deskripsiBarang?: string; unit1?: string; dokumentasiUrl?: string; dokumentasiUrls?: string[] }): string {
-    if (item.dokumentasiUrls && item.dokumentasiUrls.length > 0 && item.dokumentasiUrls[0] && !item.dokumentasiUrls[0].startsWith('data:image/svg+xml')) {
+  getItemThumbnail(item: {
+    noBarang?: string;
+    deskripsiBarang?: string;
+    unit1?: string;
+    dokumentasiUrl?: string;
+    dokumentasiUrls?: string[];
+  }): string {
+    if (
+      item.dokumentasiUrls &&
+      item.dokumentasiUrls.length > 0 &&
+      item.dokumentasiUrls[0] &&
+      !item.dokumentasiUrls[0].startsWith('data:image/svg+xml')
+    ) {
       return item.dokumentasiUrls[0];
     }
     if (item.dokumentasiUrl && item.dokumentasiUrl.trim() && !item.dokumentasiUrl.startsWith('data:image/svg+xml')) {
       return item.dokumentasiUrl;
     }
-    return createDefaultBarangThumbnail(item.noBarang || 'AKK-BRG', item.deskripsiBarang || 'Barang Kemasan AKK', item.unit1 || 'Pcs');
+    return createDefaultBarangThumbnail(
+      item.noBarang || 'AKK-BRG',
+      item.deskripsiBarang || 'Barang Kemasan AKK',
+      item.unit1 || 'Pcs'
+    );
   },
 
   importBatch(
@@ -1476,7 +1262,8 @@ export const databaseBarangService = {
     });
 
     const sanitizedBatch: DatabaseBarangRecord[] = records.map((item, idx) => {
-      const code = String(item.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(idx + 1).padStart(4, '0')}`;
+      const code =
+        String(item.noBarang || '').trim().toUpperCase() || `AKK-BRG-${String(idx + 1).padStart(4, '0')}`;
       const prev = existingByCode.get(code);
       const desc = String(item.deskripsiBarang || item.keteranganBarang || prev?.deskripsiBarang || 'Barang Kemasan AKK').trim();
       const u1 = String(item.unit1 || item.satuan || prev?.unit1 || 'Pcs').trim();
@@ -1505,36 +1292,17 @@ export const databaseBarangService = {
       } else if (p > 0 && l > 0 && t > 0) {
         v = calculateVolM3(p, l, t);
       }
-      const b =
-        item.beratKg !== undefined && item.beratKg !== null
-          ? Number(item.beratKg) || 0
-          : 0;
+      const b = item.beratKg !== undefined && item.beratKg !== null ? Number(item.beratKg) || 0 : 0;
 
-      const incomingUrls: string[] = Array.isArray(item.dokumentasiUrls)
-        ? item.dokumentasiUrls.filter((u: any) => typeof u === 'string' && u.trim() && !u.startsWith('data:image/svg+xml'))
-        : [];
-      const rawDoc = item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? item.dokumentasiUrl : '';
-      if (rawDoc && !incomingUrls.includes(rawDoc)) {
-        incomingUrls.unshift(rawDoc);
-      }
-      const idbPreserved = preservedPhotosByCode.get(code) || [];
-      const finalUrls =
-        incomingUrls.length > 0
-          ? incomingUrls
-          : idbPreserved.length > 0
-          ? idbPreserved
-          : Array.isArray(prev?.dokumentasiUrls) && prev.dokumentasiUrls.length > 0
-          ? prev.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-          : prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml')
-          ? [prev.dokumentasiUrl]
-          : [];
-
-      if (finalUrls.length > 0) {
-        preservedPhotosByCode.set(code, finalUrls);
-      }
+      const incomingUrls = extractCleanPhotosRaw(item);
+      const prevUrls = extractCleanPhotosRaw(prev);
+      const finalUrls = incomingUrls.length > 0 ? incomingUrls : prevUrls;
 
       const rec: DatabaseBarangRecordWithOrder = {
-        id: prev?.id || item.id || `dbb-${String(idx + 1).padStart(6, '0')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id:
+          prev?.id ||
+          item.id ||
+          `dbb-${String(idx + 1).padStart(6, '0')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         orderIndex: idx,
         noBarang: code,
         deskripsiBarang: desc,
@@ -1556,7 +1324,7 @@ export const databaseBarangService = {
         originalSizeKb: item.originalSizeKb ?? prev?.originalSizeKb ?? 0,
         compressionSavingsPct: item.compressionSavingsPct ?? prev?.compressionSavingsPct ?? 0,
         kategoriBarang: item.kategoriBarang || prev?.kategoriBarang || 'Karton Box Corrugated',
-        stokTersedia: item.stokTersedia !== undefined ? Number(item.stokTersedia) : (prev?.stokTersedia ?? 1000),
+        stokTersedia: item.stokTersedia !== undefined ? Number(item.stokTersedia) : prev?.stokTersedia ?? 1000,
         cabang: item.cabang || prev?.cabang || 'Banyuwangi',
         updatedAt: item.updatedAt || today
       };
@@ -1589,10 +1357,10 @@ export const databaseBarangService = {
     }
 
     inMemoryItems = finalRecords;
-    hasHydratedFromIdb = true;
+    hasHydratedFromServer = true;
 
-    void saveRecordsToIndexedDb(finalRecords);
     purgeDatabaseBarangLocalStorage();
+    void deleteIndexedDbByName(LEGACY_IDB_NAME);
     void this.syncAllToServer(finalRecords, 'replace_all');
 
     window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
@@ -1665,107 +1433,69 @@ export const databaseBarangService = {
     return undefined;
   },
 
-  upsertItem(input: {
-    id?: string;
-    noBarang: string;
-    deskripsiBarang?: string;
-    keteranganBarang?: string;
-    unit1?: string;
-    satuan?: string;
-    unit2?: string;
-    unit3?: string;
-    rasio2?: number | string;
-    rasio3?: number | string;
-    panjangCm?: number;
-    lebarCm?: number;
-    tinggiCm?: number;
-    volM3?: number;
-    beratKg?: number;
-    dokumentasiUrl?: string;
-    dokumentasiUrls?: string[];
-    compressedSizeKb?: number;
-    originalSizeKb?: number;
-    compressionSavingsPct?: number;
-    kategoriBarang?: string;
-    stokTersedia?: number;
-    cabang?: string;
-  }): DatabaseBarangRecord {
+  buildRecordFromInput(input: DatabaseBarangUpsertInput): {
+    record: DatabaseBarangRecord;
+    list: DatabaseBarangRecord[];
+    idx: number;
+    explicitPhotoReplace: boolean;
+  } {
     const list = this.getAll();
     const cleanCode = input.noBarang.trim().toUpperCase();
     const cleanDesc = (input.deskripsiBarang || input.keteranganBarang || '').trim();
     const cleanUnit1 = (input.unit1 || input.satuan || 'Pcs').trim();
 
     const idx = list.findIndex(
-      item =>
-        (input.id && item.id === input.id) ||
-        item.noBarang.trim().toUpperCase() === cleanCode
+      item => (input.id && item.id === input.id) || item.noBarang.trim().toUpperCase() === cleanCode
     );
-
     const prev = idx >= 0 ? list[idx] : undefined;
 
-    const p = input.panjangCm !== undefined ? Number(input.panjangCm) || 0 : (prev?.panjangCm ?? 0);
-    const l = input.lebarCm !== undefined ? Number(input.lebarCm) || 0 : (prev?.lebarCm ?? 0);
-    const t = input.tinggiCm !== undefined ? Number(input.tinggiCm) || 0 : (prev?.tinggiCm ?? 0);
-    const v = input.volM3 !== undefined && input.volM3 !== null
-      ? Number(input.volM3) || 0
-      : (p > 0 && l > 0 && t > 0 ? calculateVolM3(p, l, t) : (prev?.volM3 ?? 0));
-    const b = input.beratKg !== undefined && input.beratKg !== null
-      ? Number(input.beratKg) || 0
-      : (prev?.beratKg ?? 0);
+    const p = input.panjangCm !== undefined ? Number(input.panjangCm) || 0 : prev?.panjangCm ?? 0;
+    const l = input.lebarCm !== undefined ? Number(input.lebarCm) || 0 : prev?.lebarCm ?? 0;
+    const t = input.tinggiCm !== undefined ? Number(input.tinggiCm) || 0 : prev?.tinggiCm ?? 0;
+    const v =
+      input.volM3 !== undefined && input.volM3 !== null
+        ? Number(input.volM3) || 0
+        : p > 0 && l > 0 && t > 0
+        ? calculateVolM3(p, l, t)
+        : prev?.volM3 ?? 0;
+    const b = input.beratKg !== undefined && input.beratKg !== null ? Number(input.beratKg) || 0 : prev?.beratKg ?? 0;
 
     const explicitPhotoReplace = Array.isArray(input.dokumentasiUrls);
     let urls: string[] = [];
     if (Array.isArray(input.dokumentasiUrls)) {
-      urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(u));
-      if (urls.length === 0) {
-        explicitlyClearedPhotoCodes.add(cleanCode);
-        savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
-        photoOverridesByCode.delete(cleanCode);
-        savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
-        preservedPhotosByCode.delete(cleanCode);
-        explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
-      } else {
-        explicitlyClearedPhotoCodes.delete(cleanCode);
-        savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
-        photoOverridesByCode.set(cleanCode, urls);
-        savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
-        preservedPhotosByCode.set(cleanCode, urls);
-        explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
-      }
-    } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(input.dokumentasiUrl)) {
+      urls = input.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'));
+    } else if (input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml')) {
       urls = [input.dokumentasiUrl];
-      explicitlyClearedPhotoCodes.delete(cleanCode);
-      savePersistentSet(LS_KEY_CLEARED_PHOTO_CODES, explicitlyClearedPhotoCodes);
-      photoOverridesByCode.set(cleanCode, urls);
-      savePersistentMap(LS_KEY_EXPLICIT_PHOTO_OVERRIDES, photoOverridesByCode);
-      preservedPhotosByCode.set(cleanCode, urls);
-      explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
-    } else if (prev?.dokumentasiUrls && prev.dokumentasiUrls.length > 0) {
-      urls = prev.dokumentasiUrls.filter(u => !deletedPhotoUrls.has(u));
-    } else if (prev?.dokumentasiUrl && !prev.dokumentasiUrl.startsWith('data:image/svg+xml') && !deletedPhotoUrls.has(prev.dokumentasiUrl)) {
-      urls = [prev.dokumentasiUrl];
-    } else if (!explicitlyClearedPhotoCodes.has(cleanCode) && (photoOverridesByCode.has(cleanCode) || preservedPhotosByCode.has(cleanCode))) {
-      urls = [...((photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || []).filter(u => !deletedPhotoUrls.has(u)))];
+    } else if (prev) {
+      urls = extractCleanPhotosRaw(prev);
     }
 
-    const docUrl = urls[0] || (!explicitPhotoReplace && input.dokumentasiUrl && !input.dokumentasiUrl.startsWith('data:image/svg+xml') ? input.dokumentasiUrl : '');
-    const compKb = input.compressedSizeKb ?? (urls.length > 0 ? urls.reduce((acc, u) => acc + estimateDataUrlSizeKb(u), 0) : 0);
+    const docUrl = urls[0] || '';
+    const compKb =
+      input.compressedSizeKb ??
+      (urls.length > 0 ? urls.reduce((acc, u) => acc + estimateDataUrlSizeKb(u), 0) : 0);
 
     const record: DatabaseBarangRecord = {
-      id: input.id || (prev?.id || `dbb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+      id: input.id || prev?.id || `dbb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       noBarang: cleanCode,
       deskripsiBarang: cleanDesc,
       keteranganBarang: cleanDesc,
       unit1: cleanUnit1,
       satuan: cleanUnit1,
-      unit2: input.unit2 !== undefined ? String(input.unit2).trim() : (prev?.unit2 ?? ''),
-      unit3: input.unit3 !== undefined ? String(input.unit3).trim() : (prev?.unit3 ?? ''),
-      rasio2: input.rasio2 !== undefined && input.rasio2 !== ''
-        ? (!isNaN(Number(input.rasio2)) ? Number(input.rasio2) : input.rasio2)
-        : (prev?.rasio2 ?? 0),
-      rasio3: input.rasio3 !== undefined && input.rasio3 !== ''
-        ? (!isNaN(Number(input.rasio3)) ? Number(input.rasio3) : input.rasio3)
-        : (prev?.rasio3 ?? 0),
+      unit2: input.unit2 !== undefined ? String(input.unit2).trim() : prev?.unit2 ?? '',
+      unit3: input.unit3 !== undefined ? String(input.unit3).trim() : prev?.unit3 ?? '',
+      rasio2:
+        input.rasio2 !== undefined && input.rasio2 !== ''
+          ? !isNaN(Number(input.rasio2))
+            ? Number(input.rasio2)
+            : input.rasio2
+          : prev?.rasio2 ?? 0,
+      rasio3:
+        input.rasio3 !== undefined && input.rasio3 !== ''
+          ? !isNaN(Number(input.rasio3))
+            ? Number(input.rasio3)
+            : input.rasio3
+          : prev?.rasio3 ?? 0,
       panjangCm: p,
       lebarCm: l,
       tinggiCm: t,
@@ -1774,14 +1504,19 @@ export const databaseBarangService = {
       dokumentasiUrl: docUrl,
       dokumentasiUrls: urls,
       compressedSizeKb: compKb,
-      originalSizeKb: input.originalSizeKb ?? (prev?.originalSizeKb ?? 380),
-      compressionSavingsPct: input.compressionSavingsPct ?? (prev?.compressionSavingsPct ?? 97),
-      kategoriBarang: input.kategoriBarang || (prev?.kategoriBarang ?? 'Karton Box Corrugated'),
-      stokTersedia: input.stokTersedia ?? (prev?.stokTersedia ?? 1000),
-      cabang: prev?.cabang || 'Banyuwangi',
+      originalSizeKb: input.originalSizeKb ?? prev?.originalSizeKb ?? 380,
+      compressionSavingsPct: input.compressionSavingsPct ?? prev?.compressionSavingsPct ?? 97,
+      kategoriBarang: input.kategoriBarang || prev?.kategoriBarang || 'Karton Box Corrugated',
+      stokTersedia: input.stokTersedia ?? prev?.stokTersedia ?? 1000,
+      cabang: input.cabang || prev?.cabang || 'Banyuwangi',
       updatedAt: new Date().toISOString().split('T')[0]
     };
 
+    return { record, list, idx, explicitPhotoReplace };
+  },
+
+  upsertItem(input: DatabaseBarangUpsertInput): DatabaseBarangRecord {
+    const { record, list, idx, explicitPhotoReplace } = this.buildRecordFromInput(input);
     const targetOrderIdx = idx >= 0 ? idx : list.length;
     if (idx >= 0) {
       list[idx] = record;
@@ -1789,109 +1524,176 @@ export const databaseBarangService = {
       list.push(record);
     }
 
-    this.saveAll(list, false);
-    const job = this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace);
-    pendingItemUploads.set(cleanCode, job);
+    inMemoryItems = list;
+    purgeDatabaseBarangLocalStorage();
+    window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+
+    const job = this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace, false).then(async res => {
+      if (res.ok && res.item) {
+        const cur = this.getAll();
+        const i = cur.findIndex(x => x.id === res.item!.id || x.noBarang === res.item!.noBarang);
+        if (i >= 0) cur[i] = res.item;
+        inMemoryItems = cur;
+        await purgeAllDevicePhotoStorage();
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        return true;
+      }
+      return false;
+    });
+    pendingItemUploads.set(record.noBarang, job);
     void job.finally(() => {
-      if (pendingItemUploads.get(cleanCode) === job) pendingItemUploads.delete(cleanCode);
+      if (pendingItemUploads.get(record.noBarang) === job) pendingItemUploads.delete(record.noBarang);
     });
     return record;
   },
 
+  async upsertItemAsync(
+    input: DatabaseBarangUpsertInput
+  ): Promise<{ success: boolean; queuedOffline: boolean; record: DatabaseBarangRecord; error?: string }> {
+    const { record, list, idx, explicitPhotoReplace } = this.buildRecordFromInput(input);
+    const targetOrderIdx = idx >= 0 ? idx : list.length;
+
+    updateSyncStatus({ isUploadingPhoto: true, error: null });
+    try {
+      const res = await this.pushItemToServer(record, targetOrderIdx, explicitPhotoReplace, false);
+      if (res.ok && res.item) {
+        if (idx >= 0) {
+          list[idx] = res.item;
+        } else {
+          list.push(res.item);
+        }
+        inMemoryItems = list;
+        await purgeAllDevicePhotoStorage();
+        window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+        return { success: true, queuedOffline: false, record: res.item };
+      }
+
+      return {
+        success: false,
+        queuedOffline: false,
+        record,
+        error: res.error || 'Gagal menyimpan ke server database'
+      };
+    } finally {
+      updateSyncStatus({ isUploadingPhoto: false });
+    }
+  },
+
   deleteItem(id: string): void {
+    const target = this.getAll().find(i => i.id === id);
     const list = this.getAll().filter(i => i.id !== id);
-    this.saveAll(list, false);
-    void this.deleteItemFromServer(id);
+    inMemoryItems = list;
+    void purgeAllDevicePhotoStorage();
+    window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    void this.deleteItemFromServer(id, target?.noBarang);
+  },
+
+  async deleteItemAsync(id: string, noBarang?: string): Promise<{ success: boolean; error?: string }> {
+    const current = this.getAll();
+    const target = current.find(i => i.id === id);
+    const code = (noBarang || target?.noBarang || '').trim().toUpperCase();
+
+    const res = await this.deleteItemFromServer(id, code || undefined);
+    if (!res.ok) {
+      return { success: false, error: res.error };
+    }
+
+    inMemoryItems = current.filter(
+      i => i.id !== id && (!code || String(i.noBarang || '').trim().toUpperCase() !== code)
+    );
+    await purgeAllDevicePhotoStorage();
+    window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
+    return { success: true };
   },
 
   deletePhoto(code: string, photoUrl: string): void {
+    void this.deletePhotoAsync(code, photoUrl);
+  },
+
+  async deletePhotoAsync(code: string, photoUrl: string): Promise<DatabaseBarangRecord | null> {
     const cleanCode = String(code || '').trim().toUpperCase();
-    if (!cleanCode) return;
-    if (photoUrl) {
-      deletedPhotoUrls.add(photoUrl);
-    }
+    if (!cleanCode) return null;
+
     const list = this.getAll();
     const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
-    const itemPhotos = idx >= 0 ? extractCleanPhotos(list[idx]) : [];
-    const currentPhotos = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || itemPhotos;
-    const remaining = currentPhotos.filter(u => u !== photoUrl && !deletedPhotoUrls.has(u));
-    if (remaining.length === 0) {
-      explicitlyClearedPhotoCodes.add(cleanCode);
-      photoOverridesByCode.delete(cleanCode);
-      preservedPhotosByCode.delete(cleanCode);
-    } else {
-      photoOverridesByCode.set(cleanCode, remaining);
-      preservedPhotosByCode.set(cleanCode, remaining);
-    }
-    explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
+    const itemPhotos = idx >= 0 ? extractCleanPhotosRaw(list[idx]) : [];
+    const remaining = itemPhotos.filter(u => u !== photoUrl);
 
+    let updatedRecord: DatabaseBarangRecord | null = null;
     if (idx >= 0) {
-      list[idx] = {
+      updatedRecord = {
         ...list[idx],
         dokumentasiUrls: remaining,
         dokumentasiUrl: remaining[0] || '',
         updatedAt: new Date().toISOString().split('T')[0]
       };
+      list[idx] = updatedRecord;
       inMemoryItems = list;
-      void saveRecordsToIndexedDb(list);
       purgeDatabaseBarangLocalStorage();
     }
 
     if (typeof window !== 'undefined') {
-      fetch('/api/database-barang/delete-photo', {
-        method: 'POST',
-        credentials: 'include',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          noBarang: cleanCode,
-          photoUrl,
-          clearAll: remaining.length === 0,
-          updatedUrls: remaining,
-          approvedBySuperAdmin: true
-        })
-      }).catch(() => {});
+      try {
+        await fetch('/api/database-barang/delete-photo', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            noBarang: cleanCode,
+            photoUrl,
+            clearAll: remaining.length === 0,
+            updatedUrls: remaining,
+            approvedBySuperAdmin: true
+          })
+        });
+      } catch {}
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     }
+
+    return updatedRecord;
   },
 
   clearAllPhotos(code: string): void {
+    void this.clearAllPhotosAsync(code);
+  },
+
+  async clearAllPhotosAsync(code: string): Promise<DatabaseBarangRecord | null> {
     const cleanCode = String(code || '').trim().toUpperCase();
-    if (!cleanCode) return;
-    const current = photoOverridesByCode.get(cleanCode) || preservedPhotosByCode.get(cleanCode) || [];
-    current.forEach(u => deletedPhotoUrls.add(u));
-    explicitlyClearedPhotoCodes.add(cleanCode);
-    photoOverridesByCode.delete(cleanCode);
-    preservedPhotosByCode.delete(cleanCode);
-    explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
+    if (!cleanCode) return null;
 
     const list = this.getAll();
     const idx = list.findIndex(r => String(r.noBarang || '').trim().toUpperCase() === cleanCode);
+    let updatedRecord: DatabaseBarangRecord | null = null;
     if (idx >= 0) {
-      list[idx] = {
+      updatedRecord = {
         ...list[idx],
         dokumentasiUrls: [],
         dokumentasiUrl: '',
         updatedAt: new Date().toISOString().split('T')[0]
       };
+      list[idx] = updatedRecord;
       inMemoryItems = list;
-      void saveRecordsToIndexedDb(list);
       purgeDatabaseBarangLocalStorage();
     }
 
     if (typeof window !== 'undefined') {
-      fetch('/api/database-barang/delete-photo', {
-        method: 'POST',
-        credentials: 'include',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          noBarang: cleanCode,
-          clearAll: true,
-          updatedUrls: [],
-          approvedBySuperAdmin: true
-        })
-      }).catch(() => {});
+      try {
+        await fetch('/api/database-barang/delete-photo', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            noBarang: cleanCode,
+            clearAll: true,
+            updatedUrls: [],
+            approvedBySuperAdmin: true
+          })
+        });
+      } catch {}
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     }
+
+    return updatedRecord;
   },
 
   async fetchPhotoDeleteRequests(): Promise<PhotoDeletionApprovalRequest[]> {
@@ -1970,11 +1772,14 @@ export const databaseBarangService = {
       }
       return { success: false, error: data?.error || 'Gagal memproses persetujuan Super Admin' };
     } catch (err: any) {
-      return { success: false, error: err?.message || 'Gagal menghubungi server MySQL' };
+      return { success: false, error: err?.message || 'Gagal menghubungi server database' };
     }
   },
 
-  async bulkDeletePhotos(target: { codes?: string[]; keepCodes?: string[] }): Promise<{ success: boolean; deletedCount: number; remainingPhotoCount: number }> {
+  async bulkDeletePhotos(target: {
+    codes?: string[];
+    keepCodes?: string[];
+  }): Promise<{ success: boolean; deletedCount: number; remainingPhotoCount: number }> {
     const list = this.getAll();
     let codesToClear: string[] = [];
 
@@ -1983,21 +1788,12 @@ export const databaseBarangService = {
       codesToClear = list
         .filter(it => {
           const c = String(it.noBarang || '').trim().toUpperCase();
-          const hasPhoto = (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.length > 0) ||
-            (typeof it.dokumentasiUrl === 'string' && it.dokumentasiUrl.trim() !== '' && !it.dokumentasiUrl.startsWith('data:image/svg+xml'));
-          return hasPhoto && !keep.has(c);
+          return extractCleanPhotosRaw(it).length > 0 && !keep.has(c);
         })
         .map(it => String(it.noBarang || '').trim().toUpperCase());
     } else if (target.codes) {
       codesToClear = target.codes.map(c => String(c).trim().toUpperCase());
     }
-
-    codesToClear.forEach(cleanCode => {
-      explicitlyClearedPhotoCodes.add(cleanCode);
-      photoOverridesByCode.delete(cleanCode);
-      preservedPhotosByCode.delete(cleanCode);
-      explicitPhotoReplaceTimestampByCode.set(cleanCode, Date.now());
-    });
 
     const clearSet = new Set(codesToClear);
     const updated = list.map(it => {
@@ -2014,10 +1810,13 @@ export const databaseBarangService = {
     });
 
     inMemoryItems = updated;
-    await saveRecordsToIndexedDb(updated);
-    purgeDatabaseBarangLocalStorage();
+    await purgeAllDevicePhotoStorage();
 
-    let resData = { success: true, deletedCount: codesToClear.length, remainingPhotoCount: list.filter(it => (it.dokumentasiUrls?.length || 0) > 0).length };
+    let resData = {
+      success: true,
+      deletedCount: codesToClear.length,
+      remainingPhotoCount: updated.filter(it => extractCleanPhotosRaw(it).length > 0).length
+    };
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch('/api/database-barang/photos/bulk-delete', {
@@ -2031,7 +1830,7 @@ export const databaseBarangService = {
           resData = d;
         }
       } catch (e) {
-        console.warn('Gagal bulk-delete foto ke MySQL server:', e);
+        console.warn('Gagal bulk-delete foto ke server:', e);
       }
       window.dispatchEvent(new CustomEvent('akk-database-barang-updated'));
     }
@@ -2085,10 +1884,11 @@ export const databaseBarangService = {
   }
 };
 
-// Sinkronisasi Real-Time otomatis antar perangkat (PC <-> HP) secara hemat kuota jaringan (hanya aktif saat tab terlihat & sudah terautentikasi)
+// Sinkronisasi Real-Time otomatis antar perangkat (PC <-> HP) secara hemat kuota jaringan
 if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
   let isRealtimeSyncRunning = false;
   let lastSyncRunAt = 0;
+
   const triggerRealtimePhotoSync = () => {
     const now = Date.now();
     if (
@@ -2109,11 +1909,9 @@ if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
     }
     isRealtimeSyncRunning = true;
     lastSyncRunAt = now;
-    void databaseBarangService
-      .syncRealtimePhotosFromServer()
-      .finally(() => {
-        isRealtimeSyncRunning = false;
-      });
+    void databaseBarangService.syncRealtimePhotosFromServer().finally(() => {
+      isRealtimeSyncRunning = false;
+    });
   };
 
   setInterval(triggerRealtimePhotoSync, 60000);
@@ -2124,5 +1922,8 @@ if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
       }
     });
   }
+  window.addEventListener('online', () => {
+    lastSyncRunAt = 0;
+    triggerRealtimePhotoSync();
+  });
 }
-

@@ -44,6 +44,43 @@ export const OFFICIAL_DESTINATION_AREAS = [
   'Kanvas LKT'
 ] as const;
 
+export const SIDOARJO_DESTINATION_AREAS = [
+  'BLIKETUT',
+  'PONOMADI',
+  'LATUBO',
+  'PROLUJEM',
+  'MALANG',
+  'MADURA',
+  'SURABAYA',
+  'SIDOARJO',
+  'KANVAS'
+] as const;
+
+export type SidoarjoDestinationArea = typeof SIDOARJO_DESTINATION_AREAS[number];
+
+export function getOfficialAreasForBranch(branchId?: string | null): readonly string[] {
+  if (branchId === 'cab-sidoarjo') {
+    return SIDOARJO_DESTINATION_AREAS;
+  }
+  return OFFICIAL_DESTINATION_AREAS;
+}
+
+export function isSidoarjoArea(areaName?: string | null): boolean {
+  if (!areaName) return false;
+  const clean = areaName.trim().toUpperCase();
+  if (SIDOARJO_DESTINATION_AREAS.some(a => a.toUpperCase() === clean)) return true;
+  return (
+    clean.startsWith('BLIKETUT') ||
+    clean.startsWith('PONOMADI') ||
+    clean.startsWith('LATUBO') ||
+    clean.startsWith('PROLUJEM') ||
+    clean.startsWith('MADURA') ||
+    clean === 'MALANG' ||
+    clean === 'SURABAYA' ||
+    clean === 'SIDOARJO'
+  );
+}
+
 export type OfficialDestinationArea = typeof OFFICIAL_DESTINATION_AREAS[number];
 
 export const STANDARD_AREAS = OFFICIAL_DESTINATION_AREAS;
@@ -107,17 +144,54 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
 
 /**
  * Normalisasi otomatis nama area variatif dari Google Sheets / Excel / Form
- * menjadi salah satu dari 37 nama area baku resmi.
+ * menjadi nama area baku resmi sesuai cabang (Nusantara maupun Sidoarjo).
  */
-export function standardizeAreaName(rawArea: string | undefined | null): string {
-  if (!rawArea) return 'Rogojampi Retail';
+export function standardizeAreaName(rawArea: string | undefined | null, branchId?: string | null): string {
+  if (!rawArea) return branchId === 'cab-sidoarjo' ? 'SIDOARJO' : 'Rogojampi Retail';
   const clean = rawArea.trim().toUpperCase();
 
-  // 1. Direct case-insensitive match dengan salah satu dari official areas
+  // 0. Check Sidoarjo official areas FIRST so composite names like PROLUJEM (... JEMBER - BONDOWOSO) are never mangled
+  const exactSda = SIDOARJO_DESTINATION_AREAS.find(a => a.toUpperCase() === clean);
+  if (exactSda) {
+    // Only map bare 'KANVAS' to 'KANVAS' when branch is Sidoarjo or explicitly uppercase 'KANVAS'
+    if (exactSda === 'KANVAS' && branchId && branchId !== 'cab-sidoarjo') {
+      return 'Kanvas LKT';
+    }
+    return exactSda;
+  }
+  if (clean.startsWith('BLIKETUT') || (branchId === 'cab-sidoarjo' && (clean.includes('BLITAR') || clean.includes('KEDIRI') || clean.includes('TULUNGAGUNG') || clean.includes('TRENGGALEK')))) {
+    return SIDOARJO_DESTINATION_AREAS[0];
+  }
+  if (clean.startsWith('PONOMADI') || (branchId === 'cab-sidoarjo' && (clean.includes('MOJOKERTO') || clean.includes('JOMBANG') || clean.includes('NGANJUK') || clean.includes('MADIUN') || clean.includes('PONOROGO') || clean.includes('NGAWI')))) {
+    return SIDOARJO_DESTINATION_AREAS[1];
+  }
+  if (clean.startsWith('LATUBO') || (branchId === 'cab-sidoarjo' && (clean.includes('GRESIK') || clean.includes('LAMONGAN') || clean.includes('TUBAN') || clean.includes('BOJONEGORO') || clean.includes('CEPU')))) {
+    return SIDOARJO_DESTINATION_AREAS[2];
+  }
+  if (clean.startsWith('PROLUJEM') || (branchId === 'cab-sidoarjo' && (clean.includes('PASURUAN') || clean.includes('PROBOLINGGO') || clean.includes('LUMAJANG')))) {
+    return SIDOARJO_DESTINATION_AREAS[3];
+  }
+  if (clean === 'MALANG' || (branchId === 'cab-sidoarjo' && clean.includes('MALANG'))) {
+    return SIDOARJO_DESTINATION_AREAS[4];
+  }
+  if (clean.startsWith('MADURA') || (branchId === 'cab-sidoarjo' && (clean.includes('SUMENEP') || clean.includes('SAMPANG') || clean.includes('BANGKALAN')))) {
+    return SIDOARJO_DESTINATION_AREAS[5];
+  }
+  if (clean === 'SURABAYA' || (branchId === 'cab-sidoarjo' && clean.includes('SURABAYA'))) {
+    return SIDOARJO_DESTINATION_AREAS[6];
+  }
+  if (clean === 'SIDOARJO' || (branchId === 'cab-sidoarjo' && clean.includes('SIDOARJO'))) {
+    return SIDOARJO_DESTINATION_AREAS[7];
+  }
+  if (branchId === 'cab-sidoarjo' && clean.includes('KANVAS')) {
+    return SIDOARJO_DESTINATION_AREAS[8];
+  }
+
+  // 1. Direct case-insensitive match dengan salah satu dari official areas Nusantara
   const exactMatch = OFFICIAL_DESTINATION_AREAS.find(a => a.toUpperCase() === clean);
   if (exactMatch) return exactMatch;
 
-  // 1a. Kanvas LKT
+  // 1a. Kanvas LKT (Cabang Nusantara)
   if (clean.includes('KANVAS LKT') || clean.includes('KANVAS_LKT') || clean.includes('KANVAS LUAR KOTA') || clean === 'KANVAS' || clean === 'LKT') {
     return 'Kanvas LKT';
   }

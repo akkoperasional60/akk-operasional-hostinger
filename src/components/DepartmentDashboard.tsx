@@ -11,9 +11,7 @@ import {
 } from 'lucide-react';
 import { SecurityGateLog } from '../types';
 import { TeamCalendar } from './TeamCalendar';
-import { attendanceService } from '../services/attendanceService';
-import { PresenceSummary } from './PresenceSummary';
-import { AbsenceManagementModal } from './AbsenceManagementModal';
+import { HrEmployeeRollingView } from './hr/HrEmployeeRollingView';
 import { WarehouseManagementSystem } from './WarehouseManagementSystem';
 import { AkkLogo } from './AkkLogo';
 import { branchStore, BranchRecord } from '../services/branchStore';
@@ -21,6 +19,7 @@ import {
   FinanceMonitoringLedgerView,
   CustomerMasterMappingView
 } from './finance/FinanceLedgerAndMapping';
+import { FinanceOverviewDashboard } from './finance/FinanceOverviewDashboard';
 import {
   SalesNameMappingRecord,
   DEFAULT_SALES_MAPPINGS,
@@ -62,32 +61,6 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
     }
   };
 
-  const crews = logisticsStore.getCrews();
-  const allRecords = attendanceService.getAllAttendanceRecords();
-
-  const consecutiveAbsences = crews.filter(crew => {
-    const records = allRecords
-      .filter(r => r.crewId === crew.id && r.status === 'absent')
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
-    let consecutive = 0;
-    for (let i = 0; i < records.length; i++) {
-      if (i === 0) {
-        consecutive++;
-      } else {
-        const d1 = new Date(records[i-1].date);
-        const d2 = new Date(records[i].date);
-        if ((d1.getTime() - d2.getTime()) === 86400000) {
-          consecutive++;
-        } else {
-          break;
-        }
-      }
-    }
-    return consecutive > 3;
-  });
-
-  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
   const [selectedVideoModal, setSelectedVideoModal] = useState<string | null>(null);
 
   // GA: Dynamic Security Logs from Store
@@ -256,48 +229,8 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
 
   return (
     <div className="space-y-6">
-      {/* Top 3 Sub-Menu Utama HR: 1. HR, 2. GA, 3. Training & Development */}
+      {(currentSubTab.startsWith('ga_') || currentSubTab.startsWith('training_')) && (
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
-          <button
-            type="button"
-            onClick={() => handleTabChange('hr_core')}
-            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
-              currentSubTab === 'hr_core'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>1. HR (Presensi &amp; SDM)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange(currentSubTab.startsWith('ga_') ? currentSubTab : 'ga_security')}
-            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
-              currentSubTab.startsWith('ga_')
-                ? 'bg-amber-600 text-slate-950 shadow-lg shadow-amber-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <ShieldAlert className="w-4 h-4" />
-            <span>2. GA (General Affairs)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange(currentSubTab.startsWith('training_') ? currentSubTab : 'training_videos')}
-            className={`px-4 py-2.5 rounded-xl font-black flex items-center gap-2 transition cursor-pointer ${
-              currentSubTab.startsWith('training_')
-                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            <span>3. Training &amp; Development</span>
-          </button>
-        </div>
 
         {/* Sub-navigasi internal untuk GA */}
         {currentSubTab.startsWith('ga_') && (
@@ -377,47 +310,12 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
           </div>
         )}
       </div>
+      )}
 
-      {/* SUBTAB 1: HR UTAMA (PRESENSI & DATA KARYAWAN) */}
+      {/* SUBTAB 1: HR UTAMA (DATA KARYAWAN, ROLLING & HISTORY DEPARTEMEN) */}
       {currentSubTab === 'hr_core' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {showAbsenceModal && <AbsenceManagementModal onClose={() => setShowAbsenceModal(false)} />}
-          
-          {consecutiveAbsences.length > 0 && (
-            <div className="bg-rose-900/20 border border-rose-800 p-4 rounded-xl flex items-center gap-4">
-              <AlertCircle className="w-6 h-6 text-rose-500 shrink-0" />
-              <div>
-                <h4 className="text-white font-semibold">Peringatan Ketidakhadiran</h4>
-                <p className="text-rose-300 text-sm">
-                  Kru berikut tidak hadir lebih dari 3 hari berturut-turut: {consecutiveAbsences.map(c => c.name).join(', ')}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-sm font-black text-white uppercase tracking-wider">Rekapitulasi Kehadiran &amp; Absensi</h3>
-              <p className="text-xs text-slate-400">Pantau kehadiran kru supir, helper, dan staf operasional pabrik AKK.</p>
-            </div>
-            <button 
-              onClick={() => setShowAbsenceModal(true)}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20 active:scale-95 transition"
-            >
-              <UserCheck className="w-4 h-4" /> Kelola Absensi &amp; Penugasan
-            </button>
-          </div>
-
-          <PresenceSummary />
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <MetricCard title="Staff Aktif" value="142" subtext="Tersebar di semua cabang" icon={Users} color="text-indigo-400" />
-            <MetricCard title="Hadir Hari Ini" value="19 Kru" subtext="Driver & Helper Operasional" icon={CheckCircle2} color="text-emerald-400" />
-            <MetricCard title="Ijin / Sakit" value="1" subtext="Dalam pemantauan HR" icon={AlertCircle} color="text-rose-400" />
-            <MetricCard title="Target Rekrutmen" value="85%" subtext="Pencapaian kuota bulan ini" icon={TrendingUp} color="text-emerald-400" />
-          </div>
-
-          <TeamCalendar role="hr_admin" />
+        <div className="animate-in fade-in duration-200">
+          <HrEmployeeRollingView />
         </div>
       )}
 
@@ -1746,11 +1644,11 @@ function createSampleBillingPhotoDataUrl(
 }
 
 const FinanceDashboard: React.FC<{
-  initialMode?: 'monitoring' | 'customer_mapping' | 'billing_app';
+  initialMode?: 'overview' | 'monitoring' | 'customer_mapping' | 'billing_app';
   initialBillingTeamFilter?: 'ALL' | 'FINANCE' | 'SALES';
   onNavigateTab?: (tab: string) => void;
 }> = ({ initialMode = 'monitoring', initialBillingTeamFilter = 'ALL', onNavigateTab }) => {
-  const [financeMode, setFinanceMode] = useState<'monitoring' | 'customer_mapping' | 'billing_app'>(initialMode);
+  const [financeMode, setFinanceMode] = useState<'overview' | 'monitoring' | 'customer_mapping' | 'billing_app'>(initialMode);
   const [billingTeamFilter, setBillingTeamFilter] = useState<'ALL' | 'FINANCE' | 'SALES'>(initialBillingTeamFilter);
   const currentUser = logisticsStore.getCurrentUser();
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
@@ -2999,6 +2897,26 @@ const FinanceDashboard: React.FC<{
             }
           }}
         />
+      ) : financeMode === 'overview' ? (
+        <FinanceOverviewDashboard
+          invoices={invoices}
+          masterCustomers={masterCustomers}
+          collectionLogs={allCollectionLogs}
+          branches={branches}
+          branchFilter={branchFilter}
+          setBranchFilter={setBranchFilter}
+          onNavigateTab={tab => {
+            if (onNavigateTab) {
+              onNavigateTab(tab);
+            } else if (tab === 'finance_customer_mapping') {
+              setFinanceMode('customer_mapping');
+            } else if (tab === 'finance_billing_app') {
+              setFinanceMode('billing_app');
+            } else if (tab === 'finance_dashboard') {
+              setFinanceMode('monitoring');
+            }
+          }}
+        />
       ) : (
         <FinanceMonitoringLedgerView
           invoices={invoices}
@@ -3743,7 +3661,7 @@ const PurchasingDashboard = () => (
 export const DepartmentDashboard: React.FC<{ 
   dashboardType?: 'hr' | 'finance' | 'warehouse' | 'purchasing';
   initialHrTab?: HrSubTab;
-  initialFinanceMode?: 'monitoring' | 'customer_mapping' | 'billing_app';
+  initialFinanceMode?: 'overview' | 'monitoring' | 'customer_mapping' | 'billing_app';
   initialBillingTeamFilter?: 'ALL' | 'FINANCE' | 'SALES';
   onNavigateTab?: (tab: string) => void;
 }> = ({ dashboardType, initialHrTab, initialFinanceMode = 'monitoring', initialBillingTeamFilter = 'ALL', onNavigateTab }) => {
@@ -3764,9 +3682,13 @@ export const DepartmentDashboard: React.FC<{
 
   return (
     <div className="space-y-6">
-      {typeToRender !== 'warehouse' && typeToRender !== 'finance' && (
+      {typeToRender !== 'warehouse' && typeToRender !== 'finance' && !(typeToRender === 'hr' && (!initialHrTab || initialHrTab === 'hr_core')) && (
         <h2 className="text-lg font-black text-slate-900 dark:text-white">
-          Dashboard {typeToRender === 'hr' ? 'Human Resources (1. HR, 2. GA & 3. Training & Development)' : 'Purchasing'}
+          {typeToRender === 'hr'
+            ? initialHrTab?.startsWith('ga_')
+              ? 'General Affairs (GA)'
+              : 'Training & Development'
+            : 'Dashboard Purchasing'}
         </h2>
       )}
       {renderDashboard()}

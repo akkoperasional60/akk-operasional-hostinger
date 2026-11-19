@@ -220,6 +220,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'ga_aset':
     case 'training_videos':
     case 'training_karyawan':
+    case 'finance_overview':
     case 'finance_dashboard':
     case 'finance_customer_mapping':
     case 'finance_billing_app':

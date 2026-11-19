@@ -62,6 +62,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   onSyncWithMasterSku
 }) => {
   const [items, setItems] = useState<DatabaseBarangRecord[]>(() => databaseBarangService.getAll());
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => databaseBarangService.getAll().length === 0);
   const [syncStatus, setSyncStatus] = useState<DatabaseBarangSyncStatus>(() => databaseBarangService.getSyncStatus());
   const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
   const isSuperAdmin = currentUser?.role === 'super_admin';
@@ -293,19 +294,32 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
         if (cameraTargetItem) {
           const freshRecord = databaseBarangService.getAll().find(i => i.id === cameraTargetItem.id) || cameraTargetItem;
-          const existingUrls = Array.isArray(freshRecord.dokumentasiUrls)
-            ? freshRecord.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-            : (freshRecord.dokumentasiUrl && !freshRecord.dokumentasiUrl.startsWith('data:image/svg+xml') ? [freshRecord.dokumentasiUrl] : []);
-          const updatedUrls = [...existingUrls, compressed.dataUrl];
-          const savedItem = databaseBarangService.upsertItem({
-            ...freshRecord,
-            dokumentasiUrls: updatedUrls,
-            dokumentasiUrl: updatedUrls[0]
-          });
+          const uploadRes = await databaseBarangService.uploadPhotosForItem(freshRecord, [compressed.dataUrl]);
           setItems(databaseBarangService.getAll());
-          setCameraTargetItem(savedItem);
-          setPreviewDocItem(prev => (prev && prev.id === savedItem.id ? savedItem : prev));
+          if (uploadRes.deletedOnServer) {
+            stopCamera();
+            setIsCameraModalOpen(false);
+            setCameraTargetItem(null);
+            setPreviewDocItem(prev => (prev && prev.id === freshRecord.id ? null : prev));
+            setFeedbackModal({
+              title: 'Barang Sudah Dihapus',
+              message: uploadRes.error || `Barang ${freshRecord.noBarang} sudah dihapus oleh pengguna lain sehingga foto tidak dikirim.`,
+              variant: 'danger',
+              badge: freshRecord.noBarang
+            });
+            return;
+          }
+          setCameraTargetItem(uploadRes.record);
+          setPreviewDocItem(prev => (prev && prev.id === uploadRes.record.id ? uploadRes.record : prev));
           setCameraSessionCount(prev => prev + 1);
+          if (!uploadRes.success) {
+            setFeedbackModal({
+              title: 'Gagal Mengunggah Foto ke Server',
+              message: uploadRes.error || `Foto barang ${freshRecord.noBarang} gagal dikirim ke server database. Periksa koneksi jaringan Anda lalu coba lagi.`,
+              variant: 'danger',
+              badge: freshRecord.noBarang
+            });
+          }
         } else {
           setDokumentasiUrls(prev => {
             const combined = [...prev, compressed.dataUrl];
@@ -317,7 +331,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       } catch (e) {
         console.error('Gagal menyimpan foto live camera:', e);
       }
-    }, 'image/jpeg', 0.92);
+    }, 'image/jpeg', 1.0);
   };
 
   const triggerCameraForRow = (item: DatabaseBarangRecord) => {
@@ -343,52 +357,52 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     }
   };
 
-  const handleDeletePhotoFromPreview = (item: DatabaseBarangRecord, photoIdx: number) => {
+  const handleDeletePhotoFromPreview = async (item: DatabaseBarangRecord, photoIdx: number) => {
     const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
       ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
       : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
     const removedUrl = existingUrls[photoIdx];
     const updatedUrls = existingUrls.filter((_, idx) => idx !== photoIdx);
 
-    if (removedUrl) {
-      databaseBarangService.deletePhoto(item.noBarang, removedUrl);
-    }
-    const saved = databaseBarangService.upsertItem({
-      ...item,
-      dokumentasiUrls: updatedUrls,
-      dokumentasiUrl: updatedUrls[0] || ''
-    });
+    const saved = removedUrl
+      ? await databaseBarangService.deletePhotoAsync(item.noBarang, removedUrl)
+      : null;
     setItems(databaseBarangService.getAll());
-    setPreviewDocItem(saved);
-    setActivePhotoIndex(prev => Math.max(0, Math.min(prev, updatedUrls.length - 1)));
+    setPreviewDocItem(
+      saved || {
+        ...item,
+        dokumentasiUrls: updatedUrls,
+        dokumentasiUrl: updatedUrls[0] || ''
+      }
+    );
+    setActivePhotoIndex(prev => Math.max(0, Math.min(prev, Math.max(0, updatedUrls.length - 1))));
   };
 
-  const handleClearAllPhotosFromPreview = (item: DatabaseBarangRecord) => {
-    databaseBarangService.clearAllPhotos(item.noBarang);
-    const saved = databaseBarangService.upsertItem({
-      ...item,
-      dokumentasiUrls: [],
-      dokumentasiUrl: ''
-    });
+  const handleClearAllPhotosFromPreview = async (item: DatabaseBarangRecord) => {
+    const saved = await databaseBarangService.clearAllPhotosAsync(item.noBarang);
     setItems(databaseBarangService.getAll());
-    setPreviewDocItem(saved);
+    setPreviewDocItem(
+      saved || {
+        ...item,
+        dokumentasiUrls: [],
+        dokumentasiUrl: ''
+      }
+    );
     setActivePhotoIndex(0);
   };
 
-  const handleSetPrimaryPhotoInPreview = (item: DatabaseBarangRecord, photoIdx: number) => {
+  const handleSetPrimaryPhotoInPreview = async (item: DatabaseBarangRecord, photoIdx: number) => {
     const existingUrls = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
       ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
       : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
     if (photoIdx <= 0 || photoIdx >= existingUrls.length) return;
     const chosen = existingUrls[photoIdx];
     const reordered = [chosen, ...existingUrls.filter((_, idx) => idx !== photoIdx)];
-    const saved = databaseBarangService.upsertItem({
-      ...item,
-      dokumentasiUrls: reordered,
-      dokumentasiUrl: reordered[0] || ''
+    const res = await databaseBarangService.uploadPhotosForItem(item, reordered, {
+      replaceAllUrls: reordered
     });
     setItems(databaseBarangService.getAll());
-    setPreviewDocItem(saved);
+    setPreviewDocItem(res.record);
     setActivePhotoIndex(0);
   };
 
@@ -527,7 +541,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       }
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
-      const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const croppedDataUrl = canvas.toDataURL('image/jpeg', 1.0);
       const updatedUrls = [...existingUrls];
       let nextPhotoIdx = photoIdx;
       if (saveAsNewPhoto) {
@@ -537,13 +551,11 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         updatedUrls[photoIdx] = croppedDataUrl;
       }
 
-      const saved = databaseBarangService.upsertItem({
-        ...item,
-        dokumentasiUrls: updatedUrls,
-        dokumentasiUrl: updatedUrls[0] || ''
+      const uploadRes = await databaseBarangService.uploadPhotosForItem(item, updatedUrls, {
+        replaceAllUrls: updatedUrls
       });
       setItems(databaseBarangService.getAll());
-      setPreviewDocItem(saved);
+      setPreviewDocItem(uploadRes.record);
       setActivePhotoIndex(nextPhotoIdx);
       setIsCropMode(false);
       setPreviewZoom(1);
@@ -586,17 +598,15 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       ctx.rotate(Math.PI / 2);
       ctx.drawImage(img, -natW / 2, -natH / 2, natW, natH);
 
-      const rotatedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const rotatedDataUrl = canvas.toDataURL('image/jpeg', 1.0);
       const updatedUrls = [...existingUrls];
       updatedUrls[photoIdx] = rotatedDataUrl;
 
-      const saved = databaseBarangService.upsertItem({
-        ...item,
-        dokumentasiUrls: updatedUrls,
-        dokumentasiUrl: updatedUrls[0] || ''
+      const uploadRes = await databaseBarangService.uploadPhotosForItem(item, updatedUrls, {
+        replaceAllUrls: updatedUrls
       });
       setItems(databaseBarangService.getAll());
-      setPreviewDocItem(saved);
+      setPreviewDocItem(uploadRes.record);
       setPreviewZoom(1);
       setPreviewPan({ x: 0, y: 0 });
     } catch (err) {
@@ -614,37 +624,63 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       const results = await Promise.all(
         files.map(f =>
           compressDocumentationPhoto(f, {
-            maxDimension: 1600,
-            initialQuality: 0.92
+            maxDimension: 1440,
+            initialQuality: 0.88
           })
         )
       );
       const newUrls = results.map(r => r.dataUrl);
       const freshRecord = databaseBarangService.getAll().find(i => i.id === targetItem.id) || targetItem;
-      const existingUrls = Array.isArray(freshRecord.dokumentasiUrls)
-        ? freshRecord.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
-        : (freshRecord.dokumentasiUrl && !freshRecord.dokumentasiUrl.startsWith('data:image/svg+xml') ? [freshRecord.dokumentasiUrl] : []);
-      const updatedUrls = [...existingUrls, ...newUrls];
 
-      const saved = databaseBarangService.upsertItem({
-        ...freshRecord,
-        dokumentasiUrls: updatedUrls,
-        dokumentasiUrl: updatedUrls[0]
-      });
+      // Langsung unggah foto ukuran asli ke server database
+      const uploadRes = await databaseBarangService.uploadPhotosForItem(freshRecord, newUrls);
       setItems(databaseBarangService.getAll());
+
+      if (uploadRes.deletedOnServer) {
+        if (previewDocItem && previewDocItem.id === freshRecord.id) {
+          setPreviewDocItem(null);
+        }
+        setFeedbackModal({
+          title: 'Barang Sudah Dihapus',
+          message: uploadRes.error || `Barang ${freshRecord.noBarang} sudah dihapus dari database oleh pengguna lain sehingga foto tidak dikirim.`,
+          variant: 'danger',
+          badge: freshRecord.noBarang
+        });
+        return;
+      }
+
+      const saved = uploadRes.record;
+      const savedUrls = Array.isArray(saved.dokumentasiUrls) ? saved.dokumentasiUrls : [];
       if (previewDocItem && previewDocItem.id === saved.id) {
         setPreviewDocItem(saved);
-        setActivePhotoIndex(updatedUrls.length - 1);
+        setActivePhotoIndex(Math.max(0, savedUrls.length - 1));
       }
       if (cameraTargetItem && cameraTargetItem.id === saved.id) {
         setCameraTargetItem(saved);
       }
-      setFeedbackModal({
-        title: 'Foto Berhasil Disimpan',
-        message: `Foto barang ${saved.noBarang} berhasil disimpan.`
-      });
+
+      if (uploadRes.success) {
+        setFeedbackModal({
+          title: 'Foto Langsung Terunggah',
+          message: `${newUrls.length} foto barang ${saved.noBarang} langsung tersimpan ke server database dalam kualitas & ukuran file asli.`,
+          variant: 'success',
+          badge: saved.noBarang
+        });
+      } else {
+        setFeedbackModal({
+          title: 'Gagal Mengunggah Foto ke Server',
+          message: uploadRes.error || `Foto barang ${freshRecord.noBarang} gagal dikirim ke server database.`,
+          variant: 'danger',
+          badge: freshRecord.noBarang
+        });
+      }
     } catch (err) {
       console.error('Gagal upload foto kamera:', err);
+      setFeedbackModal({
+        title: 'Gagal Memproses Foto',
+        message: 'Terjadi kendala saat memproses gambar. Silakan coba ambil ulang foto.',
+        variant: 'danger'
+      });
     } finally {
       e.target.value = '';
       setActiveCameraRowItem(null);
@@ -657,20 +693,39 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
   };
 
   useEffect(() => {
-    databaseBarangService.ensureHydrated().then(loaded => {
-      if (Array.isArray(loaded)) {
-        setItems(loaded);
-      }
-      void databaseBarangService.syncRealtimePhotosFromServer().then(changed => {
-        if (changed) {
-          setItems(databaseBarangService.getAll());
+    let cancelled = false;
+    if (databaseBarangService.getAll().length === 0) {
+      setIsInitialLoading(true);
+    }
+    databaseBarangService
+      .ensureHydrated()
+      .then(loaded => {
+        if (cancelled) return;
+        if (Array.isArray(loaded)) {
+          setItems(loaded);
+        }
+        setIsInitialLoading(false);
+        if (Array.isArray(loaded) && loaded.length > 0) {
+          void databaseBarangService.syncRealtimePhotosFromServer().then(changed => {
+            if (!cancelled && changed) {
+              setItems(databaseBarangService.getAll());
+            }
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsInitialLoading(false);
         }
       });
-    });
     void refreshPhotoDeleteRequests();
 
     const sync = () => {
-      setItems(databaseBarangService.getAll());
+      const latest = databaseBarangService.getAll();
+      setItems(latest);
+      if (latest.length > 0) {
+        setIsInitialLoading(false);
+      }
       setCurrentUser(logisticsStore.getCurrentUser());
     };
     const handleSyncStatus = (e: Event) => {
@@ -688,6 +743,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       setCurrentUser(logisticsStore.getCurrentUser());
     });
     return () => {
+      cancelled = true;
       window.removeEventListener('akk-database-barang-updated', sync);
       window.removeEventListener('akk-database-barang-sync-status', handleSyncStatus);
       window.removeEventListener('storage', sync);
@@ -701,7 +757,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       result = await databaseBarangService.forceSyncNow();
       await refreshPhotoDeleteRequests();
     } catch (err: any) {
-      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server database MySQL.' });
+      setFeedbackModal({ title: 'Sinkronisasi Gagal', message: err?.message || 'Gagal menghubungi server database.' });
       return;
     }
     const syncError = databaseBarangService.getSyncStatus().error;
@@ -715,42 +771,19 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
     ).length;
     setFeedbackModal({
-      title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi MySQL (HP ↔ Browser PC) Berhasil' : 'Server Belum Memiliki Data Barang'),
+      title: syncError ? 'Sinkronisasi Belum Tuntas' : (result.count > 0 ? 'Sinkronisasi Server Berhasil' : 'Server Belum Memiliki Data Barang'),
       message:
         syncError ? `Server melaporkan masalah: ${syncError}.` : result.count > 0
-          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto barang telah tersinkronisasi penuh langsung dari MySQL ke seluruh perangkat (HP & Browser PC).`
-          : 'Saat ini belum ada data di server database MySQL.'
+          ? `Sebanyak ${result.count.toLocaleString('id-ID')} barang dan ${photoCountNow.toLocaleString('id-ID')} dokumentasi foto telah disinkronkan langsung dari server database.`
+          : 'Saat ini belum ada data di server database.'
     });
-  };
-
-  const handleRecoverLocalPhotos = async () => {
-    try {
-      const result = await databaseBarangService.recoverLocalPhotosToMysql();
-      const latestItems = databaseBarangService.getAll();
-      setItems(latestItems);
-      await refreshPhotoDeleteRequests();
-      const syncedPhotoCount = latestItems.filter(
-        it =>
-          (Array.isArray(it.dokumentasiUrls) && it.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml'))) ||
-          (it.dokumentasiUrl && !it.dokumentasiUrl.startsWith('data:image/svg+xml'))
-      ).length;
-      setFeedbackModal({
-        title: 'Sinkronisasi Foto Dokumentasi MySQL Selesai',
-        message: `Total SKU berfoto terdokumentasi di MySQL saat ini: ${Math.max(syncedPhotoCount, result.afterPhotoSkuCount)} barang (Berhasil disinkronkan: ${Math.max(result.succeededSkuCount, syncedPhotoCount)}, Gagal: ${result.failedSkuCount}).`
-      });
-    } catch (err: any) {
-      setFeedbackModal({
-        title: 'Gagal Menghubungkan Foto ke Server Database MySQL',
-        message: `${err?.message || 'Server belum tersedia'}.`
-      });
-    }
   };
 
   const confirmDeletePhoto = async () => {
     if (!photoToDelete) return;
     const { item, photoIdx, isAll, photoUrl } = photoToDelete;
 
-    // Jika bukan Super Admin, kirim permohonan persetujuan hapus foto ke Super Admin di MySQL
+    // Jika bukan Super Admin, kirim permohonan persetujuan hapus foto ke Super Admin
     if (!isSuperAdmin) {
       setIsSubmittingPhotoDelete(true);
       try {
@@ -770,7 +803,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         setFeedbackModal({
           title: res.success ? 'Menunggu Persetujuan Super Admin' : 'Gagal Mengajukan Hapus Foto',
           message: res.success
-            ? `Permohonan hapus dokumentasi foto barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dikirim ke Super Admin. Foto hanya akan terhapus dari MySQL setelah disetujui oleh Super Admin.`
+            ? `Permohonan hapus dokumentasi foto barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dikirim ke Super Admin. Foto hanya akan terhapus dari database setelah disetujui oleh Super Admin.`
             : (res.message || 'Gagal mengirim permohonan ke Super Admin.'),
           variant: res.success ? 'info' : 'danger',
           badge: item.noBarang
@@ -781,17 +814,17 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
       return;
     }
 
-    // Jika Super Admin, langsung hapus dari MySQL & perbarui tampilan
+    // Jika Super Admin, langsung hapus dari server database & perbarui tampilan
     if (isAll) {
-      handleClearAllPhotosFromPreview(item);
+      await handleClearAllPhotosFromPreview(item);
     } else {
-      handleDeletePhotoFromPreview(item, photoIdx);
+      await handleDeletePhotoFromPreview(item, photoIdx);
     }
     setPhotoToDelete(null);
     setDeletePhotoReason('');
     setFeedbackModal({
       title: 'Foto Dokumentasi Dihapus (Super Admin)',
-      message: `Foto dokumentasi barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dihapus secara permanen dari database MySQL.`,
+      message: `Foto dokumentasi barang ${item.noBarang} (${item.deskripsiBarang || item.keteranganBarang}) telah dihapus secara permanen dari server database.`,
       variant: 'danger',
       badge: item.noBarang
     });
@@ -808,9 +841,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     if (res.success) {
       if (decision === 'approved') {
         if (reqItem.clearAll) {
-          databaseBarangService.clearAllPhotos(reqItem.noBarang);
+          await databaseBarangService.clearAllPhotosAsync(reqItem.noBarang);
         } else {
-          databaseBarangService.deletePhoto(reqItem.noBarang, reqItem.photoUrl);
+          await databaseBarangService.deletePhotoAsync(reqItem.noBarang, reqItem.photoUrl);
         }
       }
       await refreshPhotoDeleteRequests();
@@ -819,8 +852,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         title: decision === 'approved' ? 'Penghapusan Foto Disetujui' : 'Permohonan Hapus Foto Ditolak',
         message:
           decision === 'approved'
-            ? `Dokumentasi foto untuk barang ${reqItem.noBarang} (${reqItem.deskripsiBarang}) telah disetujui dan dihapus dari database MySQL.`
-            : `Permohonan hapus foto untuk barang ${reqItem.noBarang} oleh ${reqItem.requestedByName} telah ditolak. Foto tetap tersimpan aman di MySQL.`,
+            ? `Dokumentasi foto untuk barang ${reqItem.noBarang} (${reqItem.deskripsiBarang}) telah disetujui dan dihapus dari server database.`
+            : `Permohonan hapus foto untuk barang ${reqItem.noBarang} oleh ${reqItem.requestedByName} telah ditolak. Foto tetap tersimpan aman di server database.`,
         variant: decision === 'approved' ? 'danger' : 'info',
         badge: reqItem.noBarang
       });
@@ -852,7 +885,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     items.forEach(i => {
       const has = Boolean(
         (i.dokumentasiUrls && i.dokumentasiUrls.length > 0) ||
-        (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml') && i.dokumentasiUrl.trim() !== '')
+        (i.dokumentasiUrl && !i.dokumentasiUrl.startsWith('data:image/svg+xml') && i.dokumentasiUrl.trim() !== '') ||
+        i.hasPhoto
       );
       if (has) withPhoto++;
       else withoutPhoto++;
@@ -883,7 +917,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
 
       const hasCustomPhoto = Boolean(
         (item.dokumentasiUrls && item.dokumentasiUrls.length > 0) ||
-        (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== '')
+        (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== '') ||
+        item.hasPhoto
       );
       const matchFoto =
         fotoFilter === 'ALL' ||
@@ -975,6 +1010,22 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setIsFormModalOpen(true);
   };
 
+  const openPreviewDocModal = (item: DatabaseBarangRecord) => {
+    setPreviewDocItem(item);
+    setActivePhotoIndex(0);
+    const hasLoadedUrls =
+      (Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.some(u => u && !u.startsWith('data:image/svg+xml'))) ||
+      (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') && item.dokumentasiUrl.trim() !== '');
+    if (!hasLoadedUrls && item.hasPhoto) {
+      void databaseBarangService.fetchItemPhotosFromServer(item.noBarang).then(updated => {
+        if (updated) {
+          setItems(databaseBarangService.getAll());
+          setPreviewDocItem(prev => (prev && prev.noBarang === updated.noBarang ? updated : prev));
+        }
+      });
+    }
+  };
+
   const openEditModal = (item: DatabaseBarangRecord) => {
     setEditingItem(item);
     setNoBarang(item.noBarang);
@@ -996,6 +1047,16 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     setDokumentasiUrls(validUrls);
     setDokumentasiUrl(validUrls[0] || '');
     setIsFormModalOpen(true);
+
+    if (validUrls.length === 0 && item.hasPhoto) {
+      void databaseBarangService.fetchItemPhotosFromServer(item.noBarang).then(updated => {
+        if (updated && Array.isArray(updated.dokumentasiUrls) && updated.dokumentasiUrls.length > 0) {
+          setItems(databaseBarangService.getAll());
+          setDokumentasiUrls(updated.dokumentasiUrls);
+          setDokumentasiUrl(updated.dokumentasiUrls[0] || '');
+        }
+      });
+    }
   };
 
   const handleModalPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1052,7 +1113,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const primaryDoc = dokumentasiUrls[0] || dokumentasiUrl || '';
     const calculatedVol = volM3 > 0 ? volM3 : calculateVolM3(panjangCm, lebarCm, tinggiCm);
 
-    const saved = databaseBarangService.upsertItem({
+    const saveRes = await databaseBarangService.upsertItemAsync({
       id: editingItem?.id,
       noBarang: noBarang.trim().toUpperCase(),
       deskripsiBarang: deskripsiBarang.trim(),
@@ -1075,31 +1136,50 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
     const all = databaseBarangService.getAll();
     setItems(all);
     if (onSyncWithMasterSku) onSyncWithMasterSku(all);
-    // Langsung tutup modal seketika tanpa menunggu jaringan
     setIsFormModalOpen(false);
 
-    // Keterangan singkat dan tidak bertele-tele
-    setFeedbackModal({
-      title: 'Data Berhasil Disimpan',
-      message: `Data barang "${saved.deskripsiBarang}" berhasil disimpan.`
-    });
+    if (saveRes.success) {
+      setFeedbackModal({
+        title: 'Data Berhasil Disimpan',
+        message: `Data barang "${saveRes.record.deskripsiBarang}" langsung tersimpan di server database.`,
+        variant: 'success',
+        badge: saveRes.record.noBarang
+      });
+    } else {
+      setFeedbackModal({
+        title: 'Gagal Menyimpan ke Server',
+        message: saveRes.error || 'Gagal menyimpan data ke server database. Periksa koneksi internet Anda.',
+        variant: 'danger'
+      });
+    }
   };
 
   const handleDeleteItem = (item: DatabaseBarangRecord) => {
     setItemToDelete(item);
   };
 
-  const confirmDeleteItem = () => {
+  const confirmDeleteItem = async () => {
     if (!itemToDelete) return;
     const target = itemToDelete;
-    databaseBarangService.deleteItem(target.id);
+    const delRes = await databaseBarangService.deleteItemAsync(target.id, target.noBarang);
     const all = databaseBarangService.getAll();
     setItems(all);
     if (onSyncWithMasterSku) onSyncWithMasterSku(all);
     setItemToDelete(null);
+
+    if (!delRes.success) {
+      setFeedbackModal({
+        title: 'Gagal Menghapus Barang',
+        message: delRes.error || `Gagal menghapus barang "${target.deskripsiBarang || target.keteranganBarang}" dari server database.`,
+        variant: 'danger',
+        badge: target.noBarang
+      });
+      return;
+    }
+
     setFeedbackModal({
-      title: 'Barang Berhasil Dihapus',
-      message: `Data barang "${target.deskripsiBarang || target.keteranganBarang}" berhasil dihapus.`,
+      title: 'Barang Berhasil Dihapus Permanen',
+      message: `Data barang "${target.deskripsiBarang || target.keteranganBarang}" berhasil dihapus permanen dari server database.`,
       variant: 'danger',
       badge: target.noBarang
     });
@@ -1772,13 +1852,19 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={handleRecoverLocalPhotos}
-            disabled={syncStatus.isSyncing}
-            className="px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-bold transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
-            title="Kirim seluruh foto dari browser ini ke server database dengan cepat"
+            onClick={handleManualServerSync}
+            disabled={syncStatus.isSyncing || syncStatus.isUploadingPhoto}
+            className="px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 text-xs font-bold transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
+            title="Muat ulang & sinkronkan data barang serta foto langsung dari server database"
           >
-            {syncStatus.isSyncing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-            <span>{syncStatus.isSyncing ? `Memuat (${syncStatus.progressPct}%)...` : 'Load Foto ke DB'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${(syncStatus.isSyncing || syncStatus.isUploadingPhoto) ? 'animate-spin' : ''}`} />
+            <span>
+              {syncStatus.isSyncing
+                ? `Memuat (${syncStatus.progressPct}%)...`
+                : syncStatus.isUploadingPhoto
+                ? 'Mengunggah Foto...'
+                : 'Sinkronisasi Server'}
+            </span>
           </button>
           <button
             type="button"
@@ -1888,8 +1974,8 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-300">
                   {isSuperAdmin
-                    ? 'Sebagai Super Admin, Anda memiliki hak akses penuh untuk menyetujui atau menolak penghapusan foto dokumentasi dari database MySQL.'
-                    : 'Penghapusan foto dokumentasi memerlukan persetujuan Super Admin sebelum dihapus permanen dari database MySQL.'}
+                    ? 'Sebagai Super Admin, Anda memiliki hak akses penuh untuk menyetujui atau menolak penghapusan foto dokumentasi dari server database.'
+                    : 'Penghapusan foto dokumentasi memerlukan persetujuan Super Admin sebelum dihapus permanen dari server database.'}
                 </p>
               </div>
             </div>
@@ -1936,7 +2022,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                         type="button"
                         onClick={() => handleDecidePhotoDeleteRequest(req, 'approved')}
                         className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition shadow-2xs"
-                        title="Setujui & Hapus Foto dari Database MySQL"
+                        title="Setujui & Hapus Foto dari Server Database"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>Setujui Hapus</span>
@@ -2184,7 +2270,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       : item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml')
                       ? [item.dokumentasiUrl]
                       : [];
-                  const hasCustomPhoto = photoList.length > 0;
+                  const hasCustomPhoto = photoList.length > 0 || Boolean(item.hasPhoto);
 
                   return (
                     <div
@@ -2214,12 +2300,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             <>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setPreviewDocItem(item);
-                                  setActivePhotoIndex(0);
-                                }}
+                                onClick={() => openPreviewDocModal(item)}
                                 className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/70"
-                                title={`Lihat ${photoList.length} Foto Dokumentasi`}
+                                title={photoList.length > 0 ? `Lihat ${photoList.length} Foto Dokumentasi` : 'Lihat Foto Dokumentasi'}
                               >
                                 <Eye className="w-3.5 h-3.5" />
                                 {photoList.length > 1 && (
@@ -2293,20 +2376,29 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 })
               ) : (
                 <div className="py-10 px-4 text-center space-y-3">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold">
-                    {items.length === 0
-                      ? 'Database Barang sedang disinkronkan atau belum diunggah dari komputer (PC) ke server.'
-                      : 'Tidak ada data barang yang sesuai filter pencarian.'}
-                  </p>
-                  {items.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={handleManualServerSync}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
-                      <span>Muat &amp; Sinkronkan Data dari Server</span>
-                    </button>
+                  {(isInitialLoading || syncStatus.isSyncing) && items.length === 0 ? (
+                    <div className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 text-xs font-bold">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Memuat data Database Barang dari server...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold">
+                        {items.length === 0
+                          ? (syncStatus.error || 'Data barang dari server belum termuat. Klik tombol di bawah untuk memuat ulang.')
+                          : 'Tidak ada data barang yang sesuai filter pencarian.'}
+                      </p>
+                      {items.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={handleManualServerSync}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                          <span>Muat &amp; Sinkronkan Data dari Server</span>
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -2370,7 +2462,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                       const photoList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
                         ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
                         : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
-                      const hasCustomPhoto = photoList.length > 0;
+                      const hasCustomPhoto = photoList.length > 0 || Boolean(item.hasPhoto);
 
                       return (
                         <tr key={item.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition">
@@ -2441,12 +2533,9 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setPreviewDocItem(item);
-                                      setActivePhotoIndex(0);
-                                    }}
+                                    onClick={() => openPreviewDocModal(item)}
                                     className="relative p-1 rounded-md bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-700 dark:text-blue-300 transition cursor-pointer"
-                                    title={`Lihat ${photoList.length} Foto Dokumentasi`}
+                                    title={photoList.length > 0 ? `Lihat ${photoList.length} Foto Dokumentasi` : 'Lihat Foto Dokumentasi'}
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                     {photoList.length > 1 && (
@@ -2481,7 +2570,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                   ) : (
                     <tr>
                       <td colSpan={7} className="py-10 text-center text-slate-400 text-xs">
-                        Tidak ada data barang yang sesuai filter pencarian.
+                        {(isInitialLoading || syncStatus.isSyncing) && items.length === 0 ? (
+                          <div className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold">
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Memuat data Database Barang dari server...</span>
+                          </div>
+                        ) : items.length === 0 ? (
+                          <div className="space-y-2.5">
+                            <p className="text-slate-500 dark:text-slate-400 font-semibold">
+                              {syncStatus.error || 'Data barang dari server belum termuat.'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={handleManualServerSync}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs cursor-pointer"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                              <span>Muat Ulang Data dari Server</span>
+                            </button>
+                          </div>
+                        ) : (
+                          'Tidak ada data barang yang sesuai filter pencarian.'
+                        )}
                       </td>
                     </tr>
                   )}
@@ -2608,20 +2718,17 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                             >
                               <Camera className="w-3.5 h-3.5" />
                             </button>
-                            {((Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0) || item.dokumentasiUrl) && (() => {
+                            {((Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0) || item.dokumentasiUrl || item.hasPhoto) && (() => {
                               const pList = Array.isArray(item.dokumentasiUrls) && item.dokumentasiUrls.length > 0
                                 ? item.dokumentasiUrls.filter(u => u && !u.startsWith('data:image/svg+xml'))
                                 : (item.dokumentasiUrl && !item.dokumentasiUrl.startsWith('data:image/svg+xml') ? [item.dokumentasiUrl] : []);
-                              if (pList.length === 0) return null;
+                              if (pList.length === 0 && !item.hasPhoto) return null;
                               return (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setPreviewDocItem(item);
-                                    setActivePhotoIndex(0);
-                                  }}
+                                  onClick={() => openPreviewDocModal(item)}
                                   className="relative p-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition cursor-pointer"
-                                  title={`Lihat ${pList.length} Foto Dokumentasi`}
+                                  title={pList.length > 0 ? `Lihat ${pList.length} Foto Dokumentasi` : 'Lihat Foto Dokumentasi'}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                   {pList.length > 1 && (
@@ -2656,7 +2763,28 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                 ) : (
                   <tr>
                     <td colSpan={14} className="py-8 text-center text-slate-400 text-xs">
-                      Tidak ada data barang yang sesuai pencarian.
+                      {(isInitialLoading || syncStatus.isSyncing) && items.length === 0 ? (
+                        <div className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Memuat data Database Barang dari server...</span>
+                        </div>
+                      ) : items.length === 0 ? (
+                        <div className="space-y-2.5">
+                          <p className="text-slate-500 dark:text-slate-400 font-semibold">
+                            {syncStatus.error || 'Data barang dari server belum termuat.'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleManualServerSync}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                            <span>Muat Ulang Data dari Server</span>
+                          </button>
+                        </div>
+                      ) : (
+                        'Tidak ada data barang yang sesuai pencarian.'
+                      )}
                     </td>
                   </tr>
                 )}
@@ -2999,7 +3127,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                         4. Foto Dokumentasi Barang (Bisa Ambil Langsung dari HP)
                       </div>
                       <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                        Bisa jepret langsung pakai kamera HP atau pilih dari galeri. Otomatis dikompresi agar hemat memori.
+                        Bisa jepret langsung pakai kamera HP atau pilih dari galeri. Ukuran &amp; kualitas file asli dipertahankan tanpa kompresi.
                       </div>
                     </div>
                   </div>
@@ -3031,7 +3159,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     {/* Tombol Unggah File / Galeri */}
                     <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-xs transition">
                       <Upload className="w-3.5 h-3.5" />
-                      <span>{isCompressingPhoto ? 'Mengompres...' : '📁 Pilih Galeri / File'}</span>
+                      <span>{isCompressingPhoto ? 'Memuat Foto...' : '📁 Pilih Galeri / File'}</span>
                       <input
                         type="file"
                         multiple
@@ -3073,7 +3201,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between pt-1">
                       <span>Total {dokumentasiUrls.length} foto siap disimpan untuk barang ini.</span>
                       <span className="text-emerald-600 dark:text-emerald-400 font-bold text-[10px]">
-                        ✓ Terkompresi Otomatis
+                        ✓ Ukuran File Asli Dipertahankan
                       </span>
                     </div>
                   </div>
@@ -4254,7 +4382,7 @@ export const WarehouseDatabaseBarangView: React.FC<WarehouseDatabaseBarangViewPr
                     <span className="text-rose-600 dark:text-rose-400 font-black">
                       {photoToDelete.item.deskripsiBarang || photoToDelete.item.keteranganBarang || photoToDelete.item.noBarang}
                     </span>{' '}
-                    secara permanen dari database MySQL?
+                    secara permanen dari server database?
                   </>
                 ) : (
                   <>
