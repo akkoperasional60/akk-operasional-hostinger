@@ -1,7 +1,15 @@
 import { UserProfile, UserRole, UserPermissions } from '../types';
 
 export const isSpvLogistikRole = (role: UserRole | string): boolean => {
-  return role === 'spv_logistik' || role === 'spv logistik' || role === 'dispatcher' || role === 'operasional' || role === 'pengiriman';
+  const r = String(role || '');
+  return (
+    r === 'spv_logistik' ||
+    r === 'spv logistik' ||
+    r === 'dispatcher' ||
+    r === 'operasional' ||
+    r === 'koordinator_driver' ||
+    r === 'pengiriman'
+  );
 };
 
 export const isDispatcherRole = (role: UserRole | string): boolean => {
@@ -39,37 +47,45 @@ export const hasRequiredRole = (
 };
 
 export const getUserRoleDisplayTitle = (role: UserRole | string): string => {
-  switch (role) {
+  switch (String(role || '')) {
     case 'super_admin':
-      return 'Super Admin / Manager';
+      return 'Super Admin';
     case 'dispatcher':
     case 'spv_logistik':
     case 'spv logistik':
       return 'SPV Logistik';
     case 'operasional':
-      return 'Operasional (Operational Lead)';
-    case 'pengiriman':
-      return 'Pengiriman';
+      return 'SPV Operasional';
+    case 'koordinator_driver':
+      return 'Koordinator Driver';
     case 'security':
-      return 'Security (Pos Satpam & Keamanan)';
+      return 'Security';
     case 'driver':
-      return 'Kru Supir / Driver';
+      return 'Driver';
     case 'crew_helper':
-      return 'Kru Helper / Kernet';
+      return 'Helper';
     case 'sales_admin':
       return 'Adm. Penjualan';
+    case 'spv_sales_admin':
+      return 'SPV Adm Penjualan';
     case 'purchasing_admin':
       return 'Adm. Pembelian';
+    case 'spv_purchasing_admin':
+      return 'SPV Adm Pembelian';
     case 'hr_admin':
-      return 'HR Admin';
+      return 'Human Resource Development';
     case 'finance_tax_admin':
-      return 'Finance & Tax';
+      return 'Adm Finance & Tax';
     case 'warehouse_admin':
       return 'Gudang';
+    case 'koordinator_gudang':
+      return 'Koordinator Gudang';
     case 'marketing_online':
       return 'Marketing Online';
     case 'marketing_offline':
       return 'Marketing Offline';
+    case 'spv_marketing_offline':
+      return 'SPV Marketing Offline';
     case 'unassigned':
       return 'Perlu Diisi (Belum Ditentukan)';
     default:
@@ -78,20 +94,23 @@ export const getUserRoleDisplayTitle = (role: UserRole | string): string => {
 };
 
 export const getDefaultTabForRole = (role: UserRole | string): string => {
-  switch (role) {
+  switch (String(role || '')) {
     case 'super_admin':
       return 'dashboard';
     case 'spv_logistik':
     case 'dispatcher':
     case 'operasional':
+    case 'koordinator_driver':
     case 'pengiriman':
       return 'operational_dashboard';
     case 'driver':
     case 'crew_helper':
       return 'driver_portal';
     case 'sales_admin':
+    case 'spv_sales_admin':
       return 'sales_dashboard';
     case 'purchasing_admin':
+    case 'spv_purchasing_admin':
       return 'purchasing_dashboard';
     case 'hr_admin':
       return 'hr_dashboard';
@@ -100,10 +119,12 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
     case 'finance_tax_admin':
       return 'finance_dashboard';
     case 'warehouse_admin':
+    case 'koordinator_gudang':
       return 'warehouse_scanner';
     case 'marketing_online':
       return 'marketing_online';
     case 'marketing_offline':
+    case 'spv_marketing_offline':
       return 'marketing_offline';
     default:
       return 'operational_dashboard';
@@ -111,21 +132,32 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
 };
 
 export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermissions['modules'] => {
-  const isAll = role === 'super_admin';
-  const isLogistikStaff = role === 'spv_logistik' || role === 'spv logistik' || role === 'dispatcher' || role === 'operasional' || role === 'pengiriman';
-  const isCrew = role === 'driver' || role === 'crew_helper';
-  const isSales = role === 'sales_admin';
-  const isWarehouse = role === 'warehouse_admin';
-  const isMktOnline = role === 'marketing_online';
-  const isMktOffline = role === 'marketing_offline';
-  const isPurchasing = role === 'purchasing_admin';
-  const isFinance = role === 'finance_tax_admin';
-  const isHr = role === 'hr_admin';
-  const isSecurity = role === 'security';
+  const r = String(role || '');
+  const isAll = r === 'super_admin';
+  const isLogistikStaff =
+    r === 'spv_logistik' ||
+    r === 'spv logistik' ||
+    r === 'dispatcher' ||
+    r === 'operasional' ||
+    r === 'koordinator_driver' ||
+    r === 'pengiriman';
+  const isCrew = r === 'driver' || r === 'crew_helper';
+  const isSales = r === 'sales_admin' || r === 'spv_sales_admin';
+  const isSpvSales = r === 'spv_sales_admin';
+  const isWarehouse = r === 'warehouse_admin' || r === 'koordinator_gudang';
+  const isKoordinatorGudang = r === 'koordinator_gudang';
+  const isMktOnline = r === 'marketing_online';
+  const isMktOffline = r === 'marketing_offline' || r === 'spv_marketing_offline';
+  const isSpvMktOffline = r === 'spv_marketing_offline';
+  const isPurchasing = r === 'purchasing_admin' || r === 'spv_purchasing_admin';
+  const isSpvPurchasing = r === 'spv_purchasing_admin';
+  const isFinance = r === 'finance_tax_admin';
+  const isHr = r === 'hr_admin';
+  const isSecurity = r === 'security';
 
   return {
     logistics: {
-      enabled: isAll || isLogistikStaff || isCrew,
+      enabled: isAll || isLogistikStaff || isCrew || isKoordinatorGudang,
       subMenus: {
         operational_dashboard: isAll || isLogistikStaff ? 'full_access' : 'none',
         schedules: isAll || isLogistikStaff ? 'full_access' : 'none',
@@ -140,7 +172,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         spareparts: isAll || isLogistikStaff ? 'full_access' : 'none',
         maintenance_costs: isAll || isLogistikStaff ? 'full_access' : 'none',
         fuel_efficiency: isAll || isLogistikStaff ? 'full_access' : 'none',
-        warehouse_fleet_cubication: isAll || isLogistikStaff ? 'full_access' : 'none',
+        warehouse_fleet_cubication: isAll || isLogistikStaff || isKoordinatorGudang ? 'full_access' : 'none',
         // Legacy keys preserved for backward compatibility
         dashboard_logistik: isAll || isLogistikStaff ? 'full_access' : 'none',
         armada_ceklis: isAll || isLogistikStaff ? 'full_access' : 'none',
@@ -179,26 +211,26 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       }
     },
     warehouse: {
-      enabled: isAll || isWarehouse,
+      enabled: isAll || isWarehouse || isSpvPurchasing,
       subMenus: {
-        warehouse_scanner: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_scanner: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         warehouse_dashboard: isAll || isWarehouse ? 'full_access' : 'none',
-        warehouse_inventory: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_inventory: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         warehouse_slotting: isAll || isWarehouse ? 'full_access' : 'none',
         warehouse_inbound: isAll || isWarehouse ? 'full_access' : 'none',
         warehouse_outbound: isAll || isWarehouse ? 'full_access' : 'none',
-        warehouse_opname: isAll || isWarehouse ? 'full_access' : 'none',
+        warehouse_opname: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         // Legacy keys
-        stok_barang: isAll || isWarehouse ? 'full_access' : 'none',
+        stok_barang: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         permintaan_barang: isAll || isWarehouse ? 'full_access' : 'none',
-        opname_stok: isAll || isWarehouse ? 'full_access' : 'none',
+        opname_stok: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         ceklis_muat: isAll || isWarehouse ? 'full_access' : 'none'
       }
     },
     marketing: {
-      enabled: isAll || isMktOnline || isMktOffline,
+      enabled: isAll || isMktOnline || isMktOffline || isSpvSales,
       subMenus: {
-        marketing_online: isAll || isMktOnline ? 'full_access' : 'none',
+        marketing_online: isAll || isMktOnline ? 'full_access' : isSpvMktOffline ? 'read_only' : 'none',
         marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
         marketing_invoice_validation: isAll || isMktOffline || isMktOnline || isSales ? 'full_access' : 'none',
         marketing_sales_mapping: isAll || isMktOffline || isMktOnline || isSales || isFinance ? 'full_access' : 'none',
@@ -206,7 +238,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         marketing_billing_app: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
         // Legacy keys
-        kampanye: isAll || isMktOnline ? 'full_access' : 'none',
+        kampanye: isAll || isMktOnline ? 'full_access' : isSpvMktOffline ? 'read_only' : 'none',
         leads_pipeline: isAll || isMktOffline ? 'full_access' : 'none',
         laporan_kunjungan: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none'
       }
@@ -286,7 +318,7 @@ export interface RolePolicySummary {
 export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
   {
     roleKey: 'super_admin',
-    title: 'Super Admin / Manager',
+    title: 'Super Admin',
     badgeColor: 'text-amber-400 border-amber-500/30 bg-amber-500/10',
     allowedModules: [
       'Executive & Operational Dashboards',
@@ -718,14 +750,30 @@ export const normalizeUserPermissions = (
     const normalizedBranches: NonNullable<UserPermissions['branchPermissions']> = {};
     Object.entries(permissions.branchPermissions).forEach(([branchId, branchEntry]) => {
       if (!branchEntry) return;
-      const normBranchMods = normalizeSingleModulesMap(branchEntry.modules || {}, normalizedTopModules);
+      const isBranchEnabled = Boolean(branchEntry.enabled);
+      const normBranchMods = normalizeSingleModulesMap(
+        branchEntry.modules || {},
+        isBranchEnabled ? undefined : undefined
+      );
+      if (!isBranchEnabled) {
+        Object.keys(normBranchMods).forEach(modId => {
+          const cleanSubs: Record<string, 'read_only' | 'full_access' | 'none'> = {};
+          Object.keys(normBranchMods[modId]?.subMenus || {}).forEach(k => {
+            cleanSubs[k] = 'none';
+          });
+          normBranchMods[modId] = {
+            enabled: false,
+            subMenus: cleanSubs
+          };
+        });
+      }
       const anyModActive = Object.values(normBranchMods).some(
         m => m?.enabled && Object.values(m.subMenus || {}).some(v => v === 'full_access' || v === 'read_only')
       );
       normalizedBranches[branchId] = {
         ...branchEntry,
         branchId: branchEntry.branchId || branchId,
-        enabled: Boolean(branchEntry.enabled && anyModActive),
+        enabled: Boolean(isBranchEnabled && anyModActive),
         modules: normBranchMods
       };
     });

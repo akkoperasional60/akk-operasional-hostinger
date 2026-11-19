@@ -5,11 +5,6 @@ interface Props {
   children?: ReactNode;
 }
 
-interface State {
-  hasError: boolean;
-  error?: Error;
-}
-
 const CACHE_KEYS_TO_PURGE_ON_ERROR = [
   'akk_admin_calendar_schedules_v1',
   'akk_sales_admin_branch_map_v1',
@@ -49,34 +44,58 @@ function isChunkLoadError(error?: Error): boolean {
   );
 }
 
+const SILENT_RELOAD_COUNT_KEY = 'akk_silent_reload_count_v1';
+const SILENT_RELOAD_TS_KEY = 'akk_silent_reload_ts_v1';
+const MAX_SILENT_RELOADS_WINDOW = 2;
+const RELOAD_WINDOW_MS = 30000;
+
+interface State {
+  hasError: boolean;
+  isAutoReloading: boolean;
+  error?: Error;
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
-    hasError: false
+    hasError: false,
+    isAutoReloading: false
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    return { hasError: true, isAutoReloading: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught React Error:', error, errorInfo);
 
-    if (isChunkLoadError(error)) {
-      // Preserve localStorage data and render recovery UI without triggering automatic reload loops
+    const chunkErr = isChunkLoadError(error);
+    if (!chunkErr) {
+      purgeCorruptedCacheKeys();
+    }
+
+    try {
+      const now = Date.now();
+      const lastTs = Number(sessionStorage.getItem(SILENT_RELOAD_TS_KEY) || '0');
+      const prevCount = Number(sessionStorage.getItem(SILENT_RELOAD_COUNT_KEY) || '0');
+      const withinWindow = lastTs > 0 && now - lastTs < RELOAD_WINDOW_MS;
+      const nextCount = withinWindow ? prevCount + 1 : 1;
+
+      if (nextCount <= MAX_SILENT_RELOADS_WINDOW) {
+        sessionStorage.setItem(SILENT_RELOAD_TS_KEY, String(now));
+        sessionStorage.setItem(SILENT_RELOAD_COUNT_KEY, String(nextCount));
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 80);
+        return;
+      }
+    } catch {
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 80);
       return;
     }
 
-    purgeCorruptedCacheKeys();
-
-    // Auto-recover once per 15 seconds for non-chunk state errors
-    try {
-      const now = Date.now();
-      const lastRecover = Number(sessionStorage.getItem('akk_auto_recover_ts') || '0');
-      if (!lastRecover || now - lastRecover > 15000) {
-        sessionStorage.setItem('akk_auto_recover_ts', String(now));
-        this.setState({ hasError: false, error: undefined });
-      }
-    } catch {}
+    this.setState({ isAutoReloading: false });
   }
 
   private handleReset = () => {
@@ -85,43 +104,41 @@ export class ErrorBoundary extends Component<Props, State> {
       purgeCorruptedCacheKeys();
     }
     try {
+      sessionStorage.removeItem(SILENT_RELOAD_COUNT_KEY);
+      sessionStorage.removeItem(SILENT_RELOAD_TS_KEY);
       sessionStorage.removeItem('akk_auto_recover_ts');
       sessionStorage.removeItem('akk_chunk_reload_ts');
     } catch {}
-    this.setState({ hasError: false, error: undefined });
+    this.setState({ hasError: false, isAutoReloading: false, error: undefined });
     window.location.reload();
   };
 
   public render() {
     if (this.state.hasError) {
-      const chunkErr = isChunkLoadError(this.state.error);
+      if (this.state.isAutoReloading) {
+        return (
+          <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+            <RefreshCw className="w-6 h-6 text-blue-600 dark:text-amber-400 animate-spin" />
+          </div>
+        );
+      }
+
       return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6 text-center selection:bg-blue-500 selection:text-white">
-          <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-xl space-y-6">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-amber-500/10 border border-blue-200 dark:border-amber-500/25 flex items-center justify-center text-blue-600 dark:text-amber-400 mx-auto">
-              <AlertTriangle className="w-8 h-8" />
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6 text-center">
+          <div className="max-w-sm w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-lg space-y-4">
+            <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-amber-500/10 border border-blue-200 dark:border-amber-500/25 flex items-center justify-center text-blue-600 dark:text-amber-400 mx-auto">
+              <AlertTriangle className="w-5 h-5" />
             </div>
-
-            <div className="space-y-2">
-              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                {chunkErr ? 'Koneksi Modul Sedang Disinkronkan' : 'Sistem Mengalami Pemulihan Otomatis'}
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {chunkErr
-                  ? 'Halaman modul gagal dimuat sementara karena pembaruan server atau koneksi terputus. Data Anda tetap aman.'
-                  : 'Aplikasi telah mengamankan data Anda dan mengosongkan memori sementara untuk menjaga stabilitas operasional.'}
-              </p>
-            </div>
-
-            <div className="pt-2">
-              <button
-                onClick={this.handleReset}
-                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 dark:bg-amber-500 dark:hover:bg-amber-400 text-white dark:text-slate-950 font-black text-xs shadow-lg shadow-blue-600/15 dark:shadow-amber-500/10 transition cursor-pointer active:scale-95 flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Muat Ulang Sistem Operasional AKK</span>
-              </button>
-            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+              Halaman perlu dimuat ulang untuk melanjutkan.
+            </p>
+            <button
+              onClick={this.handleReset}
+              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 dark:bg-amber-500 dark:hover:bg-amber-400 text-white dark:text-slate-950 font-bold text-xs transition cursor-pointer active:scale-95 flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Muat Ulang</span>
+            </button>
           </div>
         </div>
       );

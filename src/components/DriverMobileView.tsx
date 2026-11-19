@@ -810,16 +810,98 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
 
     const onShiftUpdated = () => {
-      syncShiftState(driverShiftService.getActiveShift(selectedDriverId, portalDisplayName));
+      const nextActive = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
+      syncShiftState(nextActive);
+      if (!nextActive) {
+        loadDeliveriesRef.current(true);
+      }
     };
 
     const onWaybillUpdated = () => {
       setWaybillRefreshTick(t => t + 1);
     };
 
+    // Sinkronisasi berkala status shift Driver <-> Helper agar saat salah satu klik "Tiba di Gudang",
+    // aplikasi pasangan (Driver/Helper) otomatis mengikuti status Selesai / Tiba di Gudang & langsung membuka Checklist Pulang
+    const crewArrivalSyncTimer = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const prevActiveShift = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
+      if (!prevActiveShift) return;
+      try {
+        await driverShiftService.syncFromServer();
+      } catch {}
+      const latestAfterSync = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
+      if (prevActiveShift && !latestAfterSync) {
+        const todayStr = getLocalDateStr();
+        const allFleets = logisticsStore.getFleets();
+        const matchedFleet =
+          allFleets.find(f => f.id === prevActiveShift.fleetId) ||
+          (prevActiveShift.plateNumber
+            ? allFleets.find(
+                f =>
+                  f.plateNumber.replace(/\s+/g, '').toLowerCase() ===
+                  prevActiveShift.plateNumber!.replace(/\s+/g, '').toLowerCase()
+              )
+            : undefined);
+        const resolvedFleetId = matchedFleet?.id || prevActiveShift.fleetId || '';
+        const resolvedPlate = matchedFleet?.plateNumber || prevActiveShift.plateNumber || '-';
+        const resolvedVehicleType = matchedFleet?.vehicleType || prevActiveShift.vehicleType || '-';
+
+        syncShiftState(null);
+        setHasConfirmedArrivalFlag(true);
+        writeDriverScopedValue('akk_confirmed_arrival_', todayStr);
+        setBottomNav('deliveries');
+        setActiveTab('delivered');
+
+        try {
+          await logisticsStore.hydrateOperationalDataFromHostinger();
+        } catch {}
+        await loadDeliveriesRef.current(true);
+        setWaybillRefreshTick(t => t + 1);
+
+        // Cek apakah Checklist Pulang hari ini sudah pernah diisi untuk armada/kru ini
+        let freshChecklists = driverChecklistService.getChecklists();
+        try {
+          freshChecklists = await driverChecklistService.syncFromServer();
+          setChecklists(freshChecklists);
+        } catch {}
+        const normPlate = resolvedPlate.replace(/\s+/g, '').toLowerCase();
+        const alreadySubmittedPostTrip = freshChecklists.some(c => {
+          const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+          if (cDate !== todayStr || c.inspectionType !== 'post_trip') return false;
+          const cPlate = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+          return (normPlate && normPlate !== '-' && cPlate === normPlate) || c.driverId === selectedDriverId;
+        });
+
+        if (!alreadySubmittedPostTrip) {
+          const postTripTemplate = driverChecklistService.createNewChecklistTemplate(
+            selectedDriverId,
+            portalDisplayName || prevActiveShift.driverName || 'Kru',
+            resolvedFleetId,
+            resolvedPlate,
+            resolvedVehicleType,
+            0
+          );
+          postTripTemplate.inspectionType = 'post_trip';
+          setActiveChecklistToEdit(postTripTemplate);
+          setChecklistInspectionType('post_trip');
+          setIsChecklistModalOpen(true);
+        }
+
+        addNotification(
+          'delivery',
+          'Tiba di Gudang Tersinkronisasi • Checklist Pulang',
+          `Rekan kru telah mengonfirmasi Tiba di Gudang untuk armada ${resolvedPlate}. Status Anda otomatis selesai — silakan lanjutkan Checklist Pulang.`
+        );
+      } else if (latestAfterSync) {
+        syncShiftState(latestAfterSync);
+      }
+    }, 5000);
+
     window.addEventListener('driver-shift-updated', onShiftUpdated);
     window.addEventListener('driver-waybill-updated', onWaybillUpdated);
     return () => {
+      clearInterval(crewArrivalSyncTimer);
       window.removeEventListener('driver-shift-updated', onShiftUpdated);
       window.removeEventListener('driver-waybill-updated', onWaybillUpdated);
     };
@@ -855,7 +937,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         currentUser?.role === 'super_admin' ||
         currentUser?.role === 'spv_logistik' ||
         currentUser?.role === 'operasional' ||
-        currentUser?.role === 'pengiriman';
+        currentUser?.role === 'koordinator_driver';
 
       const filtered = all.filter(r => {
         const rDriverLower = (r.driverName || '').toLowerCase();
@@ -2480,30 +2562,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const delivered = sameDayOrCustomDeliveries.filter(d => d.status === 'delivered');
     const nonDelivered = sameDayOrCustomDeliveries.filter(d => d.status !== 'delivered');
 
-    if (canManageAllPortalSchedules && spvCrewFilter === 'all') {
-      const inProgressOrToday = nonDelivered.filter(
-        d =>
-          d.id === portalSelfIdActive ||
-          d.id === portalActiveReplacedScheduleId ||
-          Boolean(d.backupCrewName) ||
-          ['picked_up', 'in_transit', 'delayed'].includes(d.status) ||
-          Boolean(keluarArgoMap[d.id]) ||
-          isScheduleMatchingTargetDate(d, targetIso)
-      );
-      const sortedActive = [...(inProgressOrToday.length > 0 ? inProgressOrToday : nonDelivered)].sort((a, b) => {
-        if (portalSelfIdActive && a.id === portalSelfIdActive && b.id !== portalSelfIdActive) return -1;
-        if (portalSelfIdActive && b.id === portalSelfIdActive && a.id !== portalSelfIdActive) return 1;
-        if (a.id === portalActiveReplacedScheduleId && b.id !== portalActiveReplacedScheduleId) return -1;
-        if (b.id === portalActiveReplacedScheduleId && a.id !== portalActiveReplacedScheduleId) return 1;
-        if (a.backupCrewName && !b.backupCrewName) return -1;
-        if (b.backupCrewName && !a.backupCrewName) return 1;
-        return 0;
-      });
-      const activeIds = new Set(sortedActive.map(d => d.id));
-      const remainingScheduled = nonDelivered.filter(d => !activeIds.has(d.id));
+    // Sesuai instruksi: Tampilan awal sebelum Check-In adalah kosongan (tidak ada list jadwal aktif).
+    // Jadwal aktif baru muncul setelah driver/helper melakukan Check-In (mengisi area kirim, armada, kru).
+    if (!activeShift) {
       return {
-        activeDeliveries: sortedActive,
-        scheduledDeliveries: remainingScheduled,
+        activeDeliveries: [],
+        scheduledDeliveries: [],
         deliveredDeliveries: delivered
       };
     }
@@ -2518,7 +2582,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     ).trim();
     const currentAccId = currentDriver?.id || currentUser?.id || selectedDriverId;
 
-    // 0. Prioritas tertinggi: jadwal dari Check-In Mandiri (Area/Armada/Kru dipilih aktif hari ini) atau jadwal rolling
+    // 0. Prioritas tertinggi: jadwal dari Check-In Mandiri (Area/Armada/Kru dipilih aktif hari ini)
     const selfCheckedInSchedule = portalSelfIdActive
       ? nonDelivered.find(d => d.id === portalSelfIdActive) ||
         (activeShiftAreaStd
@@ -2526,6 +2590,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               d =>
                 standardizeAreaName(d.areaName || d.store?.city || '') === activeShiftAreaStd &&
                 isScheduleMatchingTargetDate(d, targetIso)
+            ) ||
+            nonDelivered.find(
+              d => standardizeAreaName(d.areaName || d.store?.city || '') === activeShiftAreaStd
             )
           : undefined)
       : undefined;
@@ -2539,7 +2606,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         )
       : undefined;
 
-    // 1. Prioritas berikutnya: jadwal yang sedang digantikan (Back Up / Menggantikan) oleh kru ini pada hari ini
     const backupAssigned = nonDelivered.find(
       d =>
         Boolean(d.backupCrewName) &&
@@ -2547,7 +2613,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         isScheduleMatchingTargetDate(d, targetIso)
     );
 
-    // 2. Prioritas perjalanan aktif
     const inProgress = nonDelivered.find(
       d => ['picked_up', 'in_transit', 'delayed'].includes(d.status) || Boolean(keluarArgoMap[d.id])
     );
@@ -2561,7 +2626,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     } else if (inProgress) {
       primaryActive = inProgress;
     } else {
-      // 3. Jadwal tepat tanggal hari ini
       const exactToday = nonDelivered.find(d => isScheduleMatchingTargetDate(d, targetIso));
       if (exactToday) {
         primaryActive = exactToday;
@@ -2571,17 +2635,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
 
     const activeList = primaryActive ? [primaryActive] : [];
-    const remainingScheduled = nonDelivered
-      .filter(d => !primaryActive || d.id !== primaryActive.id)
-      .sort((a, b) => {
-        const timeA = new Date(a.departureDate || a.createdAt || 0).getTime();
-        const timeB = new Date(b.departureDate || b.createdAt || 0).getTime();
-        return timeA - timeB;
-      });
 
     return {
       activeDeliveries: activeList,
-      scheduledDeliveries: remainingScheduled,
+      scheduledDeliveries: [],
       deliveredDeliveries: delivered
     };
   }, [
@@ -2592,6 +2649,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     portalActiveReplacedScheduleId,
     dateFilterStart,
     dateFilterEnd,
+    activeShift,
     activeShift?.id,
     activeShift?.selectedArea
   ]);
@@ -2983,21 +3041,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   };
 
-  // Filtered deliveries berdasarkan activeTab, rentang tanggal (dateFilterStart - dateFilterEnd), batasan sebulan pada 'all', dan searchQuery
+  // Filtered deliveries berdasarkan activeTab ('active' | 'delivered' | 'all'), rentang tanggal, dan searchQuery
   const filteredDeliveries = useMemo(() => {
     let sourceList: Schedule[] = [];
+    const allCombined = [...activeDeliveries, ...deliveredDeliveries];
     const hasSearchQuery = Boolean(searchQuery.trim());
     if (hasSearchQuery) {
       const seen = new Set<string>();
-      sourceList = [...activeDeliveries, ...scheduledDeliveries, ...deliveredDeliveries].filter(item => {
+      sourceList = allCombined.filter(item => {
         if (seen.has(item.id)) return false;
         seen.add(item.id);
         return true;
       });
     } else if (activeTab === 'active') sourceList = activeDeliveries;
-    else if (activeTab === 'scheduled') sourceList = scheduledDeliveries;
     else if (activeTab === 'delivered') sourceList = deliveredDeliveries;
-    else sourceList = [...activeDeliveries, ...scheduledDeliveries, ...deliveredDeliveries];
+    else sourceList = allCombined;
 
     const hasCustomDateRange = Boolean(dateFilterStart || dateFilterEnd);
 
@@ -3132,21 +3190,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     });
 
-    // Total kiriman yang dijalankan oleh kru ini (tetap mengirim + menggantikan orang lain + history tambahan jika ada)
-    const historyDeliveredExtra = Math.max(0, monthHistoryRecords.length - terkirimSelesaiCount);
-    const totalTerkirimBulanIni = tetapMengirimCount + menggantikanCount + historyDeliveredExtra;
+    const aktifTabCount = activeDeliveries.length;
+    const selesaiTabCount = deliveredDeliveries.length;
+    const semuaTabCount = aktifTabCount + selesaiTabCount;
 
-    // Perhitungan ketepatan sesuai instruksi user:
-    // "ketepatan ini dihitung ketika driver / helper ini dijadwalkan mengirim tapi ada yang tetap mengirim atau digantikan dengan orang lain. jadi perhitungannya (terkirim - jadwal) / jadwal * 100%"
-    // Yaitu persentase jadwal yang tetap berhasil dikirimkan oleh kru bersangkutan tanpa dialihkan ke orang lain:
-    // (Jadwal - Digantikan) / Jadwal * 100% atau TetapMengirim / Jadwal * 100%
-    let ketepatanPct = 100;
-    if (jadwalCount > 0) {
-      const successfulTrips = Math.max(0, jadwalCount - digantikanCount);
-      ketepatanPct = Math.min(100, Math.max(0, Math.round((successfulTrips / jadwalCount) * 1000) / 10));
-    } else if (totalTerkirimBulanIni > 0) {
-      ketepatanPct = 100;
-    }
+    const syncedJadwalCount = semuaTabCount;
+    const syncedTerkirimCount = selesaiTabCount;
+    const syncedKetepatanPct =
+      syncedJadwalCount > 0
+        ? Math.min(100, Math.max(0, Math.round((syncedTerkirimCount / syncedJadwalCount) * 100)))
+        : 0;
 
     const MONTH_LABELS = [
       'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -3156,15 +3209,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return {
       activeMonthName: MONTH_LABELS[activeMonth] || 'Bulan Ini',
       activeYear,
-      jadwalCount,
-      tetapMengirimCount,
+      jadwalCount: syncedJadwalCount,
+      tetapMengirimCount: syncedTerkirimCount,
       digantikanCount,
       menggantikanCount,
-      totalTerkirimBulanIni,
-      terkirimSelesaiCount,
-      ketepatanPct
+      totalTerkirimBulanIni: syncedTerkirimCount,
+      terkirimSelesaiCount: syncedTerkirimCount,
+      ketepatanPct: syncedKetepatanPct
     };
-  }, [deliveries, dateFilterStart, portalDisplayName, currentUser, currentDriver, selectedDriverId, canManageAllPortalSchedules, spvCrewFilter]);
+  }, [deliveries, activeDeliveries.length, deliveredDeliveries.length, dateFilterStart, portalDisplayName, currentUser, currentDriver, selectedDriverId, canManageAllPortalSchedules, spvCrewFilter]);
 
   // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin & Terpisah per Cabang)
   const standbyPortalInfo = useMemo(() => {
@@ -4201,12 +4254,32 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       podConditionNote: arrivalNote
     };
 
-    updateSharedScheduleFlow([delivery.id], {
+    // Kumpulkan seluruh ID jadwal terkait dalam tim (Driver & Helper pada rute/armada/tanggal yang sama)
+    const todayIsoLocal = getLocalDateStr();
+    const deliveryAreaStd = standardizeAreaName(delivery.areaName || delivery.store?.storeName || '');
+    const deliveryPlateClean = (assignedFleet?.plateNumber || delivery.fleet?.plateNumber || activeShift?.plateNumber || '')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+    const relatedDeliveries = deliveries.filter(d => {
+      if (d.id === delivery.id) return true;
+      if (d.status === 'delivered') return false;
+      const dAreaStd = standardizeAreaName(d.areaName || d.store?.storeName || '');
+      const dPlateClean = (d.fleet?.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+      const dDate = (d.departureDate || d.createdAt || '').slice(0, 10);
+      const sameDate = !dDate || dDate === (delivery.departureDate || todayIsoLocal).slice(0, 10);
+      if (!sameDate) return false;
+      if (deliveryPlateClean && deliveryPlateClean !== '-' && dPlateClean === deliveryPlateClean) return true;
+      if (deliveryAreaStd && dAreaStd === deliveryAreaStd) return true;
+      return false;
+    });
+    const relatedScheduleIds = Array.from(new Set([delivery.id, ...relatedDeliveries.map(d => d.id)]));
+
+    updateSharedScheduleFlow(relatedScheduleIds, {
       argoArrivalTimestamp: argoArrivalIso,
       argoArrivalBy: portalDisplayName
     });
 
-    // Tutup & arsipkan Live GPS Trip ke MySQL Hostinger
+    // Tutup & arsipkan Live GPS Trip secara otomatis
     void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${delivery.id}`)}/ping`, {
       method: 'POST',
       credentials: 'same-origin',
@@ -4225,15 +4298,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       })
       .catch(() => {});
 
-    await handleUpdateStatus(delivery, 'delivered', arrivalNote, podData, 'available');
-
-    driverWaybillService.getWaybillForSchedule({
-      ...delivery,
-      status: 'delivered',
-      fleet: assignedFleet || delivery.fleet,
-      fleetId: assignedFleet?.id || delivery.fleetId
-    });
-    driverWaybillService.updateWaybillStatus(`WB-${delivery.id}`, 'delivered', arrivalNote);
+    for (const relDel of relatedDeliveries) {
+      await handleUpdateStatus(relDel, 'delivered', arrivalNote, podData, 'available');
+      driverWaybillService.getWaybillForSchedule({
+        ...relDel,
+        status: 'delivered',
+        fleet: assignedFleet || relDel.fleet,
+        fleetId: assignedFleet?.id || relDel.fleetId
+      });
+      driverWaybillService.updateWaybillStatus(`WB-${relDel.id}`, 'delivered', arrivalNote);
+    }
     setWaybillRefreshTick(t => t + 1);
 
     driverReportService.addReport({
@@ -4248,25 +4322,33 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       notes: arrivalNote
     });
 
-    // Otomatis Check-Out saat klik Tiba di Gudang (tanpa manual Check-Out)
+    // Otomatis Check-Out & Sinkronkan Tiba di Gudang untuk seluruh kru dalam tim (Driver + Helper 1 + Helper 2)
     const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
-    if (currentActiveShift) {
-      await driverShiftService.updateShiftProgress(currentActiveShift.id, {
-        arrivedAtWarehouseAt: argoArrivalIso
-      });
-      const targetDriverId = currentActiveShift.driverId || selectedDriverId;
-      await driverShiftService.checkOutDriver(
-        targetDriverId,
-        undefined,
-        {
-          driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
-          userRole: 'Helper',
-          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || delivery?.fleet?.plateNumber || '-',
-          areaName: delivery.areaName || delivery.store?.storeName || 'Gudang Argo'
-        }
-      );
-      setActiveShift(null);
-    }
+    await driverShiftService.checkOutCrewTeamForTrip({
+      actorDriverId: currentActiveShift?.driverId || selectedDriverId,
+      actorName: currentDriver?.name || currentActiveShift?.driverName || portalDisplayName,
+      actorRole: 'Helper',
+      plateNumber: assignedFleet?.plateNumber || currentActiveShift?.plateNumber || delivery?.fleet?.plateNumber || '-',
+      areaName: delivery.areaName || delivery.store?.storeName || currentActiveShift?.selectedArea || 'Gudang Argo',
+      tripDate: (delivery.departureDate || todayIsoLocal).slice(0, 10),
+      crewNames: [
+        delivery.crew?.name,
+        delivery.crewHelper?.name,
+        delivery.crewHelper2?.name,
+        currentActiveShift?.driverName,
+        currentActiveShift?.helper1Name,
+        currentActiveShift?.helper2Name,
+        portalDisplayName
+      ],
+      arrivedAtWarehouseAt: argoArrivalIso,
+      notes: arrivalNote
+    });
+    // Simpan info armada sebelum activeShift dibersihkan agar langsung tampil di Checklist Pulang
+    const postTripFleetId = assignedFleet?.id || currentActiveShift?.fleetId || delivery.fleet?.id || '';
+    const postTripPlate = assignedFleet?.plateNumber || currentActiveShift?.plateNumber || delivery.fleet?.plateNumber || '-';
+    const postTripVehicleType = assignedFleet?.vehicleType || currentActiveShift?.vehicleType || delivery.fleet?.vehicleType || '-';
+
+    setActiveShift(null);
 
     const todayStr = getLocalDateStr();
     setHasConfirmedArrivalFlag(true);
@@ -4276,10 +4358,24 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     setActiveTab('delivered');
     await loadDeliveriesRef.current(true);
 
+    // Otomatis munculkan form Checklist Pulang setelah klik Tiba di Gudang
+    const postTripTemplate = driverChecklistService.createNewChecklistTemplate(
+      selectedDriverId,
+      currentDriver?.name || portalDisplayName || 'Helper',
+      postTripFleetId,
+      postTripPlate,
+      postTripVehicleType,
+      0
+    );
+    postTripTemplate.inspectionType = 'post_trip';
+    setActiveChecklistToEdit(postTripTemplate);
+    setChecklistInspectionType('post_trip');
+    setIsChecklistModalOpen(true);
+
     addNotification(
       'delivery',
-      'Tiba di Gudang • Otomatis Check-Out Berlaku (Helper)',
-      `Konfirmasi tiba di gudang oleh Helper (${portalDisplayName}) berhasil. Shift Anda telah otomatis Check-Out dan rute terekam di Riwayat Perjalanan.`
+      'Tiba di Gudang • Masuk Tab Selesai & Isi Checklist Pulang',
+      `Konfirmasi tiba di gudang oleh Helper (${portalDisplayName}) berhasil. Seluruh kru otomatis selesai dan silakan lanjutkan Checklist Pulang.`
     );
   };
 
@@ -4682,15 +4778,43 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       })
       .catch(() => {});
 
-    await handleUpdateStatus(targetDelivery, 'delivered', podNote, podData, choice);
-    // Pastikan waybill ter-generate dan berstatus 'delivered' agar muncul di SJ Keluar & Selesai
-    driverWaybillService.getWaybillForSchedule({
-      ...targetDelivery,
-      status: 'delivered',
-      fleet: assignedFleet || targetDelivery.fleet,
-      fleetId: assignedFleet?.id || targetDelivery.fleetId
+    // Kumpulkan seluruh jadwal terkait dalam tim (Driver + Helper) pada armada/area/tanggal yang sama
+    const targetAreaStd = standardizeAreaName(targetDelivery.areaName || targetDelivery.store?.storeName || '');
+    const targetPlateClean = (assignedFleet?.plateNumber || targetDelivery.fleet?.plateNumber || activeShift?.plateNumber || '')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+    const targetTripDate = (targetDelivery.departureDate || getLocalDateStr()).slice(0, 10);
+    const relatedPodDeliveries = deliveries.filter(d => {
+      if (d.id === targetDelivery.id) return true;
+      if (d.status === 'delivered') return false;
+      const dAreaStd = standardizeAreaName(d.areaName || d.store?.storeName || '');
+      const dPlateClean = (d.fleet?.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+      const dDate = (d.departureDate || d.createdAt || '').slice(0, 10);
+      const sameDate = !dDate || dDate === targetTripDate;
+      if (!sameDate) return false;
+      if (targetPlateClean && targetPlateClean !== '-' && dPlateClean === targetPlateClean) return true;
+      if (targetAreaStd && dAreaStd === targetAreaStd) return true;
+      return false;
     });
-    driverWaybillService.updateWaybillStatus(`WB-${targetDelivery.id}`, 'delivered', podNote);
+    const relatedPodScheduleIds = Array.from(new Set([targetDelivery.id, ...relatedPodDeliveries.map(d => d.id)]));
+    if (relatedPodScheduleIds.length > 1) {
+      updateSharedScheduleFlow(relatedPodScheduleIds, {
+        argoArrivalTimestamp: argoArrivalIso,
+        argoArrivalBy: portalDisplayName
+      });
+    }
+
+    for (const relDel of relatedPodDeliveries) {
+      await handleUpdateStatus(relDel, 'delivered', podNote, podData, choice);
+      // Pastikan waybill ter-generate dan berstatus 'delivered' agar muncul di SJ Keluar & Selesai
+      driverWaybillService.getWaybillForSchedule({
+        ...relDel,
+        status: 'delivered',
+        fleet: assignedFleet || relDel.fleet,
+        fleetId: assignedFleet?.id || relDel.fleetId
+      });
+      driverWaybillService.updateWaybillStatus(`WB-${relDel.id}`, 'delivered', podNote);
+    }
     setWaybillRefreshTick(t => t + 1);
 
     // Rekam ke Laporan Kiriman Kru agar SPV Logistik tahu status armada sampai di Argo & servis jika ada
@@ -4707,24 +4831,29 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       photoUrl: podModal.photoUrl
     });
 
-    // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang
+    // Otomatis Check-Out & Sinkronkan Tiba di Gudang ke seluruh kru dalam tim (Driver + Helper 1 + Helper 2)
     let autoCheckedOut = false;
     const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
-    if (currentActiveShift) {
-      await driverShiftService.updateShiftProgress(currentActiveShift.id, {
-        arrivedAtWarehouseAt: argoArrivalIso
-      });
-      const targetDriverId = currentActiveShift.driverId || selectedDriverId;
-      await driverShiftService.checkOutDriver(
-        targetDriverId,
-        undefined,
-        {
-          driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
-          userRole: syncedUserRoleInfo.roleLabel,
-          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || targetDelivery?.fleet?.plateNumber || '-',
-          areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Gudang Argo'
-        }
-      );
+    const teamCheckoutRes = await driverShiftService.checkOutCrewTeamForTrip({
+      actorDriverId: currentActiveShift?.driverId || selectedDriverId,
+      actorName: currentDriver?.name || currentActiveShift?.driverName || portalDisplayName,
+      actorRole: syncedUserRoleInfo.roleLabel,
+      plateNumber: assignedFleet?.plateNumber || currentActiveShift?.plateNumber || targetDelivery?.fleet?.plateNumber || '-',
+      areaName: targetDelivery.areaName || targetDelivery.store?.storeName || currentActiveShift?.selectedArea || 'Gudang Argo',
+      tripDate: targetTripDate,
+      crewNames: [
+        targetDelivery.crew?.name,
+        targetDelivery.crewHelper?.name,
+        targetDelivery.crewHelper2?.name,
+        currentActiveShift?.driverName,
+        currentActiveShift?.helper1Name,
+        currentActiveShift?.helper2Name,
+        portalDisplayName
+      ],
+      arrivedAtWarehouseAt: argoArrivalIso,
+      notes: podNote
+    });
+    if (currentActiveShift || teamCheckoutRes.checkedOutCount > 0) {
       setActiveShift(null);
       autoCheckedOut = true;
     }
@@ -5381,43 +5510,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </button>
               </div>
 
-              {/* Baris 2b: Ringkasan Penugasan Check-In Aktif (Area, Armada, Driver, Helper 1 & Helper 2) */}
-              {activeShift && activeShift.selectedArea && (
-                <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/60 rounded-xl p-2.5 space-y-1.5 text-[11px]">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="inline-flex items-center gap-1 font-bold text-slate-900 dark:text-white">
-                      <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                      <span>{activeShift.selectedArea}</span>
-                    </span>
-                    {(isChecklistCompletedAfterCheckin || activeShift.checkinRole === 'helper') && (activeShift.plateNumber || assignedFleet?.plateNumber) ? (
-                      <span className="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-700 dark:text-blue-300 font-bold text-[10px]">
-                        {activeShift.fleetInitialCode ? `${activeShift.fleetInitialCode} · ` : ''}
-                        {activeShift.plateNumber || assignedFleet?.plateNumber}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold text-[10px]">
-                        Menunggu Checklist Armada
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-600 dark:text-slate-300">
-                    <span>
-                      <strong>{activeShift.checkinRole === 'helper' ? 'Helper:' : 'Driver:'}</strong> {activeShift.driverName}
-                    </span>
-                    {activeShift.helper1Name && (
-                      <span>
-                        <strong>Helper 1:</strong> {activeShift.helper1Name}
-                      </span>
-                    )}
-                    {activeShift.helper2Name && (
-                      <span>
-                        <strong>Helper 2:</strong> {activeShift.helper2Name}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Baris 3: Status GPS Ringkas */}
               <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-xs flex-wrap">
                 <div
@@ -5573,8 +5665,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             )}
 
-            {/* STATUS STAND BY / PENGGANTIAN KRU — Disembunyikan otomatis setelah Kru Check-In atau mengisi Checklist */}
-            {!hasChecklistToday &&
+            {/* STATUS STAND BY / PENGGANTIAN KRU — Disembunyikan pada tampilan awal sebelum Check-In agar kosongan */}
+            {standbyReplaceForm.isOpen &&
+              !hasChecklistToday &&
               !isChecklistCompletedAfterCheckin &&
               !activeShift &&
               activeDeliveries.length === 0 &&
@@ -6095,12 +6188,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               );
             })()}
 
-            {/* Tab Status Pengiriman */}
-            <div className="grid grid-cols-4 gap-1 p-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] sm:text-xs">
+            {/* Tab Status Pengiriman: Aktif, Selesai, Semua */}
+            <div className="grid grid-cols-3 gap-1 p-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] sm:text-xs">
               <button
                 type="button"
                 onClick={() => setActiveTab('active')}
-                className={`min-h-[38px] py-1.5 px-1 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
+                className={`min-h-[38px] py-1.5 px-2 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
                   activeTab === 'active'
                     ? 'bg-amber-500 text-slate-950 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -6110,19 +6203,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('scheduled')}
-                className={`min-h-[38px] py-1.5 px-1 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
-                  activeTab === 'scheduled'
-                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                Jadwal ({scheduledDeliveries.length})
-              </button>
-              <button
-                type="button"
                 onClick={() => setActiveTab('delivered')}
-                className={`min-h-[38px] py-1.5 px-1 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
+                className={`min-h-[38px] py-1.5 px-2 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
                   activeTab === 'delivered'
                     ? 'bg-amber-500 text-slate-950 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -6133,13 +6215,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('all')}
-                className={`min-h-[38px] py-1.5 px-1 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap truncate ${
+                className={`min-h-[38px] py-1.5 px-2 rounded-lg font-bold transition text-center cursor-pointer whitespace-nowrap tabular-nums truncate ${
                   activeTab === 'all'
                     ? 'bg-amber-500 text-slate-950 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
-                Semua
+                Semua ({activeDeliveries.length + deliveredDeliveries.length})
               </button>
             </div>
 
@@ -6286,21 +6368,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       )}
 
-                      {/* Route & Crew Summary (Ringkas Tanpa Nested Box Berlebihan) */}
+                      {/* Crew Summary (Driver & Helper) */}
                       <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-                        <div className="flex items-start gap-2">
-                          <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
-                          <div className="min-w-0 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
-                            <span className="font-medium text-slate-500 dark:text-slate-400">
-                              {delivery.originName || 'Gudang Banyuwangi DC'}
-                            </span>
-                            <span className="mx-1.5 text-slate-400">→</span>
-                            <span>
-                              {(store?.address || `Area ${delivery.areaName || ''}`).replace(/DENPASAR\s*1\s*&\s*2/gi, 'DENPASAR 1')}
-                            </span>
-                          </div>
-                        </div>
-
                         {(() => {
                           const activeCardRole = getScheduledJobdeskForDelivery(delivery);
                           const effectiveDriverDisplay =
@@ -6371,69 +6440,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           );
                         })()}
                       </div>
-
-                      {/* Ringkasan Armada, Tanggal & Jam (Satu Baris Terpadu Tanpa Duplikasi) */}
-                      {(() => {
-                        const portalTiming = getDriverPortalDepartureLabel(
-                          delivery.departureDate,
-                          delivery.areaName,
-                          store?.storeName || delivery.store?.storeName,
-                          delivery.estimatedArrival,
-                          store?.deliveryWindow || delivery.store?.deliveryWindow
-                        );
-                        const normPlateCode = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
-                        const isMuncarDelivery = ((delivery.areaName || store?.storeName || '').toLowerCase()).includes('muncar');
-                        const muncarFleetObj = isMuncarDelivery ? logisticsStore.findFleetByCodeOrPlate('N4 / NS2') : undefined;
-
-                        const rawDeliveryFleetObj =
-                          fleets.find(f => f.id === delivery.fleetId) ||
-                          (delivery.armada ? logisticsStore.findFleetByCodeOrPlate(delivery.armada) : undefined) ||
-                          (delivery.fleet?.plateNumber
-                            ? fleets.find(f => normPlateCode(f.plateNumber) === normPlateCode(delivery.fleet?.plateNumber))
-                            : undefined) ||
-                          delivery.fleet ||
-                          muncarFleetObj ||
-                          assignedFleet;
-                        const canonicalFleet = resolveCanonicalFleetMeta(
-                          rawDeliveryFleetObj || delivery.fleet?.plateNumber || delivery.fleetId
-                        );
-                        const deliveryFleetObj = rawDeliveryFleetObj
-                          ? {
-                              ...rawDeliveryFleetObj,
-                              initialCode:
-                                rawDeliveryFleetObj.initialCode ||
-                                canonicalFleet?.initialCode ||
-                                rawDeliveryFleetObj.vehicleType ||
-                                canonicalFleet?.vehicleType,
-                              vehicleType: rawDeliveryFleetObj.vehicleType || canonicalFleet?.vehicleType
-                            }
-                          : canonicalFleet;
-
-                        const dateFormatted = delivery.departureDate
-                          ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
-                          : 'Hari ini';
-
-                        return (
-                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300 flex-wrap">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <Truck className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                              <span className="font-semibold text-slate-900 dark:text-white truncate">
-                                {deliveryFleetObj?.initialCode && deliveryFleetObj?.plateNumber
-                                  ? `${deliveryFleetObj.initialCode} · ${deliveryFleetObj.plateNumber}`
-                                  : deliveryFleetObj?.initialCode || deliveryFleetObj?.plateNumber || '-'}
-                              </span>
-                              <span aria-hidden="true">·</span>
-                              <span className="tabular-nums">{dateFormatted}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums shrink-0">
-                              <Clock className="w-3.5 h-3.5 text-blue-500" />
-                              <span>
-                                {portalTiming.timing.departureLabel} - {portalTiming.timing.returnLabel}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })()}
 
                       {/* Status Terintegrasi: Permintaan Oper Jadwal (Hanya tampil di tab Jadwal, bukan di Aktif) */}
                       {activeTab !== 'active' && delivery.transferRequest?.status === 'pending' && (
@@ -6535,16 +6541,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                         </div>
                                       )}
 
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenUrgentRollingModal(delivery)}
-                                        className="w-full py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
-                                        title="Ubah kru atau armada secara mendadak (rolling pagi) sebelum keluar dari gudang"
-                                      >
-                                        <RefreshCw className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                                        <span>Perubahan Urgent (Rolling Pagi)</span>
-                                      </button>
-
                                       {isSuperAdminUser && (
                                         <button
                                           type="button"
@@ -6591,11 +6587,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                           className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                                         >
                                           <ClipboardCheck className="w-4 h-4" />
-                                          <span>
-                                            {!activeShift
-                                              ? (isSuperAdminUser ? 'Tembus / Isi Checklist Armada (Super Admin)' : 'Check-In Dulu Untuk Isi Checklist Armada')
-                                              : 'Isi Checklist Armada (Pra-Berangkat)'}
-                                          </span>
+                                          <span>Isi Checklist Armada</span>
                                         </button>
 
                                         {isSuperAdminUser && (
@@ -6611,16 +6603,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                         )}
                                       </div>
                                     )}
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenUrgentRollingModal(delivery)}
-                                      className="w-full py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
-                                      title="Ubah kru atau armada secara mendadak (rolling pagi) sebelum keluar dari gudang"
-                                    >
-                                      <RefreshCw className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                                      <span>Perubahan Urgent (Rolling Pagi)</span>
-                                    </button>
 
                                     {activeTab !== 'active' && (
                                       <button
@@ -7327,14 +7309,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </div>
 
                     {/* Destination & Manifest Details */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 space-y-1.5 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-white text-sm">{wb.destination.storeName}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{wb.date}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <span className="truncate">{wb.destination.address}</span>
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-white text-sm truncate">{wb.destination.storeName}</span>
+                        <span className="text-[10px] text-slate-400 font-mono shrink-0">{wb.date}</span>
                       </div>
                     </div>
 
@@ -7586,25 +7564,52 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         )}
 
-        {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD) */}
-        {bottomNav === 'form_kirim' && (
-          <DriverFormKirimPanel
-            todayFormKirim={todayFormKirimIntegration.record}
-            todayDisplayDate={realtimeDayDateStr}
-            matchedScheduleArea={todayFormKirimIntegration.matchedArea}
-            portalDisplayName={portalDisplayName}
-            userRole={isUserHelperRole ? 'Helper' : 'Driver'}
-            deviceGps={deviceGps}
-            onRefresh={() => {
-              void formKirimStore.hydrateFromServer(true);
-              loadDeliveries(true);
-              addNotification('delivery', 'Form Kirim Diperbarui', 'Data Form Kirim hari ini telah disinkronkan.');
-            }}
-            onNotify={(title, message) => {
-              addNotification('delivery', title, message);
-            }}
-          />
-        )}
+        {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD + KM PAGI/PULANG) */}
+        {bottomNav === 'form_kirim' && (() => {
+          const activePlateClean = (
+            todayFormKirimIntegration.record?.plateNumber ||
+            assignedFleet?.plateNumber ||
+            activeShift?.plateNumber ||
+            ''
+          )
+            .replace(/\s+/g, '')
+            .toLowerCase();
+          const currentDriverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
+          const todayMatchingChecklists = checklists.filter(c => {
+            const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+            if (cDate && cDate !== todayLocalStr) return false;
+            const cPlateClean = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+            const cDriverLower = String(c.driverName || '').trim().toLowerCase();
+            if (activePlateClean && activePlateClean !== '-' && cPlateClean === activePlateClean) return true;
+            if (c.driverId && c.driverId === selectedDriverId) return true;
+            if (currentDriverNameLower && cDriverLower && (cDriverLower.includes(currentDriverNameLower) || currentDriverNameLower.includes(cDriverLower))) return true;
+            return false;
+          });
+          const latestPreTrip = todayMatchingChecklists.find(c => c.inspectionType === 'pre_trip' && Number(c.odometerKm) > 0);
+          const latestPostTrip = todayMatchingChecklists.find(c => c.inspectionType === 'post_trip' && Number(c.odometerKm) > 0);
+
+          return (
+            <DriverFormKirimPanel
+              todayFormKirim={todayFormKirimIntegration.record}
+              todayDisplayDate={realtimeDayDateStr}
+              matchedScheduleArea={todayFormKirimIntegration.matchedArea}
+              portalDisplayName={portalDisplayName}
+              userRole={isUserHelperRole ? 'Helper' : 'Driver'}
+              deviceGps={deviceGps}
+              checklistKmPagi={latestPreTrip?.odometerKm ?? null}
+              checklistKmPulang={latestPostTrip?.odometerKm ?? null}
+              onRefresh={() => {
+                void formKirimStore.hydrateFromServer(true);
+                void driverChecklistService.syncFromServer().then(setChecklists);
+                loadDeliveries(true);
+                addNotification('delivery', 'Form Kirim Diperbarui', 'Data Form Kirim & KM Checklist hari ini telah disinkronkan.');
+              }}
+              onNotify={(title, message) => {
+                addNotification('delivery', title, message);
+              }}
+            />
+          );
+        })()}
 
         {/* TAB 3: RIWAYAT PENGIRIMAN SELESAI */}
         {bottomNav === 'history' && (
@@ -8394,10 +8399,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div className="font-bold text-white">{podModal.delivery?.store?.storeName || podModal.delivery?.areaName}</div>
-              <div className="text-slate-400 text-[11px]">{podModal.delivery?.store?.address}</div>
-              <div className="text-amber-400 font-semibold text-[11px] pt-1">Area Kirim: {podModal.delivery?.areaName || podModal.delivery?.store?.storeName || 'Tujuan'}</div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+              <div className="font-bold text-white text-sm">
+                {podModal.delivery?.areaName || podModal.delivery?.store?.storeName || 'Area Tujuan'}
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -9002,10 +9007,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           setActiveChecklistToEdit(null);
         }}
         driverId={selectedDriverId}
-        driverName={currentDriver?.name || 'Driver'}
-        fleetId={assignedFleet?.id || activeShift?.fleetId || ''}
-        plateNumber={assignedFleet?.plateNumber || activeShift?.plateNumber || '-'}
-        vehicleType={assignedFleet?.vehicleType || '-'}
+        driverName={currentDriver?.name || portalDisplayName || 'Driver'}
+        fleetId={assignedFleet?.id || activeShift?.fleetId || activeChecklistToEdit?.fleetId || ''}
+        plateNumber={assignedFleet?.plateNumber || activeShift?.plateNumber || activeChecklistToEdit?.plateNumber || '-'}
+        vehicleType={assignedFleet?.vehicleType || activeShift?.vehicleType || activeChecklistToEdit?.vehicleType || '-'}
         initialChecklist={activeChecklistToEdit}
         defaultInspectionType={checklistInspectionType}
         canSelectPostTrip={hasConfirmedArrivalToday}
@@ -9057,6 +9062,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               });
             }
           }
+          formKirimStore.syncChecklistOdometer({
+            date: todayStr,
+            plateNumber: saved.plateNumber,
+            driverName: saved.driverName,
+            areaName: activeShift?.selectedArea || activeDeliveries[0]?.areaName || '',
+            inspectionType: saved.inspectionType,
+            odometerKm: saved.odometerKm,
+            recordedAt: completedAtIso
+          });
           setChecklists(prev => {
             const idx = prev.findIndex(c => c.id === saved.id);
             if (idx >= 0) {

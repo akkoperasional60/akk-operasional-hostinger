@@ -67,6 +67,7 @@ export default defineConfig(() => {
       'import.meta.env.VITE_BUILD_TARGET': JSON.stringify(buildTarget),
     },
     resolve: {
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve(import.meta.dirname || '.'),
       },

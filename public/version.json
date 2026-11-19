@@ -1,9 +1,9 @@
 {
-  "versionCode": 10039,
-  "versionName": "1.0.39",
-  "updatedAt": "2026-11-17T17:06:00.000000",
+  "versionCode": 10040,
+  "versionName": "1.0.40",
+  "updatedAt": "2026-11-19T11:15:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V51: Studio 3D Showcase Armada (Fleet3DShowcase & truck3dBuilder), Menu Biaya Servis & Pemeliharaan Armada, Menu Validasi Portal (Jadwal vs Check-In), Menu Live Trips & Playback Rute GPS, serta Migrasi Penuh Seluruh Modul dari localStorage ke MySQL Hostinger."
+  "releaseNotes": "Update V52: 5 Role Jabatan Baru (Koordinator Driver, Koordinator Gudang, SPV Adm Penjualan/Pembelian/Marketing Offline), Filter Kru Portal Driver Khusus Full Access, Sinkronisasi Otomatis Tiba di Gudang & Checklist Pulang Lintas Driver-Helper, Integrasi Odometer KM Pagi/Pulang ke Form Kirim, Pop-up Peringatan Armada Belum Ready, serta Kompresi Foto Kamera 800px."
 }

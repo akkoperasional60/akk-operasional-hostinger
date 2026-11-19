@@ -109,8 +109,6 @@ export async function downloadSuratJalanPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.text('Divisi Logistik & Distribusi Armada', paperWidth / 2, y, { align: 'center' });
-    y += 3;
-    doc.text('Banyuwangi KM 12 • Telp (0333) 412890', paperWidth / 2, y, { align: 'center' });
     y += 2.5;
 
     drawDashedLine(y);
@@ -130,8 +128,6 @@ export async function downloadSuratJalanPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.text(`Tgl: ${waybill.date || new Date().toISOString().slice(0, 10)} | Out: ${waybill.gateOutTime || '07:30'}`, paperWidth / 2, y, { align: 'center' });
-    y += 3;
-    doc.text(`Resi: ${waybill.trackingNumber || '-'}`, paperWidth / 2, y, { align: 'center' });
     y += 2.5;
 
     drawDashedLine(y);
@@ -157,8 +153,6 @@ export async function downloadSuratJalanPdf(
 
     doc.text(`Area : ${waybill.destination?.areaName || '-'}`, margin, y);
     y += 3;
-    doc.text(`PIC  : ${waybill.destination?.contactPerson || '-'}`, margin, y);
-    y += 3;
     doc.text(`Telp : ${waybill.destination?.phone || '-'}`, margin, y);
     y += 2.5;
 
@@ -173,13 +167,18 @@ export async function downloadSuratJalanPdf(
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.text(`${waybill.fleet?.plateNumber || '-'} [${waybill.fleet?.initialCode || 'AKK'}]`, margin, y);
+    const resolvedFleetInitial =
+      (waybill.fleet?.initialCode && waybill.fleet.initialCode !== '-' ? waybill.fleet.initialCode : '') ||
+      logisticsStore.findFleetByCodeOrPlate(waybill.fleet?.plateNumber)?.initialCode ||
+      '';
+    const fleetHeaderLabel = resolvedFleetInitial
+      ? `${resolvedFleetInitial} (${waybill.fleet?.plateNumber || '-'})`
+      : `${waybill.fleet?.plateNumber || '-'}`;
+    doc.text(fleetHeaderLabel, margin, y);
     y += 3.2;
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
-    doc.text(`Tipe   : ${waybill.fleet?.vehicleType || 'Engkel Box'}`, margin, y);
-    y += 3;
     doc.text(`Driver : ${waybill.crew?.driverName || '-'}`, margin, y);
     y += 3;
     doc.text(`Helper : ${waybill.crew?.helperName || '-'}`, margin, y);
@@ -225,7 +224,23 @@ export async function downloadSuratJalanPdf(
     };
 
     const allUsers = logisticsStore.getUsers();
-    const spvName = formatConcisePdfName(waybill.preparedByName || allUsers.find(u => u.role === 'spv_logistik')?.fullName || 'M. Syaiful B.');
+    const resolvedSpvUser =
+      allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') ||
+      allUsers.find(
+        u =>
+          u.status === 'approved' &&
+          u.role !== 'super_admin' &&
+          u.role !== 'driver' &&
+          u.role !== 'crew_helper' &&
+          u.permissions?.modules?.logistics?.enabled &&
+          (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
+            u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
+      ) ||
+      allUsers.find(u => u.role === 'spv_logistik');
+    const spvName = formatConcisePdfName(
+      (waybill.preparedBySigned && waybill.preparedByName ? waybill.preparedByName : resolvedSpvUser?.fullName) ||
+        logisticsStore.getLogisticsCoordinator()
+    );
     const operasionalName = formatConcisePdfName(waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Bayu Novianto Dimas Permana');
     const secName = formatConcisePdfName(waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Hairul Rozikin');
     const dFirst = (waybill.crew?.driverName || 'Driver').replace(/^Super\s+Admin$/i, 'Admin').replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD)\s+/i, '').trim().split(/\s+/)[0];
@@ -239,7 +254,7 @@ export async function downloadSuratJalanPdf(
     // Row 1: SPV Logistik & Operasional
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6);
-    doc.text('Disiapkan (SPV):', leftX, y, { align: 'center' });
+    doc.text('Disiapkan:', leftX, y, { align: 'center' });
     doc.text('Operasional:', rightX, y, { align: 'center' });
 
     // Blank space for manual/initial signature (13mm vertical space)

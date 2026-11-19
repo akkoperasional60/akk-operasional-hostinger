@@ -401,8 +401,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     setTimeout(() => setIsFlashActive(false), 150);
 
     const canvas = document.createElement('canvas');
-    // Limit max resolution to 1024px for optimal DB storage & fast upload
-    const maxDim = 1024;
+    // Limit max resolution to 800px for compact payload & fast upload
+    const maxDim = 800;
     let w = video.videoWidth;
     let h = video.videoHeight;
     if (w > maxDim || h > maxDim) {
@@ -435,8 +435,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     const exifMeta = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
     stampWatermark(ctx, w, h, now, exifMeta);
 
-    // Compressed JPEG quality 0.72 (reduces file size by ~70-80% without losing watermark legibility)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    // Compressed JPEG quality 0.58 for compact size while keeping watermark sharp
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
     setCapturedImage(dataUrl);
     setCapturedExif(exifMeta);
     setCapturedTimestamp(now.toISOString());
@@ -516,7 +516,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     const simExif = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
     stampWatermark(ctx, 1024, 576, now, simExif);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
     setCapturedImage(dataUrl);
     setCapturedExif(simExif);
     setCapturedTimestamp(now.toISOString());
@@ -549,8 +549,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          // Limit max dimension to 1024px for database storage efficiency
-          const maxDim = 1024;
+          // Limit max dimension to 800px for compact storage & fast upload
+          const maxDim = 800;
           let w = img.width;
           let h = img.height;
           if (w > maxDim || h > maxDim) {
@@ -570,7 +570,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
             ctx.drawImage(img, 0, 0, w, h);
             const now = new Date();
             stampWatermark(ctx, w, h, now, exifMeta);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
             setCapturedImage(dataUrl);
             setCapturedExif(exifMeta);
             setCapturedTimestamp(now.toISOString());

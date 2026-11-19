@@ -426,7 +426,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const applyWatermarkToCanvas = (canvas: HTMLCanvasElement, exifInput?: ExifTimestampMetadata): string => {
     const exif = exifInput || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
     const ctx = canvas.getContext('2d');
-    if (!ctx) return canvas.toDataURL('image/jpeg', 0.72);
+    if (!ctx) return canvas.toDataURL('image/jpeg', 0.58);
     const w = canvas.width;
     const h = canvas.height;
 
@@ -480,7 +480,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       bannerY + 14 + (fontSize * 2)
     );
 
-    const stampedUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const stampedUrl = canvas.toDataURL('image/jpeg', 0.58);
     addPhotoToList(stampedUrl, exif);
     return stampedUrl;
   };
@@ -489,9 +489,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const captureLivePhoto = (closeAfterCapture: boolean = false) => {
     if (!videoRef.current) return;
     const video = videoRef.current;
-    const rawW = video.videoWidth || 1280;
-    const rawH = video.videoHeight || 720;
-    const maxDim = 960;
+    const rawW = video.videoWidth || 800;
+    const rawH = video.videoHeight || 450;
+    const maxDim = 800;
     let w = rawW;
     let h = rawH;
     if (w > maxDim || h > maxDim) {
@@ -535,7 +535,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const maxDim = 960;
+            const maxDim = 800;
             let w = img.width;
             let h = img.height;
             if (w > maxDim || h > maxDim) {

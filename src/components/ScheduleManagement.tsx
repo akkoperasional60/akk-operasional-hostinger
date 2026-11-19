@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check, Building2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check, Building2, Wrench } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -303,6 +304,15 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
     setSelectedRouteScheduleId(sch.id);
   };
   const [consecutiveConflict, setConsecutiveConflict] = useState<AreaRepetitionConflict | null>(null);
+  const [notReadyFleetPopup, setNotReadyFleetPopup] = useState<{
+    fleet: Fleet;
+    statusTitle: string;
+    reasonType: 'maintenance' | 'on_duty' | 'scheduled';
+    description: string;
+    areaName: string | null;
+    driverName: string | null;
+    canForceProceed: boolean;
+  } | null>(null);
   const { addNotification } = useToast();
   const [isExportingManifestPdf, setIsExportingManifestPdf] = useState(false);
 
@@ -1443,18 +1453,73 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     <select
                       required
                       value={newSchedule.fleetId}
-                      onChange={(e) => setNewSchedule({ ...newSchedule, fleetId: e.target.value })}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        if (!nextId) {
+                          setNewSchedule({ ...newSchedule, fleetId: '' });
+                          return;
+                        }
+                        const chosenFleet = fleets.find(f => f.id === nextId);
+                        if (chosenFleet) {
+                          const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                          const liveDate = logisticsStore.getFleetLiveOperationalInfo(chosenFleet, depDateIso);
+                          const liveNow = logisticsStore.getFleetLiveOperationalInfo(chosenFleet);
+                          const isMaintenance = liveDate.effectiveStatus === 'maintenance' || chosenFleet.status === 'maintenance';
+                          const isSameDateConflict = !isMaintenance && !liveDate.canBeScheduled;
+                          const isCurrentlyOnDuty =
+                            !isMaintenance &&
+                            liveDate.canBeScheduled &&
+                            (liveNow.effectiveStatus === 'on-duty' || chosenFleet.status === 'on-duty');
+
+                          if (isMaintenance || isSameDateConflict || isCurrentlyOnDuty) {
+                            setNotReadyFleetPopup({
+                              fleet: chosenFleet,
+                              reasonType: isMaintenance ? 'maintenance' : isSameDateConflict ? 'scheduled' : 'on_duty',
+                              statusTitle: isMaintenance
+                                ? 'Sedang Servis / Perbaikan'
+                                : isSameDateConflict
+                                ? liveDate.statusLabel === 'Kirim'
+                                  ? 'Sedang Kirim (Di Jalan)'
+                                  : 'Sudah Terjadwal'
+                                : 'Sedang Kirim (Belum Kembali)',
+                              description: isMaintenance
+                                ? 'Status armada ini masih dalam proses servis atau perbaikan bengkel (Belum Ready). Pastikan kendaraan benar-benar siap sebelum dijadwalkan.'
+                                : isSameDateConflict
+                                ? `Armada ini sudah terjadwal atau sedang pengiriman pada tanggal tersebut (${liveDate.areaName || liveDate.todayScheduledArea || 'Area Kirim'}).`
+                                : 'Armada ini saat ini masih dalam pengiriman di jalan dan belum kembali ke gudang (Belum Ready).',
+                              areaName: liveDate.areaName || liveNow.areaName || liveDate.todayScheduledArea,
+                              driverName: liveDate.driverName || liveNow.driverName,
+                              canForceProceed: !isSameDateConflict
+                            });
+                            return;
+                          }
+                        }
+                        setNewSchedule({ ...newSchedule, fleetId: nextId });
+                      }}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
                     >
                       <option value="">-- Pilih Truk Armada --</option>
                       {fleets.map(fl => {
-                        const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fl);
-                        const isServis = !liveInfo.canBeScheduled;
+                        const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                        const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fl, depDateIso);
+                        const liveNow = logisticsStore.getFleetLiveOperationalInfo(fl);
+                        const isNotReady =
+                          liveInfo.effectiveStatus === 'maintenance' ||
+                          fl.status === 'maintenance' ||
+                          !liveInfo.canBeScheduled ||
+                          liveNow.effectiveStatus === 'on-duty' ||
+                          fl.status === 'on-duty';
                         return (
-                          <option key={fl.id} value={fl.id} disabled={isServis}>
-                            {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} — {liveInfo.statusLabel}
-                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
-                            {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
+                          <option key={fl.id} value={fl.id}>
+                            {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} — {
+                              liveInfo.effectiveStatus === 'maintenance' || fl.status === 'maintenance'
+                                ? 'Servis (Belum Ready)'
+                                : !liveInfo.canBeScheduled
+                                ? `${liveInfo.statusLabel} (${liveInfo.areaName || liveInfo.todayScheduledArea || 'Terjadwal'})`
+                                : liveNow.effectiveStatus === 'on-duty' || fl.status === 'on-duty'
+                                ? `Sedang Kirim (${liveNow.areaName || 'Belum Kembali'})`
+                                : liveInfo.statusLabel
+                            }{isNotReady ? ' ⚠' : ''}
                           </option>
                         );
                       })}
@@ -1462,25 +1527,157 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     {newSchedule.fleetId && (() => {
                       const selFleet = fleets.find(f => f.id === newSchedule.fleetId);
                       if (!selFleet) return null;
-                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                      const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet, depDateIso);
+                      const liveNow = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                      const isNotReady =
+                        liveInfo.effectiveStatus === 'maintenance' ||
+                        selFleet.status === 'maintenance' ||
+                        !liveInfo.canBeScheduled ||
+                        liveNow.effectiveStatus === 'on-duty' ||
+                        selFleet.status === 'on-duty';
                       return (
-                        <div className="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+                        <div className={`mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border text-[11px] ${
+                          isNotReady
+                            ? liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
+                              ? 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+                              : 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                            : 'bg-slate-950 border-slate-800'
+                        }`}>
                           <div className="flex items-center gap-2">
-                            <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                            {isNotReady ? (
+                              <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${
+                                liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
+                                  ? 'text-rose-400'
+                                  : 'text-amber-400'
+                              }`} />
+                            ) : (
+                              <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                            )}
                             <span className="font-bold text-white">
-                              Status Armada: {liveInfo.statusLabel}
+                              {isNotReady
+                                ? `Peringatan: Armada Belum Ready (${liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance' ? 'Servis' : liveNow.statusLabel})`
+                                : `Status Armada: ${liveInfo.statusLabel}`}
                             </span>
                           </div>
                           <span className="text-[10px] font-medium text-slate-400 truncate">
-                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
-                              ? `Area Hari Ini: ${liveInfo.areaName}`
-                              : liveInfo.effectiveStatus === 'maintenance'
+                            {liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
                               ? 'Sedang Perbaikan (Servis)'
+                              : liveNow.effectiveStatus === 'on-duty' && liveNow.areaName
+                              ? `Area Aktif: ${liveNow.areaName}`
                               : 'Siap Digunakan Kirim'}
                           </span>
                         </div>
                       );
                     })()}
+
+                    {notReadyFleetPopup &&
+                      typeof document !== 'undefined' &&
+                      createPortal(
+                        <div
+                          onClick={() => setNotReadyFleetPopup(null)}
+                          className="fixed inset-0 z-[10000] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+                        >
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
+                          >
+                            <div className={`px-5 py-4 border-b flex items-start justify-between gap-3 ${
+                              notReadyFleetPopup.reasonType === 'maintenance'
+                                ? 'bg-rose-500/10 border-rose-500/30'
+                                : 'bg-amber-500/10 border-amber-500/30'
+                            }`}>
+                              <div className="flex items-start gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                                  notReadyFleetPopup.reasonType === 'maintenance'
+                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                    : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                                }`}>
+                                  {notReadyFleetPopup.reasonType === 'maintenance' ? (
+                                    <Wrench className="w-5 h-5" />
+                                  ) : (
+                                    <AlertTriangle className="w-5 h-5" />
+                                  )}
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-extrabold text-white">Peringatan: Armada Belum Ready</h4>
+                                  <p className={`text-[11px] font-semibold mt-0.5 ${
+                                    notReadyFleetPopup.reasonType === 'maintenance' ? 'text-rose-300' : 'text-amber-300'
+                                  }`}>
+                                    Status saat ini: {notReadyFleetPopup.statusTitle}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setNotReadyFleetPopup(null)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="p-5 space-y-3.5">
+                              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-extrabold text-white">
+                                    {notReadyFleetPopup.fleet.initialCode ? `[${notReadyFleetPopup.fleet.initialCode}] ` : ''}
+                                    {notReadyFleetPopup.fleet.plateNumber}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                    notReadyFleetPopup.reasonType === 'maintenance'
+                                      ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                  }`}>
+                                    {notReadyFleetPopup.statusTitle}
+                                  </span>
+                                </div>
+                                {notReadyFleetPopup.areaName && (
+                                  <div className="text-[11px] text-slate-400">
+                                    Area Aktif: <strong className="text-slate-200">{notReadyFleetPopup.areaName}</strong>
+                                  </div>
+                                )}
+                                {notReadyFleetPopup.driverName && (
+                                  <div className="text-[11px] text-slate-400">
+                                    Driver: <strong className="text-slate-200">{notReadyFleetPopup.driverName}</strong>
+                                  </div>
+                                )}
+                              </div>
+                              <p className="text-xs leading-relaxed text-slate-300">{notReadyFleetPopup.description}</p>
+                            </div>
+                            <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setNotReadyFleetPopup(null)}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                                  notReadyFleetPopup.canForceProceed
+                                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                                }`}
+                              >
+                                Pilih Armada Ready Lain
+                              </button>
+                              {notReadyFleetPopup.canForceProceed && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const chosenId = notReadyFleetPopup.fleet.id;
+                                    setNotReadyFleetPopup(null);
+                                    setNewSchedule({ ...newSchedule, fleetId: chosenId });
+                                  }}
+                                  className={`px-4 py-2 rounded-xl text-xs font-bold text-white transition cursor-pointer ${
+                                    notReadyFleetPopup.reasonType === 'maintenance'
+                                      ? 'bg-rose-600 hover:bg-rose-500'
+                                      : 'bg-amber-600 hover:bg-amber-500'
+                                  }`}
+                                >
+                                  Tetap Jadwalkan Armada Ini
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>,
+                        document.body
+                      )}
                   </div>
                 </div>
 

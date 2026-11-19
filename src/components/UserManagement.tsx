@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Users, UserCheck, UserX, Clock, ShieldAlert, CheckCircle2, XCircle, 
   Search, Filter, Plus, Shield, User, Building, Phone, Mail, Calendar, 
@@ -28,20 +29,19 @@ const MODULE_DEFINITIONS = CANONICAL_SIDEBAR_MODULES.map(mod => ({
 }));
 
 const DEPARTMENT_FILTER_OPTIONS = [
-  { id: 'all', label: 'Semua Role / Departemen', shortLabel: 'Semua', icon: '🌐' },
-  { id: 'logistics', label: 'Logistik & Pengiriman', shortLabel: 'Logistik', icon: '🚚' },
-  { id: 'sales', label: 'Admin Penjualan (Sales)', shortLabel: 'Sales', icon: '💼' },
-  { id: 'warehouse', label: 'Gudang (Warehouse)', shortLabel: 'Gudang', icon: '📦' },
-  { id: 'marketing', label: 'Marketing', shortLabel: 'Marketing', icon: '📢' },
-  { id: 'purchasing', label: 'Admin Pembelian', shortLabel: 'Pembelian', icon: '🛒' },
-  { id: 'finance', label: 'Finance & Tax', shortLabel: 'Finance', icon: '💰' },
-  { id: 'hr', label: 'Human Resources & GA', shortLabel: 'HR & GA', icon: '👥' },
-  { id: 'super_admin', label: 'Super Admin', shortLabel: 'Super Admin', icon: '👑' },
+  { id: 'all', label: 'Semua Role / Departemen', shortLabel: 'Semua', Icon: Users, tone: 'text-amber-400 bg-amber-500/15' },
+  { id: 'logistics', label: 'Logistik & Armada', shortLabel: 'Logistik', Icon: Truck, tone: 'text-blue-400 bg-blue-500/15' },
+  { id: 'sales', label: 'Admin Penjualan (Sales)', shortLabel: 'Sales', Icon: Briefcase, tone: 'text-violet-400 bg-violet-500/15' },
+  { id: 'warehouse', label: 'Gudang (Warehouse)', shortLabel: 'Gudang', Icon: Package, tone: 'text-emerald-400 bg-emerald-500/15' },
+  { id: 'marketing', label: 'Marketing', shortLabel: 'Marketing', Icon: Megaphone, tone: 'text-orange-400 bg-orange-500/15' },
+  { id: 'purchasing', label: 'Admin Pembelian', shortLabel: 'Pembelian', Icon: ShoppingBag, tone: 'text-pink-400 bg-pink-500/15' },
+  { id: 'finance', label: 'Adm Finance & Tax', shortLabel: 'Finance', Icon: DollarSign, tone: 'text-lime-400 bg-lime-500/15' },
+  { id: 'hr', label: 'HRD & Security', shortLabel: 'HR & GA', Icon: Shield, tone: 'text-rose-400 bg-rose-500/15' },
+  { id: 'super_admin', label: 'Super Admin', shortLabel: 'Super Admin', Icon: ShieldCheck, tone: 'text-amber-300 bg-amber-500/20' },
 ];
 
 const OFFICIAL_DEPARTMENT_OPTIONS = [
   'Logistik',
-  'Pengiriman',
   'Adm. Penjualan',
   'Adm. Pembelian',
   'Gudang',
@@ -50,6 +50,504 @@ const OFFICIAL_DEPARTMENT_OPTIONS = [
   'Human Resources',
   'Marketing'
 ];
+
+interface RoleDropdownOption {
+  value: UserRole;
+  label: string;
+  category: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  iconTone: string;
+}
+
+const ROLE_DROPDOWN_OPTIONS: RoleDropdownOption[] = [
+  { value: 'super_admin', label: 'Super Admin', category: 'Manajemen', Icon: ShieldCheck, iconTone: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  { value: 'spv_logistik', label: 'SPV Logistik', category: 'Logistik', Icon: Truck, iconTone: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  { value: 'operasional', label: 'SPV Operasional', category: 'Operasional', Icon: BarChart3, iconTone: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' },
+  { value: 'koordinator_driver', label: 'Koordinator Driver', category: 'Logistik', Icon: UserCog, iconTone: 'bg-sky-500/20 text-sky-400 border-sky-500/30' },
+  { value: 'driver', label: 'Driver', category: 'Logistik', Icon: Truck, iconTone: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  { value: 'crew_helper', label: 'Helper', category: 'Logistik', Icon: Users, iconTone: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' },
+  { value: 'koordinator_gudang', label: 'Koordinator Gudang', category: 'Gudang', Icon: Package, iconTone: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  { value: 'warehouse_admin', label: 'Gudang', category: 'Gudang', Icon: Package, iconTone: 'bg-teal-500/20 text-teal-400 border-teal-500/30' },
+  { value: 'spv_sales_admin', label: 'SPV Adm Penjualan', category: 'Penjualan', Icon: Briefcase, iconTone: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
+  { value: 'sales_admin', label: 'Adm. Penjualan', category: 'Penjualan', Icon: Briefcase, iconTone: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+  { value: 'spv_purchasing_admin', label: 'SPV Adm Pembelian', category: 'Pembelian', Icon: ShoppingBag, iconTone: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30' },
+  { value: 'purchasing_admin', label: 'Adm. Pembelian', category: 'Pembelian', Icon: ShoppingBag, iconTone: 'bg-pink-500/20 text-pink-400 border-pink-500/30' },
+  { value: 'spv_marketing_offline', label: 'SPV Marketing Offline', category: 'Marketing', Icon: Megaphone, iconTone: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  { value: 'marketing_offline', label: 'Marketing Offline', category: 'Marketing', Icon: Megaphone, iconTone: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  { value: 'marketing_online', label: 'Marketing Online', category: 'Marketing', Icon: BarChart3, iconTone: 'bg-sky-500/20 text-sky-400 border-sky-500/30' },
+  { value: 'finance_tax_admin', label: 'Adm Finance & Tax', category: 'Finance', Icon: DollarSign, iconTone: 'bg-lime-500/20 text-lime-400 border-lime-500/30' },
+  { value: 'hr_admin', label: 'Human Resource Development', category: 'HR & GA', Icon: Users, iconTone: 'bg-rose-500/20 text-rose-400 border-rose-500/30' },
+  { value: 'security', label: 'Security', category: 'Keamanan', Icon: Shield, iconTone: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
+  { value: 'unassigned', label: 'Perlu Diisi (Belum Ditentukan)', category: 'Belum Diatur', Icon: AlertTriangle, iconTone: 'bg-rose-500/20 text-rose-400 border-rose-500/30' }
+];
+
+const getDefaultDepartmentForRole = (role: UserRole, fallback = 'Logistik'): string => {
+  switch (role) {
+    case 'driver':
+    case 'crew_helper':
+    case 'spv_logistik':
+    case 'operasional':
+    case 'koordinator_driver':
+    case 'super_admin':
+      return 'Logistik';
+    case 'security':
+      return 'Satpam';
+    case 'sales_admin':
+    case 'spv_sales_admin':
+      return 'Adm. Penjualan';
+    case 'purchasing_admin':
+    case 'spv_purchasing_admin':
+      return 'Adm. Pembelian';
+    case 'warehouse_admin':
+    case 'koordinator_gudang':
+      return 'Gudang';
+    case 'finance_tax_admin':
+      return 'Finance & Tax';
+    case 'hr_admin':
+      return 'Human Resources';
+    case 'marketing_online':
+    case 'marketing_offline':
+    case 'spv_marketing_offline':
+      return 'Marketing';
+    default:
+      return fallback;
+  }
+};
+
+interface PortalMenuPosition {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+}
+
+function computePortalPosition(triggerEl: HTMLElement, minWidth = 220, desiredMaxHeight = 260): PortalMenuPosition {
+  const rect = triggerEl.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const margin = 12;
+  const gap = 6;
+  const width = Math.min(Math.max(rect.width, minWidth), vw - margin * 2);
+  let left = rect.left;
+  if (left + width > vw - margin) {
+    left = Math.max(margin, vw - margin - width);
+  }
+  const spaceBelow = vh - rect.bottom - margin - gap;
+  const spaceAbove = rect.top - margin - gap;
+  const openUp = spaceBelow < Math.min(220, desiredMaxHeight) && spaceAbove > spaceBelow;
+  const maxHeight = Math.max(140, Math.min(desiredMaxHeight, openUp ? spaceAbove : spaceBelow));
+
+  if (openUp) {
+    return {
+      bottom: vh - rect.top + gap,
+      left,
+      width,
+      maxHeight,
+      openUp: true
+    };
+  }
+  return {
+    top: rect.bottom + gap,
+    left,
+    width,
+    maxHeight,
+    openUp: false
+  };
+}
+
+interface CustomSelectOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+  dotClass?: string;
+  Icon?: React.ComponentType<{ className?: string }>;
+  iconTone?: string;
+}
+
+const CustomSelectDropdown: React.FC<{
+  value: string;
+  onChange: (val: string) => void;
+  options: CustomSelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  compact?: boolean;
+  minMenuWidth?: number;
+}> = ({
+  value,
+  onChange,
+  options,
+  placeholder = 'Pilih opsi...',
+  disabled = false,
+  searchable = false,
+  searchPlaceholder = 'Cari...',
+  compact = false,
+  minMenuWidth = 210
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<PortalMenuPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const selected = options.find(opt => opt.value === value) || null;
+  const filtered = query.trim()
+    ? options.filter(
+        opt =>
+          opt.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+          (opt.sublabel || '').toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : options;
+
+  const updatePos = () => {
+    if (!triggerRef.current) return;
+    setMenuPos(computePortalPosition(triggerRef.current, minMenuWidth, 260));
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    const t = searchable ? setTimeout(() => searchRef.current?.focus(), 40) : null;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    const handleReposition = () => updatePos();
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      if (t) clearTimeout(t);
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isOpen, searchable]);
+
+  const SelectedIcon = selected?.Icon;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setIsOpen(prev => !prev)}
+        className={`w-full ${
+          compact ? 'px-2.5 py-1.5 rounded-lg text-[11px]' : 'px-3 py-2 rounded-xl text-xs'
+        } bg-slate-950 border text-left flex items-center justify-between gap-2 transition ${
+          disabled
+            ? 'opacity-60 cursor-not-allowed border-slate-800'
+            : isOpen
+            ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-md shadow-amber-500/10 cursor-pointer'
+            : 'border-slate-800 hover:border-slate-600 cursor-pointer'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {selected?.dotClass && (
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${selected.dotClass}`} />
+          )}
+          {SelectedIcon && (
+            <span
+              className={`${
+                compact ? 'w-5 h-5 rounded-md' : 'w-6 h-6 rounded-lg'
+              } border flex items-center justify-center shrink-0 ${
+                selected?.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+              }`}
+            >
+              <SelectedIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
+            </span>
+          )}
+          <span className={`font-semibold truncate ${selected ? 'text-white' : 'text-slate-400'}`}>
+            {selected ? selected.label : placeholder}
+          </span>
+        </div>
+        <ChevronDown
+          className={`${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-slate-400 shrink-0 transition-transform duration-150 ${
+            isOpen ? 'rotate-180 text-amber-400' : ''
+          }`}
+        />
+      </button>
+
+      {isOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              bottom: menuPos.bottom,
+              left: menuPos.left,
+              width: menuPos.width,
+              zIndex: 9999
+            }}
+            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/75 overflow-hidden animate-in fade-in duration-150"
+          >
+            {searchable && (
+              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={searchPlaceholder}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{ maxHeight: Math.max(120, menuPos.maxHeight - (searchable ? 48 : 8)) }}
+              className="overflow-y-auto p-1.5 space-y-0.5"
+            >
+              {filtered.length === 0 ? (
+                <div className="py-4 text-center text-[11px] text-slate-500">Data tidak ditemukan.</div>
+              ) : (
+                filtered.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {opt.dotClass && (
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
+                        )}
+                        {OptIcon && (
+                          <span
+                            className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${
+                              opt.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            <OptIcon className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <div className={`text-xs truncate ${active ? 'text-amber-300 font-bold' : 'text-white font-semibold'}`}>
+                            {opt.label}
+                          </div>
+                          {opt.sublabel && (
+                            <div className="text-[10px] text-slate-400 truncate">{opt.sublabel}</div>
+                          )}
+                        </div>
+                      </div>
+                      {active && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
+
+const USER_STATUS_DROPDOWN_OPTIONS: CustomSelectOption[] = [
+  { value: 'approved', label: 'Aktif / Disetujui', sublabel: 'Akun aktif dan dapat mengakses sistem', dotClass: 'bg-emerald-400 ring-2 ring-emerald-500/30' },
+  { value: 'inactive', label: 'Nonaktif', sublabel: 'Akses ditutup, histori tetap tersimpan', dotClass: 'bg-slate-400 ring-2 ring-slate-500/30' },
+  { value: 'pending', label: 'Menunggu Approval', sublabel: 'Belum disetujui oleh Super Admin', dotClass: 'bg-amber-400 ring-2 ring-amber-500/30' },
+  { value: 'rejected', label: 'Ditolak / Dibekukan', sublabel: 'Permintaan akses dibekukan', dotClass: 'bg-rose-500 ring-2 ring-rose-500/30' }
+];
+
+const ACCESS_LEVEL_DROPDOWN_OPTIONS: CustomSelectOption[] = [
+  { value: 'full_access', label: 'Full Akses', sublabel: 'Bisa input & edit data', dotClass: 'bg-emerald-400' },
+  { value: 'read_only', label: 'Hanya Lihat', sublabel: 'Read only tanpa ubah data', dotClass: 'bg-amber-400' },
+  { value: 'none', label: 'Tidak Ada Akses', sublabel: 'Sub-menu dinonaktifkan', dotClass: 'bg-rose-500' }
+];
+
+const CustomRoleDropdown: React.FC<{
+  value: UserRole;
+  onChange: (role: UserRole) => void;
+  includeUnassigned?: boolean;
+}> = ({ value, onChange, includeUnassigned = false }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<PortalMenuPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const options = ROLE_DROPDOWN_OPTIONS.filter(opt => includeUnassigned || opt.value !== 'unassigned');
+  const selected = ROLE_DROPDOWN_OPTIONS.find(opt => opt.value === value) || options[0];
+  const filtered = query.trim()
+    ? options.filter(
+        opt =>
+          opt.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+          opt.category.toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : options;
+
+  const updatePos = () => {
+    if (!triggerRef.current) return;
+    setMenuPos(computePortalPosition(triggerRef.current, 270, 290));
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    const t = setTimeout(() => searchRef.current?.focus(), 40);
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    const handleReposition = () => updatePos();
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isOpen]);
+
+  const SelectedIcon = selected.Icon;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+          isOpen
+            ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-lg shadow-amber-500/10'
+            : 'border-slate-800 hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${selected.iconTone}`}>
+            <SelectedIcon className="w-3.5 h-3.5" />
+          </span>
+          <span className="text-xs font-bold text-white truncate">{selected.label}</span>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+      </button>
+
+      {isOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              bottom: menuPos.bottom,
+              left: menuPos.left,
+              width: menuPos.width,
+              zIndex: 9999
+            }}
+            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/75 overflow-hidden animate-in fade-in duration-150"
+          >
+            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cari role atau divisi..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div
+              style={{ maxHeight: Math.max(140, menuPos.maxHeight - 50) }}
+              className="overflow-y-auto p-1.5 space-y-0.5"
+            >
+              {filtered.length === 0 ? (
+                <div className="py-5 text-center text-[11px] text-slate-500">
+                  Role tidak ditemukan.
+                </div>
+              ) : (
+                filtered.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 ${opt.iconTone}`}>
+                          <OptIcon className="w-3.5 h-3.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className={`text-xs font-semibold truncate ${active ? 'text-amber-300 font-bold' : 'text-white'}`}>
+                            {opt.label}
+                          </div>
+                          <div className="text-[10px] text-slate-400">{opt.category}</div>
+                        </div>
+                      </div>
+                      {active && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
 
 export interface UserManagementProps {
   onNavigateToE2E?: () => void;
@@ -60,8 +558,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
   const [statusFilter, setStatusFilter] = useState<'all' | UserApprovalStatus>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const [isDeptFilterOpen, setIsDeptFilterOpen] = useState<boolean>(false);
+  const deptFilterRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isDeptFilterOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (deptFilterRef.current && !deptFilterRef.current.contains(e.target as Node)) {
+        setIsDeptFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [isDeptFilterOpen]);
 
   // Super Admin check
   const isSuperAdmin = currentUser.role === 'super_admin';
@@ -349,22 +860,26 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   }, [selectedUser?.id, selectedUser?.role, branches.length]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
-    super_admin: 'Super Admin / Manager',
-    dispatcher: 'Dispatcher / SPV Logistik',
+    super_admin: 'Super Admin',
+    dispatcher: 'SPV Logistik',
     spv_logistik: 'SPV Logistik',
-    operasional: 'Operasional (Operational Lead)',
-    pengiriman: 'Pengiriman',
-    security: 'Security (Pos Satpam & Keamanan)',
+    operasional: 'SPV Operasional',
+    koordinator_driver: 'Koordinator Driver',
+    security: 'Security',
     sales_admin: 'Adm. Penjualan',
+    spv_sales_admin: 'SPV Adm Penjualan',
     purchasing_admin: 'Adm. Pembelian',
-    hr_admin: 'HR Admin',
-    finance_tax_admin: 'Finance & Tax',
+    spv_purchasing_admin: 'SPV Adm Pembelian',
+    hr_admin: 'Human Resource Development',
+    finance_tax_admin: 'Adm Finance & Tax',
     warehouse_admin: 'Gudang',
-    driver: 'Kru Supir / Driver',
+    koordinator_gudang: 'Koordinator Gudang',
+    driver: 'Driver',
     marketing_online: 'Marketing Online',
     marketing_offline: 'Marketing Offline',
-    crew_helper: 'Kru Helper / Kernet',
-    unassigned: '⚠️ Perlu Diisi (Belum Ada Role)'
+    spv_marketing_offline: 'SPV Marketing Offline',
+    crew_helper: 'Helper',
+    unassigned: 'Perlu Diisi (Belum Ada Role)'
   };
 
   const toggleBranchExpansion = (branchId: string) => {
@@ -542,7 +1057,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         ...prev,
         [branchId]: {
           ...branchEntry,
-          enabled: activeModCount > 0 ? true : branchEntry.enabled,
+          enabled: activeModCount > 0,
           allAccess: activeModCount === MODULE_DEFINITIONS.length,
           modules: nextModules
         }
@@ -791,7 +1306,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       password: newUser.password,
       status: chosenRole !== 'unassigned' ? 'approved' : 'pending',
       notes: isCrewRole
-        ? `Akun ${chosenRole === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'} aktif & terintegrasi otomatis ke Daftar Jadwal Pengiriman`
+        ? `Akun ${chosenRole === 'driver' ? 'Driver' : 'Helper'} aktif`
         : chosenRole !== 'unassigned'
         ? `Akun aktif untuk role ${ROLE_LABELS[chosenRole] || chosenRole}`
         : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
@@ -825,7 +1340,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     showNotification(
       isCrewRole ? 'Akun Kru Terdaftar & Sinkron ke Jadwal' : 'Akun Baru Terdaftar',
       isCrewRole
-        ? `Akun "${created.fullName}" (${ROLE_LABELS[chosenRole]}) berhasil dibuat dan otomatis masuk ke dalam daftar pilihan ${chosenRole === 'driver' ? 'Kru Supir Utama' : 'Kru Helper / Kernet'} pada menu Jadwal & Penugasan Pengiriman.`
+        ? `Akun "${created.fullName}" (${ROLE_LABELS[chosenRole]}) berhasil dibuat dan otomatis masuk ke dalam daftar pilihan ${chosenRole === 'driver' ? 'Driver' : 'Helper'} pada menu Jadwal & Penugasan Pengiriman.`
         : `Akun "${created.fullName}" berhasil dibuat dengan Role: ${ROLE_LABELS[chosenRole] || chosenRole}.`,
       'success'
     );
@@ -845,7 +1360,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         return (
           role === 'spv_logistik' ||
           role === 'operasional' ||
-          role === 'pengiriman' ||
+          role === 'koordinator_driver' ||
           role === 'driver' ||
           role === 'crew_helper' ||
           /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept) ||
@@ -854,12 +1369,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       case 'sales':
         return (
           role === 'sales_admin' ||
+          role === 'spv_sales_admin' ||
           /sales|penjualan/i.test(dept) ||
           (role !== 'super_admin' && canAccess(u, 'sales_admin'))
         );
       case 'warehouse':
         return (
           role === 'warehouse_admin' ||
+          role === 'koordinator_gudang' ||
           /gudang|warehouse/i.test(dept) ||
           (role !== 'super_admin' && canAccess(u, 'warehouse'))
         );
@@ -867,12 +1384,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         return (
           role === 'marketing_online' ||
           role === 'marketing_offline' ||
+          role === 'spv_marketing_offline' ||
           /marketing|pemasaran/i.test(dept) ||
           (role !== 'super_admin' && canAccess(u, 'marketing'))
         );
       case 'purchasing':
         return (
           role === 'purchasing_admin' ||
+          role === 'spv_purchasing_admin' ||
           /pembelian|purchasing|pengadaan/i.test(dept) ||
           (role !== 'super_admin' && canAccess(u, 'purchasing'))
         );
@@ -993,21 +1512,58 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <span>Tambah User Langsung</span>
           </button>
 
-          {/* Department / Role Filter Dropdown in Top Toolbar */}
-          <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
-            <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="text-slate-400 font-semibold text-[11px] hidden sm:inline">Role / Dept:</span>
-            <select
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="bg-transparent text-amber-400 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+          {/* Department / Role Filter Custom Dropdown in Top Toolbar */}
+          <div ref={deptFilterRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsDeptFilterOpen(prev => !prev)}
+              className={`flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border text-xs transition cursor-pointer ${
+                isDeptFilterOpen
+                  ? 'border-amber-500 ring-2 ring-amber-500/20'
+                  : 'border-slate-800 hover:border-slate-600'
+              }`}
             >
-              {DEPARTMENT_FILTER_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id} className="bg-slate-900 text-slate-200 font-medium">
-                  {opt.icon} {opt.label} ({countUsersInDept(opt.id)})
-                </option>
-              ))}
-            </select>
+              <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-slate-400 font-semibold text-[11px] hidden sm:inline">Role / Dept:</span>
+              <span className="text-amber-400 font-bold text-xs">
+                {activeDeptOption?.label || 'Semua Role / Departemen'} ({countUsersInDept(departmentFilter)})
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isDeptFilterOpen ? 'rotate-180 text-amber-400' : ''}`} />
+            </button>
+
+            {isDeptFilterOpen && (
+              <div className="absolute left-0 mt-1.5 w-72 z-[70] rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/70 p-1.5 space-y-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                {DEPARTMENT_FILTER_OPTIONS.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = departmentFilter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setDepartmentFilter(opt.id);
+                        setIsDeptFilterOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${opt.tone}`}>
+                          <OptIcon className="w-3.5 h-3.5" />
+                        </span>
+                        <span className="text-xs font-semibold truncate">{opt.label}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold tabular-nums ${active ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>
+                        {countUsersInDept(opt.id)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1729,30 +2285,26 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                                                   {isSubActive && (
                                                     <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                                      <span className="text-[10px] text-slate-400">
+                                                      <span className="text-[10px] text-slate-400 shrink-0">
                                                         Akses Input:
                                                       </span>
-                                                      <select
-                                                        value={accessLevel}
-                                                        onChange={e =>
-                                                          handleBranchSubMenuPermissionChange(
-                                                            branch.id,
-                                                            mod.id,
-                                                            sub.id,
-                                                            e.target.value as 'none' | 'read_only' | 'full_access'
-                                                          )
-                                                        }
-                                                        disabled={!isSuperAdmin}
-                                                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
-                                                      >
-                                                        <option value="full_access">
-                                                          🟢 Full Akses (Bisa Input/Edit)
-                                                        </option>
-                                                        <option value="read_only">
-                                                          🟡 Hanya Lihat (Read Only)
-                                                        </option>
-                                                        <option value="none">🔴 Tidak Ada Akses</option>
-                                                      </select>
+                                                      <div className="w-36">
+                                                        <CustomSelectDropdown
+                                                          value={accessLevel}
+                                                          onChange={val =>
+                                                            handleBranchSubMenuPermissionChange(
+                                                              branch.id,
+                                                              mod.id,
+                                                              sub.id,
+                                                              val as 'none' | 'read_only' | 'full_access'
+                                                            )
+                                                          }
+                                                          options={ACCESS_LEVEL_DROPDOWN_OPTIONS}
+                                                          disabled={!isSuperAdmin}
+                                                          compact
+                                                          minMenuWidth={195}
+                                                        />
+                                                      </div>
                                                     </div>
                                                   )}
                                                 </div>
@@ -1834,18 +2386,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <p className="text-xs text-slate-400">
               Pilih akun pengguna sumber untuk menyalin seluruh konfigurasi hak akses modul dan sub-menu ke user saat ini ({selectedUser?.fullName}).
             </p>
-            <select
+            <CustomSelectDropdown
               value={sourceUserIdForCopy}
-              onChange={(e) => setSourceUserIdForCopy(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white"
-            >
-              <option value="">-- Pilih User Sumber --</option>
-              {visibleUsersForRole.filter(u => u.id !== selectedUser?.id && u.status !== 'inactive').map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName} ({ROLE_LABELS[u.role] || u.role})
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSourceUserIdForCopy(val)}
+              placeholder="Pilih User Sumber..."
+              searchable
+              searchPlaceholder="Cari nama atau role user..."
+              minMenuWidth={280}
+              options={visibleUsersForRole
+                .filter(u => u.id !== selectedUser?.id && u.status !== 'inactive')
+                .map(u => ({
+                  value: u.id,
+                  label: u.fullName,
+                  sublabel: ROLE_LABELS[u.role] || u.role,
+                  Icon: User,
+                  iconTone: 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                }))}
+            />
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setIsCopyModalOpen(false)}
@@ -2008,8 +2565,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       {/* Manual Add User Modal */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-visible shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 rounded-t-2xl flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-amber-400" />
                 Tambah Pengguna Baru AKK
@@ -2062,50 +2619,31 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-300 font-bold block mb-1">Role Pengguna *</label>
-                  <select
+                  <CustomRoleDropdown
                     value={newUser.role}
-                    onChange={(e) => {
-                      const r = e.target.value as UserRole;
+                    onChange={(r) => {
                       setNewUser({
                         ...newUser,
                         role: r,
-                        department: r === 'pengiriman'
-                          ? 'Pengiriman'
-                          : (r === 'driver' || r === 'crew_helper' || r === 'spv_logistik' || r === 'operasional')
-                          ? 'Logistik'
-                          : newUser.department
+                        department: getDefaultDepartmentForRole(r, newUser.department)
                       });
                     }}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold cursor-pointer focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="driver">🚚 Kru Supir / Driver</option>
-                    <option value="crew_helper">🤝 Kru Helper / Kernet</option>
-                    <option value="spv_logistik">🚛 SPV Logistik</option>
-                    <option value="operasional">📋 Operasional</option>
-                    <option value="pengiriman">📦 Pengiriman</option>
-                    <option value="security">🛡️ Security</option>
-                    <option value="sales_admin">💼 Adm. Penjualan</option>
-                    <option value="purchasing_admin">🛒 Adm. Pembelian</option>
-                    <option value="warehouse_admin">📦 Gudang</option>
-                    <option value="finance_tax_admin">💰 Finance &amp; Tax</option>
-                    <option value="hr_admin">👥 HR Admin</option>
-                    <option value="marketing_online">🌐 Marketing Online</option>
-                    <option value="marketing_offline">📣 Marketing Offline</option>
-                    <option value="super_admin">👑 Super Admin</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
                   <label className="text-slate-300 font-bold block mb-1">Departemen / Divisi</label>
-                  <select
+                  <CustomSelectDropdown
                     value={newUser.department}
-                    onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer focus:outline-none focus:border-amber-500"
-                  >
-                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setNewUser({ ...newUser, department: val })}
+                    options={OFFICIAL_DEPARTMENT_OPTIONS.map(dept => ({
+                      value: dept,
+                      label: dept,
+                      Icon: Building,
+                      iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                    }))}
+                    minMenuWidth={220}
+                  />
                 </div>
               </div>
 
@@ -2141,38 +2679,39 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         </div>
       )}
 
-      {/* Edit User Profile Modal (Khusus Super Admin) */}
+      {/* Edit User Profile Modal (Khusus Super Admin) — Compact Single-Viewport Tanpa Double Scroll */}
       {editingUser && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl space-y-0">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl my-auto">
+            <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 rounded-t-2xl flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                   <UserCog className="w-4 h-4" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
-                    <span>Edit Pengguna: {editingUser.fullName}</span>
-                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    <span className="truncate">Edit Pengguna: {editingUser.fullName}</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
                       {ROLE_LABELS[editingUser.role] || editingUser.role}
                     </span>
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-400 truncate">
                     Perbarui data akun <strong className="text-slate-200">{editingUser.fullName}</strong> &bull; ID: <code className="text-amber-400 font-mono">{editingUser.id}</code>
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingUser(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div className="space-y-1.5 sm:col-span-2">
+            <form onSubmit={handleSaveEdit} className="p-4 space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-amber-400" />
                     <span>Nama Lengkap &amp; Gelar</span>
@@ -2187,7 +2726,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Mail className="w-3.5 h-3.5 text-blue-400" />
                     <span>Email Akun</span>
@@ -2202,7 +2741,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Phone className="w-3.5 h-3.5 text-emerald-400" />
                     <span>No. WhatsApp</span>
@@ -2215,71 +2754,65 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Shield className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Keterangan Role / Jabatan User</span>
+                    <span>Role / Jabatan User</span>
                     <span className="text-rose-400">*</span>
                   </label>
-                  <select
+                  <CustomRoleDropdown
                     value={editFormData.role}
-                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as UserRole })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="unassigned">⚠️ Perlu Diisi (Belum Ditentukan)</option>
-                    <option value="super_admin">👑 Super Admin / Manager</option>
-                    <option value="spv_logistik">🚛 SPV Logistik</option>
-                    <option value="operasional">📋 Operasional (Operational Lead)</option>
-                    <option value="pengiriman">📦 Pengiriman</option>
-                    <option value="security">🛡️ Security (Pos Satpam &amp; Keamanan)</option>
-                    <option value="driver">🚚 Kru Supir / Driver</option>
-                    <option value="crew_helper">🤝 Kru Helper / Kernet</option>
-                    <option value="sales_admin">💼 Adm. Penjualan</option>
-                    <option value="purchasing_admin">🛒 Adm. Pembelian</option>
-                    <option value="hr_admin">👥 HR Admin</option>
-                    <option value="finance_tax_admin">💰 Finance &amp; Tax</option>
-                    <option value="warehouse_admin">📦 Gudang</option>
-                    <option value="marketing_online">🌐 Marketing Online</option>
-                    <option value="marketing_offline">📣 Marketing Offline</option>
-                  </select>
+                    includeUnassigned={true}
+                    onChange={(r) =>
+                      setEditFormData({
+                        ...editFormData,
+                        role: r,
+                        department: getDefaultDepartmentForRole(r, editFormData.department)
+                      })
+                    }
+                  />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Status Akun</span>
                   </label>
-                  <select
+                  <CustomSelectDropdown
                     value={editFormData.status}
-                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as UserApprovalStatus })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="approved">🟢 Aktif / Disetujui (Approved)</option>
-                    <option value="inactive">⚫ Nonaktif (Hak Akses Ditutup, Histori Tersimpan)</option>
-                    <option value="pending">🟡 Menunggu Approval (Pending)</option>
-                    <option value="rejected">🔴 Ditolak / Dibekukan (Rejected)</option>
-                  </select>
+                    onChange={(val) => setEditFormData({ ...editFormData, status: val as UserApprovalStatus })}
+                    options={USER_STATUS_DROPDOWN_OPTIONS}
+                    minMenuWidth={240}
+                  />
                 </div>
 
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Building className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Departemen / Divisi</span>
                     <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    required
+                  <CustomSelectDropdown
                     value={editFormData.department}
-                    onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    {!OFFICIAL_DEPARTMENT_OPTIONS.includes(editFormData.department) && editFormData.department && (
-                      <option value={editFormData.department}>{editFormData.department}</option>
-                    )}
-                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setEditFormData({ ...editFormData, department: val })}
+                    options={[
+                      ...(!OFFICIAL_DEPARTMENT_OPTIONS.includes(editFormData.department) && editFormData.department
+                        ? [{
+                            value: editFormData.department,
+                            label: editFormData.department,
+                            Icon: Building,
+                            iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                          }]
+                        : []),
+                      ...OFFICIAL_DEPARTMENT_OPTIONS.map(dept => ({
+                        value: dept,
+                        label: dept,
+                        Icon: Building,
+                        iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                      }))
+                    ]}
+                    minMenuWidth={260}
+                  />
                 </div>
               </div>
 

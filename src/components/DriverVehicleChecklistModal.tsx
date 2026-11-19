@@ -23,6 +23,7 @@ import {
   OverallChecklistStatus
 } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
+import { formKirimStore } from '../services/formKirimStore';
 import { useToast } from '../context/ToastContext';
 import {
   ExifMetadataBadge,
@@ -211,46 +212,62 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   const captureFromLiveVideo = () => {
     if (!liveVideoRef.current) return;
     const video = liveVideoRef.current;
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
+    const rawW = video.videoWidth || 800;
+    const rawH = video.videoHeight || 450;
+    const maxDim = 800;
+    let cw = rawW;
+    let ch = rawH;
+    if (cw > maxDim || ch > maxDim) {
+      if (cw > ch) {
+        ch = Math.round((ch * maxDim) / cw);
+        cw = maxDim;
+      } else {
+        cw = Math.round((cw * maxDim) / ch);
+        ch = maxDim;
+      }
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = 1280;
-    canvas.height = 720;
+    canvas.width = cw;
+    canvas.height = ch;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     if (cameraFacingMode === 'user') {
-      ctx.translate(1280, 0);
+      ctx.translate(cw, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(video, 0, 0, w, h, 0, 0, 1280, 720);
+    ctx.drawImage(video, 0, 0, rawW, rawH, 0, 0, cw, ch);
     if (cameraFacingMode === 'user') {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     const exifMeta = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
-    drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
+    drawExifMetadataOnCanvas(ctx, cw, ch, exifMeta);
 
     const targetItem = cameraTarget !== 'evidence' ? checklist.items.find(i => i.id === cameraTarget) : null;
     const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
 
-    // Watermark
+    // Watermark proporsional
+    const bannerH = Math.max(58, Math.round(ch * 0.14));
+    const bannerY = ch - bannerH;
+    const titlePx = Math.max(11, Math.round(cw * 0.017));
+    const subPx = Math.max(9, Math.round(cw * 0.013));
     ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-    ctx.fillRect(0, 620, 1280, 100);
+    ctx.fillRect(0, bannerY, cw, bannerH);
     ctx.fillStyle = '#06b6d4';
-    ctx.fillRect(0, 620, 1280, 3);
+    ctx.fillRect(0, bannerY, cw, 2);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 20px system-ui, sans-serif';
-    ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
+    ctx.font = `bold ${titlePx}px system-ui, sans-serif`;
+    ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 12, bannerY + Math.round(bannerH * 0.38));
     ctx.fillStyle = '#f59e0b';
-    ctx.font = 'bold 16px monospace';
+    ctx.font = `bold ${subPx}px monospace`;
     ctx.fillText(
-      `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
-      20,
-      690
+      `EXIF: ${exifMeta.DateTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | ${inspectionType === 'pre_trip' ? 'CHECKLIST PAGI' : 'CHECKLIST PULANG'}`,
+      12,
+      bannerY + Math.round(bannerH * 0.78)
     );
 
-    applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), cameraTarget, exifMeta);
+    applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.55), cameraTarget, exifMeta);
     stopLiveCamera();
   };
 
@@ -265,30 +282,46 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
+          const maxDim = 800;
+          let cw = img.width || 800;
+          let ch = img.height || 450;
+          if (cw > maxDim || ch > maxDim) {
+            if (cw > ch) {
+              ch = Math.round((ch * maxDim) / cw);
+              cw = maxDim;
+            } else {
+              cw = Math.round((cw * maxDim) / ch);
+              ch = maxDim;
+            }
+          }
           const canvas = document.createElement('canvas');
-          canvas.width = 1280;
-          canvas.height = 720;
+          canvas.width = cw;
+          canvas.height = ch;
           const ctx = canvas.getContext('2d');
           if (!ctx) return;
-          ctx.drawImage(img, 0, 0, 1280, 720);
-          drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
-          // Watermark
+          ctx.drawImage(img, 0, 0, cw, ch);
+          drawExifMetadataOnCanvas(ctx, cw, ch, exifMeta);
+          // Watermark proporsional
+          const bannerH = Math.max(58, Math.round(ch * 0.14));
+          const bannerY = ch - bannerH;
+          const titlePx = Math.max(11, Math.round(cw * 0.017));
+          const subPx = Math.max(9, Math.round(cw * 0.013));
           ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-          ctx.fillRect(0, 620, 1280, 100);
+          ctx.fillRect(0, bannerY, cw, bannerH);
           ctx.fillStyle = '#06b6d4';
-          ctx.fillRect(0, 620, 1280, 3);
+          ctx.fillRect(0, bannerY, cw, 2);
           ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 20px system-ui, sans-serif';
-          ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
+          ctx.font = `bold ${titlePx}px system-ui, sans-serif`;
+          ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 12, bannerY + Math.round(bannerH * 0.38));
           ctx.fillStyle = '#f59e0b';
-          ctx.font = 'bold 16px monospace';
+          ctx.font = `bold ${subPx}px monospace`;
           ctx.fillText(
-            `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
-            20,
-            690
+            `EXIF: ${exifMeta.DateTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | ${inspectionType === 'pre_trip' ? 'CHECKLIST PAGI' : 'CHECKLIST PULANG'}`,
+            12,
+            bannerY + Math.round(bannerH * 0.78)
           );
 
-          applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), activeTarget, exifMeta);
+          applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.55), activeTarget, exifMeta);
           stopLiveCamera();
         };
         img.src = reader.result as string;
@@ -469,10 +502,17 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     setIsSubmitting(false);
 
     if (success) {
+      formKirimStore.syncChecklistOdometer({
+        date: finalChecklist.date,
+        plateNumber: finalChecklist.plateNumber,
+        driverName: finalChecklist.driverName,
+        inspectionType: finalChecklist.inspectionType,
+        odometerKm: finalChecklist.odometerKm
+      });
       addNotification(
         'checker',
         'Checklist Armada Tersimpan',
-        `Inspeksi ${inspectionType === 'pre_trip' ? 'Pra-Jalan (Pagi)' : 'Pasca-Jalan (Pulang)'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
+        `Inspeksi ${inspectionType === 'pre_trip' ? 'Checklist Pagi' : 'Checklist Pulang'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
       );
       setNotes('');
       setOdometerInput('');
@@ -629,7 +669,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                     inspectionType === 'pre_trip' ? 'bg-amber-500 text-slate-950 shadow font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Pra-Jalan (Pagi)
+                  Checklist Pagi
                 </button>
                 <button
                   type="button"
@@ -640,8 +680,8 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                   }}
                   title={
                     isPostTripUnlocked
-                      ? 'Pilih Checklist Pasca-Jalan (Pulang)'
-                      : 'Terkunci: Checklist Pasca-Jalan baru dapat dipilih setelah klik Konfirmasi Tiba di Gudang'
+                      ? 'Pilih Checklist Pulang'
+                      : 'Terkunci: Checklist Pulang baru dapat dipilih setelah klik Konfirmasi Tiba di Gudang'
                   }
                   className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
                     inspectionType === 'post_trip'
@@ -651,7 +691,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                       : 'text-slate-600 opacity-50 cursor-not-allowed'
                   }`}
                 >
-                  Pasca-Jalan (Pulang) {!isPostTripUnlocked ? '🔒' : ''}
+                  Checklist Pulang {!isPostTripUnlocked ? '🔒' : ''}
                 </button>
               </div>
 
@@ -672,7 +712,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               <div className="text-[11px] text-amber-950 dark:text-amber-200 bg-amber-100/90 dark:bg-amber-950/40 border border-amber-400 dark:border-amber-500/40 rounded-xl px-3 py-2 flex items-center gap-2 shadow-2xs">
                 <Clock className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
                 <span className="leading-snug font-medium">
-                  <strong className="font-extrabold text-amber-950 dark:text-amber-100">Wajib Pra-Jalan (Pagi)</strong> sebelum berangkat. Opsi <strong className="font-extrabold text-amber-950 dark:text-amber-100">Pasca-Jalan (Pulang)</strong> otomatis terbuka setelah klik <strong className="font-extrabold text-amber-950 dark:text-amber-100">Tiba di Gudang</strong>.
+                  <strong className="font-extrabold text-amber-950 dark:text-amber-100">Wajib Checklist Pagi</strong> sebelum berangkat. Opsi <strong className="font-extrabold text-amber-950 dark:text-amber-100">Checklist Pulang</strong> otomatis terbuka setelah klik <strong className="font-extrabold text-amber-950 dark:text-amber-100">Tiba di Gudang</strong>.
                 </span>
               </div>
             )}
@@ -711,7 +751,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                 className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
               >
                 <Sparkles className="w-3 h-3" />
-                <span>Tandai Semua OK</span>
+                <span>Semua OK</span>
               </button>
             </div>
           </div>

@@ -124,8 +124,7 @@ class DriverWaybillService {
       signedByDriverAt: '',
       signedByChecker: false,
       signedByCheckerAt: '',
-      // 4 Role-based signatures dikosongi terlebih dahulu
-      preparedByName: 'M. Syaiful B.',
+      preparedByName: logisticsStore.getLogisticsCoordinator(),
       preparedBySigned: false,
       preparedBySignedAt: '',
       acknowledgedByName: 'Bayu Novianto Dimas Permana',
@@ -167,7 +166,10 @@ class DriverWaybillService {
     if (stored[key]) {
       const existing = stored[key];
       let changed = false;
-      if (schedule.fleet?.plateNumber && existing.fleet.plateNumber !== schedule.fleet.plateNumber) {
+      if (
+        (schedule.fleet?.plateNumber && existing.fleet.plateNumber !== schedule.fleet.plateNumber) ||
+        (schedule.fleet?.initialCode && existing.fleet.initialCode !== schedule.fleet.initialCode)
+      ) {
         existing.fleet = {
           id: schedule.fleetId,
           plateNumber: schedule.fleet.plateNumber,
@@ -175,6 +177,13 @@ class DriverWaybillService {
           initialCode: schedule.fleet.initialCode || existing.fleet.initialCode
         };
         changed = true;
+      }
+      if (!existing.preparedBySigned) {
+        const liveSpvName = logisticsStore.getLogisticsCoordinator();
+        if (liveSpvName && existing.preparedByName !== liveSpvName) {
+          existing.preparedByName = liveSpvName;
+          changed = true;
+        }
       }
       if (schedule.crew?.name && existing.crew.driverName !== schedule.crew.name) {
         existing.crew.driverId = schedule.crewId;

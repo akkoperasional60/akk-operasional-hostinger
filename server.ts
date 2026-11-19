@@ -746,37 +746,37 @@ async function startServer() {
   const requireLogisticsWrite = requireModuleWrite(
     'logistics',
     ['fleets', 'crews', 'crew_history', 'spareparts', 'maintenance_costs', 'fuel_efficiency', 'schedules', 'fleet_procurement', 'fleet_forms', 'box_simulation', 'warehouse_fleet_cubication', 'armada_ceklis', 'logistics_dashboard'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman']
   );
   const requireScheduleWrite = requireModuleWrite(
     'logistics',
     ['schedules', 'rencana_rute', 'driver_portal', 'portal_driver'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'driver', 'crew_helper', 'warehouse_admin']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'sales_admin', 'spv_sales_admin', 'driver', 'crew_helper', 'warehouse_admin', 'koordinator_gudang']
   );
   const requireScheduleStatusWrite = requireModuleWrite(
     'logistics',
     ['schedules', 'driver_portal', 'portal_driver', 'crew_reports', 'driver_reports', 'rencana_rute'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'driver', 'crew_helper']
   );
   const requireStoreWrite = requireModuleWrite(
     'marketing',
     ['customer_map', 'marketing_offline', 'laporan_kunjungan'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'sales_admin', 'spv_sales_admin', 'marketing_offline', 'spv_marketing_offline']
   );
   const requireMarketingWrite = requireModuleWrite(
     'marketing',
     ['marketing_online', 'marketing_offline', 'marketing_to_vo_ro', 'customer_map', 'kampanye', 'leads_pipeline', 'laporan_kunjungan'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'marketing_online', 'marketing_offline', 'sales_admin']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'marketing_online', 'marketing_offline', 'spv_marketing_offline', 'sales_admin', 'spv_sales_admin']
   );
   const requireWarehouseAccess = requireModuleWrite(
     'wms_gudang',
     ['database_barang', 'wms_summary', 'wms_inventory', 'wms_floor_map', 'wms_inbound_outbound', 'wms_opname', 'warehouse_scanner', 'warehouse_inventory', 'warehouse_inbound', 'warehouse_outbound', 'warehouse_opname', 'stok_barang'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'warehouse_admin', 'koordinator_gudang']
   );
   const requireAttendanceWrite = requireModuleWrite(
     'hr',
     ['hr_dashboard', 'ga_security', 'training_videos', 'attendance', 'hr_data_karyawan', 'absensi_kehadiran'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper']
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'hr_admin', 'driver', 'crew_helper']
   );
 
   const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
@@ -1499,7 +1499,7 @@ async function startServer() {
     const cleanName = String(data.fullName || data.name || '').trim();
     const cleanEmail = String(data.email || '').trim().toLowerCase();
     const cleanPassword = String(data.password || '');
-    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','koordinator_driver','sales_admin','spv_sales_admin','purchasing_admin','spv_purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','koordinator_gudang','marketing_online','marketing_offline','spv_marketing_offline','unassigned']);
     const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
     const role = allowedRoles.has(String(data.role)) ? String(data.role) : 'unassigned';
     const status = allowedStatuses.has(String(data.status)) ? String(data.status) : 'pending';
@@ -1547,7 +1547,7 @@ async function startServer() {
   app.put('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
     const id = req.params.id;
     const data = req.body || {};
-    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','koordinator_driver','sales_admin','spv_sales_admin','purchasing_admin','spv_purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','koordinator_gudang','marketing_online','marketing_offline','spv_marketing_offline','unassigned']);
     const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
     if (data.role !== undefined && !allowedRoles.has(String(data.role))) return res.status(400).json({ success: false, error: 'Role tidak valid' });
     if (data.status !== undefined && !allowedStatuses.has(String(data.status))) return res.status(400).json({ success: false, error: 'Status tidak valid' });
@@ -1630,7 +1630,7 @@ async function startServer() {
       // Hapus entri kru lama di tabel crews HANYA jika akun tidak lagi memiliki akses Portal Driver Mobile
       const hasPortalDriver = (() => {
         if (resolvedStatus !== 'approved') return false;
-        if (['super_admin', 'spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(resolvedRole)) return false;
+        if (['super_admin', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'dispatcher'].includes(resolvedRole)) return false;
         let parsedPerms: any = null;
         try {
           parsedPerms = typeof resolvedPermissionsJson === 'string' ? JSON.parse(resolvedPermissionsJson) : resolvedPermissionsJson;
@@ -1640,14 +1640,15 @@ async function startServer() {
             if (!b?.enabled || !b?.modules?.logistics?.enabled) return false;
             const subs = b.modules.logistics.subMenus || {};
             const dp = subs.driver_portal ?? subs.portal_driver;
-            return dp === 'full_access' || dp === 'read_only';
+            return dp === 'full_access';
           });
         }
         if (parsedPerms?.modules?.logistics) {
           if (!parsedPerms.modules.logistics.enabled) return false;
           const subs = parsedPerms.modules.logistics.subMenus || {};
           const dp = subs.driver_portal ?? subs.portal_driver;
-          if (dp === 'full_access' || dp === 'read_only') return true;
+          if (dp === 'full_access') return true;
+          if (dp === 'read_only' || dp === 'none') return false;
         }
         return resolvedRole === 'driver' || resolvedRole === 'crew_helper';
       })();
@@ -4367,15 +4368,15 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             if (!b?.enabled || !b?.modules?.logistics?.enabled) return false;
             const subs = b.modules.logistics.subMenus || {};
             const dp = subs.driver_portal ?? subs.portal_driver;
-            return dp === 'full_access' || dp === 'read_only';
+            return dp === 'full_access';
           });
         }
         if (parsedPerms?.modules?.logistics) {
           if (!parsedPerms.modules.logistics.enabled) return false;
           const subs = parsedPerms.modules.logistics.subMenus || {};
           const dp = subs.driver_portal ?? subs.portal_driver;
-          if (dp === 'full_access' || dp === 'read_only') return true;
-          if (dp === 'none') return false;
+          if (dp === 'full_access') return true;
+          if (dp === 'read_only' || dp === 'none') return false;
         }
         return r === 'driver' || r === 'crew_helper';
       };

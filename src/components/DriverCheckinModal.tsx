@@ -290,10 +290,9 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
       const isServ = f.status === 'maintenance';
       return {
         value: f.id,
-        label: f.initialCode ? `${f.initialCode} · ${f.plateNumber}` : f.plateNumber,
-        sublabel: f.vehicleType || 'Armada Box',
-        badge: isServ ? 'Servis' : 'Ready',
-        badgeTone: isServ ? 'rose' : 'emerald',
+        label: f.initialCode || f.plateNumber,
+        badge: isServ ? 'Servis' : undefined,
+        badgeTone: isServ ? 'rose' : undefined,
         disabled: isServ,
         searchText: `${f.initialCode || ''} ${f.plateNumber} ${f.vehicleType || ''}`
       };
@@ -760,7 +759,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
                     onClose={() => setOpenDropdown(null)}
                     value={selectedFleetId}
                     placeholder="-- Pilih Armada --"
-                    searchPlaceholder="Cari kode unit, plat nomor, atau tipe armada..."
+                    searchPlaceholder="Cari inisial armada..."
                     options={fleetComboboxOptions}
                     onChange={(val) => {
                       setSelectedFleetId(val);
@@ -771,7 +770,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
                   />
                 ) : (
                   <div className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs">
-                    {plateNumber} · {vehicleType}
+                    {fleetOptions.find(f => f.id === selectedFleetId)?.initialCode || plateNumber}
                   </div>
                 )}
               </div>

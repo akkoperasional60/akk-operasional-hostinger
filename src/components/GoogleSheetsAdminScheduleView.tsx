@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   FileSpreadsheet, 
   Download, 
@@ -37,7 +38,8 @@ import {
   Trash2,
   Save,
   Zap,
-  Building2
+  Building2,
+  Wrench
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { branchStore, BranchRecord } from '../services/branchStore';
@@ -419,6 +421,18 @@ const CrewCustomSelectDropdown: React.FC<{
   );
 };
 
+interface NotReadyFleetWarningPayload {
+  fleet: Fleet;
+  fleetCode: string;
+  reasonType: 'maintenance' | 'same_date_conflict' | 'currently_on_duty';
+  statusTitle: string;
+  description: string;
+  areaName: string | null;
+  driverName: string | null;
+  targetDateIso?: string;
+  canForceProceed: boolean;
+}
+
 const FleetCustomSelectDropdown: React.FC<{
   label: string;
   value: string;
@@ -431,6 +445,7 @@ const FleetCustomSelectDropdown: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [warningModal, setWarningModal] = useState<NotReadyFleetWarningPayload | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -441,7 +456,7 @@ const FleetCustomSelectDropdown: React.FC<{
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsOpen(false);
+      if (e.key === 'Escape' && !warningModal) setIsOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('keydown', handleKeyDown);
@@ -449,7 +464,19 @@ const FleetCustomSelectDropdown: React.FC<{
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isOpen, warningModal]);
+
+  useEffect(() => {
+    if (!warningModal) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setWarningModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc, true);
+    return () => window.removeEventListener('keydown', handleEsc, true);
+  }, [warningModal]);
 
   const selectedFleet = useMemo(() => {
     if (!value) return null;
@@ -459,6 +486,27 @@ const FleetCustomSelectDropdown: React.FC<{
       null
     );
   }, [fleets, value]);
+
+  const evaluateFleetReadiness = (fleet: Fleet) => {
+    const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso, excludeScheduleId);
+    const liveNow = logisticsStore.getFleetLiveOperationalInfo(fleet, undefined, excludeScheduleId);
+    const isMaintenance = live.effectiveStatus === 'maintenance' || fleet.status === 'maintenance';
+    const isSameDateConflict = !isMaintenance && !live.canBeScheduled;
+    const isCurrentlyOnDuty =
+      !isMaintenance &&
+      live.canBeScheduled &&
+      (liveNow.effectiveStatus === 'on-duty' || fleet.status === 'on-duty');
+    const isNotReady = isMaintenance || isSameDateConflict || isCurrentlyOnDuty;
+
+    return {
+      live,
+      liveNow,
+      isMaintenance,
+      isSameDateConflict,
+      isCurrentlyOnDuty,
+      isNotReady
+    };
+  };
 
   const filteredFleets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -474,10 +522,15 @@ const FleetCustomSelectDropdown: React.FC<{
       .map((fleet) => {
         const fleetCode = fleet.initialCode || fleet.plateNumber;
         const isSelected = selectedFleet?.id === fleet.id || value === fleetCode || value === fleet.plateNumber;
-        const live = logisticsStore.getFleetLiveOperationalInfo(fleet, dateIso, excludeScheduleId);
-        const isSelectable = live.canBeScheduled || isSelected;
-        const sortRank = isSelectable ? 0 : live.effectiveStatus === 'maintenance' ? 2 : 1;
-        return { fleet, fleetCode, isSelected, live, isSelectable, sortRank };
+        const readiness = evaluateFleetReadiness(fleet);
+        const sortRank = !readiness.isNotReady
+          ? 0
+          : readiness.isCurrentlyOnDuty
+          ? 1
+          : readiness.isSameDateConflict
+          ? 2
+          : 3;
+        return { fleet, fleetCode, isSelected, ...readiness, sortRank };
       })
       .sort((a, b) => a.sortRank - b.sortRank);
   }, [fleets, search, selectedFleet, value, dateIso, excludeScheduleId]);
@@ -486,28 +539,92 @@ const FleetCustomSelectDropdown: React.FC<{
     setHighlightedIndex(0);
   }, [search, isOpen]);
 
-  const handleSelectHighlightedOrFirstValid = () => {
-    if (filteredFleets.length === 0) return;
-    const target = filteredFleets[highlightedIndex] || filteredFleets[0];
-    if (target && target.isSelectable) {
-      onChange(target.fleetCode);
+  const attemptSelectFleet = (entry: (typeof filteredFleets)[number]) => {
+    if (!entry.isNotReady || entry.isSelected) {
+      onChange(entry.fleetCode);
       setIsOpen(false);
       return;
     }
-    const firstValid = filteredFleets.find(entry => entry.isSelectable);
-    if (firstValid) {
-      onChange(firstValid.fleetCode);
-      setIsOpen(false);
+
+    // Armada belum ready -> tampilkan pop-up peringatan yang jelas
+    setIsOpen(false);
+
+    if (entry.isMaintenance) {
+      setWarningModal({
+        fleet: entry.fleet,
+        fleetCode: entry.fleetCode,
+        reasonType: 'maintenance',
+        statusTitle: 'Sedang Servis / Perbaikan',
+        description:
+          'Status armada ini masih dalam proses servis atau perbaikan bengkel (Belum Ready). Pastikan kendaraan benar-benar sudah selesai diperbaiki sebelum dijadwalkan untuk pengiriman.',
+        areaName: entry.live.areaName || entry.liveNow.areaName,
+        driverName: entry.live.driverName || entry.liveNow.driverName,
+        targetDateIso: dateIso,
+        canForceProceed: true
+      });
+      return;
+    }
+
+    if (entry.isSameDateConflict) {
+      const activeArea = entry.live.areaName || entry.live.todayScheduledArea || 'Area Pengiriman';
+      const isActivelyOnRoad = entry.live.statusLabel === 'Kirim';
+      setWarningModal({
+        fleet: entry.fleet,
+        fleetCode: entry.fleetCode,
+        reasonType: 'same_date_conflict',
+        statusTitle: isActivelyOnRoad ? 'Sedang Kirim (Di Jalan)' : 'Sudah Terjadwal',
+        description: isActivelyOnRoad
+          ? `Armada ini sedang dalam pengiriman aktif pada tanggal tersebut (${activeArea}). 1 armada tidak dapat dijadwalkan dua kali di tanggal yang sama.`
+          : `Armada ini sudah memiliki jadwal pengiriman aktif pada tanggal tersebut (${activeArea}). 1 armada tidak dapat dijadwalkan dua kali di tanggal yang sama.`,
+        areaName: activeArea,
+        driverName: entry.live.driverName || entry.liveNow.driverName,
+        targetDateIso: dateIso,
+        canForceProceed: false
+      });
+      return;
+    }
+
+    // Sedang kirim di lapangan saat ini (belum kembali ke gudang)
+    const liveRoadArea = entry.liveNow.areaName || entry.liveNow.todayScheduledArea || 'Pengiriman Aktif';
+    setWarningModal({
+      fleet: entry.fleet,
+      fleetCode: entry.fleetCode,
+      reasonType: 'currently_on_duty',
+      statusTitle: 'Sedang Kirim (Belum Kembali)',
+      description:
+        'Armada ini saat ini masih berstatus sedang melakukan pengiriman di jalan dan belum kembali ke gudang (Belum Ready). Pastikan armada sudah kembali sebelum jadwal keberangkatan berikutnya.',
+      areaName: liveRoadArea,
+      driverName: entry.liveNow.driverName,
+      targetDateIso: dateIso,
+      canForceProceed: true
+    });
+  };
+
+  const handleSelectHighlightedOrFirstValid = () => {
+    if (filteredFleets.length === 0) return;
+    const target = filteredFleets[highlightedIndex] || filteredFleets[0];
+    if (target) {
+      attemptSelectFleet(target);
     }
   };
 
-  const liveInfo = selectedFleet
-    ? logisticsStore.getFleetLiveOperationalInfo(selectedFleet, dateIso, excludeScheduleId)
-    : null;
+  const selectedReadiness = selectedFleet ? evaluateFleetReadiness(selectedFleet) : null;
+  const liveInfo = selectedReadiness?.live || null;
 
   const formattedFleetTitle = selectedFleet
-    ? `[${selectedFleet.initialCode || selectedFleet.plateNumber}] ${selectedFleet.plateNumber} — ${liveInfo?.statusLabel || 'Ready'}`
+    ? `[${selectedFleet.initialCode || selectedFleet.plateNumber}] ${selectedFleet.plateNumber} — ${
+        selectedReadiness?.isMaintenance
+          ? 'Sedang Servis (Belum Ready)'
+          : selectedReadiness?.isCurrentlyOnDuty
+          ? 'Sedang Kirim (Belum Ready)'
+          : liveInfo?.statusLabel || 'Ready'
+      }`
     : 'Pilih Armada Truk...';
+
+  const readyFleetsCount = useMemo(
+    () => filteredFleets.filter(item => !item.isNotReady).length,
+    [filteredFleets]
+  );
 
   return (
     <div ref={containerRef} className="relative">
@@ -515,6 +632,16 @@ const FleetCustomSelectDropdown: React.FC<{
         <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
           <span>{label}</span>
         </label>
+        {selectedReadiness?.isNotReady && (
+          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+            selectedReadiness.isMaintenance
+              ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+          }`}>
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            <span>Belum Ready</span>
+          </span>
+        )}
       </div>
 
       <button
@@ -538,13 +665,23 @@ const FleetCustomSelectDropdown: React.FC<{
           }
         }}
         className={`h-[44px] w-full flex items-center justify-between gap-2.5 bg-white dark:bg-slate-950 border rounded-2xl px-4 py-2.5 text-left transition cursor-pointer ${
-          isOpen
+          selectedReadiness?.isNotReady
+            ? selectedReadiness.isMaintenance
+              ? 'border-rose-400 dark:border-rose-500/70 ring-2 ring-rose-500/15'
+              : 'border-amber-400 dark:border-amber-500/70 ring-2 ring-amber-500/15'
+            : isOpen
             ? 'border-blue-500 ring-2 ring-blue-500/20'
             : 'border-slate-300 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600'
         }`}
       >
         <span className={`text-xs font-extrabold truncate ${
-          selectedFleet ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500 italic'
+          selectedFleet
+            ? selectedReadiness?.isNotReady
+              ? selectedReadiness.isMaintenance
+                ? 'text-rose-700 dark:text-rose-300'
+                : 'text-amber-700 dark:text-amber-300'
+              : 'text-slate-900 dark:text-white'
+            : 'text-slate-400 dark:text-slate-500 italic'
         }`}>
           {formattedFleetTitle}
         </span>
@@ -553,32 +690,60 @@ const FleetCustomSelectDropdown: React.FC<{
       </button>
 
       {/* Separate Status Box Below Dropdown */}
-      <div className="mt-2 h-[32px] w-full px-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between text-[11px]">
+      <div className={`mt-2 min-h-[32px] w-full px-3.5 py-1.5 rounded-xl border flex items-center justify-between gap-2 text-[11px] transition ${
+        selectedReadiness?.isNotReady
+          ? selectedReadiness.isMaintenance
+            ? 'border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/30'
+            : 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-950/30'
+          : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950'
+      }`}>
         <div className="flex items-center gap-2 min-w-0">
-          <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-            !selectedFleet || !liveInfo
-              ? 'bg-slate-200 dark:bg-slate-800'
-              : liveInfo.effectiveStatus === 'maintenance'
-              ? 'bg-rose-500/20'
-              : liveInfo.statusLabel === 'Terjadwal'
-              ? 'bg-amber-500/20'
-              : liveInfo.effectiveStatus === 'on-duty'
-              ? 'bg-blue-500/20'
-              : 'bg-emerald-500/20'
-          }`}>
-            <span className={`w-2.5 h-2.5 rounded-full ${
-              selectedFleet && liveInfo ? liveInfo.dotColorClass : 'bg-slate-400'
+          {selectedReadiness?.isNotReady ? (
+            <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${
+              selectedReadiness.isMaintenance ? 'text-rose-500' : 'text-amber-500'
             }`} />
-          </span>
-          <span className="font-extrabold text-slate-900 dark:text-white truncate">
-            {selectedFleet && liveInfo ? liveInfo.statusLabel : 'Belum Dipilih'}
+          ) : (
+            <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+              !selectedFleet || !liveInfo
+                ? 'bg-slate-200 dark:bg-slate-800'
+                : 'bg-emerald-500/20'
+            }`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                selectedFleet && liveInfo ? liveInfo.dotColorClass : 'bg-slate-400'
+              }`} />
+            </span>
+          )}
+          <span className={`font-extrabold truncate ${
+            selectedReadiness?.isNotReady
+              ? selectedReadiness.isMaintenance
+                ? 'text-rose-700 dark:text-rose-300'
+                : 'text-amber-700 dark:text-amber-300'
+              : 'text-slate-900 dark:text-white'
+          }`}>
+            {!selectedFleet || !liveInfo
+              ? 'Belum Dipilih'
+              : selectedReadiness?.isMaintenance
+              ? 'Belum Ready (Servis)'
+              : selectedReadiness?.isCurrentlyOnDuty
+              ? 'Belum Ready (Di Jalan)'
+              : selectedReadiness?.isSameDateConflict
+              ? `Belum Ready (${liveInfo.statusLabel})`
+              : liveInfo.statusLabel}
           </span>
         </div>
-        <span className="text-slate-500 dark:text-slate-400 font-medium truncate ml-2">
+        <span className={`font-medium truncate ml-2 ${
+          selectedReadiness?.isNotReady
+            ? selectedReadiness.isMaintenance
+              ? 'text-rose-600 dark:text-rose-300'
+              : 'text-amber-700 dark:text-amber-300'
+            : 'text-slate-500 dark:text-slate-400'
+        }`}>
           {!selectedFleet
             ? 'Pilih armada pengiriman'
-            : liveInfo?.effectiveStatus === 'maintenance'
-            ? 'Sedang Proses Servis'
+            : selectedReadiness?.isMaintenance
+            ? 'Peringatan: Sedang Proses Servis'
+            : selectedReadiness?.isCurrentlyOnDuty
+            ? `Masih Kirim: ${selectedReadiness.liveNow.areaName || 'Belum Kembali'}`
             : liveInfo?.effectiveStatus === 'on-duty'
             ? `${liveInfo.statusLabel === 'Terjadwal' ? 'Terjadwal' : 'Kirim'}: ${liveInfo.areaName || 'Kirim'}`
             : liveInfo?.todayScheduledArea
@@ -589,7 +754,7 @@ const FleetCustomSelectDropdown: React.FC<{
 
       {isOpen && (
         <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-          <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+          <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 space-y-1.5">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
@@ -626,6 +791,17 @@ const FleetCustomSelectDropdown: React.FC<{
                 </button>
               )}
             </div>
+            <div className="flex items-center justify-between px-1 text-[10px] text-slate-500 dark:text-slate-400">
+              <span>
+                <strong className="text-emerald-600 dark:text-emerald-400">{readyFleetsCount}</strong> Armada Ready
+              </span>
+              {filteredFleets.length - readyFleetsCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
+                  <AlertTriangle className="w-3 h-3" />
+                  <span>{filteredFleets.length - readyFleetsCount} Belum Ready</span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
@@ -634,15 +810,16 @@ const FleetCustomSelectDropdown: React.FC<{
                 Tidak ada armada truk yang cocok dengan pencarian "{search}".
               </div>
             ) : (
-              filteredFleets.map(({ fleet, fleetCode, isSelected, live }, idx) => {
+              filteredFleets.map((entry, idx) => {
+                const { fleet, isSelected, live, liveNow, isMaintenance, isSameDateConflict, isCurrentlyOnDuty, isNotReady } = entry;
                 const isHighlighted = idx === highlightedIndex;
-                const isUnselectable = !live.canBeScheduled && !isSelected;
-                const isMaintenance = live.effectiveStatus === 'maintenance';
                 const optionLabel = `[${fleet.initialCode || fleet.plateNumber}] ${fleet.plateNumber} — ${
                   isMaintenance
                     ? 'Sedang Servis'
-                    : (live.effectiveStatus === 'on-duty' || !live.canBeScheduled) && !isSelected
+                    : isSameDateConflict
                     ? `${live.statusLabel} (${live.areaName || live.todayScheduledArea || 'Jadwal'})`
+                    : isCurrentlyOnDuty
+                    ? `Sedang Kirim (${liveNow.areaName || 'Di Jalan'})`
                     : live.statusLabel
                 }`;
 
@@ -650,34 +827,54 @@ const FleetCustomSelectDropdown: React.FC<{
                   <button
                     key={fleet.id}
                     type="button"
-                    disabled={isUnselectable}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    onClick={() => {
-                      if (isUnselectable) return;
-                      onChange(fleetCode);
-                      setIsOpen(false);
-                    }}
+                    onClick={() => attemptSelectFleet(entry)}
                     className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left text-xs transition cursor-pointer ${
-                      isUnselectable
-                        ? 'opacity-45 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
-                        : isSelected || isHighlighted
+                      isSelected
+                        ? isNotReady
+                          ? isMaintenance
+                            ? 'bg-rose-600 text-white font-bold shadow-2xs'
+                            : 'bg-amber-600 text-white font-bold shadow-2xs'
+                          : 'bg-blue-600 text-white font-bold shadow-2xs'
+                        : isNotReady
+                        ? isHighlighted
+                          ? isMaintenance
+                            ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-semibold border border-rose-200 dark:border-rose-500/30'
+                            : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-semibold border border-amber-200 dark:border-amber-500/30'
+                          : 'bg-slate-50/80 dark:bg-slate-950/40 text-slate-600 dark:text-slate-300 hover:bg-amber-50/70 dark:hover:bg-amber-950/30 font-medium'
+                        : isHighlighted
                         ? 'bg-blue-600 text-white font-bold shadow-2xs'
                         : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-800 dark:text-slate-200 font-medium'
                     }`}
                   >
-                    <span className="truncate">{optionLabel}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
-                    {isUnselectable && (
-                      <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border shrink-0 ${
-                        isMaintenance
-                          ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25'
-                          : live.statusLabel === 'Kirim'
-                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/25'
-                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
-                      }`}>
-                        {isMaintenance ? 'Servis' : live.statusLabel}
-                      </span>
-                    )}
+                    <span className="flex items-center gap-2 min-w-0">
+                      {isNotReady && !isSelected && (
+                        <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${
+                          isMaintenance ? 'text-rose-500' : 'text-amber-500'
+                        }`} />
+                      )}
+                      <span className="truncate">{optionLabel}</span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isNotReady && (
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border shrink-0 ${
+                          isSelected
+                            ? 'bg-white/20 text-white border-white/30'
+                            : isMaintenance
+                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                            : isCurrentlyOnDuty || live.statusLabel === 'Kirim'
+                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/25'
+                            : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                        }`}>
+                          {isMaintenance
+                            ? 'Servis'
+                            : isCurrentlyOnDuty
+                            ? 'Belum Kembali'
+                            : live.statusLabel}
+                        </span>
+                      )}
+                      {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
+                    </div>
                   </button>
                 );
               })
@@ -685,6 +882,162 @@ const FleetCustomSelectDropdown: React.FC<{
           </div>
         </div>
       )}
+
+      {/* Pop-up Peringatan Armada Belum Ready */}
+      {warningModal &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            onClick={() => setWarningModal(null)}
+            className="fixed inset-0 z-[10000] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
+            >
+              {/* Header Peringatan */}
+              <div className={`px-5 py-4 border-b flex items-start justify-between gap-3 ${
+                warningModal.reasonType === 'maintenance'
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-500/30'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-500/30'
+              }`}>
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                    warningModal.reasonType === 'maintenance'
+                      ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                      : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                  }`}>
+                    {warningModal.reasonType === 'maintenance' ? (
+                      <Wrench className="w-5 h-5" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className={`text-sm font-extrabold tracking-tight ${
+                      warningModal.reasonType === 'maintenance'
+                        ? 'text-rose-900 dark:text-rose-200'
+                        : 'text-amber-900 dark:text-amber-200'
+                    }`}>
+                      Peringatan: Armada Belum Ready
+                    </h4>
+                    <p className={`text-[11px] font-semibold mt-0.5 ${
+                      warningModal.reasonType === 'maintenance'
+                        ? 'text-rose-700 dark:text-rose-300'
+                        : 'text-amber-700 dark:text-amber-300'
+                    }`}>
+                      Status saat ini: {warningModal.statusTitle}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWarningModal(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition cursor-pointer"
+                  aria-label="Tutup peringatan"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body Detail Armada */}
+              <div className="p-5 space-y-4">
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Truck className="w-4 h-4 text-blue-500 shrink-0" />
+                      <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                        [{warningModal.fleetCode}] {warningModal.fleet.plateNumber}
+                      </span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border shrink-0 ${
+                      warningModal.reasonType === 'maintenance'
+                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                        : 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                    }`}>
+                      {warningModal.statusTitle}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px]">
+                    {warningModal.targetDateIso && (
+                      <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">Tgl: <strong className="text-slate-800 dark:text-slate-200">{warningModal.targetDateIso}</strong></span>
+                      </div>
+                    )}
+                    {warningModal.fleet.vehicleType && (
+                      <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                        <Truck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{warningModal.fleet.vehicleType}</span>
+                      </div>
+                    )}
+                    {warningModal.areaName && (
+                      <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 col-span-2">
+                        <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="truncate">Area Aktif: <strong className="text-slate-800 dark:text-slate-200">{warningModal.areaName}</strong></span>
+                      </div>
+                    )}
+                    {warningModal.driverName && (
+                      <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 col-span-2">
+                        <User className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                        <span className="truncate">Driver: <strong className="text-slate-800 dark:text-slate-200">{warningModal.driverName}</strong></span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                  {warningModal.description}
+                </p>
+
+                {!warningModal.canForceProceed && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 px-3.5 py-2.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                    <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                    <span>Silakan pilih armada lain yang berstatus <strong>Ready</strong> atau sesuaikan tanggal pengiriman terlebih dahulu.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer Actions */}
+              <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWarningModal(null);
+                    setIsOpen(true);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    warningModal.canForceProceed
+                      ? 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm'
+                  }`}
+                >
+                  Pilih Armada Ready Lain
+                </button>
+
+                {warningModal.canForceProceed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const chosenCode = warningModal.fleetCode;
+                      setWarningModal(null);
+                      onChange(chosenCode);
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition cursor-pointer ${
+                      warningModal.reasonType === 'maintenance'
+                        ? 'bg-rose-600 hover:bg-rose-500'
+                        : 'bg-amber-600 hover:bg-amber-500'
+                    }`}
+                  >
+                    Tetap Jadwalkan Armada Ini
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
@@ -1313,6 +1666,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const currentUserProfile = logisticsStore.getCurrentUser();
   const canEditSchedules = canEdit(currentUserProfile, 'schedules');
+
+  const [openPeriodDropdown, setOpenPeriodDropdown] = useState<'month' | 'year' | 'branch' | null>(null);
+  const periodDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (periodDropdownRef.current && !periodDropdownRef.current.contains(ev.target as Node)) {
+        setOpenPeriodDropdown(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const effectiveActiveBranchId = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
 
@@ -4468,18 +4834,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <Download className="w-3.5 h-3.5 text-blue-400" />
               <span>Ekspor</span>
             </button>
-
-            <button
-              onClick={() => {
-                setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
-                setIsHistoryModalOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 transition cursor-pointer"
-              title="Riwayat / Log Unggah & Perubahan Jadwal"
-            >
-              <HistoryIcon className="w-3.5 h-3.5 text-amber-400" />
-              <span>Riwayat ({scheduleChangeLogs.length})</span>
-            </button>
           </div>
         </div>
 
@@ -4509,67 +4863,204 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
 
-          {/* Month, Year & Cabang Selectors */}
-          <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold flex-wrap">
-            <span className="text-slate-600 dark:text-slate-300 font-extrabold px-1 text-[11px]">Periode:</span>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
-            >
-              <option value={-1}>Semua Bulan</option>
-              {MONTH_NAMES.map((m, idx) => (
-                <option key={m} value={idx}>{m}</option>
-              ))}
-            </select>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
-            >
-              {[2024, 2025, 2026, 2027, 2028].map(yr => (
-                <option key={yr} value={yr}>{yr}</option>
-              ))}
-            </select>
+          {/* Custom Styled Month, Year & Cabang Dropdown Selectors */}
+          <div
+            ref={periodDropdownRef}
+            className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs text-xs font-semibold flex-wrap relative z-30"
+          >
+            <span className="text-slate-500 dark:text-slate-400 font-extrabold px-1.5 text-[11px] uppercase tracking-wider">
+              Periode:
+            </span>
 
-            {/* Cabang Filter (Terpisah Tegas: Nusantara vs Sidoarjo) */}
-            <div className="flex items-center gap-1 pl-1 border-l border-slate-200 dark:border-slate-800">
-              <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-              <select
-                value={effectiveActiveBranchId}
-                onChange={(e) => {
-                  const bId = e.target.value;
-                  setSelectedBranchId(bId);
-                  branchStore.setActiveBranchId(bId);
-                }}
-                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-blue-500 cursor-pointer"
+            {/* Custom Month Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenPeriodDropdown(prev => (prev === 'month' ? null : 'month'))}
+                className={`inline-flex items-center justify-between gap-2 min-w-[132px] px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                  openPeriodDropdown === 'month'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
+                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
+                }`}
               >
-                {branches.map(b => (
-                  <option key={b.id} value={b.id}>Cabang {b.name}</option>
-                ))}
-              </select>
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>{selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]}</span>
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    openPeriodDropdown === 'month' ? 'rotate-180 text-emerald-500' : ''
+                  }`}
+                />
+              </button>
+
+              {openPeriodDropdown === 'month' && (
+                <div className="absolute left-0 mt-1.5 w-48 max-h-72 overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMonth(-1);
+                      setOpenPeriodDropdown(null);
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      selectedMonth === -1
+                        ? 'bg-emerald-500 text-slate-950 shadow-2xs'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>Semua Bulan</span>
+                    {selectedMonth === -1 && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  {MONTH_NAMES.map((m, idx) => {
+                    const isAct = selectedMonth === idx;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMonth(idx);
+                          setOpenPeriodDropdown(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                          isAct
+                            ? 'bg-emerald-500 text-slate-950 font-bold shadow-2xs'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span>{m}</span>
+                        {isAct && <Check className="w-3.5 h-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Custom Year Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenPeriodDropdown(prev => (prev === 'year' ? null : 'year'))}
+                className={`inline-flex items-center justify-between gap-2 min-w-[86px] px-3 py-1.5 rounded-lg border text-xs font-bold tabular-nums transition cursor-pointer whitespace-nowrap ${
+                  openPeriodDropdown === 'year'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
+                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
+                }`}
+              >
+                <span>{selectedYear}</span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    openPeriodDropdown === 'year' ? 'rotate-180 text-emerald-500' : ''
+                  }`}
+                />
+              </button>
+
+              {openPeriodDropdown === 'year' && (
+                <div className="absolute left-0 mt-1.5 w-32 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
+                  {[2024, 2025, 2026, 2027, 2028].map(yr => {
+                    const isAct = selectedYear === yr;
+                    return (
+                      <button
+                        key={yr}
+                        type="button"
+                        onClick={() => {
+                          setSelectedYear(yr);
+                          setOpenPeriodDropdown(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold tabular-nums transition cursor-pointer ${
+                          isAct
+                            ? 'bg-emerald-500 text-slate-950 shadow-2xs'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span>{yr}</span>
+                        {isAct && <Check className="w-3.5 h-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Custom Cabang Dropdown (Terpisah Tegas: Nusantara vs Sidoarjo) */}
+            <div className="relative pl-2 border-l border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setOpenPeriodDropdown(prev => (prev === 'branch' ? null : 'branch'))}
+                className={`inline-flex items-center justify-between gap-2 min-w-[164px] px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                  openPeriodDropdown === 'branch'
+                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20'
+                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>
+                    Cabang {branches.find(b => b.id === effectiveActiveBranchId)?.name || 'Nusantara'}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    openPeriodDropdown === 'branch' ? 'rotate-180 text-blue-500' : ''
+                  }`}
+                />
+              </button>
+
+              {openPeriodDropdown === 'branch' && (
+                <div className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
+                  <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    Pilih Cabang Operasional
+                  </div>
+                  {branches.map(b => {
+                    const isAct = effectiveActiveBranchId === b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedBranchId(b.id);
+                          branchStore.setActiveBranchId(b.id);
+                          setOpenPeriodDropdown(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          isAct
+                            ? 'bg-blue-600 text-white shadow-2xs'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Building2 className={`w-3.5 h-3.5 ${isAct ? 'text-white' : 'text-blue-500'}`} />
+                          <span>Cabang {b.name}</span>
+                        </span>
+                        {isAct && <Check className="w-3.5 h-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Aggregate KPI Chips - 4 Cards (Tanpa Distribusi Lokal) */}
+        {/* Aggregate KPI Chips - 4 Cards (Total Kiriman & Validasi Area) */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
           <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total Ritase Kirim</span>
+              <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total Kiriman</span>
               <Truck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
               {stats.totalTrips} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Rute</span>
             </div>
           </div>
 
           <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400">Total Area Kirim</span>
+              <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400">Validasi Area</span>
               <MapPin className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
             </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
               {stats.totalUniqueAreas} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Area</span>
             </div>
           </div>
@@ -4667,6 +5158,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                 const isSelected = selectedCalendarDate === cell.dateString;
                 const hasDeliveries = cell.totalTrips > 0;
+                const isSunday = cIdx % 7 === 0 || cell.dayName === 'MINGGU';
 
                 return (
                   <div
@@ -4678,7 +5170,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       }
                     }}
                     className={`min-h-[68px] sm:min-h-[78px] p-1.5 rounded-lg border transition cursor-pointer flex flex-col justify-between select-none relative ${
-                      isSelected
+                      isSunday
+                        ? isSelected
+                          ? 'bg-rose-100/90 dark:bg-rose-950/70 border-rose-500 ring-1 ring-rose-500 shadow-sm z-10'
+                          : 'bg-rose-50/90 dark:bg-rose-950/35 hover:bg-rose-100/80 dark:hover:bg-rose-950/55 border-rose-200 dark:border-rose-800/70'
+                        : isSelected
                         ? 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500 shadow-sm z-10'
                         : hasDeliveries
                         ? 'bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700'
@@ -4686,8 +5182,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className={`text-[11px] font-black px-1.5 py-0.2 rounded ${
-                        isSelected
+                      <span className={`text-[11px] font-black px-1.5 py-0.2 rounded tabular-nums ${
+                        isSunday
+                          ? isSelected
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-rose-100 dark:bg-rose-900/70 text-rose-700 dark:text-rose-200 font-extrabold'
+                          : isSelected
                           ? 'bg-emerald-600 text-white'
                           : hasDeliveries
                           ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-extrabold'
@@ -4696,7 +5196,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         {String(cell.dayNumber).padStart(2, '0')}
                       </span>
                       {hasDeliveries && (
-                        <span className="text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 rounded-full border border-emerald-300 dark:border-emerald-800">
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded-full border ${
+                          isSunday
+                            ? 'text-rose-700 dark:text-rose-200 bg-rose-100 dark:bg-rose-950/80 border-rose-300 dark:border-rose-800'
+                            : 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-800'
+                        }`}>
                           {cell.totalTrips} Rit
                         </span>
                       )}
@@ -4724,8 +5228,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         )}
                       </div>
                     ) : (
-                      <div className="text-[9px] font-medium text-slate-400 text-center py-1 italic">
-                        Off
+                      <div className={`text-[9px] text-center py-1 ${
+                        isSunday
+                          ? 'font-bold text-rose-600 dark:text-rose-400'
+                          : 'font-medium text-slate-400 italic'
+                      }`}>
+                        {isSunday ? 'Libur' : 'Off'}
                       </div>
                     )}
                   </div>
@@ -6403,9 +6911,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <Calendar className="w-3.5 h-3.5" />
                     <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
                   </span>
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                    Kepulangan = Sesuai Tanggal Kirim
-                  </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {/* Keberangkatan */}
@@ -6570,9 +7075,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
                     <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                    Kepulangan = Sesuai Tanggal Kirim
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">

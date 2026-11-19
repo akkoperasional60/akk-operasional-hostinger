@@ -762,6 +762,122 @@ class DriverShiftService {
     };
   }
 
+  /**
+   * Sinkronisasi Tiba di Gudang lintas Driver & Helper:
+   * Ketika Driver ATAU Helper menekan "Tiba di Gudang", seluruh shift aktif dalam tim/armada/area
+   * perjalanan yang sama hari ini ikut otomatis selesai (checked_out + arrivedAtWarehouseAt).
+   */
+  public async checkOutCrewTeamForTrip(params: {
+    actorDriverId: string;
+    actorName?: string;
+    actorRole?: string;
+    plateNumber?: string;
+    areaName?: string;
+    tripDate?: string;
+    crewNames?: Array<string | undefined>;
+    arrivedAtWarehouseAt?: string;
+    notes?: string;
+  }): Promise<{ checkedOutCount: number; matchedShiftIds: string[] }> {
+    try {
+      await this.syncFromServer();
+    } catch {}
+
+    const shifts = this.getShifts();
+    const now = new Date();
+    const arrivedIso = params.arrivedAtWarehouseAt || now.toISOString();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const checkoutFormatted = `${hours}:${minutes} WIB`;
+
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const normText = (v?: string) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const targetPlate = normPlate(params.plateNumber);
+    const targetArea = normText(params.areaName);
+    const targetDate = String(params.tripDate || '').slice(0, 10) || getLocalDateStr();
+
+    // Kumpulkan semua nama kru dalam tim (actor + driver + helper1 + helper2 + rekan di shift aktif actor)
+    const teamNamesSet = new Set<string>();
+    const addName = (n?: string) => {
+      const clean = normText(n);
+      if (clean && clean !== '-' && clean !== 'driver armada terkait') {
+        teamNamesSet.add(clean);
+      }
+    };
+    addName(params.actorName);
+    (params.crewNames || []).forEach(addName);
+
+    const actorShift = shifts.find(
+      s => s.status !== 'checked_out' && isSameDriverIdentity(s.driverId, s.driverName, params.actorDriverId, params.actorName)
+    );
+    if (actorShift) {
+      addName(actorShift.driverName);
+      addName(actorShift.helper1Name);
+      addName(actorShift.helper2Name);
+    }
+
+    const effectivePlate = targetPlate || normPlate(actorShift?.plateNumber);
+    const effectiveArea = targetArea || normText(actorShift?.selectedArea);
+
+    const isNameInTeam = (candidate?: string): boolean => {
+      const clean = normText(candidate);
+      if (!clean) return false;
+      for (const tn of teamNamesSet) {
+        if (clean === tn || clean.includes(tn) || tn.includes(clean)) return true;
+      }
+      return false;
+    };
+
+    const matchedShifts: DriverShiftCheckin[] = [];
+    shifts.forEach(s => {
+      if (s.status === 'checked_out') return;
+      const sameDate = !s.date || s.date.slice(0, 10) === targetDate;
+      const isActor = isSameDriverIdentity(s.driverId, s.driverName, params.actorDriverId, params.actorName);
+      const samePlate = Boolean(effectivePlate && effectivePlate !== '-' && normPlate(s.plateNumber) === effectivePlate && sameDate);
+      const sameArea = Boolean(effectiveArea && normText(s.selectedArea) === effectiveArea && sameDate);
+      const linkedByCrewName =
+        sameDate &&
+        (isNameInTeam(s.driverName) || isNameInTeam(s.helper1Name) || isNameInTeam(s.helper2Name));
+
+      if (isActor || samePlate || linkedByCrewName || (sameArea && (samePlate || linkedByCrewName))) {
+        s.status = 'checked_out';
+        s.arrivedAtWarehouseAt = arrivedIso;
+        s.checkoutTime = arrivedIso;
+        s.checkoutTimeFormatted = checkoutFormatted;
+        if (params.notes) {
+          s.notes = (s.notes ? s.notes + ' | ' : '') + params.notes;
+        }
+        matchedShifts.push(s);
+      }
+    });
+
+    if (matchedShifts.length > 0) {
+      this.persistShifts(shifts);
+      matchedShifts.forEach(s => {
+        const memberRole = s.checkinRole === 'helper' ? 'Helper' : 'Driver';
+        driverReportService.upsertShiftCheckinCheckoutReport({
+          shiftId: s.id,
+          driverId: s.driverId,
+          driverName: s.driverName,
+          userRole: memberRole,
+          plateNumber: s.plateNumber || params.plateNumber || '-',
+          areaName: s.selectedArea || params.areaName || 'Gudang Argo',
+          checkinTimeFormatted: s.checkinTimeFormatted,
+          checkoutTimeFormatted: checkoutFormatted,
+          securityPin: '****'
+        });
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: matchedShifts[0] }));
+      }
+    }
+
+    return {
+      checkedOutCount: matchedShifts.length,
+      matchedShiftIds: matchedShifts.map(s => s.id)
+    };
+  }
+
   public deleteShift(shiftOrReportId: string, driverName?: string, dateStr?: string): boolean {
     const cleanId = String(shiftOrReportId || '').trim();
     if (!cleanId) return false;

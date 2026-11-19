@@ -80,13 +80,40 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
   };
 
   const allUsers = logisticsStore.getUsers();
-  const spvUser = allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') || { fullName: 'M. Syaiful B.', role: 'spv_logistik' };
+  const spvUser =
+    allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') ||
+    allUsers.find(
+      u =>
+        u.status === 'approved' &&
+        u.role !== 'super_admin' &&
+        u.role !== 'driver' &&
+        u.role !== 'crew_helper' &&
+        u.permissions?.modules?.logistics?.enabled &&
+        (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
+          u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
+    ) ||
+    allUsers.find(u => u.role === 'spv_logistik') ||
+    { fullName: logisticsStore.getLogisticsCoordinator(), role: 'spv_logistik' };
   const operasionalUser = allUsers.find(u => u.role === 'operasional' && u.status === 'approved') || { fullName: 'Bayu Novianto Dimas Permana', role: 'operasional' };
   const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Hairul Rozikin', role: 'security' };
-  const spvConciseName = formatConcisePerson(currentWaybill?.preparedByName || spvUser.fullName);
+  const spvConciseName = formatConcisePerson(
+    (currentWaybill?.preparedBySigned && currentWaybill?.preparedByName ? currentWaybill.preparedByName : spvUser.fullName) ||
+      spvUser.fullName
+  );
   const operasionalConciseName = formatConcisePerson(currentWaybill?.acknowledgedByName || operasionalUser.fullName);
   const securityConciseName = formatConcisePerson(currentWaybill?.securityOfficerName || securityUser.fullName);
   const driverHelperName = formatConciseCrewPair(currentWaybill?.crew.driverName, currentWaybill?.crew.helperName);
+  const resolvedFleetInitial =
+    (currentWaybill?.fleet?.initialCode && currentWaybill.fleet.initialCode !== '-'
+      ? currentWaybill.fleet.initialCode
+      : '') ||
+    logisticsStore.findFleetByCodeOrPlate(currentWaybill?.fleet?.plateNumber)?.initialCode ||
+    '';
+  const fleetDisplayLabel = currentWaybill
+    ? resolvedFleetInitial
+      ? `${resolvedFleetInitial} (${currentWaybill.fleet.plateNumber})`
+      : currentWaybill.fleet.plateNumber
+    : '-';
 
   const handleToggleSignRole = (roleKey: 'preparedBy' | 'acknowledgedBy' | 'security' | 'driver') => {
     if (!currentWaybill) return;
@@ -169,7 +196,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
   };
 
   const handleCopySummary = () => {
-    const text = `*SURAT JALAN KELUAR PT AKK*\nNo: ${currentWaybill.waybillNumber}\nArmada: ${currentWaybill.fleet.plateNumber} (${currentWaybill.fleet.vehicleType})\nDriver: ${currentWaybill.crew.driverName}\nTujuan: ${currentWaybill.destination.storeName} (${currentWaybill.destination.city})\nStatus: ${currentWaybill.statusLabel}`;
+    const text = `*SURAT JALAN KELUAR PT AKK*\nNo: ${currentWaybill.waybillNumber}\nArmada: ${fleetDisplayLabel}\nDriver: ${currentWaybill.crew.driverName}\nTujuan: ${currentWaybill.destination.storeName} (${currentWaybill.destination.city})\nStatus: ${currentWaybill.statusLabel}`;
     navigator.clipboard.writeText(text);
     setIsCopied(true);
     addNotification('schedule', 'Teks Disalin', 'Ringkasan Surat Jalan disalin ke clipboard.');
@@ -314,9 +341,6 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                 <div className="text-[9px] text-slate-700 font-sans font-semibold">
                   Divisi Logistik &amp; Distribusi Armada
                 </div>
-                <div className="text-[8px] text-slate-600 font-sans">
-                  Banyuwangi KM 12 • (0333) 412890
-                </div>
               </div>
             </div>
 
@@ -330,9 +354,6 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               </div>
               <div className="text-[8.5px] text-slate-700">
                 Tgl: {currentWaybill.date} | Out: {currentWaybill.gateOutTime}
-              </div>
-              <div className="text-[8.5px] text-slate-700">
-                Resi: {currentWaybill.trackingNumber}
               </div>
             </div>
 
@@ -351,9 +372,6 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               <div className="text-[8.5px] text-slate-700">
                 {currentWaybill.destination.address}
               </div>
-              <div className="text-[8.5px] text-slate-800 pt-0.5">
-                PIC: {currentWaybill.destination.contactPerson} ({currentWaybill.destination.phone})
-              </div>
             </div>
 
             {/* Data Armada & Kru */}
@@ -363,7 +381,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                 <span>Armada &amp; Kru Pengemudi:</span>
               </div>
               <div className="font-bold text-[10px] text-slate-950">
-                {currentWaybill.fleet.plateNumber} ({currentWaybill.fleet.vehicleType})
+                {fleetDisplayLabel}
               </div>
               <div className="text-[8.5px] text-slate-800">
                 Driver : {currentWaybill.crew.driverName}
@@ -383,9 +401,9 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-center text-[8px] font-sans">
-                {/* 1. SPV Logistik */}
+                {/* 1. Disiapkan (SPV Logistik) */}
                 <div className="border border-slate-300 rounded p-1.5 flex flex-col justify-between min-h-[76px]">
-                  <div className="font-bold text-slate-800">Disiapkan (SPV):</div>
+                  <div className="font-bold text-slate-800">Disiapkan:</div>
                   <div
                     onClick={() => handleToggleSignRole('preparedBy')}
                     className="my-1 min-h-[34px] flex flex-col items-center justify-center border-b border-dotted border-slate-400 cursor-pointer hover:bg-slate-50"

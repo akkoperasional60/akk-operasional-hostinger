@@ -268,7 +268,7 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
               Live Trips, Riwayat Rute &amp; Playback Perjalanan
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-              Pantau armada yang sedang berjalan secara real-time serta putar ulang (playback) riwayat rute perjalanan tersimpan di Hostinger MySQL.
+              Pantau armada secara real-time serta putar ulang (playback) riwayat rute perjalanan yang terekam otomatis dari GPS aplikasi Driver &amp; Helper.
             </p>
           </div>
         </div>
@@ -376,8 +376,8 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {mode === 'live'
-                  ? 'Perjalanan otomatis aktif saat Driver / Helper menekan Gate-Out di Portal Driver Mobile.'
-                  : 'Riwayat rute otomatis tersimpan ke MySQL saat kru menekan Tiba di Gudang.'}
+                  ? 'Perjalanan otomatis aktif saat Driver / Helper menekan Gate-Out di Portal Driver & Helper.'
+                  : 'Riwayat rute GPS aplikasi Driver & Helper tersimpan otomatis saat kru menekan Tiba di Gudang.'}
               </p>
             </div>
           ) : (

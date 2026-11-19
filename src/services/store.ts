@@ -1907,19 +1907,25 @@ class LogisticsStore {
   }
 
   /**
+  /**
    * Mengecek apakah akun pengguna merupakan Kru Pengiriman aktif (Driver / Helper)
-   * atau pengguna lintas departemen yang memiliki hak akses ke Portal Driver Mobile (driver_portal / portal_driver)
-   * maupun Jadwal & Penugasan Armada (schedules / rencana_rute), baik Full Access maupun Hanya Lihat (Read Only),
-   * serta memisahkan secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
+   * yang memiliki hak akses Full Access ('full_access') ke Portal Driver Mobile (driver_portal / portal_driver).
+   * Akun dengan akses Hanya Lihat ('read_only') tidak masuk ke dalam daftar Stand By / Kru,
+   * serta dipisahkan secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
    */
   public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
     if (!u) return false;
     if (u.status !== 'approved') return false;
     const cleanEmail = (u.email || '').trim().toLowerCase();
     const cleanName = (u.fullName || '').trim().toLowerCase();
-    // Hanya kecualikan akun sistem/direksi murni atau profil mock non-lapangan
+    // Kecualikan akun sistem/manajemen/non-lapangan
     if (
       u.role === 'super_admin' ||
+      u.role === 'spv_logistik' ||
+      u.role === 'operasional' ||
+      u.role === 'koordinator_driver' ||
+      u.role === 'dispatcher' ||
+      String(u.role) === 'pengiriman' ||
       cleanName === 'super admin' ||
       cleanName === 'tamu / belum login' ||
       cleanEmail === 'akkoperasional60@gmail.com' ||
@@ -1939,40 +1945,26 @@ class LogisticsStore {
       u.permissions?.branchPermissions
     );
 
-    const hasBranchDeliveryOrScheduleAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
+    const hasBranchPortalFullAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
       if (!bEntry || !bEntry.enabled) return false;
       const logMod = bEntry.modules?.logistics;
       if (!logMod || !logMod.enabled) return false;
       const subs = logMod.subMenus || {};
       const dpVal = subs.driver_portal ?? subs.portal_driver;
-      const schVal = subs.schedules ?? subs.rencana_rute;
-      if (
-        dpVal === 'full_access' ||
-        dpVal === 'read_only' ||
-        schVal === 'full_access' ||
-        schVal === 'read_only'
-      ) {
-        return true;
-      }
-      if (
-        (u.role === 'driver' ||
-          u.role === 'crew_helper' ||
-          u.role === 'spv_logistik' ||
-          u.role === 'pengiriman' ||
-          u.role === 'dispatcher') &&
-        dpVal === undefined &&
-        schVal === undefined
-      ) {
-        return Object.values(subs).some(v => v === 'full_access' || v === 'read_only');
-      }
-      return false;
+      // Hanya akses Full Access pada Portal Driver Mobile yang masuk ke daftar Kru / Stand By (Hanya Lihat / read_only tidak masuk)
+      return dpVal === 'full_access';
     };
 
+    const anyBranchHasPortalFullAccess = Object.values(branchPerms).some(bEntry =>
+      hasBranchPortalFullAccess(bEntry)
+    );
+    if (!anyBranchHasPortalFullAccess) return false;
+
     if (targetBranchId && targetBranchId !== 'ALL') {
-      return hasBranchDeliveryOrScheduleAccess(branchPerms[targetBranchId]);
+      return this.getCrewUserPrimaryBranchId(u) === targetBranchId;
     }
 
-    return Object.values(branchPerms).some(bEntry => hasBranchDeliveryOrScheduleAccess(bEntry));
+    return true;
   }
 
   public getCrewUserPrimaryBranchId(u: UserProfile): string {
@@ -1984,30 +1976,26 @@ class LogisticsStore {
     );
     const sdaEntry = branchPerms['cab-sidoarjo'];
     const bwiEntry = branchPerms['cab-banyuwangi'];
-    const sdaEnabled = Boolean(sdaEntry?.enabled);
-    const bwiEnabled = Boolean(bwiEntry?.enabled);
 
-    if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
-    if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
-
-    const hasScheduleOrPortalAccess = (entry?: UserBranchPermissionEntry) =>
+    const hasBranchPortalFullAccess = (entry?: UserBranchPermissionEntry) =>
       Boolean(
         entry?.enabled &&
           entry?.modules?.logistics?.enabled &&
           (entry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
-            entry.modules.logistics.subMenus?.driver_portal === 'read_only' ||
-            entry.modules.logistics.subMenus?.portal_driver === 'full_access' ||
-            entry.modules.logistics.subMenus?.portal_driver === 'read_only' ||
-            entry.modules.logistics.subMenus?.schedules === 'full_access' ||
-            entry.modules.logistics.subMenus?.schedules === 'read_only' ||
-            entry.modules.logistics.subMenus?.rencana_rute === 'full_access' ||
-            entry.modules.logistics.subMenus?.rencana_rute === 'read_only')
+            entry.modules.logistics.subMenus?.portal_driver === 'full_access')
       );
 
-    const sdaHasDp = hasScheduleOrPortalAccess(sdaEntry);
-    const bwiHasDp = hasScheduleOrPortalAccess(bwiEntry);
+    const sdaHasDp = hasBranchPortalFullAccess(sdaEntry);
+    const bwiHasDp = hasBranchPortalFullAccess(bwiEntry);
 
-    if (sdaHasDp && !bwiHasDp) return 'cab-sidoarjo';
+    // Jika Cabang Sidoarjo memiliki akses penuh Portal Driver Mobile, prioritaskan sebagai kru Sidoarjo
+    // (karena Cabang Sidoarjo hanya aktif jika diaktifkan secara eksplisit untuk kru Sidoarjo, sehingga tidak tercampur ke Nusantara)
+    if (sdaHasDp) return 'cab-sidoarjo';
+    if (bwiHasDp) return 'cab-banyuwangi';
+
+    const sdaEnabled = Boolean(sdaEntry?.enabled);
+    const bwiEnabled = Boolean(bwiEntry?.enabled);
+    if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
     return 'cab-banyuwangi';
   }
 
@@ -2173,11 +2161,21 @@ class LogisticsStore {
     const roleLabelMap: Record<string, string> = {
       super_admin: 'Super Admin',
       spv_logistik: 'SPV Logistik',
-      pengiriman: 'Pengiriman',
-      driver: 'Kru Supir',
-      crew_helper: 'Kru Helper',
-      admin_penjualan: 'Admin Penjualan',
-      operasional: 'Operasional',
+      koordinator_driver: 'Koordinator Driver',
+      driver: 'Driver',
+      crew_helper: 'Helper',
+      sales_admin: 'Adm. Penjualan',
+      spv_sales_admin: 'SPV Adm Penjualan',
+      purchasing_admin: 'Adm. Pembelian',
+      spv_purchasing_admin: 'SPV Adm Pembelian',
+      warehouse_admin: 'Gudang',
+      koordinator_gudang: 'Koordinator Gudang',
+      marketing_online: 'Marketing Online',
+      marketing_offline: 'Marketing Offline',
+      spv_marketing_offline: 'SPV Marketing Offline',
+      hr_admin: 'Human Resource Development',
+      finance_tax_admin: 'Adm Finance & Tax',
+      operasional: 'SPV Operasional',
       security: 'Security'
     };
     const newEntry: ScheduleChangeLogEntry = {
@@ -2364,18 +2362,27 @@ class LogisticsStore {
       return this.currentUser.fullName;
     }
     const approvedSpvLogistiks = this.users.filter(u => u.role === 'spv_logistik' && u.status === 'approved');
-    const bahriSpvLogistik = approvedSpvLogistiks.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
-    if (bahriSpvLogistik) {
-      return bahriSpvLogistik.fullName;
-    }
     if (approvedSpvLogistiks.length > 0) {
       return approvedSpvLogistiks[0].fullName;
     }
-    const anyBahri = this.users.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
-    if (anyBahri) {
-      return anyBahri.fullName;
+    const approvedLogisticsUsers = this.users.filter(
+      u =>
+        u.status === 'approved' &&
+        u.role !== 'super_admin' &&
+        u.role !== 'driver' &&
+        u.role !== 'crew_helper' &&
+        u.permissions?.modules?.logistics?.enabled &&
+        (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
+          u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
+    );
+    if (approvedLogisticsUsers.length > 0) {
+      return approvedLogisticsUsers[0].fullName;
     }
-    return 'Muhammad Syaiful Bahri';
+    const anySpv = this.users.find(u => u.role === 'spv_logistik');
+    if (anySpv) {
+      return anySpv.fullName;
+    }
+    return 'SPV Logistik';
   }
 
   /**
@@ -4208,7 +4215,20 @@ class LogisticsStore {
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
     const u = this.getCurrentUser();
     const isCrewOrPortalUpdate =
-      Boolean(u && ['driver', 'crew_helper', 'warehouse_admin', 'spv_logistik', 'super_admin', 'operasional', 'pengiriman', 'dispatcher'].includes(u.role)) ||
+      Boolean(
+        u &&
+          [
+            'driver',
+            'crew_helper',
+            'warehouse_admin',
+            'koordinator_gudang',
+            'spv_logistik',
+            'koordinator_driver',
+            'super_admin',
+            'operasional',
+            'dispatcher'
+          ].includes(u.role)
+      ) ||
       updatedSchedule.backupCrewName !== undefined ||
       updatedSchedule.backupPosition !== undefined ||
       updatedSchedule.backupTargetName !== undefined ||

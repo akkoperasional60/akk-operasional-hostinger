@@ -119,6 +119,10 @@ export interface FormKirimRecord {
   financeSettlementChecked?: boolean;
   financeSettlementCheckedAt?: string;
   financeSettlementCheckedBy?: string;
+  kmPagi?: number;
+  kmPulang?: number;
+  kmPagiRecordedAt?: string;
+  kmPulangRecordedAt?: string;
 }
 
 const LEGACY_DUMMY_FORM_KIRIM_IDS = new Set(['FK-202611-001', 'FK-202611-002']);
@@ -1335,6 +1339,78 @@ class FormKirimStore {
     } else {
       this.saveAll(updated);
     }
+  }
+
+  public syncChecklistOdometer(params: {
+    date?: string;
+    plateNumber?: string;
+    driverName?: string;
+    areaName?: string;
+    inspectionType: 'pre_trip' | 'post_trip';
+    odometerKm: number;
+    recordedAt?: string;
+  }): void {
+    const km = Number(params.odometerKm);
+    if (!Number.isFinite(km) || km <= 0) return;
+
+    const existing = this.getAll();
+    if (existing.length === 0) return;
+
+    const nowIso = params.recordedAt || new Date().toISOString();
+    const targetDate = String(params.date || '').slice(0, 10);
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const normText = (v?: string) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    const reqPlate = normPlate(params.plateNumber);
+    const reqDriver = normText(params.driverName);
+    const reqArea = normText(params.areaName);
+
+    const matchedIds: string[] = [];
+    const updated = existing.map(record => {
+      const recDate = String(record.tanggalKirim || '').slice(0, 10);
+      const dateOk = !targetDate || !recDate || recDate === targetDate;
+      if (!dateOk) return record;
+
+      const plateMatch = Boolean(reqPlate && reqPlate !== '-' && normPlate(record.plateNumber) === reqPlate);
+      const driverMatch = Boolean(
+        reqDriver &&
+          record.driverName &&
+          (normText(record.driverName).includes(reqDriver) || reqDriver.includes(normText(record.driverName)))
+      );
+      const areaMatch = Boolean(
+        reqArea &&
+          (record.areaKirim || record.storeName) &&
+          (normText(record.areaKirim || record.storeName).includes(reqArea) ||
+            reqArea.includes(normText(record.areaKirim || record.storeName)))
+      );
+
+      if (!plateMatch && !driverMatch && !areaMatch) return record;
+
+      matchedIds.push(record.id);
+      if (params.inspectionType === 'pre_trip') {
+        return {
+          ...record,
+          kmPagi: km,
+          kmPagiRecordedAt: nowIso
+        };
+      }
+      return {
+        ...record,
+        kmPulang: km,
+        kmPulangRecordedAt: nowIso
+      };
+    });
+
+    if (matchedIds.length === 0) return;
+
+    this.persistLocal(updated);
+    matchedIds.forEach(id => {
+      const patch: Partial<FormKirimRecord> =
+        params.inspectionType === 'pre_trip'
+          ? { kmPagi: km, kmPagiRecordedAt: nowIso }
+          : { kmPulang: km, kmPulangRecordedAt: nowIso };
+      this.syncDriverPatch(id, patch, updated);
+    });
   }
 }
 

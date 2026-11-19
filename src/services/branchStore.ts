@@ -502,9 +502,12 @@ class BranchStoreService {
         cloned.enabled = Boolean(isBranchEnabled && activeCountInBranch > 0);
         result[branch.id] = cloned;
       } else {
-        // Default: Nusantara (Banyuwangi) is enabled by default for existing AKK staff,
-        // Super Admin gets all branches enabled
-        const isDefaultEnabled = role === 'super_admin' || branch.id === 'cab-banyuwangi';
+        // Default: Nusantara (Banyuwangi) is enabled by default only if no other branch is explicitly enabled
+        const anyOtherBranchExplicitlyEnabled = Object.entries(savedForUser).some(
+          ([bId, bVal]) => bId !== branch.id && Boolean(bVal?.enabled)
+        );
+        const isDefaultEnabled =
+          role === 'super_admin' || (branch.id === 'cab-banyuwangi' && !anyOtherBranchExplicitlyEnabled);
         const baseModules: UserPermissions['modules'] = {};
 
         Object.keys(roleDefaults).forEach(modId => {
