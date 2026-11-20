@@ -3005,9 +3005,11 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
 
     const registerArea = (rawVal?: string | null) => {
       const trimmed = String(rawVal || '').trim();
-      if (!trimmed || trimmed === '-') return;
+      const lower = trimmed.toLowerCase();
+      if (!trimmed || trimmed === '-' || lower === 'area pengiriman' || lower === 'area kiriman' || lower === 'area kirim') return;
       const canonical = standardizeAreaName(trimmed);
-      if (!canonical || canonical === '-') return;
+      const canonicalLower = canonical.toLowerCase();
+      if (!canonical || canonical === '-' || canonicalLower === 'area pengiriman' || canonicalLower === 'area kiriman' || canonicalLower === 'area kirim') return;
       const key = canonical.toUpperCase().replace(/\s+/g, ' ').trim();
       if (!areaMap.has(key)) {
         areaMap.set(key, canonical);

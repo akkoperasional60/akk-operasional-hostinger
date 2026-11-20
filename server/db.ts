@@ -6,9 +6,19 @@ dotenv.config();
 let pool: mysql.Pool | null = null;
 let circuitOpenUntil = 0;
 let consecutiveFailures = 0;
-const CIRCUIT_BREAKER_COOLDOWN_MS = 20000; // 20 detik cooldown jika koneksi MySQL gagal
+let localLoopbackRefusedInPreview = false;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 20000;
 
-export function isDatabaseConfigured(): boolean {
+function isPreviewOrCloudRun(): boolean {
+  return Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+}
+
+function isLoopbackDbHost(): boolean {
+  const host = String(process.env.DB_HOST || 'localhost').trim().toLowerCase();
+  return !host || host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function hasDatabaseEnvVars(): boolean {
   return Boolean(
     String(process.env.DB_NAME || '').trim() &&
     String(process.env.DB_USER || '').trim() &&
@@ -16,8 +26,43 @@ export function isDatabaseConfigured(): boolean {
   );
 }
 
+export function isDatabaseConfigured(): boolean {
+  if (localLoopbackRefusedInPreview && isPreviewOrCloudRun()) {
+    return false;
+  }
+  return hasDatabaseEnvVars();
+}
+
 export function isCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil;
+}
+
+function handleConnectionFailure(err: any): void {
+  consecutiveFailures++;
+  const errCode = String(err?.code || '');
+  const errMsg = String(err?.message || '');
+  const isConnErr =
+    errCode === 'ECONNREFUSED' ||
+    errCode === 'ETIMEDOUT' ||
+    errCode === 'ENOTFOUND' ||
+    errCode === 'EHOSTUNREACH' ||
+    errMsg.includes('ECONNREFUSED') ||
+    errMsg.includes('connect');
+
+  if (isConnErr && isPreviewOrCloudRun() && isLoopbackDbHost()) {
+    localLoopbackRefusedInPreview = true;
+    circuitOpenUntil = Date.now() + 24 * 60 * 60 * 1000;
+    return;
+  }
+
+  if (isConnErr || consecutiveFailures >= 2) {
+    circuitOpenUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+    if (!isPreviewOrCloudRun()) {
+      console.warn(
+        `[Database] Koneksi terganggu (${errMsg || errCode}). Cooldown aktif ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s.`
+      );
+    }
+  }
 }
 
 function assertDatabaseConfig(): void {
@@ -26,7 +71,7 @@ function assertDatabaseConfig(): void {
   if (!String(process.env.DB_USER || '').trim()) missing.push('DB_USER');
   if (!String(process.env.DB_PASSWORD || '').trim()) missing.push('DB_PASSWORD');
   if (missing.length > 0) {
-    throw new Error(`Hostinger MySQL belum dikonfigurasi: ${missing.join(', ')}`);
+    throw new Error(`Database belum dikonfigurasi: ${missing.join(', ')}`);
   }
 }
 
@@ -49,49 +94,39 @@ export function getDbPool(): mysql.Pool {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: 2500, // Cepat fail (2.5 detik) agar tidak menggantung reload browser
+    connectTimeout: 2500,
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
     charset: 'utf8mb4'
   });
 
-  console.log(`✅ [Hostinger MySQL] Pool aktif di ${host}:${port}/${database}`);
   return pool;
 }
 
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
   if (isCircuitOpen()) {
-    throw new Error('MySQL offline (circuit breaker active, using instant local cache)');
+    throw new Error('Database circuit breaker active (using instant local cache)');
   }
 
   try {
     const p = getDbPool();
     const [rows] = await p.execute(sql, params);
-    // Berhasil terkoneksi: reset failure counter
     consecutiveFailures = 0;
     circuitOpenUntil = 0;
+    localLoopbackRefusedInPreview = false;
     return rows as T;
   } catch (err: any) {
-    consecutiveFailures++;
-    const isConnErr = err?.code === 'ECONNREFUSED' || 
-                      err?.code === 'ETIMEDOUT' || 
-                      err?.code === 'ENOTFOUND' || 
-                      err?.code === 'EHOSTUNREACH' ||
-                      err?.message?.includes('connect');
-    if (isConnErr || consecutiveFailures >= 2) {
-      circuitOpenUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
-      console.warn(`⚠️ [Hostinger MySQL] Koneksi gagal (${err?.message || err?.code}). Circuit breaker aktif ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s.`);
-    }
+    handleConnectionFailure(err);
     throw err;
   }
 }
 
 export async function testConnection(): Promise<{ success: boolean; configured: boolean; message: string }> {
-  if (!isDatabaseConfigured()) {
+  if (!hasDatabaseEnvVars()) {
     return {
       success: false,
       configured: false,
-      message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diatur di environment variables.'
+      message: 'Database belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diatur di environment variables.'
     };
   }
   try {
@@ -101,18 +136,20 @@ export async function testConnection(): Promise<{ success: boolean; configured: 
     connection.release();
     consecutiveFailures = 0;
     circuitOpenUntil = 0;
+    localLoopbackRefusedInPreview = false;
     const host = process.env.DB_HOST || 'localhost';
     const port = Number(process.env.DB_PORT) || 3306;
     return {
       success: true,
       configured: true,
-      message: `Connected successfully to Hostinger MySQL at ${host}:${port}`
+      message: `Connected successfully at ${host}:${port}`
     };
   } catch (err: any) {
+    handleConnectionFailure(err);
     return {
       success: false,
-      configured: true,
-      message: `MySQL Connection failed: ${err?.message || err}`
+      configured: !localLoopbackRefusedInPreview,
+      message: `Database connection unavailable: ${err?.message || err}`
     };
   }
 }

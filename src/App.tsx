@@ -649,7 +649,7 @@ export default function App() {
       case 'fleet_forms': return 'Formulir Pengadaan Armada';
       case 'sales_dashboard': return 'Dashboard Admin Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
-      case 'sales_schedules': return 'Sales Hub: Jadwal Produksi & Kirim';
+      case 'sales_schedules': return 'Admin Penjualan: Jadwal & Penugasan Admin';
       case 'sales_loading_duration': return 'Sales Hub: Durasi Muat Real-Time';
       case 'sales_form_kirim': return 'Sales Hub: Form Kirim Barang';
       case 'sales_skill_matrix': return 'Sales Hub: Matriks Keterampilan Admin';

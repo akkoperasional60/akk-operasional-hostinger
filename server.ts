@@ -7462,8 +7462,8 @@ Kembalikan HANYA JSON valid:
         const catalogItems = deduplicateCatalogItems(mapped);
         return res.json({ success: true, source: 'mysql', count: catalogItems.length, items: catalogItems });
       } catch (dbErr: any) {
-        console.error('[GET /api/database-barang/catalog] MySQL error:', dbErr?.message || dbErr);
         if (isHostingerEnv) {
+          console.warn('[GET /api/database-barang/catalog] Database warning:', dbErr?.message || dbErr);
           return res.status(503).json({
             success: false,
             error: `Gagal membaca katalog barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
@@ -7572,8 +7572,8 @@ Kembalikan HANYA JSON valid:
         });
         return res.json({ success: true, source: 'mysql', count: deduped.length, items: deduped });
       } catch (dbErr: any) {
-        console.error('[GET /api/database-barang] MySQL error:', dbErr?.message || dbErr);
         if (isHostingerEnv) {
+          console.warn('[GET /api/database-barang] Database warning:', dbErr?.message || dbErr);
           return res.status(503).json({
             success: false,
             error: `Gagal membaca data barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
@@ -7804,8 +7804,8 @@ Kembalikan HANYA JSON valid:
             }
           }
         } catch (dbErr: any) {
-          console.error('[GET /api/database-barang/photos-sync] MySQL error:', dbErr?.message || dbErr);
           if (isHostingerEnv) {
+            console.warn('[GET /api/database-barang/photos-sync] Database warning:', dbErr?.message || dbErr);
             return res.status(503).json({
               success: false,
               error: `Gagal memuat foto barang dari database server: ${dbErr?.message || 'Koneksi database terganggu'}`
@@ -8804,7 +8804,9 @@ Kembalikan HANYA JSON valid:
             );
           }
         } catch (dbErr: any) {
-          console.warn('[Bulk Delete Photos] MySQL error:', dbErr?.message || dbErr);
+          if (isHostingerEnv) {
+            console.warn('[Bulk Delete Photos] Database warning:', dbErr?.message || dbErr);
+          }
         }
       }
 

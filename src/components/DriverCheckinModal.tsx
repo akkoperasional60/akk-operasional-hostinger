@@ -271,7 +271,17 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
       ])
     )
       .map(a => String(a || '').trim())
-      .filter(a => a && a !== '-' && !a.toLowerCase().includes('terjadwal'))
+      .filter(a => {
+        const lower = a.toLowerCase();
+        return (
+          lower !== '' &&
+          lower !== '-' &&
+          !lower.includes('terjadwal') &&
+          lower !== 'area pengiriman' &&
+          lower !== 'area kiriman' &&
+          lower !== 'area kirim'
+        );
+      })
       .sort((a, b) => a.localeCompare(b, 'id'));
 
     return merged.map(area => ({

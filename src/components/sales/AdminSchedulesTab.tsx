@@ -79,8 +79,19 @@ export const NON_AREA_TERMS = [
   'Muat Toko',
   'Cek Eceran Toko',
   'Cek Surat Jalan Toko',
-  'Input Retur'
+  'Input Retur',
+  'Area Pengiriman',
+  'Area Kiriman',
+  'Area Kirim'
 ];
+
+const NON_AREA_TERM_SET = new Set(NON_AREA_TERMS.map(t => t.toLowerCase()));
+
+function isNonAreaTerm(value?: string | null): boolean {
+  const clean = String(value || '').trim().toLowerCase();
+  if (!clean || clean === '-') return true;
+  return NON_AREA_TERM_SET.has(clean);
+}
 
 const LS_ADMIN_BRANCH_MAP_KEY = 'akk_sales_admin_branch_map_v1';
 
@@ -495,15 +506,15 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     liveSchedules.forEach(s => {
       const schBranch = branchStore.getScheduleBranchId(s.id, s.originName || s.areaName, s.fleetId);
       if (schBranch !== effectiveBranchId) return;
-      const raw = s.areaName || s.store?.city || '';
-      if (raw && !NON_AREA_TERMS.includes(raw)) {
+      const raw = (s.areaName || s.store?.city || '').trim();
+      if (raw && !isNonAreaTerm(raw)) {
         const std = standardizeAreaName(raw, effectiveBranchId);
-        if (std && std !== '-' && !NON_AREA_TERMS.includes(std)) {
+        if (std && !isNonAreaTerm(std)) {
           areaSet.add(std);
         }
       }
     });
-    return Array.from(areaSet);
+    return Array.from(areaSet).filter(area => !isNonAreaTerm(area));
   }, [effectiveBranchId]);
 
   const nowCurrent = new Date();
@@ -610,6 +621,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   const [editAbsenceReason, setEditAbsenceReason] = useState<string>('');
   const [editAreaDuties, setEditAreaDuties] = useState<string[]>([]);
   const [editAdditionalDuties, setEditAdditionalDuties] = useState<string[]>([]);
+  const [editCustomDutyInput, setEditCustomDutyInput] = useState<string>('');
   const [editIsBackupAcc, setEditIsBackupAcc] = useState<boolean>(false);
   const [editAreaSearchQuery, setEditAreaSearchQuery] = useState<string>('');
   const [isEditAdminDropdownOpen, setIsEditAdminDropdownOpen] = useState(false);
@@ -663,7 +675,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setEditAbsenceReason(item.absenceReason || '');
     setEditAreaDuties(
       safeDuties.filter(
-        d => typeof d === 'string' && !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !NON_AREA_TERMS.includes(d)
+        d => typeof d === 'string' && !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !isNonAreaTerm(d)
       )
     );
     setEditAdditionalDuties(
@@ -675,6 +687,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       )
     );
     setEditIsBackupAcc(Boolean(item.isBackupAcc));
+    setEditCustomDutyInput('');
     setEditAreaSearchQuery('');
     setIsEditAdminDropdownOpen(false);
   };
@@ -770,12 +783,18 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setAdminBranchId(manualAdmin, targetBranch);
 
     const isAbsent = manualAttendanceStatus === 'ijin' || manualAttendanceStatus === 'sakit';
+    const isTargetSidoarjo = targetBranch === 'cab-sidoarjo';
     const fallbackArea = synchronizedDeliveryAreas[0] || (isSidoarjoBranch ? 'SIDOARJO' : 'Muncar Pasar');
     const finalDuties = isAbsent
       ? []
       : manualAreaDuties.length > 0
       ? Array.from(new Set(manualAreaDuties))
       : [fallbackArea];
+    const finalAdditionalDuties =
+      isAbsent || isTargetSidoarjo
+        ? []
+        : Array.from(new Set(manualAdditionalDuties.map(d => d.trim()).filter(Boolean)));
+    const finalBackupAcc = !isAbsent && !isTargetSidoarjo && manualIsBackupAcc;
 
     setSchedules(prev => {
       const next = [...prev];
@@ -791,12 +810,17 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         const mergedDuties = isAbsent
           ? []
           : Array.from(new Set([...existing.duties, ...finalDuties]));
+        const existingAdd = Array.isArray(existing.additionalDuties) ? existing.additionalDuties : [];
+        const mergedAdditionalDuties =
+          isAbsent || isTargetSidoarjo
+            ? []
+            : Array.from(new Set([...existingAdd, ...finalAdditionalDuties]));
         next[existingIdx] = {
           ...existing,
           branchId: targetBranch,
           duties: mergedDuties,
-          additionalDuties: [],
-          isBackupAcc: false,
+          additionalDuties: mergedAdditionalDuties,
+          isBackupAcc: isAbsent || isTargetSidoarjo ? false : Boolean(existing.isBackupAcc || finalBackupAcc),
           attendanceStatus: manualAttendanceStatus,
           absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
         };
@@ -807,9 +831,9 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           adminName: manualAdmin,
           branchId: targetBranch,
           duties: finalDuties,
-          additionalDuties: [],
+          additionalDuties: finalAdditionalDuties,
           shiftTime: '08:00 - 16:00',
-          isBackupAcc: false,
+          isBackupAcc: finalBackupAcc,
           notes: '',
           attendanceStatus: manualAttendanceStatus,
           absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
@@ -830,10 +854,16 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     if (!canEditSchedules || !editingSchedule || !editAdmin) return;
 
     const targetBranch = editBranchId || effectiveBranchId;
+    const isTargetSidoarjo = targetBranch === 'cab-sidoarjo';
     setAdminBranchId(editAdmin, targetBranch);
 
     const isAbsent = editAttendanceStatus === 'ijin' || editAttendanceStatus === 'sakit';
     const finalDuties = isAbsent ? [] : Array.from(new Set(editAreaDuties));
+    const finalAdditionalDuties =
+      isAbsent || isTargetSidoarjo
+        ? []
+        : Array.from(new Set(editAdditionalDuties.map(d => d.trim()).filter(Boolean)));
+    const finalBackupAcc = !isAbsent && !isTargetSidoarjo && editIsBackupAcc;
 
     setSchedules(prev => {
       const updatedList = prev.map(item => {
@@ -843,8 +873,8 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             branchId: targetBranch,
             adminName: editAdmin,
             duties: finalDuties,
-            additionalDuties: [],
-            isBackupAcc: false,
+            additionalDuties: finalAdditionalDuties,
+            isBackupAcc: finalBackupAcc,
             attendanceStatus: editAttendanceStatus,
             absenceReason: isAbsent ? editAbsenceReason.trim() : undefined
           };
@@ -892,8 +922,16 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.adminName || '').localeCompare(b.adminName || ''))
       .map((item, idx) => {
         const safeDuties = Array.isArray(item.duties) ? item.duties : [];
+        const safeAdd = Array.isArray(item.additionalDuties) ? item.additionalDuties : [];
         const areaDuties = safeDuties.filter(
-          d => !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !NON_AREA_TERMS.includes(d)
+          d => !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !isNonAreaTerm(d)
+        );
+        const addDuties = Array.from(
+          new Set([
+            ...safeDuties.filter(d => ADDITIONAL_JOBDESK_OPTIONS.includes(d)),
+            ...safeAdd,
+            ...(item.isBackupAcc ? ['Back Up ACC'] : [])
+          ])
         );
         const statusLabel =
           item.attendanceStatus === 'ijin'
@@ -901,34 +939,37 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             : item.attendanceStatus === 'sakit'
             ? 'Sakit'
             : 'Hadir';
-        return {
+        const baseRow: Record<string, any> = {
           No: idx + 1,
           Tanggal: item.date,
           Hari: getDayNameFromIso(item.date),
           Cabang: `Cabang ${activeBranchName}`,
           'Admin Penjualan': item.adminName,
           Kehadiran: statusLabel,
-          'Area Handling': areaDuties.map(getCompactAreaLabel).join(', ') || '-',
-          'Keterangan / Alasan': item.absenceReason || item.notes || '-'
+          'Area Handling': areaDuties.map(getCompactAreaLabel).join(', ') || '-'
         };
+        if (!isSidoarjoBranch) {
+          baseRow['Jobdesk Tambahan'] = addDuties.join(', ') || '-';
+        }
+        baseRow['Keterangan / Alasan'] = item.absenceReason || item.notes || '-';
+        return baseRow;
       });
 
-    const worksheet = XLSX.utils.json_to_sheet(
-      rows.length > 0
-        ? rows
-        : [
-            {
-              No: 1,
-              Tanggal: selectedDateIso,
-              Hari: getDayNameFromIso(selectedDateIso),
-              Cabang: `Cabang ${activeBranchName}`,
-              'Admin Penjualan': '-',
-              Kehadiran: '-',
-              'Area Handling': '-',
-              'Keterangan / Alasan': 'Belum ada penugasan pada periode ini'
-            }
-          ]
-    );
+    const emptyRow: Record<string, any> = {
+      No: 1,
+      Tanggal: selectedDateIso,
+      Hari: getDayNameFromIso(selectedDateIso),
+      Cabang: `Cabang ${activeBranchName}`,
+      'Admin Penjualan': '-',
+      Kehadiran: '-',
+      'Area Handling': '-'
+    };
+    if (!isSidoarjoBranch) {
+      emptyRow['Jobdesk Tambahan'] = '-';
+    }
+    emptyRow['Keterangan / Alasan'] = 'Belum ada penugasan pada periode ini';
+
+    const worksheet = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [emptyRow]);
     worksheet['!cols'] = [
       { wch: 5 },
       { wch: 13 },
@@ -937,6 +978,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       { wch: 24 },
       { wch: 12 },
       { wch: 42 },
+      ...(isSidoarjoBranch ? [] : [{ wch: 30 }]),
       { wch: 28 }
     ];
     const workbook = XLSX.utils.book_new();
@@ -982,6 +1024,15 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       setManualAdditionalDuties(prev => [...prev, trimmed]);
     }
     setCustomDutyInput('');
+  };
+
+  const addCustomEditDuty = () => {
+    const trimmed = editCustomDutyInput.trim();
+    if (!trimmed) return;
+    if (!editAdditionalDuties.includes(trimmed)) {
+      setEditAdditionalDuties(prev => [...prev, trimmed]);
+    }
+    setEditCustomDutyInput('');
   };
 
   return (
@@ -1337,20 +1388,28 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   <th className="py-2.5 px-4 w-56">Admin Penjualan</th>
-                  <th className="py-2.5 px-4 w-44">Status Kehadiran</th>
+                  <th className="py-2.5 px-4 w-36">Status Kehadiran</th>
                   <th className="py-2.5 px-4">Area Handling</th>
+                  {!isSidoarjoBranch && <th className="py-2.5 px-4 w-64">Jobdesk Tambahan</th>}
                   {canEditSchedules && <th className="py-2.5 px-4 text-right w-24">Aksi</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
                 {selectedDateSchedules.map(item => {
                   const safeDuties = Array.isArray(item.duties) ? item.duties : [];
+                  const safeAdditional = Array.isArray(item.additionalDuties) ? item.additionalDuties : [];
                   const areaDuties = safeDuties.filter(
                     d =>
                       typeof d === 'string' &&
                       !ADDITIONAL_JOBDESK_OPTIONS.includes(d) &&
                       d !== 'Back Up ACC' &&
-                      !NON_AREA_TERMS.includes(d)
+                      !isNonAreaTerm(d)
+                  );
+                  const rowAdditionalDuties = Array.from(
+                    new Set([
+                      ...safeDuties.filter(d => typeof d === 'string' && ADDITIONAL_JOBDESK_OPTIONS.includes(d)),
+                      ...safeAdditional.filter(d => typeof d === 'string' && d.trim() !== '')
+                    ])
                   );
                   const isAbsent =
                     item.attendanceStatus === 'ijin' || item.attendanceStatus === 'sakit';
@@ -1428,6 +1487,33 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                           </div>
                         )}
                       </td>
+
+                      {/* Jobdesk Tambahan (Khusus Non-Sidoarjo / Cabang Nusantara) */}
+                      {!isSidoarjoBranch && (
+                        <td className="py-3 px-4 align-top">
+                          {isAbsent ? (
+                            <span className="text-slate-400 italic">—</span>
+                          ) : rowAdditionalDuties.length === 0 && !item.isBackupAcc ? (
+                            <span className="text-slate-400">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.isBackupAcc && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+                                  Back Up ACC
+                                </span>
+                              )}
+                              {rowAdditionalDuties.map(duty => (
+                                <span
+                                  key={duty}
+                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800"
+                                >
+                                  {duty}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
 
                       {/* Actions */}
                       {canEditSchedules && (
@@ -1679,6 +1765,102 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                         })}
                       </div>
                     </div>
+
+                    {/* Jobdesk Tambahan (Khusus Cabang Nusantara; disembunyikan untuk Cabang Sidoarjo) */}
+                    {!isSidoarjoBranch && (
+                      <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            Jobdesk Tambahan ({manualAdditionalDuties.length} Dipilih)
+                          </label>
+                          <div className="flex items-center gap-2 text-[11px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setManualAdditionalDuties(prev =>
+                                  Array.from(new Set([...prev, ...ADDITIONAL_JOBDESK_OPTIONS]))
+                                )
+                              }
+                              className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            >
+                              Pilih Semua
+                            </button>
+                            <span className="text-slate-300 dark:text-slate-700">|</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualAdditionalDuties([]);
+                                setManualIsBackupAcc(false);
+                              }}
+                              className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {Array.from(new Set([...ADDITIONAL_JOBDESK_OPTIONS, ...manualAdditionalDuties])).map(duty => {
+                            const checked = manualAdditionalDuties.includes(duty);
+                            return (
+                              <button
+                                key={duty}
+                                type="button"
+                                onClick={() => toggleManualAdditionalDuty(duty)}
+                                className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg text-left text-xs border transition cursor-pointer ${
+                                  checked
+                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-600 text-indigo-800 dark:text-indigo-200 font-bold'
+                                    : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700 font-medium'
+                                }`}
+                              >
+                                <span className="truncate" title={duty}>{duty}</span>
+                                {checked && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={customDutyInput}
+                            onChange={e => setCustomDutyInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addCustomManualDuty();
+                              }
+                            }}
+                            placeholder="Tambah jobdesk tambahan lainnya..."
+                            className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={addCustomManualDuty}
+                            disabled={!customDutyInput.trim()}
+                            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-600 hover:text-white disabled:opacity-40 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer shrink-0"
+                          >
+                            + Tambah
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setManualIsBackupAcc(prev => !prev)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                            manualIsBackupAcc
+                              ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400 dark:border-amber-600 text-amber-800 dark:text-amber-200'
+                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                          }`}
+                        >
+                          <span>Status Back Up ACC</span>
+                          <span className="inline-flex items-center gap-1.5">
+                            {manualIsBackupAcc ? 'Aktif (Back Up ACC)' : 'Tidak'}
+                            {manualIsBackupAcc && <Check className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
+                          </span>
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1865,6 +2047,102 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                         })}
                       </div>
                     </div>
+
+                    {/* Jobdesk Tambahan (Khusus Cabang Nusantara; disembunyikan untuk Cabang Sidoarjo) */}
+                    {(editBranchId || effectiveBranchId) !== 'cab-sidoarjo' && (
+                      <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            Jobdesk Tambahan ({editAdditionalDuties.length} Dipilih)
+                          </label>
+                          <div className="flex items-center gap-2 text-[11px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditAdditionalDuties(prev =>
+                                  Array.from(new Set([...prev, ...ADDITIONAL_JOBDESK_OPTIONS]))
+                                )
+                              }
+                              className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            >
+                              Pilih Semua
+                            </button>
+                            <span className="text-slate-300 dark:text-slate-700">|</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditAdditionalDuties([]);
+                                setEditIsBackupAcc(false);
+                              }}
+                              className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {Array.from(new Set([...ADDITIONAL_JOBDESK_OPTIONS, ...editAdditionalDuties])).map(duty => {
+                            const checked = editAdditionalDuties.includes(duty);
+                            return (
+                              <button
+                                key={duty}
+                                type="button"
+                                onClick={() => toggleEditAdditionalDuty(duty)}
+                                className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg text-left text-xs border transition cursor-pointer ${
+                                  checked
+                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-600 text-indigo-800 dark:text-indigo-200 font-bold'
+                                    : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700 font-medium'
+                                }`}
+                              >
+                                <span className="truncate" title={duty}>{duty}</span>
+                                {checked && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editCustomDutyInput}
+                            onChange={e => setEditCustomDutyInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addCustomEditDuty();
+                              }
+                            }}
+                            placeholder="Tambah jobdesk tambahan lainnya..."
+                            className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={addCustomEditDuty}
+                            disabled={!editCustomDutyInput.trim()}
+                            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-600 hover:text-white disabled:opacity-40 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer shrink-0"
+                          >
+                            + Tambah
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setEditIsBackupAcc(prev => !prev)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                            editIsBackupAcc
+                              ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400 dark:border-amber-600 text-amber-800 dark:text-amber-200'
+                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                          }`}
+                        >
+                          <span>Status Back Up ACC</span>
+                          <span className="inline-flex items-center gap-1.5">
+                            {editIsBackupAcc ? 'Aktif (Back Up ACC)' : 'Tidak'}
+                            {editIsBackupAcc && <Check className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
+                          </span>
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

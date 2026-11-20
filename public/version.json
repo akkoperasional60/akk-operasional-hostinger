@@ -1,9 +1,9 @@
 {
-  "versionCode": 10041,
-  "versionName": "1.0.41",
-  "updatedAt": "2026-11-19T16:45:00.000000",
+  "versionCode": 10042,
+  "versionName": "1.0.42",
+  "updatedAt": "2026-11-20T07:45:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V53: Dashboard Ringkasan Piutang & Penagihan Finance, Modul HR Data Karyawan & Rolling Departemen, Opname Gudang & Evaluasi Jalur GPS MySQL Persistence, Optimasi Katalog Ringan & Anti-Resurrection Foto Database Barang, Isolasi Cabang Nusantara vs Sidoarjo (Peta, Jadwal Admin & Kru), GPS Gate Modal Portal Driver, serta Optimasi GZIP & Code-Splitting."
+  "releaseNotes": "Update V54: Dukungan Jobdesk Tambahan & Status Back Up ACC Khusus Cabang Nusantara pada Jadwal & Penugasan Admin (/jadwal-admin), Filter Anti-Label Header Area Pengiriman di Form Kirim & Check-In Driver, serta Optimasi Circuit Breaker Database."
 }
