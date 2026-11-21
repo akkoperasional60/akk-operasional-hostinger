@@ -124,7 +124,15 @@ class DriverWaybillService {
       signedByDriverAt: '',
       signedByChecker: false,
       signedByCheckerAt: '',
-      preparedByName: logisticsStore.getLogisticsCoordinator(),
+      preparedByName: logisticsStore.getLogisticsCoordinator({
+        scheduleId: schedule.id,
+        areaName: schedule.areaName || schedule.store?.storeName,
+        fleetId: schedule.fleetId,
+        plateNumber: fleetPlate,
+        initialCode: schedule.fleet?.initialCode,
+        driverId: schedule.crewId,
+        driverName: crewName
+      }),
       preparedBySigned: false,
       preparedBySignedAt: '',
       acknowledgedByName: 'Bayu Novianto Dimas Permana',
@@ -179,7 +187,15 @@ class DriverWaybillService {
         changed = true;
       }
       if (!existing.preparedBySigned) {
-        const liveSpvName = logisticsStore.getLogisticsCoordinator();
+        const liveSpvName = logisticsStore.getLogisticsCoordinator({
+          scheduleId: schedule.id,
+          areaName: schedule.areaName || schedule.store?.storeName || existing.destination?.areaName,
+          fleetId: schedule.fleetId || existing.fleet?.id,
+          plateNumber: schedule.fleet?.plateNumber || existing.fleet?.plateNumber,
+          initialCode: schedule.fleet?.initialCode || existing.fleet?.initialCode,
+          driverId: schedule.crewId || existing.crew?.driverId,
+          driverName: schedule.crew?.name || existing.crew?.driverName
+        });
         if (liveSpvName && existing.preparedByName !== liveSpvName) {
           existing.preparedByName = liveSpvName;
           changed = true;

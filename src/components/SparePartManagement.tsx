@@ -46,6 +46,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
 
   // Multi-Branch State
   const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
   const branches = branchStore.getBranches();
   const selectedBranch = branches.find((b: any) => b.id === selectedBranchId) || branches[0];
 
@@ -58,7 +59,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   // Filter fleets by selected branch
   const fleets = selectedBranchId === 'ALL'
     ? allFleets
-    : allFleets.filter(f => branchStore.getFleetBranch(f.id).id === selectedBranchId);
+    : allFleets.filter(f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -404,24 +405,88 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Cabang Selector */}
-            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-xs font-bold text-white">
-              <span className="text-[10px] text-slate-400 uppercase font-extrabold">CABANG:</span>
-              <select
-                value={selectedBranchId}
-                onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
-                className="bg-transparent text-xs font-bold text-amber-300 focus:outline-hidden cursor-pointer"
+            {/* Cabang Selector (Custom Dropdown) */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsBranchDropdownOpen(prev => !prev)}
+                className="flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-xs font-bold text-white transition cursor-pointer shadow-xs min-w-[230px]"
               >
-                <option value="ALL" className="bg-slate-900 text-white">Semua Cabang ({allFleets.length} Unit)</option>
-                {branches.map((b: any) => {
-                  const cnt = allFleets.filter(f => branchStore.getFleetBranch(f.id).id === b.id).length;
-                  return (
-                    <option key={b.id} value={b.id} className="bg-slate-900 text-white">
-                      {b.name} ({cnt} Unit)
-                    </option>
-                  );
-                })}
-              </select>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Warehouse className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider">Cabang:</span>
+                  <span className="text-amber-300 truncate font-bold">
+                    {selectedBranchId === 'ALL'
+                      ? `Semua Cabang (${allFleets.length} Unit)`
+                      : `${selectedBranch?.name || 'Cabang'} (${fleets.length} Unit)`}
+                  </span>
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${
+                    isBranchDropdownOpen ? 'rotate-180 text-amber-400' : ''
+                  }`}
+                />
+              </button>
+
+              {isBranchDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsBranchDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-1.5 w-64 z-50 bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/70 animate-in fade-in zoom-in-95 duration-150">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        branchStore.setSelectedOriginBranchId('ALL');
+                        setIsBranchDropdownOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                        selectedBranchId === 'ALL'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'text-slate-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>Semua Cabang</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                          {allFleets.length} Unit
+                        </span>
+                        {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                      </div>
+                    </button>
+                    {branches.map((b: any) => {
+                      const cnt = allFleets.filter(
+                        f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === b.id
+                      ).length;
+                      const isSel = selectedBranchId === b.id;
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => {
+                            branchStore.setSelectedOriginBranchId(b.id);
+                            setIsBranchDropdownOpen(false);
+                          }}
+                          className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                            isSel
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span>Cabang {b.name.replace(/^Cabang\s+/i, '')}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                              {cnt} Unit
+                            </span>
+                            {isSel && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
 
             <button
@@ -541,64 +606,6 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
             <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-slate-950/30 text-current">
               {usages.length} Log
             </span>
-          </button>
-        </div>
-
-        {/* Category Quick Filter */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-          <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              selectedCategory === 'all'
-                ? 'bg-slate-800 text-white border border-slate-700'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Semua
-          </button>
-          <button
-            onClick={() => setSelectedCategory('oli')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'oli'
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                : 'text-slate-400 hover:text-amber-300'
-            }`}
-          >
-            <Droplets className="w-3.5 h-3.5" />
-            <span>Oli Mesin</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('ban')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'ban'
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                : 'text-slate-400 hover:text-emerald-300'
-            }`}
-          >
-            <Disc className="w-3.5 h-3.5" />
-            <span>Ban</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('aki')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'aki'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                : 'text-slate-400 hover:text-cyan-300'
-            }`}
-          >
-            <BatteryCharging className="w-3.5 h-3.5" />
-            <span>Aki</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('filter')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'filter'
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-                : 'text-slate-400 hover:text-purple-300'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>Filter</span>
           </button>
         </div>
       </div>

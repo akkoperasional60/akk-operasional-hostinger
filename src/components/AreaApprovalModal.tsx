@@ -30,6 +30,8 @@ export const AreaApprovalModal: React.FC<AreaApprovalModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const effectiveTripCount = Math.max(tripCount, recentTrips.length);
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
       <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -49,7 +51,7 @@ export const AreaApprovalModal: React.FC<AreaApprovalModalProps> = ({
               </h3>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
                 Kru <strong className="text-white font-bold">{crewName}</strong> telah melakukan{' '}
-                <span className="text-amber-400 font-bold underline">{tripCount} kali pengiriman</span> ke{' '}
+                <span className="text-amber-400 font-bold underline">{effectiveTripCount} kali pengiriman</span> ke{' '}
                 <strong className="text-white font-bold">{areaName}</strong> (Batas SOP: {threshold} kali).
               </p>
             </div>
@@ -92,7 +94,7 @@ export const AreaApprovalModal: React.FC<AreaApprovalModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="font-bold text-white flex items-center gap-1.5">
                 <History className="w-3.5 h-3.5 text-blue-400" />
-                <span>Histori {tripCount} Pengiriman Terakhir Kru Ini di {areaName}:</span>
+                <span>Histori {effectiveTripCount} Pengiriman Terakhir Kru Ini di {areaName}:</span>
               </span>
               <span className="text-[10px] text-slate-400 font-mono">Log Terverifikasi</span>
             </div>

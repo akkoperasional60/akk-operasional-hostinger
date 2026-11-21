@@ -497,8 +497,15 @@ class DriverShiftService {
         ? 'Helper'
         : params.userRole || (currentUser?.role ? getUserRoleDisplayTitle(currentUser.role) : 'Driver');
     const chosenArea = (params.areaName || '').trim();
-    const cleanH1Name = resolvedCheckinRole === 'driver' ? (params.helper1Name || '').trim() : '';
-    const cleanH1Id = cleanH1Name ? (params.helper1Id || `hlp1-${cleanH1Name.toLowerCase().replace(/\s+/g, '-')}`) : undefined;
+    const cleanH1Name =
+      resolvedCheckinRole === 'driver'
+        ? (params.helper1Name || '').trim()
+        : (params.driverName || '').trim();
+    const cleanH1Id = cleanH1Name
+      ? (resolvedCheckinRole === 'driver'
+          ? (params.helper1Id || `hlp1-${cleanH1Name.toLowerCase().replace(/\s+/g, '-')}`)
+          : (params.driverId || `hlp1-${cleanH1Name.toLowerCase().replace(/\s+/g, '-')}`))
+      : undefined;
     const cleanH2Name = resolvedCheckinRole === 'driver' ? (params.helper2Name || '').trim() : '';
     const cleanH2Id = cleanH2Name ? (params.helper2Id || `hlp2-${cleanH2Name.toLowerCase().replace(/\s+/g, '-')}`) : undefined;
 
@@ -509,6 +516,10 @@ class DriverShiftService {
       const cleanedList = existingList.filter(
         s => !s.id.startsWith(`SHIFT-LINK-${primaryShift.id}`)
       );
+      if (primaryShift.checkinRole === 'helper') {
+        return [...cleanedList.filter(s => s.id !== primaryShift.id), primaryShift]
+          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      }
       const linked: DriverShiftCheckin[] = [];
       const crewSummary = [
         `Driver: ${primaryShift.driverName}`,
@@ -561,10 +572,10 @@ class DriverShiftService {
         fleetInitialCode: params.fleetInitialCode || existingActive.fleetInitialCode,
         plateNumber: params.plateNumber || existingActive.plateNumber || '-',
         vehicleType: params.vehicleType || existingActive.vehicleType || '-',
-        helper1Id: cleanH1Id || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper1Id),
-        helper1Name: cleanH1Name || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper1Name),
-        helper2Id: cleanH2Id || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper2Id),
-        helper2Name: cleanH2Name || (resolvedCheckinRole === 'driver' ? undefined : existingActive.helper2Name),
+        helper1Id: cleanH1Id,
+        helper1Name: cleanH1Name || undefined,
+        helper2Id: cleanH2Id,
+        helper2Name: cleanH2Name || undefined,
         locationName: chosenArea || existingActive.locationName,
         notes: params.notes || existingActive.notes,
         synced: true

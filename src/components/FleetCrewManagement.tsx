@@ -42,7 +42,10 @@ import {
   ChevronDown,
   Building2,
   Info,
-  MapPin
+  MapPin,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { Fleet, Crew, VehicleType, FleetStatus, CrewStatus } from '../types';
 import { logisticsStore } from '../services/store';
@@ -597,6 +600,33 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [crewFilter, setCrewFilter] = useState<string>('all');
   const [crewRoleFilter, setCrewRoleFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [crewSortConfig, setCrewSortConfig] = useState<{
+    key: 'name' | 'role' | 'status' | 'fleet' | 'performance';
+    direction: 'asc' | 'desc';
+  } | null>(null);
+
+  const normalizeCrewRoleLabel = (role?: string): 'Driver' | 'Helper' => {
+    const r = (role || '').toLowerCase();
+    if (r.includes('helper') || r.includes('kernet')) return 'Helper';
+    return 'Driver';
+  };
+
+  const normalizeSimTypeLabel = (sim?: string): 'SIM A' | 'SIM B' | 'SIM B1' => {
+    const s = (sim || '').toUpperCase();
+    if (s.includes('B1')) return 'SIM B1';
+    if (s.includes('B')) return 'SIM B';
+    return 'SIM A';
+  };
+
+  const handleCrewSort = (key: 'name' | 'role' | 'status' | 'fleet' | 'performance') => {
+    setCrewSortConfig(prev => {
+      if (prev && prev.key === key) {
+        if (prev.direction === 'asc') return { key, direction: 'desc' };
+        return null;
+      }
+      return { key, direction: 'asc' };
+    });
+  };
 
   // View mode toggle: 'table' (default data table view), 'cards' (visual card grid view), or '3d' (studio 3D truck showcase)
   const [viewMode, setViewMode] = useState<'table' | 'cards' | '3d'>('table');
@@ -849,6 +879,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const innerM3 = Number((grossM3 * 0.9).toFixed(2));
     const created = logisticsStore.addFleet({
       ...fleetToValidate,
+      branchId: newFleetBranchId,
       boxCapacityM3: grossM3,
       boxInnerMultiplierPercent: 90,
       boxInnerCapacityM3: innerM3,
@@ -891,11 +922,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
+    const normalizedSim = normalizeSimTypeLabel(newCrew.licenseType || newCrew.licenseNumber);
     const created = logisticsStore.addCrew({
       ...newCrew,
+      role: normalizeCrewRoleLabel(newCrew.role),
+      branchId: newCrewBranchId,
       phone: '-',
-      licenseNumber: '-',
-      licenseType: '-'
+      licenseNumber: normalizedSim,
+      licenseType: normalizedSim
     });
     if (created) {
       branchStore.setCrewBranchId(created.id, newCrewBranchId);
@@ -907,9 +941,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setNewCrew({
       name: '',
       phone: '-',
-      licenseNumber: '-',
-      licenseType: '-',
-      role: 'Driver Utama',
+      licenseNumber: 'SIM B1',
+      licenseType: 'SIM B1',
+      role: 'Driver',
       status: 'available'
     });
     setCrews(logisticsStore.getCrews());
@@ -923,7 +957,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   // Fleet Edit & Delete Handlers
   const handleEditFleetClick = (fleet: Fleet) => {
     setFleetFormErrors({});
-    setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id));
+    setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id, fleet.plateNumber, fleet.initialCode, fleet.branchId));
     const canonical = resolveCanonicalFleetMeta(fleet);
     const existingInStore = fleets.find(f => f.id === fleet.id || f.plateNumber === fleet.plateNumber);
 
@@ -1051,6 +1085,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       const targetFleetId = editingFleet.id;
       const updatedFleetData: Fleet = {
         ...mergedForSave,
+        branchId: editingFleetBranchId,
         boxCapacityM3: grossM3,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
@@ -1103,7 +1138,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const handleEditCrewClick = (crew: Crew) => {
     setCrewFormErrors({});
     setEditingCrewBranchId(branchStore.getCrewBranchId(crew.id, crew.name));
-    setEditingCrew({ ...crew });
+    const normRole = normalizeCrewRoleLabel(crew.role);
+    const normSim = normalizeSimTypeLabel(crew.licenseType || crew.licenseNumber);
+    setEditingCrew({
+      ...crew,
+      role: normRole,
+      licenseType: normSim,
+      licenseNumber: normSim
+    });
     setIsEditCrewOpen(true);
   };
 
@@ -1111,7 +1153,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingCrew) return;
 
-    const validation = validateCrew(editingCrew, crews, true, editingCrew.id);
+    const normalizedRole = normalizeCrewRoleLabel(editingCrew.role);
+    const normalizedSim = normalizeSimTypeLabel(editingCrew.licenseType || editingCrew.licenseNumber);
+    const crewToValidate: Crew = {
+      ...editingCrew,
+      role: normalizedRole,
+      licenseType: normalizedSim,
+      licenseNumber: normalizedSim
+    };
+
+    const validation = validateCrew(crewToValidate, crews, true, editingCrew.id);
     if (!validation.isValid) {
       setCrewFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data kru yang belum lengkap.';
@@ -1125,23 +1176,23 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
     const targetCrewId = editingCrew.id;
     const targetCrewName = editingCrew.name;
-    const targetCrewRole = editingCrew.role;
     const updatedCrewData: Partial<Crew> = {
-      ...editingCrew,
-      phone: '-',
-      licenseNumber: '-',
-      licenseType: '-'
+      ...crewToValidate,
+      branchId: editingCrewBranchId,
+      phone: editingCrew.phone || '-',
+      licenseNumber: normalizedSim,
+      licenseType: normalizedSim
     };
 
     logisticsStore.updateCrew(targetCrewId, updatedCrewData);
-    branchStore.setCrewBranchId(targetCrewId, editingCrewBranchId);
+    branchStore.setCrewBranchId(targetCrewId, editingCrewBranchId, targetCrewName);
 
     setIsEditCrewOpen(false);
     setEditingCrew(null);
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${targetCrewName} (${targetCrewRole}) berhasil diperbarui dan disimpan.`
+      message: `Data kru ${targetCrewName} (${normalizedRole}) berhasil diperbarui dan disimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
 
@@ -1298,7 +1349,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   };
 
   const filteredFleets = fleets.filter(f => {
-    const fleetBranch = branchStore.getFleetBranch(f.id);
+    const fleetBranch = branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId);
     const matchesBranch = selectedBranchId === 'ALL' || fleetBranch.id === selectedBranchId;
     const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
     const matchesStatus = fleetFilter === 'all' || liveInfo.effectiveStatus === fleetFilter;
@@ -1350,14 +1401,49 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       (crewFilter === 'aktif' && isActive) ||
       (crewFilter === 'nonaktif' && !isActive) ||
       c.status === crewFilter;
-    const matchesRole = crewRoleFilter === 'all' || c.role === crewRoleFilter;
+    const normRole = normalizeCrewRoleLabel(c.role);
+    const matchesRole = crewRoleFilter === 'all' || normRole === crewRoleFilter || c.role === crewRoleFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery =
       !q ||
       c.name.toLowerCase().includes(q) ||
+      normRole.toLowerCase().includes(q) ||
       c.role.toLowerCase().includes(q) ||
-      (c.licenseNumber && c.licenseNumber.toLowerCase().includes(q));
+      (c.licenseNumber && c.licenseNumber.toLowerCase().includes(q)) ||
+      (c.licenseType && c.licenseType.toLowerCase().includes(q));
     return matchesBranch && matchesStatus && matchesRole && matchesQuery;
+  });
+
+  const sortedCrews = [...filteredCrews].sort((a, b) => {
+    if (!crewSortConfig) return 0;
+    const dir = crewSortConfig.direction === 'asc' ? 1 : -1;
+    if (crewSortConfig.key === 'name') {
+      return a.name.localeCompare(b.name, 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'role') {
+      return normalizeCrewRoleLabel(a.role).localeCompare(normalizeCrewRoleLabel(b.role), 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'status') {
+      const aAct = getCrewIntegratedStatus(a).isActive ? 1 : 0;
+      const bAct = getCrewIntegratedStatus(b).isActive ? 1 : 0;
+      return (bAct - aAct) * dir;
+    }
+    if (crewSortConfig.key === 'fleet') {
+      const aFleet = fleets.find(f => f.id === a.currentFleetId || f.driverId === a.id);
+      const bFleet = fleets.find(f => f.id === b.currentFleetId || f.driverId === b.id);
+      const aCode = aFleet ? (aFleet.initialCode || aFleet.plateNumber) : 'ZZZ';
+      const bCode = bFleet ? (bFleet.initialCode || bFleet.plateNumber) : 'ZZZ';
+      return aCode.localeCompare(bCode, 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'performance') {
+      const aPerf = getCrewDynamicPerformance(a);
+      const bPerf = getCrewDynamicPerformance(b);
+      if (aPerf.completedRit !== bPerf.completedRit) {
+        return (aPerf.completedRit - bPerf.completedRit) * dir;
+      }
+      return (aPerf.rating - bPerf.rating) * dir;
+    }
+    return 0;
   });
 
   // Strictly scope PIC / Kru options to the chosen branch (Cabang A vs Cabang B never mixed)
@@ -1443,7 +1529,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               </div>
             )}
 
-            {!isCrewsMode ? (
+            {!isCrewsMode && (
               <button
                 onClick={openAddFleetModal}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer"
@@ -1451,30 +1537,22 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 <Plus className="w-3.5 h-3.5" />
                 <span>Tambah Armada</span>
               </button>
-            ) : (
-              <button
-                onClick={() => setIsAddCrewOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Kru</span>
-              </button>
             )}
           </div>
         </div>
 
-        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab) */}
+        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab — aligned strictly on a single horizontal plane) */}
         {(activeTab === 'fleets' || activeTab === 'crews') && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-800/80">
-            <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 mt-3 pt-3 border-t border-slate-800/80">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   placeholder={activeTab === 'fleets' ? 'Cari plat, inisial, tipe, merk...' : 'Cari nama kru, peran, SIM...'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                  className="w-full h-9 pl-8 pr-7 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
                 />
                 {searchQuery && (
                   <button
@@ -1489,67 +1567,64 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
               {activeTab === 'fleets' ? (
                 <>
-                  {/* Cabang Armada Dropdown (Multi-Branch) */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
-                    <select
+                  {/* Cabang Armada Custom Dropdown (Lurus Sejajar) */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      accent="emerald"
                       value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
-                      onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                    >
-                      {branches.map((b) => {
-                        const count = fleets.filter(fl => branchStore.getFleetBranch(fl.id).id === b.id).length;
-                        return (
-                          <option key={b.id} value={b.id}>
-                            Cabang {b.name} ({count} Unit)
-                          </option>
-                        );
+                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                      options={branches.map((b) => {
+                        const count = fleets.filter(
+                          fl => branchStore.getFleetBranch(fl.id, fl.plateNumber, fl.initialCode, fl.branchId).id === b.id
+                        ).length;
+                        return {
+                          value: b.id,
+                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Unit)`,
+                          Icon: Building2,
+                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        };
                       })}
-                    </select>
+                    />
                   </div>
 
-                  {/* Status Dropdown */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">STATUS</span>
-                    <select
+                  {/* Status Armada Custom Dropdown */}
+                  <div className="w-48">
+                    <FleetFormDropdown
                       value={fleetFilter}
-                      onChange={(e) => setFleetFilter(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer"
-                    >
-                      <option value="all">Semua Status Kondisi</option>
-                      <option value="available">● Ready (Siap Jadwal Esok)</option>
-                      <option value="on-duty">● Kirim (Sedang Dipakai Kirim)</option>
-                      <option value="maintenance">● Servis (Dalam Perbaikan)</option>
-                    </select>
+                      onChange={setFleetFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Status Kondisi' },
+                        { value: 'available', label: 'Ready (Siap Jadwal Esok)', dotClass: 'bg-emerald-400' },
+                        { value: 'on-duty', label: 'Kirim (Sedang Dipakai)', dotClass: 'bg-blue-400' },
+                        { value: 'maintenance', label: 'Servis (Dalam Perbaikan)', dotClass: 'bg-rose-400' }
+                      ]}
+                    />
                   </div>
 
-                  {/* Tipe Kendaraan Dropdown */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">TIPE</span>
-                    <select
+                  {/* Tipe Kendaraan Custom Dropdown */}
+                  <div className="w-48">
+                    <FleetFormDropdown
                       value={vehicleTypeFilter}
-                      onChange={(e) => setVehicleTypeFilter(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer"
-                    >
-                      <option value="all">Semua Tipe Kendaraan</option>
-                      <option value="Pick Up Box">Pick Up Box</option>
-                      <option value="Engkel STD">Engkel STD</option>
-                      <option value="Engkel Long">Engkel Long</option>
-                      <option value="Double STD">Double STD</option>
-                    </select>
+                      onChange={setVehicleTypeFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Tipe Kendaraan' },
+                        { value: 'Pick Up Box', label: 'Pick Up Box' },
+                        { value: 'Engkel STD', label: 'Engkel STD' },
+                        { value: 'Engkel Long', label: 'Engkel Long' },
+                        { value: 'Double STD', label: 'Double STD' }
+                      ]}
+                    />
                   </div>
                 </>
               ) : (
                 <>
-                  {/* Cabang Kru Dropdown (Multi-Branch) */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
-                    <select
+                  {/* Cabang Kru Custom Dropdown (Lurus Sejajar tanpa label bertumpuk di atas) */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      accent="emerald"
                       value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
-                      onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                    >
-                      {branches.map((b) => {
+                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                      options={branches.map((b) => {
                         const allUsers = logisticsStore.getUsers();
                         const count = visibleCrewsForRole.filter(cr => {
                           const matchedUser = allUsers.find(
@@ -1559,39 +1634,43 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, b.id)
                             : branchStore.getCrewBranch(cr.id, cr.name).id === b.id;
                         }).length;
-                        return (
-                          <option key={b.id} value={b.id}>
-                            Cabang {b.name} ({count} Kru)
-                          </option>
-                        );
+                        return {
+                          value: b.id,
+                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Kru)`,
+                          Icon: Building2,
+                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        };
                       })}
-                    </select>
+                    />
                   </div>
 
-                  {/* Status Operasional Kru Dropdown (Terintegrasi User Manajemen) */}
-                  <select
-                    value={crewFilter}
-                    onChange={(e) => setCrewFilter(e.target.value)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                  >
-                    <option value="all">Semua Status Operasional</option>
-                    <option value="aktif">● Aktif (User Manajemen)</option>
-                    {isCurrentSuperAdmin && (
-                      <option value="nonaktif">○ Nonaktif (User Manajemen)</option>
-                    )}
-                  </select>
+                  {/* Status Operasional Kru Custom Dropdown */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      value={crewFilter}
+                      onChange={setCrewFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Status Operasional' },
+                        { value: 'aktif', label: 'Aktif (User Manajemen)', dotClass: 'bg-emerald-400' },
+                        ...(isCurrentSuperAdmin
+                          ? [{ value: 'nonaktif', label: 'Nonaktif (User Manajemen)', dotClass: 'bg-rose-400' }]
+                          : [])
+                      ]}
+                    />
+                  </div>
 
-                  {/* Peran Kru Dropdown */}
-                  <select
-                    value={crewRoleFilter}
-                    onChange={(e) => setCrewRoleFilter(e.target.value)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                  >
-                    <option value="all">Semua Peran Kru</option>
-                    <option value="Driver Utama">Driver Utama</option>
-                    <option value="Kernet / Helper">Kernet / Helper</option>
-                    <option value="Driver Cadangan">Driver Cadangan</option>
-                  </select>
+                  {/* Peran Kru Custom Dropdown (Driver & Helper) */}
+                  <div className="w-40">
+                    <FleetFormDropdown
+                      value={crewRoleFilter}
+                      onChange={setCrewRoleFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Peran Kru' },
+                        { value: 'Driver', label: 'Driver' },
+                        { value: 'Helper', label: 'Helper' }
+                      ]}
+                    />
+                  </div>
                 </>
               )}
 
@@ -1607,7 +1686,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     setCrewFilter('all');
                     setCrewRoleFilter('all');
                   }}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
+                  className="h-9 px-3 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
                   title="Reset Semua Filter"
                 >
                   Reset
@@ -1769,7 +1848,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       {activeTab === 'fleets' && (() => {
         const branchFilteredFleets = selectedBranchId === 'ALL'
           ? fleets
-          : fleets.filter(f => branchStore.getFleetBranch(f.id).id === selectedBranchId);
+          : fleets.filter(f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId);
         const liveInfos = branchFilteredFleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
         const readyCount = liveInfos.filter(i => i.effectiveStatus === 'available').length;
         const kirimCount = liveInfos.filter(i => i.effectiveStatus === 'on-duty').length;
@@ -1907,9 +1986,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           {selectedBranchId === 'ALL' && (
                             <div className="mt-1 flex items-center gap-1">
                               <select
-                                value={branchStore.getFleetBranch(fleet.id).id}
+                                value={branchStore.getFleetBranch(fleet.id, fleet.plateNumber, fleet.initialCode, fleet.branchId).id}
                                 onChange={(e) => {
                                   branchStore.setFleetBranch(fleet.id, e.target.value);
+                                  logisticsStore.updateFleet(fleet.id, { branchId: e.target.value });
                                   setBranches(branchStore.getActiveBranches());
                                 }}
                                 className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
@@ -2585,16 +2665,101 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <thead>
                 <tr className="bg-slate-950/80 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   <th className="py-3 px-4 w-12 text-center">#</th>
-                  <th className="py-3 px-4">Nama Lengkap Kru</th>
-                  <th className="py-3 px-4">Peran Tugas</th>
-                  <th className="py-3 px-4 text-center">Status Operasional (User)</th>
-                  <th className="py-3 px-4">Armada Ditugaskan</th>
-                  <th className="py-3 px-4 text-center">Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</th>
-                  <th className="py-3 px-4 text-center w-28">Aksi</th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('name')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Nama Lengkap Kru</span>
+                      {crewSortConfig?.key === 'name' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('role')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Peran Tugas</span>
+                      {crewSortConfig?.key === 'role' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('status')}
+                      className="inline-flex items-center justify-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold mx-auto"
+                    >
+                      <span>Status Operasional (User)</span>
+                      {crewSortConfig?.key === 'status' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('fleet')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Armada Ditugaskan</span>
+                      {crewSortConfig?.key === 'fleet' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('performance')}
+                      className="inline-flex items-center justify-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold mx-auto"
+                    >
+                      <span>Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</span>
+                      {crewSortConfig?.key === 'performance' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center w-24">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {filteredCrews.length === 0 ? (
+                {sortedCrews.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-400">
                       <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
@@ -2603,10 +2768,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredCrews.map((crew, index) => {
+                  sortedCrews.map((crew, index) => {
                     const assignedFleet = fleets.find(f => f.id === crew.currentFleetId || f.driverId === crew.id);
                     const { isActive } = getCrewIntegratedStatus(crew);
                     const perf = getCrewDynamicPerformance(crew);
+                    const displayRole = normalizeCrewRoleLabel(crew.role);
 
                     return (
                       <tr key={crew.id} className="hover:bg-slate-850/50 transition">
@@ -2629,13 +2795,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         </td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
-                            crew.role === 'Driver Utama'
+                            displayRole === 'Driver'
                               ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                              : crew.role === 'Driver Cadangan'
-                              ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
                               : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                           }`}>
-                            {crew.role}
+                            {displayRole}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -2655,12 +2819,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         </td>
                         <td className="py-3 px-4">
                           {assignedFleet ? (
-                            <div className="flex items-center gap-1.5 font-mono font-bold text-slate-200">
-                              <Truck className="w-3.5 h-3.5 text-blue-400" />
-                              <span>{assignedFleet.plateNumber}</span>
-                              {assignedFleet.initialCode && (
-                                <span className="text-[10px] text-indigo-400">({assignedFleet.initialCode})</span>
-                              )}
+                            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 font-mono font-bold text-indigo-300 text-xs">
+                              <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>{assignedFleet.initialCode || assignedFleet.plateNumber}</span>
                             </div>
                           ) : (
                             <span className="text-[11px] text-slate-500 italic">Standby Pool</span>
@@ -2678,7 +2839,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center">
                             <button
                               type="button"
                               onClick={() => handleEditCrewClick(crew)}
@@ -2686,14 +2847,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                               title="Edit Data Kru"
                             >
                               <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteCrewClick(crew)}
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 transition cursor-pointer"
-                              title="Hapus Kru"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -2709,7 +2862,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
       {/* Crews Content: Cards Grid View */}
       {activeTab === 'crews' && viewMode === 'cards' && (
-        filteredCrews.length === 0 ? (
+        sortedCrews.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-400">
             <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
             <p className="font-semibold text-slate-300">Tidak ada kru ditemukan</p>
@@ -2717,9 +2870,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCrews.map(crew => {
+            {sortedCrews.map(crew => {
               const { isActive } = getCrewIntegratedStatus(crew);
               const perf = getCrewDynamicPerformance(crew);
+              const displayRole = normalizeCrewRoleLabel(crew.role);
               return (
                 <div key={crew.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
                   <div className="flex items-center justify-between">
@@ -2734,7 +2888,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             Cabang {branchStore.getCrewBranch(crew.id, crew.name).name}
                           </span>
                         </div>
-                        <span className="text-[11px] text-slate-400">{crew.role}</span>
+                        <span className="text-[11px] text-slate-400">{displayRole}</span>
                       </div>
                     </div>
 
@@ -2780,7 +2934,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     </button>
                   </div>
 
-                  {/* Edit & Hapus Buttons */}
+                  {/* Edit Button */}
                   <div className="pt-2.5 border-t border-slate-800 flex items-center justify-end gap-2 text-xs">
                     <button
                       onClick={() => handleEditCrewClick(crew)}
@@ -2788,13 +2942,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     >
                       <Edit3 className="w-3.5 h-3.5 text-blue-400" />
                       <span>Edit</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCrewClick(crew)}
-                      className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Hapus</span>
                     </button>
                   </div>
                 </div>
@@ -3943,56 +4090,90 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
             <form onSubmit={handleUpdateCrew} className="p-5 space-y-4 text-xs">
               <div>
-                <label className="text-slate-400 block mb-1">Cabang Penugasan *</label>
-                <select
+                <label className="text-slate-400 block mb-1.5 font-medium">Cabang Penugasan *</label>
+                <FleetFormDropdown
+                  accent="emerald"
                   value={editingCrewBranchId}
-                  onChange={(e) => setEditingCrewBranchId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 font-bold cursor-pointer mb-3"
-                >
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setEditingCrewBranchId(val)}
+                  options={branches.map(b => ({
+                    value: b.id,
+                    label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')}`,
+                    sublabel: b.city ? `Wilayah Operasional ${b.city}` : undefined,
+                    Icon: Building2,
+                    iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  }))}
+                />
               </div>
+
               <div>
-                <label className="text-slate-400 block mb-1">Nama Lengkap Kru</label>
+                <label className="text-slate-400 block mb-1.5 font-medium">Nama Lengkap Kru</label>
                 <input
                   type="text"
                   required
                   placeholder="Contoh: Joko Supriyanto"
                   value={editingCrew.name}
                   onChange={(e) => setEditingCrew({ ...editingCrew, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-hidden focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Peran Tugas</label>
-                <select
-                  value={editingCrew.role}
-                  onChange={(e) => setEditingCrew({ ...editingCrew, role: e.target.value as any })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                >
-                  <option value="Driver Utama">Driver Utama</option>
-                  <option value="Driver Cadangan">Driver Cadangan</option>
-                  <option value="Kernet / Helper">Kernet / Helper</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Jenis SIM</label>
-                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Nomor Handphone / WhatsApp</label>
-                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
-                </div>
+                <label className="text-slate-400 block mb-1.5 font-medium">Peran Tugas</label>
+                <FleetFormDropdown
+                  value={normalizeCrewRoleLabel(editingCrew.role)}
+                  onChange={(val) => setEditingCrew({ ...editingCrew, role: val as any })}
+                  options={[
+                    {
+                      value: 'Driver',
+                      label: 'Driver',
+                      sublabel: 'Pengemudi armada pengiriman',
+                      dotClass: 'bg-blue-400'
+                    },
+                    {
+                      value: 'Helper',
+                      label: 'Helper',
+                      sublabel: 'Pendamping pengemudi & bongkar muat',
+                      dotClass: 'bg-amber-400'
+                    }
+                  ]}
+                />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Nomor Registrasi SIM</label>
-                <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
+                <label className="text-slate-400 block mb-1.5 font-medium">SIM (Surat Izin Mengemudi)</label>
+                <FleetFormDropdown
+                  value={normalizeSimTypeLabel(editingCrew.licenseType || editingCrew.licenseNumber)}
+                  onChange={(val) =>
+                    setEditingCrew({
+                      ...editingCrew,
+                      licenseType: val,
+                      licenseNumber: val
+                    })
+                  }
+                  options={[
+                    {
+                      value: 'SIM A',
+                      label: 'SIM A',
+                      sublabel: 'Kendaraan operasional & Pick Up Box',
+                      Icon: CreditCard,
+                      iconTone: 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                    },
+                    {
+                      value: 'SIM B',
+                      label: 'SIM B',
+                      sublabel: 'Kendaraan angkutan barang & truk',
+                      Icon: CreditCard,
+                      iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                    },
+                    {
+                      value: 'SIM B1',
+                      label: 'SIM B1',
+                      sublabel: 'Truk Engkel & Double Box (JBB > 3.500 kg)',
+                      Icon: CreditCard,
+                      iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    }
+                  ]}
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

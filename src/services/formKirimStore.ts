@@ -468,7 +468,330 @@ export const SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS: FormKirimInvoiceItem[] = [
   }
 ];
 
+const SAMPLE_GROSIR4_DS4_INVOICE_ITEMS: FormKirimInvoiceItem[] = [
+  // COD (1 Pelanggan: TK SETIA A / P. SUGITO - 3 Faktur)
+  {
+    id: 'fki-ds4-1107-1',
+    noFaktur: 'FJ02-1126-0631',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SETIA A / P. SUGITO',
+    nilaiFaktur: 1245000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'ROGOJAMPI - BANYUWANGI',
+    keterangan: '',
+    netDays: 0,
+    paymentCategory: 'COD',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-2',
+    noFaktur: 'FJ02-1126-0607',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SETIA A / P. SUGITO',
+    nilaiFaktur: 980000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'ROGOJAMPI - BANYUWANGI',
+    keterangan: '',
+    netDays: 0,
+    paymentCategory: 'COD',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-3',
+    noFaktur: 'FJ02B-1126-0587',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SETIA A / P. SUGITO',
+    nilaiFaktur: 650000,
+    coly: 2,
+    bayar: '',
+    alamatPelanggan: 'ROGOJAMPI - BANYUWANGI',
+    keterangan: '',
+    netDays: 0,
+    paymentCategory: 'COD',
+    isManualSbu: false
+  },
+  // TEMPO (7 Pelanggan - 17 Faktur)
+  {
+    id: 'fki-ds4-1107-4',
+    noFaktur: 'FJ02BS-1126-0079',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'BP MALIK SANGGAR',
+    nilaiFaktur: 1420000,
+    coly: 5,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-5',
+    noFaktur: 'FJ02-1126-0632',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'BP MALIK SANGGAR',
+    nilaiFaktur: 1150000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-6',
+    noFaktur: 'FJ03-1126-1242',
+    tglFaktur: '06 Nop 2026',
+    namaPelanggan: 'BP MALIK SANGGAR',
+    nilaiFaktur: 890000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: true
+  },
+  {
+    id: 'fki-ds4-1107-7',
+    noFaktur: 'FJ02-1126-0606',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'BP ROBIN',
+    nilaiFaktur: 1320000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'JAJAG / GAMBIRAN - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-8',
+    noFaktur: 'FJ02-1126-0605',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'BP ROBIN',
+    nilaiFaktur: 940000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'JAJAG / GAMBIRAN - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-9',
+    noFaktur: 'FJ02-1126-0602',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'BP ROBIN',
+    nilaiFaktur: 760000,
+    coly: 2,
+    bayar: '',
+    alamatPelanggan: 'JAJAG / GAMBIRAN - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-10',
+    noFaktur: 'FJ02B-1126-0586',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK AMBULU',
+    nilaiFaktur: 1580000,
+    coly: 5,
+    bayar: '',
+    alamatPelanggan: 'GAMBIRAN / GENTENG - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-11',
+    noFaktur: 'FJ02B-1126-0127',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK ANEKA PEDOTAN',
+    nilaiFaktur: 1120000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'PEDOTAN / BANGOREJO - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-12',
+    noFaktur: 'FJ02-1126-0568',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK ANEKA PEDOTAN',
+    nilaiFaktur: 840000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'PEDOTAN / BANGOREJO - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-13',
+    noFaktur: 'FJ02-1126-0651',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK ANEKA PEDOTAN',
+    nilaiFaktur: 910000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'PEDOTAN / BANGOREJO - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-14',
+    noFaktur: 'FJ02-1126-0608',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK HOLLY - BENCULUK',
+    nilaiFaktur: 1340000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'BENCULUK / CLURING - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-15',
+    noFaktur: 'FJ02B-1126-0588',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK HOLLY - BENCULUK',
+    nilaiFaktur: 780000,
+    coly: 2,
+    bayar: '',
+    alamatPelanggan: 'BENCULUK / CLURING - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-16',
+    noFaktur: 'FJ02-1126-0599',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SUJIONO PLASTIK',
+    nilaiFaktur: 1460000,
+    coly: 5,
+    bayar: '',
+    alamatPelanggan: 'YOSOWINANGUN / JAJAG - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-17',
+    noFaktur: 'FJ02BS-1126-0070',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SUJIONO PLASTIK',
+    nilaiFaktur: 920000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'YOSOWINANGUN / JAJAG - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-18',
+    noFaktur: 'FJ02-1126-0636',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SUMBER BERKAT - SANGGAR',
+    nilaiFaktur: 1620000,
+    coly: 5,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-19',
+    noFaktur: 'FJ02BS-1126-0082',
+    tglFaktur: '07 Nop 2026',
+    namaPelanggan: 'TK SUMBER BERKAT - SANGGAR',
+    nilaiFaktur: 1180000,
+    coly: 4,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: false
+  },
+  {
+    id: 'fki-ds4-1107-20',
+    noFaktur: 'FJ03-1126-1249',
+    tglFaktur: '06 Nop 2026',
+    namaPelanggan: 'TK SUMBER BERKAT - SANGGAR',
+    nilaiFaktur: 950000,
+    coly: 3,
+    bayar: '',
+    alamatPelanggan: 'PESANGGARAN / SANGGAR - BANYUWANGI',
+    keterangan: '',
+    netDays: 14,
+    paymentCategory: 'TEMPO',
+    isManualSbu: true
+  }
+];
+
 const INITIAL_FORM_KIRIM: FormKirimRecord[] = [
+  {
+    id: 'FK-20261107-DS4',
+    noFormKirim: 'FK/AKK/2026/11/007',
+    noFaktur: 'FJ02-1126-0631 s/d FJ03-1126-1249 (20 Faktur)',
+    noSuratJalan: 'SJ-AKK-261107-GRS4',
+    branchName: 'Cabang Nusantara',
+    sbuTitle: 'ANUGRAH KEMASAN KREATIF',
+    periodLabel: 'Dari 07 Nop 2026 ke 07 Nop 2026',
+    areaKirim: 'GROSIR 4',
+    tanggalKirim: '2026-11-07',
+    storeName: 'AREA GROSIR 4 (8 Pelanggan • 3 COD • 17 TEMPO)',
+    storeAddress: 'Rute Distribusi Grosir 4 (Rogojampi, Benculuk, Jajag, Pedotan, Pesanggaran)',
+    storePhone: '-',
+    fleetId: 'flt-11',
+    plateNumber: 'W 8229 US',
+    armadaInitial: 'DS4/NMR',
+    vehicleType: 'Double STD',
+    driverName: 'Ach Taufiq',
+    helperName: 'Aan Adi Saputra',
+    itemsSummary: '8 Pelanggan (20 Faktur: 3 COD • 17 TEMPO)',
+    totalColli: 71,
+    totalNominalFaktur: 23055000,
+    sisaPiutangToko: 20180000,
+    metodePembayaran: 'COD & Tempo (Gabungan)',
+    createdByAdmin: 'Admin Penjualan',
+    createdAt: '2026-11-07T07:30:00.000Z',
+    salesNotes: 'Form Pengiriman Area GROSIR 4 • MOBIL: DS4/NMR • PENGIRIM: TAUFIK - AAN • TOTAL CUSTOMER: 8',
+    financeStatus: 'approved_finance',
+    validatedByFinance: 'Staf Finance AKK',
+    validatedAt: '2026-11-07T07:45:00.000Z',
+    financeNotes: 'Data faktur COD & Tempo sesuai (8 Customer), diteruskan ke Portal Driver & Validasi GPS.',
+    driverStatus: 'ready_for_driver',
+    invoiceItems: SAMPLE_GROSIR4_DS4_INVOICE_ITEMS,
+    codCount: 3,
+    tempoCount: 17,
+    codTotalNominal: 2875000,
+    tempoTotalNominal: 20180000
+  },
   {
     id: 'FK-202602-JBR',
     noFormKirim: 'FK/AKK/2026/02/001',
@@ -629,8 +952,13 @@ class FormKirimStore {
             (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
           );
           if (cleaned.length > 0) {
-            this.records = cleaned;
+            const existingIds = new Set(cleaned.map((r: FormKirimRecord) => r.id));
+            const missingSeed = INITIAL_FORM_KIRIM.filter(s => !existingIds.has(s.id));
+            this.records = [...cleaned, ...missingSeed];
             shouldNotify = true;
+            if (missingSeed.length > 0) {
+              this.saveAll(this.records);
+            }
           } else if (this.records.length > 0) {
             // Seed initial Form Kirim to MySQL server if server has no records yet
             this.saveAll(this.records);

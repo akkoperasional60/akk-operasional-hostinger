@@ -80,20 +80,15 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
   };
 
   const allUsers = logisticsStore.getUsers();
-  const spvUser =
-    allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') ||
-    allUsers.find(
-      u =>
-        u.status === 'approved' &&
-        u.role !== 'super_admin' &&
-        u.role !== 'driver' &&
-        u.role !== 'crew_helper' &&
-        u.permissions?.modules?.logistics?.enabled &&
-        (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
-          u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
-    ) ||
-    allUsers.find(u => u.role === 'spv_logistik') ||
-    { fullName: logisticsStore.getLogisticsCoordinator(), role: 'spv_logistik' };
+  const spvUser = logisticsStore.getLogisticsCoordinatorUser({
+    scheduleId: currentWaybill?.scheduleId,
+    areaName: currentWaybill?.destination?.areaName || currentWaybill?.destination?.storeName,
+    fleetId: currentWaybill?.fleet?.id,
+    plateNumber: currentWaybill?.fleet?.plateNumber,
+    initialCode: currentWaybill?.fleet?.initialCode,
+    driverId: currentWaybill?.crew?.driverId,
+    driverName: currentWaybill?.crew?.driverName
+  });
   const operasionalUser = allUsers.find(u => u.role === 'operasional' && u.status === 'approved') || { fullName: 'Bayu Novianto Dimas Permana', role: 'operasional' };
   const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Hairul Rozikin', role: 'security' };
   const spvConciseName = formatConcisePerson(

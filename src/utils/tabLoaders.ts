@@ -205,6 +205,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'sales_invoice_so':
     case 'sales_form_kirim':
     case 'sales_rfid_scanner':
+    case 'sales_muat_validation':
     case 'sales_skill_matrix':
     case 'sales_jobdesk':
       return loadSalesAdminHub;

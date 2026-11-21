@@ -927,6 +927,9 @@ function findMatchingRegisteredStore(
     'pertamina, jalan gatot subroto',
     'gereja advent',
     'lingkungan sukowidi desa klatak',
+    'sukowidi',
+    'gudang dc',
+    'gudang pusat',
     'pick up?, jalan raya denpasar-gilimanuk'
   ];
   const isExplicitNonStore = nonCustomerKeywords.some(k => locLower.includes(k));
@@ -934,10 +937,26 @@ function findMatchingRegisteredStore(
     return { store: null, distanceKm: 99, isNonStoreKeyword: true };
   }
 
+  const isMainlandJavaCoord =
+    typeof lng === 'number' &&
+    Number.isFinite(lng) &&
+    lng > 105 &&
+    lng <= 114.432 &&
+    !locLower.includes('bali') &&
+    !locLower.includes('tabanan') &&
+    !locLower.includes('denpasar') &&
+    !locLower.includes('jembrana') &&
+    !locLower.includes('buleleng');
+
   let closestStore: RetailStore | null = null;
-  let minDistance = 1.8; // 1.8 km radius for store stop detection
+  let minDistance = 1.65; // 1.65 km radius for store stop detection
 
   for (const st of registeredStores) {
+    // Prevent Luar Pulau (Bali/NTB) stores from falsely matching mainland East Java coordinates
+    if (isMainlandJavaCoord && getStoreLocationType(st) === 'luar_pulau') {
+      continue;
+    }
+
     const stNameLower = st.storeName.toLowerCase();
     // Exact name match in address
     if (stNameLower.length > 4 && locLower.includes(stNameLower)) {
@@ -1503,54 +1522,105 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   }
 
   const getFleetFormKirimTargets = useMemo(() => {
+    const extractFleetTokens = (raw?: string): string[] =>
+      String(raw || '')
+        .toUpperCase()
+        .split(/[\s/\-_[\]()•,]+/)
+        .map(t => t.trim())
+        .filter(t => t.length >= 2 && !['UNIT', 'ARMADA', 'BOX', 'STD', 'LONG', 'CDD', 'CDE'].includes(t));
+
+    const normalizeIsoDateKey = (raw?: string): string => {
+      const s = String(raw || '').trim();
+      if (!s || s === 'all') return '';
+      const ymd = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
+      if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+      const dmy = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
+      if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      return s.slice(0, 10);
+    };
+
     return (fleetPlate?: string, fleetId?: string, fleetInitial?: string, dateGroup?: string): {
       records: FormKirimRecord[];
       targets: FormKirimTargetCustomer[];
     } => {
       const targetPlate = normalizePlateKey(fleetPlate);
       const targetInit = normalizePlateKey(fleetInitial);
+      const targetTokens = extractFleetTokens(fleetInitial);
+
       const fleetMatched = formKirimRecords.filter(rec => {
         if (fleetId && rec.fleetId && rec.fleetId === fleetId) return true;
         if (targetPlate && normalizePlateKey(rec.plateNumber) === targetPlate) return true;
         if (targetInit && rec.armadaInitial && normalizePlateKey(rec.armadaInitial) === targetInit) return true;
+        if (targetTokens.length > 0 && rec.armadaInitial) {
+          const recTokens = extractFleetTokens(rec.armadaInitial);
+          if (targetTokens.some(tok => recTokens.includes(tok))) return true;
+        }
         return false;
       });
 
-      const normalizedDate = String(dateGroup || '').slice(0, 10);
+      const normalizedDate = normalizeIsoDateKey(dateGroup);
       const dateMatched =
-        normalizedDate && normalizedDate !== 'all'
-          ? fleetMatched.filter(rec => String(rec.tanggalKirim || '').slice(0, 10) === normalizedDate)
+        normalizedDate
+          ? fleetMatched.filter(rec => normalizeIsoDateKey(rec.tanggalKirim) === normalizedDate)
           : [];
-      const activeRecs = dateMatched.length > 0 ? dateMatched : fleetMatched;
+      const activeRecs = dateMatched.length > 0 ? dateMatched : normalizedDate ? [] : fleetMatched;
 
-      const targets: FormKirimTargetCustomer[] = [];
+      // Deduplicate targets by unique customer per Form Kirim so multi-invoice customers count as 1 store target
+      const customerMap = new Map<string, FormKirimTargetCustomer & { invoiceCount: number; firstFaktur: string }>();
+
       activeRecs.forEach(rec => {
         if (Array.isArray(rec.invoiceItems) && rec.invoiceItems.length > 0) {
           rec.invoiceItems.forEach(inv => {
             const custName = (inv.namaPelanggan || '').trim();
             if (!custName) return;
-            targets.push({
-              noFormKirim: rec.noFormKirim,
-              tanggalKirim: rec.tanggalKirim,
-              noFaktur: inv.noFaktur || rec.noFaktur || '',
-              namaPelanggan: custName,
-              alamatPelanggan: inv.alamatPelanggan || rec.storeAddress || '',
-              normalizedKey: normalizeStoreMatchKey(custName),
-              lockedGpsLat: inv.lockedGpsLat,
-              lockedGpsLng: inv.lockedGpsLng
-            });
+            const normKey = normalizeStoreMatchKey(custName) || custName.toUpperCase();
+            const existing = customerMap.get(normKey);
+            const invNo = (inv.noFaktur || rec.noFaktur || '').trim();
+            if (existing) {
+              existing.invoiceCount += 1;
+              existing.noFaktur =
+                existing.invoiceCount > 1
+                  ? `${existing.firstFaktur} (+${existing.invoiceCount - 1} Faktur)`
+                  : existing.firstFaktur;
+              if (!existing.lockedGpsLat && typeof inv.lockedGpsLat === 'number') {
+                existing.lockedGpsLat = inv.lockedGpsLat;
+                existing.lockedGpsLng = inv.lockedGpsLng;
+              }
+            } else {
+              customerMap.set(normKey, {
+                noFormKirim: rec.noFormKirim,
+                tanggalKirim: rec.tanggalKirim,
+                noFaktur: invNo,
+                firstFaktur: invNo,
+                invoiceCount: 1,
+                namaPelanggan: custName,
+                alamatPelanggan: inv.alamatPelanggan || rec.storeAddress || '',
+                normalizedKey: normKey,
+                lockedGpsLat: inv.lockedGpsLat,
+                lockedGpsLng: inv.lockedGpsLng
+              });
+            }
           });
         } else if (rec.storeName && rec.storeName.trim()) {
-          targets.push({
-            noFormKirim: rec.noFormKirim,
-            tanggalKirim: rec.tanggalKirim,
-            noFaktur: rec.noFaktur || '',
-            namaPelanggan: rec.storeName.trim(),
-            alamatPelanggan: rec.storeAddress || '',
-            normalizedKey: normalizeStoreMatchKey(rec.storeName)
-          });
+          const normKey = normalizeStoreMatchKey(rec.storeName) || rec.storeName.trim().toUpperCase();
+          if (!customerMap.has(normKey)) {
+            customerMap.set(normKey, {
+              noFormKirim: rec.noFormKirim,
+              tanggalKirim: rec.tanggalKirim,
+              noFaktur: rec.noFaktur || '',
+              firstFaktur: rec.noFaktur || '',
+              invoiceCount: 1,
+              namaPelanggan: rec.storeName.trim(),
+              alamatPelanggan: rec.storeAddress || '',
+              normalizedKey: normKey
+            });
+          }
         }
       });
+
+      const targets: FormKirimTargetCustomer[] = Array.from(customerMap.values()).map(
+        ({ invoiceCount: _ic, firstFaktur: _ff, ...rest }) => rest
+      );
 
       return { records: activeRecs, targets };
     };
@@ -1566,6 +1636,15 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       if (!m) return null;
       return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
     };
+
+    const AREA_SYNONYM_GROUPS: string[][] = [
+      ['rogojampi', 'pengantigan', 'pengantingan', 'lingkar utara rogojampi', 'gitik', 'blimbingsari'],
+      ['benculuk', 'cluring', 'srono', 'tapanrejo'],
+      ['sanggar', 'pesanggaran', 'ringintelu', 'ringinmulyo', 'sumberagung', 'siliragung', 'kesilir'],
+      ['jajag', 'yosowinangun', 'gambiran', 'maduran', 'wringinagung'],
+      ['pedotan', 'bangorejo', 'kebondalem', 'sambimulyo', 'purwoharjo'],
+      ['ambulu', 'genteng', 'sempu', 'kalisetail', 'tegalsari']
+    ];
 
     const matchTargetAgainstFormKirim = (
       matchedStore: RetailStore | null,
@@ -1587,6 +1666,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       const storeKey = normalizeStoreMatchKey(matchedStore?.storeName);
       const startLocKey = normalizeStoreMatchKey(leg.startLocation);
       const endLocKey = normalizeStoreMatchKey(leg.endLocation);
+      const combinedLocLower = `${leg.startLocation || ''} ${leg.endLocation || ''}`.toLowerCase();
 
       for (const tgt of targets) {
         if (!tgt.normalizedKey || tgt.normalizedKey.length < 3) continue;
@@ -1608,7 +1688,31 @@ export const ExcelTrackingEvaluator: React.FC = () => {
           return tgt;
         }
       }
+
+      // 3. Check area/subdistrict synonym match between Form Kirim customer name/address and GPS stop location
+      for (const tgt of targets) {
+        const tgtMetaLower = `${tgt.namaPelanggan} ${tgt.alamatPelanggan}`.toLowerCase();
+        for (const group of AREA_SYNONYM_GROUPS) {
+          const locInGroup = group.some(k => combinedLocLower.includes(k));
+          const tgtInGroup = group.some(k => tgtMetaLower.includes(k));
+          if (locInGroup && tgtInGroup) {
+            return tgt;
+          }
+        }
+      }
+
       return null;
+    };
+
+    const findRegisteredStoreByTargetName = (custName: string): RetailStore | null => {
+      const key = normalizeStoreMatchKey(custName);
+      if (!key) return null;
+      return (
+        registeredStores.find(st => {
+          const stKey = normalizeStoreMatchKey(st.storeName);
+          return stKey && (stKey === key || stKey.includes(key) || key.includes(stKey));
+        }) || null
+      );
     };
 
     const results: Array<{
@@ -1656,12 +1760,16 @@ export const ExcelTrackingEvaluator: React.FC = () => {
 
     evalList.forEach(ev => {
       const legs = ev.tripLegs || [];
-      legs.forEach((leg, idx) => {
+      // Track assigned Form Kirim targets & Mitra stores per dateGroup so the same store is never duplicated on multiple legs
+      const usedFkTargetKeysByDate = new Map<string, Set<string>>();
+      const usedStoreNamesByDate = new Map<string, Set<string>>();
+
+      // Pre-compute stopMinutes for each leg
+      const preparedLegs = legs.map((leg, idx) => {
         let stopMinutes = Number(leg.stopBeforeMinutes || 0);
         let computedStopStart = leg.stopBeforeStart || leg.endTime;
         let computedStopEnd = leg.stopBeforeEnd || leg.startTime;
 
-        // If stopBeforeMinutes wasn't pre-populated, check time gap with adjacent leg on the same day
         if (stopMinutes <= 0 && idx < legs.length - 1) {
           const nextLeg = legs[idx + 1];
           if (nextLeg && nextLeg.dateGroup === leg.dateGroup) {
@@ -1677,42 +1785,119 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             }
           }
         }
+        return { leg, idx, stopMinutes, computedStopStart, computedStopEnd };
+      });
 
-        // Match stop location against Jaringan Toko & Mitra Pelanggan
+      // Pass 1: Direct Form Kirim matches on qualifying stop legs (stopMinutes >= 5)
+      const preAssignedFkByLegIndex = new Map<number, FormKirimTargetCustomer>();
+
+      preparedLegs.forEach(({ leg, idx, stopMinutes }) => {
+        if (stopMinutes < 5) return;
+        const fkBundle = getFleetFormKirimTargets(ev.plateNumber, ev.fleetId, ev.initialCode, leg.dateGroup);
+        if (fkBundle.targets.length === 0) return;
+
         const matchStart = findMatchingRegisteredStore(
           leg.startLat,
           leg.startLng,
           leg.startLocation,
           registeredStores
         );
-        const matchEnd = findMatchingRegisteredStore(
-          leg.endLat,
-          leg.endLng,
-          leg.endLocation,
+        if (matchStart.isNonStoreKeyword) return;
+
+        let usedSet = usedFkTargetKeysByDate.get(leg.dateGroup);
+        if (!usedSet) {
+          usedSet = new Set<string>();
+          usedFkTargetKeysByDate.set(leg.dateGroup, usedSet);
+        }
+
+        const availableTargets = fkBundle.targets.filter(t => !usedSet!.has(t.normalizedKey));
+        const directMatch = matchTargetAgainstFormKirim(matchStart.store, leg, availableTargets);
+        if (directMatch) {
+          usedSet.add(directMatch.normalizedKey);
+          preAssignedFkByLegIndex.set(idx, directMatch);
+        }
+      });
+
+      // Pass 2: Assign remaining unassigned Form Kirim targets to remaining qualifying route stops (stopMinutes >= 5) on the same date
+      preparedLegs.forEach(({ leg, idx, stopMinutes }) => {
+        if (stopMinutes < 5 || preAssignedFkByLegIndex.has(idx)) return;
+        const fkBundle = getFleetFormKirimTargets(ev.plateNumber, ev.fleetId, ev.initialCode, leg.dateGroup);
+        if (fkBundle.targets.length === 0) return;
+
+        const matchStart = findMatchingRegisteredStore(
+          leg.startLat,
+          leg.startLng,
+          leg.startLocation,
+          registeredStores
+        );
+        if (matchStart.isNonStoreKeyword) return;
+
+        let usedSet = usedFkTargetKeysByDate.get(leg.dateGroup);
+        if (!usedSet) {
+          usedSet = new Set<string>();
+          usedFkTargetKeysByDate.set(leg.dateGroup, usedSet);
+        }
+
+        const nextRemainingTarget = fkBundle.targets.find(t => !usedSet!.has(t.normalizedKey));
+        if (nextRemainingTarget) {
+          usedSet.add(nextRemainingTarget.normalizedKey);
+          preAssignedFkByLegIndex.set(idx, nextRemainingTarget);
+        }
+      });
+
+      // Build unified rows
+      preparedLegs.forEach(({ leg, idx, stopMinutes, computedStopStart, computedStopEnd }) => {
+        const fkBundle = getFleetFormKirimTargets(ev.plateNumber, ev.fleetId, ev.initialCode, leg.dateGroup);
+        const hasActiveFk = fkBundle.targets.length > 0;
+        const matchedFkTarget = preAssignedFkByLegIndex.get(idx) || null;
+
+        let usedStoresOnDate = usedStoreNamesByDate.get(leg.dateGroup);
+        if (!usedStoresOnDate) {
+          usedStoresOnDate = new Set<string>();
+          usedStoreNamesByDate.set(leg.dateGroup, usedStoresOnDate);
+        }
+
+        // Only detect a customer store visit when the vehicle actually stops >= 5 minutes (not 0m departure or 4m traffic pause)
+        const matchStart = findMatchingRegisteredStore(
+          leg.startLat,
+          leg.startLng,
+          leg.startLocation,
           registeredStores
         );
 
-        const matchedStore = matchStart.store || matchEnd.store;
-        const bestDist = matchStart.store ? matchStart.distanceKm : matchEnd.distanceKm;
+        let matchedStore: RetailStore | null = null;
+        let bestDist = matchStart.distanceKm;
 
-        // Cross-check against Form Kirim targets for this fleet & date
-        const fkBundle = getFleetFormKirimTargets(ev.plateNumber, ev.fleetId, ev.initialCode, leg.dateGroup);
-        const matchedFkTarget = matchTargetAgainstFormKirim(matchedStore, leg, fkBundle.targets);
-        const hasActiveFk = fkBundle.targets.length > 0;
+        if (matchedFkTarget) {
+          const fkStore = findRegisteredStoreByTargetName(matchedFkTarget.namaPelanggan);
+          if (fkStore) {
+            matchedStore = fkStore;
+            bestDist = calculateDistanceKm(leg.startLat, leg.startLng, fkStore.latitude, fkStore.longitude);
+            usedStoresOnDate.add(fkStore.storeName.toUpperCase());
+          }
+        } else if (stopMinutes >= 5 && !matchStart.isNonStoreKeyword && !hasActiveFk) {
+          const candidate = matchStart.store;
+          if (candidate && !usedStoresOnDate.has(candidate.storeName.toUpperCase())) {
+            matchedStore = candidate;
+            usedStoresOnDate.add(candidate.storeName.toUpperCase());
+          }
+        }
 
         let stopCategory: 'customer_store' | 'long_non_customer' | 'short_transit' | 'moving_no_stop' =
           'moving_no_stop';
 
-        if (stopMinutes > 0) {
-          if ((matchedStore && !matchStart.isNonStoreKeyword) || matchedFkTarget) {
+        if (stopMinutes >= 5) {
+          if (matchedFkTarget || (matchedStore && !matchStart.isNonStoreKeyword)) {
             stopCategory = 'customer_store';
           } else if (stopMinutes >= 15) {
             stopCategory = 'long_non_customer';
           } else {
             stopCategory = 'short_transit';
           }
-        } else if (matchedStore || matchedFkTarget) {
-          stopCategory = 'customer_store';
+        } else if (stopMinutes > 0) {
+          stopCategory = 'short_transit';
+        } else {
+          stopCategory = 'moving_no_stop';
         }
 
         let formKirimStatus:
@@ -1725,7 +1910,6 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         if (matchedFkTarget) {
           formKirimStatus = 'sesuai_form_kirim';
         } else if (stopCategory === 'customer_store' && matchedStore) {
-          // Stopped at a registered Mitra store, but NOT on the fleet's Form Kirim
           formKirimStatus = 'pelanggan_luar_form_kirim';
         } else if (stopCategory === 'long_non_customer') {
           formKirimStatus = 'long_non_customer';
@@ -1735,6 +1919,8 @@ export const ExcelTrackingEvaluator: React.FC = () => {
 
         const locType = matchedStore
           ? getStoreLocationType(matchedStore)
+          : matchedFkTarget
+          ? 'dalam_kota'
           : leg.startLng > 114.432 || leg.endLng > 114.432
           ? 'luar_pulau'
           : leg.startLat <= -7.75 && leg.startLat >= -8.85 && leg.startLng <= 114.432
@@ -1778,13 +1964,17 @@ export const ExcelTrackingEvaluator: React.FC = () => {
           matchedFormKirimFaktur: matchedFkTarget?.noFaktur || '',
           matchedFormKirimCustomer: matchedFkTarget?.namaPelanggan || '',
           regionType: locType,
-          nomorToko: matchedStore?.nomor ?? '-',
-          namaTokoAtauLokasi: matchedStore
-            ? matchedStore.storeName
-            : matchedFkTarget
+          nomorToko: matchedStore?.nomor ?? (matchedFkTarget ? 'FK' : '-'),
+          namaTokoAtauLokasi: matchedFkTarget
             ? matchedFkTarget.namaPelanggan
+            : matchedStore
+            ? matchedStore.storeName
             : leg.startLocation.split(',')[0] || leg.endLocation.split(',')[0],
-          kecamatan: matchedStore?.kecamatan || leg.matchedStoreKecamatan || '-',
+          kecamatan:
+            matchedStore?.kecamatan ||
+            (matchedFkTarget?.alamatPelanggan ? matchedFkTarget.alamatPelanggan.split('-')[0].trim() : '') ||
+            leg.matchedStoreKecamatan ||
+            '-',
           kabupaten:
             matchedStore?.kabupaten ||
             leg.matchedStoreKabupaten ||

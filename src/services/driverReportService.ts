@@ -9,7 +9,19 @@ export interface DriverHelperReport {
   userRole?: string;
   helperName?: string;
   plateNumber: string;
-  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
+  category:
+    | 'kendala_jalan'
+    | 'akhir_kiriman'
+    | 'istirahat'
+    | 'update_lokasi'
+    | 'presensi_shift'
+    | 'pin_keamanan'
+    | 'mode_offline'
+    | 'isi_bbm'
+    | 'retur'
+    | 'kurang_muat'
+    | 'lebih_muat'
+    | 'salah_muat';
   areaName: string;
   deliveryId?: string;
   notes: string;
@@ -21,6 +33,21 @@ export interface DriverHelperReport {
   status: 'pending' | 'verified' | 'follow_up' | 'resolved';
   verifiedBy?: string;
   verifiedAt?: string;
+  // Data Barang Retur / Kurang Muat / Lebih Muat / Salah Muat
+  issueItemName?: string;
+  issueItemCode?: string;
+  issueItemUnit?: string;
+  issueQty?: string;
+  invoiceNumber?: string;
+  validationDecision?: 'pending' | 'approved' | 'follow_up' | 'rejected';
+  validationNote?: string;
+  validatedBy?: string;
+  validatedAt?: string;
+  // Validasi Titik GPS Lapangan (Super Admin & SPV Logistik)
+  gpsValidationStatus?: 'valid' | 'mismatch' | 'unchecked';
+  gpsValidatedBy?: string;
+  gpsValidatedAt?: string;
+  gpsValidationNote?: string;
   // Data Pengisian BBM (Solar) di Farly / Gajah Mada
   fuelLocation?: 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)' | string;
   fuelLiters?: string;
@@ -277,7 +304,13 @@ class DriverReportService {
       }
       seenIds.add(uniqueId);
       const hasSol = Boolean(r.solution && r.solution.trim());
-      const isConstraintCategory = r.category === 'kendala_jalan' || r.category === 'mode_offline';
+      const isConstraintCategory =
+        r.category === 'kendala_jalan' ||
+        r.category === 'mode_offline' ||
+        r.category === 'retur' ||
+        r.category === 'kurang_muat' ||
+        r.category === 'lebih_muat' ||
+        r.category === 'salah_muat';
       const resolvedStatus =
         hasSol && r.status === 'pending'
           ? 'resolved'
@@ -294,11 +327,20 @@ class DriverReportService {
       let finalLng = r.longitude;
       let finalGmapsUrl = r.gmapsUrl;
 
-      if (r.category === 'istirahat' || r.category === 'isi_bbm') {
+      if (
+        r.category === 'istirahat' ||
+        r.category === 'isi_bbm' ||
+        r.category === 'retur' ||
+        r.category === 'kurang_muat' ||
+        r.category === 'lebih_muat' ||
+        r.category === 'salah_muat'
+      ) {
         const customerName =
           r.customerOutletName ||
           (r.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
-          (r.category === 'isi_bbm' && r.fuelLocation ? `SPBU ${r.fuelLocation}` : '');
+          (r.category === 'isi_bbm' && r.fuelLocation ? `SPBU ${r.fuelLocation}` : '') ||
+          r.issueItemName ||
+          '';
         const coordKey =
           typeof r.latitude === 'number' && typeof r.longitude === 'number'
             ? `${r.latitude.toFixed(4)},${r.longitude.toFixed(4)}`
@@ -361,6 +403,10 @@ class DriverReportService {
         const nextOfflineStatus = inc.offlineStatus || existing.offlineStatus;
         const nextAck = inc.driverAcknowledged ?? existing.driverAcknowledged;
         const nextNotes = inc.notes || existing.notes;
+        const nextValidationDecision = inc.validationDecision || existing.validationDecision;
+        const nextValidationNote = inc.validationNote || existing.validationNote;
+        const nextGpsValidationStatus = inc.gpsValidationStatus || existing.gpsValidationStatus;
+        const nextGpsValidationNote = inc.gpsValidationNote || existing.gpsValidationNote;
 
         const isDiff =
           nextSolution !== existing.solution ||
@@ -369,7 +415,11 @@ class DriverReportService {
           nextQueueStatus !== existing.customerQueueStatus ||
           nextOfflineStatus !== existing.offlineStatus ||
           nextAck !== existing.driverAcknowledged ||
-          nextNotes !== existing.notes;
+          nextNotes !== existing.notes ||
+          nextValidationDecision !== existing.validationDecision ||
+          nextValidationNote !== existing.validationNote ||
+          nextGpsValidationStatus !== existing.gpsValidationStatus ||
+          nextGpsValidationNote !== existing.gpsValidationNote;
 
         if (isDiff) {
           const merged: DriverHelperReport = {
@@ -378,6 +428,14 @@ class DriverReportService {
             solution: nextSolution,
             solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
             solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
+            validationDecision: nextValidationDecision,
+            validationNote: nextValidationNote,
+            validatedBy: inc.validatedBy || existing.validatedBy,
+            validatedAt: inc.validatedAt || existing.validatedAt,
+            gpsValidationStatus: nextGpsValidationStatus,
+            gpsValidationNote: nextGpsValidationNote,
+            gpsValidatedBy: inc.gpsValidatedBy || existing.gpsValidatedBy,
+            gpsValidatedAt: inc.gpsValidatedAt || existing.gpsValidatedAt,
             status: nextStatus,
             photoUrl: inc.photoUrl || existing.photoUrl,
             photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
@@ -440,7 +498,13 @@ class DriverReportService {
     while (list.some(r => r.id === uniqueId)) {
       uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}-${this.seqCounter}`;
     }
-    const isConstraintCategory = report.category === 'kendala_jalan' || report.category === 'mode_offline';
+    const isConstraintCategory =
+      report.category === 'kendala_jalan' ||
+      report.category === 'mode_offline' ||
+      report.category === 'retur' ||
+      report.category === 'kurang_muat' ||
+      report.category === 'lebih_muat' ||
+      report.category === 'salah_muat';
     const defaultStatus = isConstraintCategory ? 'pending' : 'verified';
     const photoUrls = Array.isArray(report.photoUrls) && report.photoUrls.length > 0
       ? report.photoUrls
@@ -674,6 +738,130 @@ class DriverReportService {
       return true;
     }
     return false;
+  }
+
+  public validateItemIssueReport(params: {
+    id: string;
+    decision: 'approved' | 'follow_up' | 'rejected';
+    note: string;
+    validatedBy: string;
+    gpsValidationStatus?: 'valid' | 'mismatch' | 'unchecked';
+    gpsValidationNote?: string;
+  }): DriverHelperReport | null {
+    const list = [...this.getReports()];
+    const idx = list.findIndex(r => r.id === params.id);
+    if (idx < 0) return null;
+
+    const nowIso = new Date().toISOString();
+    const cleanNote = String(params.note || '').trim();
+    const mappedStatus: DriverHelperReport['status'] =
+      params.decision === 'approved'
+        ? 'verified'
+        : params.decision === 'follow_up'
+        ? 'follow_up'
+        : 'resolved';
+
+    const decisionLabel =
+      params.decision === 'approved'
+        ? 'Disetujui / Valid'
+        : params.decision === 'follow_up'
+        ? 'Perlu Tindak Lanjut'
+        : 'Ditolak / Tidak Sesuai';
+
+    const feedbackText = cleanNote
+      ? `[${decisionLabel}] ${cleanNote}`
+      : `Laporan telah divalidasi dengan status: ${decisionLabel}.`;
+
+    const nextGpsStatus = params.gpsValidationStatus || list[idx].gpsValidationStatus;
+    const nextGpsNote = params.gpsValidationNote !== undefined ? params.gpsValidationNote : list[idx].gpsValidationNote;
+
+    list[idx] = {
+      ...list[idx],
+      status: mappedStatus,
+      validationDecision: params.decision,
+      validationNote: cleanNote || decisionLabel,
+      validatedBy: params.validatedBy,
+      validatedAt: nowIso,
+      verifiedBy: params.validatedBy,
+      verifiedAt: nowIso,
+      gpsValidationStatus: nextGpsStatus,
+      gpsValidationNote: nextGpsNote,
+      gpsValidatedBy: params.gpsValidationStatus ? params.validatedBy : list[idx].gpsValidatedBy,
+      gpsValidatedAt: params.gpsValidationStatus ? nowIso : list[idx].gpsValidatedAt,
+      solution: feedbackText,
+      solutionBy: params.validatedBy,
+      solutionAt: nowIso,
+      driverAcknowledged: false
+    };
+
+    this.saveReports(list);
+    this.pushReportToServer(list[idx]);
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          solution: feedbackText,
+          solutionBy: params.validatedBy,
+          status: mappedStatus,
+          reportSnapshot: list[idx]
+        })
+      }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
+    }
+    return list[idx];
+  }
+
+  public validateReportGpsLocation(params: {
+    id: string;
+    gpsStatus: 'valid' | 'mismatch';
+    note?: string;
+    validatedBy: string;
+  }): DriverHelperReport | null {
+    const list = [...this.getReports()];
+    const idx = list.findIndex(r => r.id === params.id);
+    if (idx < 0) return null;
+
+    const nowIso = new Date().toISOString();
+    const gpsNoteText = String(params.note || '').trim() ||
+      (params.gpsStatus === 'valid'
+        ? 'Titik koordinat GPS sesuai dengan lokasi toko/rute pengiriman.'
+        : 'Titik koordinat GPS tidak sesuai / berada di luar jangkauan toko tujuan.');
+
+    list[idx] = {
+      ...list[idx],
+      gpsValidationStatus: params.gpsStatus,
+      gpsValidatedBy: params.validatedBy,
+      gpsValidatedAt: nowIso,
+      gpsValidationNote: gpsNoteText
+    };
+
+    this.saveReports(list);
+    this.pushReportToServer(list[idx]);
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          solution: list[idx].solution || `[Validasi GPS: ${params.gpsStatus === 'valid' ? 'Valid' : 'Tidak Sesuai'}] ${gpsNoteText}`,
+          solutionBy: list[idx].solutionBy || params.validatedBy,
+          status: list[idx].status,
+          reportSnapshot: list[idx]
+        })
+      }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
+    }
+    return list[idx];
   }
 
   public deleteReport(id: string): boolean {
@@ -978,7 +1166,7 @@ class DriverReportService {
     driverName: string;
     driverPhone?: string;
     plateNumber: string;
-    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
+    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm' | 'retur' | 'kurang_muat' | 'lebih_muat' | 'salah_muat';
     reportText?: string;
     notes?: string;
     latitude?: number;

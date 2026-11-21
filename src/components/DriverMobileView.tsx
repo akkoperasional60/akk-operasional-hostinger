@@ -1141,7 +1141,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return driverKendalaReports
       .filter(r => {
         const hasSol = Boolean(r.solution && r.solution.trim().length > 0);
-        const isTodayKendala = r.category === 'kendala_jalan' && (r.date || getLocalDateStr(r.timestamp)) === todayLocalStr;
+        const isTodayKendala =
+          (r.category === 'kendala_jalan' ||
+            r.category === 'retur' ||
+            r.category === 'kurang_muat' ||
+            r.category === 'lebih_muat' ||
+            r.category === 'salah_muat') &&
+          (r.date || getLocalDateStr(r.timestamp)) === todayLocalStr;
         if (!hasSol && !isTodayKendala) return false;
         if (hasSol) {
           const solutionLocalDate = r.solutionAt
@@ -2157,7 +2163,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     try {
       let localSchedules = logisticsStore.getSchedules();
       const latestShiftNow = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
-      if (localSchedules.length === 0 && !latestShiftNow?.selectedArea) {
+      const todayStrForShifts = getLocalDateStr();
+      const todayDriverShifts = driverShiftService.getShifts().filter(
+        s =>
+          s.date === todayStrForShifts &&
+          Boolean(s.selectedArea) &&
+          (s.driverId === selectedDriverId ||
+            doesCrewNameMatch(s.driverName || '', portalDisplayName) ||
+            doesCrewNameMatch(s.helper1Name || '', portalDisplayName) ||
+            doesCrewNameMatch(s.helper2Name || '', portalDisplayName))
+      );
+      if (localSchedules.length === 0 && !latestShiftNow?.selectedArea && todayDriverShifts.length === 0) {
         setDeliveries([]);
         driverOfflineSyncService.cacheDeliveries([]);
         return;
@@ -2322,106 +2338,191 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         doesCrewNameMatch(latestShiftNow?.helper1Name || '', activeSpvFilter) ||
         doesCrewNameMatch(latestShiftNow?.helper2Name || '', activeSpvFilter);
 
-      if (latestShiftNow && latestShiftNow.selectedArea && shiftMatchesSpvFilter) {
-        const shiftAreaStd = standardizeAreaName(latestShiftNow.selectedArea);
+      const shiftsToProcess = latestShiftNow && latestShiftNow.selectedArea
+        ? [latestShiftNow, ...todayDriverShifts.filter(s => s.id !== latestShiftNow.id)]
+        : todayDriverShifts;
+
+      for (const shiftItem of shiftsToProcess) {
+        if (!shiftItem.selectedArea) continue;
+        const itemMatchesSpv =
+          !isManagerPortal ||
+          activeSpvFilter === 'all' ||
+          doesCrewNameMatch(shiftItem.driverName || '', activeSpvFilter) ||
+          doesCrewNameMatch(shiftItem.helper1Name || '', activeSpvFilter) ||
+          doesCrewNameMatch(shiftItem.helper2Name || '', activeSpvFilter);
+        if (!itemMatchesSpv) continue;
+
+        const shiftAreaStd = standardizeAreaName(shiftItem.selectedArea);
         const shiftFleetObj =
-          latestFleets.find(f => f.id === latestShiftNow.fleetId) ||
-          (latestShiftNow.plateNumber
+          latestFleets.find(f => f.id === shiftItem.fleetId) ||
+          (shiftItem.fleetInitialCode ? logisticsStore.findFleetByCodeOrPlate(shiftItem.fleetInitialCode) : undefined) ||
+          (shiftItem.plateNumber
             ? latestFleets.find(
                 f =>
                   f.plateNumber.replace(/\s+/g, '').toLowerCase() ===
-                  latestShiftNow.plateNumber!.replace(/\s+/g, '').toLowerCase()
+                  shiftItem.plateNumber!.replace(/\s+/g, '').toLowerCase()
               )
             : undefined);
 
-        // Cari partner shift pada tanggal & armada/area yang sama untuk mendapatkan nama Driver / Helper 1 / Helper 2 lengkap
-        const sameDayShifts = driverShiftService.getShifts().filter(s => s.date === latestShiftNow.date);
+        const sameDayShifts = driverShiftService.getShifts().filter(s => s.date === shiftItem.date);
         const primaryDriverShift =
-          latestShiftNow.checkinRole === 'driver'
-            ? latestShiftNow
+          shiftItem.checkinRole === 'driver'
+            ? shiftItem
             : sameDayShifts.find(
                 s =>
                   s.checkinRole === 'driver' &&
-                  ((latestShiftNow.fleetId && s.fleetId === latestShiftNow.fleetId) ||
-                    (latestShiftNow.plateNumber && s.plateNumber === latestShiftNow.plateNumber) ||
+                  ((shiftItem.fleetId && s.fleetId === shiftItem.fleetId) ||
+                    (shiftItem.plateNumber && s.plateNumber === shiftItem.plateNumber) ||
                     standardizeAreaName(s.selectedArea || '') === shiftAreaStd)
               );
 
+        const isHelperCheckin = shiftItem.checkinRole === 'helper';
         const resolvedDriverName =
           primaryDriverShift?.driverName ||
-          (latestShiftNow.checkinRole === 'helper' ? 'Driver Armada Terkait' : latestShiftNow.driverName || portalDisplayName);
-        const resolvedHelper1Name =
-          primaryDriverShift?.helper1Name ||
-          latestShiftNow.helper1Name ||
-          (latestShiftNow.checkinRole === 'helper' ? latestShiftNow.driverName : '');
+          (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || portalDisplayName);
+        const resolvedHelper1Name = isHelperCheckin
+          ? (shiftItem.driverName || shiftItem.helper1Name || portalDisplayName)
+          : (primaryDriverShift?.helper1Name || shiftItem.helper1Name || '');
         const resolvedHelper2Name =
-          primaryDriverShift?.helper2Name || latestShiftNow.helper2Name || '';
+          primaryDriverShift?.helper2Name || shiftItem.helper2Name || '';
 
         const existingMatchIdx = sorted.findIndex(
           s =>
-            s.status !== 'delivered' &&
             standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd &&
-            ((s.departureDate || s.createdAt || '').slice(0, 10) === (latestShiftNow.date || todayIsoLocal)) &&
-            (!isManagerPortal || doesCrewNameMatch(s.crew?.name || '', resolvedDriverName))
+            ((s.departureDate || s.createdAt || '').slice(0, 10) === (shiftItem.date || todayIsoLocal)) &&
+            (!isManagerPortal ||
+              doesCrewNameMatch(s.crew?.name || '', resolvedDriverName) ||
+              doesCrewNameMatch(s.crewHelper?.name || '', resolvedHelper1Name) ||
+              doesCrewNameMatch(s.crew?.name || '', shiftItem.driverName || ''))
         );
 
         if (existingMatchIdx >= 0) {
           const existing = sorted[existingMatchIdx];
+          let nextDriverCrew = existing.crew;
+          if (resolvedDriverName && resolvedDriverName !== 'Driver Armada Terkait') {
+            nextDriverCrew = {
+              ...(existing.crew || {
+                id: primaryDriverShift?.driverId || existing.crewId,
+                phone: '-',
+                role: 'Driver Utama',
+                licenseNumber: '-',
+                licenseType: 'SIM B1 Umum',
+                status: 'on-duty',
+                tripsCompleted: 0,
+                rating: 5
+              }),
+              name: resolvedDriverName
+            };
+          } else if (isHelperCheckin && existing.crew?.name && doesCrewNameMatch(existing.crew.name, shiftItem.driverName)) {
+            const partnerFromHelperSlot =
+              existing.crewHelper?.name && !doesCrewNameMatch(existing.crewHelper.name, shiftItem.driverName)
+                ? existing.crewHelper
+                : undefined;
+            nextDriverCrew = partnerFromHelperSlot
+              ? { ...partnerFromHelperSlot, role: 'Driver Utama' }
+              : {
+                  ...(existing.crew || {
+                    id: 'drv-pending',
+                    phone: '-',
+                    role: 'Driver Utama',
+                    licenseNumber: '-',
+                    licenseType: 'SIM B1 Umum',
+                    status: 'on-duty',
+                    tripsCompleted: 0,
+                    rating: 5
+                  }),
+                  name: '-'
+                };
+          }
+
+          const nextHelper1Crew = resolvedHelper1Name
+            ? {
+                id: (isHelperCheckin ? shiftItem.driverId : primaryDriverShift?.helper1Id) || existing.crewHelper?.id || 'hlp-1',
+                name: resolvedHelper1Name,
+                phone: '-',
+                role: 'Kernet / Helper' as const,
+                licenseNumber: '-',
+                licenseType: 'SIM A',
+                status: 'on-duty' as const,
+                tripsCompleted: 0,
+                rating: 5
+              }
+            : existing.crewHelper;
+
+          const nextStatus: ShipmentStatus =
+            existing.status === 'delivered' ||
+            shiftItem.status === 'checked_out' ||
+            Boolean(shiftItem.arrivedAtWarehouseAt)
+              ? 'delivered'
+              : existing.status;
+
           const enrichedExisting: Schedule = {
             ...existing,
-            areaName: latestShiftNow.selectedArea,
+            areaName: shiftItem.selectedArea,
             fleetId: shiftFleetObj?.id || existing.fleetId,
             fleet: shiftFleetObj || existing.fleet,
             armada:
               shiftFleetObj?.initialCode && shiftFleetObj?.plateNumber
                 ? `${shiftFleetObj.initialCode} · ${shiftFleetObj.plateNumber}`
                 : shiftFleetObj?.plateNumber || existing.armada,
-            crew:
-              resolvedDriverName && resolvedDriverName !== 'Driver Armada Terkait'
-                ? { ...(existing.crew || { id: primaryDriverShift?.driverId || existing.crewId, phone: '-', role: 'Driver Utama', licenseNumber: '-', licenseType: 'SIM B1 Umum', status: 'on-duty', tripsCompleted: 0, rating: 5 }), name: resolvedDriverName }
-                : existing.crew,
-            crewHelper: resolvedHelper1Name
-              ? { id: primaryDriverShift?.helper1Id || 'hlp-1', name: resolvedHelper1Name, phone: '-', role: 'Kernet / Helper', licenseNumber: '-', licenseType: 'SIM A', status: 'on-duty', tripsCompleted: 0, rating: 5 }
-              : existing.crewHelper,
+            crewId: nextDriverCrew?.id || existing.crewId,
+            crew: nextDriverCrew,
+            crewHelperId: nextHelper1Crew?.id || existing.crewHelperId,
+            crewHelper: nextHelper1Crew,
             crewHelper2: resolvedHelper2Name
-              ? { id: primaryDriverShift?.helper2Id || 'hlp-2', name: resolvedHelper2Name, phone: '-', role: 'Kernet / Helper', licenseNumber: '-', licenseType: 'SIM A', status: 'on-duty', tripsCompleted: 0, rating: 5 }
-              : existing.crewHelper2
+              ? {
+                  id: primaryDriverShift?.helper2Id || 'hlp-2',
+                  name: resolvedHelper2Name,
+                  phone: '-',
+                  role: 'Kernet / Helper' as const,
+                  licenseNumber: '-',
+                  licenseType: 'SIM A',
+                  status: 'on-duty' as const,
+                  tripsCompleted: 0,
+                  rating: 5
+                }
+              : existing.crewHelper2,
+            status: nextStatus,
+            actualArrival: existing.actualArrival || shiftItem.arrivedAtWarehouseAt
           };
           sorted.splice(existingMatchIdx, 1);
           sorted.unshift(enrichedExisting);
         } else {
-          const portalSelfId = `PORTAL-${latestShiftNow.id}`;
+          const portalSelfId = `PORTAL-${shiftItem.id}`;
+          if (sorted.some(s => s.id === portalSelfId)) continue;
           const sharedSelf = sharedScheduleFlowMap[portalSelfId];
           const selfStatus: ShipmentStatus =
-            latestShiftNow.arrivedAtWarehouseAt || sharedSelf?.argoArrivalTimestamp
+            shiftItem.status === 'checked_out' ||
+            shiftItem.arrivedAtWarehouseAt ||
+            sharedSelf?.argoArrivalTimestamp
               ? 'delivered'
-              : latestShiftNow.gateOutAt || sharedSelf?.gateOutConfirmed
+              : shiftItem.gateOutAt || sharedSelf?.gateOutConfirmed
               ? 'in_transit'
               : 'scheduled';
 
           const fallbackFleetObj: Fleet = shiftFleetObj || {
-            id: latestShiftNow.fleetId || 'fl-portal',
-            plateNumber: latestShiftNow.plateNumber || '-',
-            vehicleType: (latestShiftNow.vehicleType as any) || 'Engkel Long Box',
-            initialCode: latestShiftNow.fleetInitialCode || '',
+            id: shiftItem.fleetId || 'fl-portal',
+            plateNumber: shiftItem.plateNumber || '-',
+            vehicleType: (shiftItem.vehicleType as any) || 'Engkel Long Box',
+            initialCode: shiftItem.fleetInitialCode || '',
             brand: 'PT AKK Fleet',
             status: selfStatus === 'in_transit' ? 'on-duty' : 'available'
           };
 
           const syntheticSelfSchedule: Schedule = {
             id: portalSelfId,
-            trackingNumber: `SJ-${latestShiftNow.id.slice(-6).toUpperCase()}`,
+            trackingNumber: `SJ-${shiftItem.id.slice(-6).toUpperCase()}`,
             originName: 'Gudang DC PT AKK',
             originCoords: [-8.1906, 114.3708],
             storeId: 'dc-banyuwangi',
             store: {
               id: 'dc-banyuwangi',
               storeCode: 'PORTAL-SELF',
-              storeName: latestShiftNow.selectedArea,
+              storeName: shiftItem.selectedArea,
               island: 'Jawa',
               province: 'Jawa Timur',
-              city: latestShiftNow.selectedArea,
-              address: `Area Pengiriman ${latestShiftNow.selectedArea}`,
+              city: shiftItem.selectedArea,
+              address: `Area Pengiriman ${shiftItem.selectedArea}`,
               latitude: -8.1906,
               longitude: 114.3708,
               contactPerson: 'PIC Toko',
@@ -2431,10 +2532,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             },
             fleetId: fallbackFleetObj.id,
             fleet: fallbackFleetObj,
-            crewId: primaryDriverShift?.driverId || latestShiftNow.driverId,
+            crewId: primaryDriverShift?.driverId || (isHelperCheckin ? 'drv-pending' : shiftItem.driverId),
             crew: {
-              id: primaryDriverShift?.driverId || latestShiftNow.driverId,
-              name: resolvedDriverName,
+              id: primaryDriverShift?.driverId || (isHelperCheckin ? 'drv-pending' : shiftItem.driverId),
+              name: isHelperCheckin && resolvedDriverName === 'Driver Armada Terkait' ? '-' : resolvedDriverName,
               phone: '-',
               role: 'Driver Utama',
               licenseNumber: '-',
@@ -2443,10 +2544,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               tripsCompleted: 0,
               rating: 5
             },
-            crewHelperId: resolvedHelper1Name ? (primaryDriverShift?.helper1Id || 'hlp-1') : undefined,
+            crewHelperId: resolvedHelper1Name ? ((isHelperCheckin ? shiftItem.driverId : primaryDriverShift?.helper1Id) || 'hlp-1') : undefined,
             crewHelper: resolvedHelper1Name
               ? {
-                  id: primaryDriverShift?.helper1Id || 'hlp-1',
+                  id: (isHelperCheckin ? shiftItem.driverId : primaryDriverShift?.helper1Id) || 'hlp-1',
                   name: resolvedHelper1Name,
                   phone: '-',
                   role: 'Kernet / Helper',
@@ -2471,19 +2572,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   rating: 5
                 }
               : undefined,
-            areaName: latestShiftNow.selectedArea,
+            areaName: shiftItem.selectedArea,
             armada: `${fallbackFleetObj.initialCode ? `${fallbackFleetObj.initialCode} · ` : ''}${fallbackFleetObj.plateNumber}`,
-            departureDate: latestShiftNow.date || todayIsoLocal,
-            estimatedArrival: `${latestShiftNow.date || todayIsoLocal}T17:00:00`,
-            actualDeparture: latestShiftNow.gateOutAt || sharedSelf?.gateOutTimestamp,
-            actualArrival: latestShiftNow.arrivedAtWarehouseAt || sharedSelf?.argoArrivalTimestamp,
+            departureDate: shiftItem.date || todayIsoLocal,
+            estimatedArrival: `${shiftItem.date || todayIsoLocal}T17:00:00`,
+            actualDeparture: shiftItem.gateOutAt || sharedSelf?.gateOutTimestamp,
+            actualArrival: shiftItem.arrivedAtWarehouseAt || sharedSelf?.argoArrivalTimestamp,
             status: selfStatus,
-            cargoDescription: `Check-In Mandiri (${latestShiftNow.checkinRole === 'helper' ? 'Helper' : 'Driver'}) - ${latestShiftNow.selectedArea}`,
+            cargoDescription: `Check-In Mandiri (${isHelperCheckin ? 'Helper' : 'Driver'}) - ${shiftItem.selectedArea}`,
             cargoWeightTon: 0,
             isInterIsland:
-              latestShiftNow.selectedArea.toLowerCase().includes('bali') ||
-              latestShiftNow.selectedArea.toLowerCase().includes('denpasar'),
-            createdAt: latestShiftNow.createdAt || new Date().toISOString()
+              shiftItem.selectedArea.toLowerCase().includes('bali') ||
+              shiftItem.selectedArea.toLowerCase().includes('denpasar'),
+            createdAt: shiftItem.createdAt || new Date().toISOString()
           };
           sorted.unshift(syntheticSelfSchedule);
         }
@@ -5767,7 +5868,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             <span className={`text-[10px] font-black uppercase tracking-wider block ${
                               hasSol ? 'text-amber-700 dark:text-amber-400' : 'text-rose-700 dark:text-rose-400'
                             }`}>
-                              {hasSol ? 'Arahan Resmi SPV Logistik / Tim Pengiriman' : 'Laporan Kendala Terkirim • Menunggu Solusi'}
+                              {sol.category === 'retur' || sol.category === 'kurang_muat' || sol.category === 'lebih_muat' || sol.category === 'salah_muat'
+                                ? hasSol
+                                  ? 'Hasil Validasi Admin Penjualan'
+                                  : `Laporan ${sol.category === 'retur' ? 'Retur' : sol.category === 'kurang_muat' ? 'Kurang Muat' : sol.category === 'lebih_muat' ? 'Lebih Muat' : 'Salah Muat'} • Menunggu Validasi`
+                                : hasSol
+                                ? 'Arahan Resmi SPV Logistik / Tim Pengiriman'
+                                : 'Laporan Kendala Terkirim • Menunggu Solusi'}
                             </span>
                             <h4 className="text-xs font-black text-slate-900 dark:text-white">
                               {sol.areaName} ({sol.driverName} • {sol.plateNumber})
@@ -5782,7 +5889,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40'
                             : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/40 animate-pulse'
                         }`}>
-                          {!hasSol ? '⏳ Menunggu Balasan' : sol.driverAcknowledged ? '✓ Dijalankan Kru' : 'Solusi Baru Masuk'}
+                          {!hasSol
+                            ? (sol.category === 'retur' || sol.category === 'kurang_muat' || sol.category === 'lebih_muat' || sol.category === 'salah_muat'
+                                ? '⏳ Menunggu Validasi'
+                                : '⏳ Menunggu Balasan')
+                            : sol.driverAcknowledged
+                            ? '✓ Dikonfirmasi Kru'
+                            : (sol.category === 'retur' || sol.category === 'kurang_muat' || sol.category === 'lebih_muat' || sol.category === 'salah_muat'
+                                ? 'Validasi Selesai'
+                                : 'Solusi Baru Masuk')}
                         </span>
                       </div>
 
@@ -8067,11 +8182,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 type="button"
                 onClick={() => openGmapsFeature(undefined, effectiveJobdeskRole)}
                 className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/35 ring-4 ring-white dark:ring-slate-900 transition-all duration-200 active:scale-95 hover:scale-105 cursor-pointer group"
-                title={
-                  effectiveJobdeskRole === 'helper'
-                    ? 'Laporan Kendala & Absen Pelanggan'
-                    : 'Laporan BBM, Kendala & Absen Pelanggan'
-                }
+                title="Laporan BBM, Kendala, Absen & Barang (Retur / Kurang / Salah Muat)"
                 aria-label="Fitur Lapangan Driver & Helper"
               >
                 <Plus className="w-7 h-7 stroke-[2.5] transition-transform duration-200 group-hover:rotate-90 text-white" />
@@ -9261,6 +9372,66 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               });
             }
           }
+          if (saved.inspectionType === 'post_trip') {
+            const targetDeliveries = deliveries.filter(
+              d =>
+                d.status !== 'delivered' ||
+                (d.departureDate || d.createdAt || '').slice(0, 10) === todayStr
+            );
+            const completedIds: string[] = [];
+            targetDeliveries.forEach(d => {
+              completedIds.push(d.id);
+              if (d.status !== 'delivered') {
+                if (!d.id.startsWith('PORTAL-')) {
+                  logisticsStore.updateSchedule(d.id, {
+                    status: 'delivered',
+                    actualArrival: d.actualArrival || completedAtIso,
+                    podReceiverName: d.podReceiverName || portalDisplayName,
+                    podConditionNote: d.podConditionNote || 'Selesai Kirim & Checklist Pulang Terverifikasi'
+                  });
+                }
+                const wb = driverWaybillService.getWaybillForSchedule(d);
+                if (wb.status !== 'delivered') {
+                  driverWaybillService.updateWaybillStatus(wb.id, 'delivered');
+                }
+              }
+            });
+            setDeliveries(prev =>
+              prev.map(d =>
+                completedIds.includes(d.id)
+                  ? {
+                      ...d,
+                      status: 'delivered',
+                      actualArrival: d.actualArrival || completedAtIso
+                    }
+                  : d
+              )
+            );
+            if (completedIds.length > 0) {
+              updateSharedScheduleFlow(completedIds, {
+                argoArrivalTimestamp: completedAtIso,
+                argoArrivalBy: portalDisplayName
+              });
+            }
+            const shiftToFinish =
+              activeShift ||
+              driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
+            if (shiftToFinish) {
+              void driverShiftService.updateShiftProgress(shiftToFinish.id, {
+                arrivedAtWarehouseAt: shiftToFinish.arrivedAtWarehouseAt || completedAtIso
+              });
+              driverShiftService.checkOutCrewTeamForTrip({
+                actorDriverId: selectedDriverId,
+                actorName: portalDisplayName,
+                plateNumber: saved.plateNumber || shiftToFinish.plateNumber,
+                areaName: shiftToFinish.selectedArea || targetDeliveries[0]?.areaName,
+                tripDate: todayStr,
+                arrivedAtWarehouseAt: shiftToFinish.arrivedAtWarehouseAt || completedAtIso,
+                notes: 'Auto Check-Out Selesai Checklist Pasca-Jalan (Pulang)'
+              });
+              setActiveShift(null);
+            }
+          }
           formKirimStore.syncChecklistOdometer({
             date: todayStr,
             plateNumber: saved.plateNumber,
@@ -9327,6 +9498,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
           const chosenFleet =
             fleets.find(f => f.id === shift.fleetId) ||
+            (shift.fleetInitialCode ? logisticsStore.findFleetByCodeOrPlate(shift.fleetInitialCode) : undefined) ||
             (shift.plateNumber
               ? fleets.find(f => f.plateNumber.replace(/\s+/g, '').toLowerCase() === shift.plateNumber!.replace(/\s+/g, '').toLowerCase())
               : undefined) ||
@@ -9341,6 +9513,105 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
           }
 
+          // Sinkronkan perubahan Peran (Driver/Helper), Armada, dan Area ke jadwal aktif di logisticsStore & Surat Jalan
+          if (shift.selectedArea) {
+            const shiftAreaStd = standardizeAreaName(shift.selectedArea);
+            const todayStr = shift.date || getLocalDateStr();
+            const allSchedules = logisticsStore.getSchedules();
+            const matchedSchedule = allSchedules.find(
+              s =>
+                s.status !== 'delivered' &&
+                standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd &&
+                (s.departureDate || s.createdAt || '').slice(0, 10) === todayStr
+            );
+            if (matchedSchedule) {
+              const patch: Partial<Schedule> = {
+                areaName: shift.selectedArea,
+                fleetId: chosenFleet?.id || matchedSchedule.fleetId,
+                fleet: chosenFleet || matchedSchedule.fleet,
+                armada:
+                  chosenFleet?.initialCode && chosenFleet?.plateNumber
+                    ? `${chosenFleet.initialCode} · ${chosenFleet.plateNumber}`
+                    : chosenFleet?.plateNumber || matchedSchedule.armada
+              };
+
+              if (chosenRole === 'helper') {
+                const helperName = shift.driverName || currentDriver?.name || portalDisplayName;
+                patch.crewHelperId = shift.driverId || selectedDriverId;
+                patch.crewHelper = {
+                  id: shift.driverId || selectedDriverId,
+                  name: helperName,
+                  phone: currentDriver?.phone || '-',
+                  role: 'Kernet / Helper',
+                  licenseNumber: '-',
+                  licenseType: 'SIM A',
+                  status: 'on-duty',
+                  tripsCompleted: 0,
+                  rating: 5
+                };
+                if (matchedSchedule.crew?.name && doesCrewNameMatch(matchedSchedule.crew.name, helperName)) {
+                  const prevHelperNotMe =
+                    matchedSchedule.crewHelper?.name && !doesCrewNameMatch(matchedSchedule.crewHelper.name, helperName)
+                      ? matchedSchedule.crewHelper
+                      : undefined;
+                  patch.crew = prevHelperNotMe
+                    ? { ...prevHelperNotMe, role: 'Driver Utama' }
+                    : {
+                        ...(matchedSchedule.crew || {
+                          id: 'drv-pending',
+                          phone: '-',
+                          role: 'Driver Utama',
+                          licenseNumber: '-',
+                          licenseType: 'SIM B1 Umum',
+                          status: 'on-duty',
+                          tripsCompleted: 0,
+                          rating: 5
+                        }),
+                        name: '-'
+                      };
+                }
+              } else {
+                const driverName = shift.driverName || currentDriver?.name || portalDisplayName;
+                patch.crewId = shift.driverId || selectedDriverId;
+                patch.crew = {
+                  ...(matchedSchedule.crew || {
+                    id: shift.driverId || selectedDriverId,
+                    phone: currentDriver?.phone || '-',
+                    role: 'Driver Utama',
+                    licenseNumber: '-',
+                    licenseType: 'SIM B1 Umum',
+                    status: 'on-duty',
+                    tripsCompleted: 0,
+                    rating: 5
+                  }),
+                  name: driverName
+                };
+                if (shift.helper1Name) {
+                  patch.crewHelperId = shift.helper1Id || 'hlp-1';
+                  patch.crewHelper = {
+                    id: shift.helper1Id || 'hlp-1',
+                    name: shift.helper1Name,
+                    phone: '-',
+                    role: 'Kernet / Helper',
+                    licenseNumber: '-',
+                    licenseType: 'SIM A',
+                    status: 'on-duty',
+                    tripsCompleted: 0,
+                    rating: 5
+                  };
+                }
+              }
+
+              logisticsStore.updateSchedule(matchedSchedule.id, patch);
+              const updatedScheduleObj: Schedule = { ...matchedSchedule, ...patch };
+              driverWaybillService.getWaybillForSchedule(updatedScheduleObj);
+            }
+          }
+
+          setTimeout(() => {
+            loadDeliveriesRef.current(true);
+          }, 20);
+
           // 1. Jika kru Check-In sebagai HELPER:
           // Langsung dialihkan ke Surat Jalan Keluar untuk divalidasi oleh Pos Security dan Gate-Out
           if (chosenRole === 'helper') {
@@ -9352,7 +9623,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             addNotification(
               'delivery',
               'Check-In Helper Berhasil • Surat Jalan Keluar Siap',
-              `Area: ${shift.selectedArea || '-'} · Armada: ${shift.plateNumber || '-'}. Silakan lakukan Validasi Security dan Gate-Out.`
+              `Peran: Helper · Area: ${shift.selectedArea || '-'} · Armada: ${chosenFleet?.initialCode ? `${chosenFleet.initialCode} (${chosenFleet.plateNumber})` : shift.plateNumber || '-'}. Silakan lakukan Validasi Security dan Gate-Out.`
             );
             return;
           }
@@ -9671,10 +9942,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               );
             });
           }
+          const isItemIssue =
+            report.category === 'retur' ||
+            report.category === 'kurang_muat' ||
+            report.category === 'lebih_muat' ||
+            report.category === 'salah_muat';
           addNotification(
             'delivery',
-            'Laporan Kru Terkirim • Langsung Masuk Laporan Kiriman Kru',
-            `Laporan kru (${assignedFleet?.plateNumber || report.plateNumber}) berhasil dikirim dan terhubung real-time dengan Tim Pengiriman.`
+            isItemIssue
+              ? 'Laporan Barang Terkirim • Menunggu Validasi'
+              : 'Laporan Kru Terkirim • Langsung Masuk Laporan Kiriman Kru',
+            isItemIssue
+              ? `Foto bukti ${report.category === 'retur' ? 'Barang Retur' : report.category === 'kurang_muat' ? 'Kurang Muat' : report.category === 'lebih_muat' ? 'Lebih Muat' : 'Salah Muat'} telah dikirim ke Admin Penjualan & Logistik untuk validasi.`
+              : `Laporan kru (${assignedFleet?.plateNumber || report.plateNumber}) berhasil dikirim dan terhubung real-time dengan Tim Pengiriman.`
           );
         }}
       />

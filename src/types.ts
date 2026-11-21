@@ -86,6 +86,7 @@ export interface Fleet {
   stnkExpiryDate?: string; // Masa Berlaku STNK / Plat (5 Tahunan)
   kirExpiryDate?: string; // Masa Berlaku Uji KIR Dishub (6 Bulanan / Berkala)
   photos3d?: FleetAnglePhotos; // Foto kondisi armada 6 sudut (depan, belakang, kanan, kiri, atas, kabin)
+  branchId?: string; // Cabang Penugasan ('cab-sidoarjo' | 'cab-banyuwangi')
   // Optional backwards compatibility fields
   tonnageCapacity?: number;
   currentTonnage?: number;
@@ -117,11 +118,12 @@ export interface Crew {
   id: string;
   name: string;
   phone: string;
-  role: 'Driver Utama' | 'Driver Cadangan' | 'Kernet / Helper';
+  role: 'Driver' | 'Helper' | 'Driver Utama' | 'Driver Cadangan' | 'Kernet / Helper';
   licenseNumber: string;
-  licenseType: 'SIM B2 Umum' | 'SIM B1 Umum' | 'SIM A' | '-' | string;
+  licenseType: 'SIM A' | 'SIM B' | 'SIM B1' | 'SIM B2 Umum' | 'SIM B1 Umum' | '-' | string;
   status: CrewStatus;
   currentFleetId?: string;
+  branchId?: string;
   tripsCompleted: number;
   rating: number; // e.g. 4.8 / 5
   certifications?: string[];

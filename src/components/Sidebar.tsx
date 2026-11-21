@@ -86,6 +86,7 @@ export type NavTab =
   | 'sales_invoice_so'
   | 'sales_form_kirim'
   | 'sales_rfid_scanner'
+  | 'sales_muat_validation'
   | 'sales_skill_matrix'
   | 'sales_jobdesk'
   | 'sales_kpi'
@@ -617,6 +618,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Aplikasi Scan & Foto Muat',
               icon: <QrCode className="w-4 h-4 text-emerald-500" />,
               description: 'Foto item sesuai faktur, deteksi otomatis YOLO & verifikasi muat'
+            },
+            {
+              tab: 'sales_muat_validation',
+              label: 'Validasi Muat & Retur',
+              icon: <ShieldCheck className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  Driver &amp; Helper
+                </span>
+              ),
+              description: 'Validasi laporan salah muat, kurang muat & barang retur dari Portal Driver & Helper'
             }
           ]
         },

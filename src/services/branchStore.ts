@@ -292,12 +292,69 @@ class BranchStoreService {
   // ============================================================
   // ENTITY <-> ORIGIN WAREHOUSE (CABANG) ASSIGNMENT & RESOLUTION
   // ============================================================
-  public getFleetBranchId(fleetId: string, _plateNumber?: string, _initialCode?: string): string {
+  public getFleetBranchId(
+    fleetId: string,
+    plateNumber?: string,
+    initialCode?: string,
+    explicitBranchId?: string
+  ): string {
+    if (explicitBranchId && this.branches.some(b => b.id === explicitBranchId)) {
+      this.entityBranches.fleets[fleetId] = explicitBranchId;
+      return explicitBranchId;
+    }
+
+    const cleanPlate = (plateNumber || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const compactPlate = cleanPlate.replace(/\s+/g, '');
+    const cleanInit = (initialCode || '').trim().toUpperCase();
+    const initTokens = cleanInit
+      .split(/[\s/\-_]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    // Known Nusantara (Banyuwangi) fleets (12 canonical units including NMR DS4 & DS5)
+    const nusantaraSpecificTokens = new Set([
+      'NP1', 'NP3', 'NS1', 'NS2', 'NS3', 'NL1', 'NL2', 'DS1', 'DS2', 'DS3', 'DS4', 'DS5',
+      'N1', 'A3', 'N3', 'N4', 'N5', 'N20', 'N21', 'N22', 'N23', 'S5'
+    ]);
+    const nusantaraWPlates = new Set(['W8229US', 'W8603PG']);
+
+    // Known Sidoarjo fleets by initial code (A1, A2, A4, S1, S2, S3, S4, SDA) or L/W plate prefix (excluding Nusantara DS4/DS5)
+    const sidoarjoSpecificTokens = new Set(['A1', 'A2', 'A4', 'A5', 'A6', 'S1', 'S2', 'S3', 'S4', 'SDA']);
+    const hasNusantaraToken = initTokens.some(t => nusantaraSpecificTokens.has(t));
+    const hasSidoarjoToken = initTokens.some(t => sidoarjoSpecificTokens.has(t));
+
+    if (hasSidoarjoToken && !hasNusantaraToken) {
+      return 'cab-sidoarjo';
+    }
+    if (
+      compactPlate &&
+      !nusantaraWPlates.has(compactPlate) &&
+      !hasNusantaraToken &&
+      (cleanPlate.startsWith('L ') ||
+        /^L\d/.test(compactPlate) ||
+        cleanPlate.startsWith('W ') ||
+        /^W\d/.test(compactPlate))
+    ) {
+      return 'cab-sidoarjo';
+    }
+    if (hasNusantaraToken || cleanPlate.startsWith('P ') || /^P\d/.test(compactPlate) || nusantaraWPlates.has(compactPlate)) {
+      const mapped = this.entityBranches.fleets[fleetId];
+      if (mapped && this.branches.some(b => b.id === mapped) && !hasNusantaraToken) {
+        return mapped;
+      }
+      return 'cab-banyuwangi';
+    }
+
     const mapped = this.entityBranches.fleets[fleetId];
     if (mapped && this.branches.some(b => b.id === mapped)) {
       return mapped;
     }
     return 'cab-banyuwangi';
+  }
+
+  public syncFleetBranchIdSilent(fleetId: string, branchId?: string) {
+    if (!fleetId || !branchId || !this.branches.some(b => b.id === branchId)) return;
+    this.entityBranches.fleets[fleetId] = branchId;
   }
 
   public setFleetBranchId(fleetId: string, branchId: string) {
@@ -403,8 +460,13 @@ class BranchStoreService {
     this.notify();
   }
 
-  public getFleetBranch(fleetId: string, plateNumber?: string, initialCode?: string): BranchRecord {
-    const id = this.getFleetBranchId(fleetId, plateNumber, initialCode);
+  public getFleetBranch(
+    fleetId: string,
+    plateNumber?: string,
+    initialCode?: string,
+    explicitBranchId?: string
+  ): BranchRecord {
+    const id = this.getFleetBranchId(fleetId, plateNumber, initialCode, explicitBranchId);
     return this.getBranchById(id) || this.branches[0] || DEFAULT_BRANCHES[1];
   }
 

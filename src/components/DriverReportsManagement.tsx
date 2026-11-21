@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { SchedulePortalValidationReport } from './SchedulePortalValidationReport';
+import { MuatReturValidationTab } from './sales/MuatReturValidationTab';
 import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
@@ -218,7 +219,7 @@ export const DriverReportsManagement: React.FC = () => {
   };
 
   // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan GPS Form Kirim
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal'>('operasional');
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal' | 'retur_muat_salah'>('operasional');
   const [gpsHistoryFilter, setGPSHistoryFilter] = useState<'all' | 'edited_multi' | 'initial_only'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
   const [formKirimRecords, setFormKirimRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
@@ -1071,94 +1072,99 @@ export const DriverReportsManagement: React.FC = () => {
   return (
     <div className="w-full max-w-full px-3 sm:px-5 py-4 space-y-5 animate-in fade-in duration-200">
       
-      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
-        <div className="flex items-center gap-2 flex-wrap">
+      {/* 🌟 SUB-MENU SELECTOR: Ringkas, 1 Baris Proporsional & Mudah Dipindai */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-xs overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1 min-w-max">
           <button
+            type="button"
             onClick={() => setActiveSubMenu('operasional')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'operasional'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <AlertTriangle className="w-4 h-4" />
-            <span>Laporan Kendala Lapangan</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>Kendala Lapangan</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {totalCount}
             </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveSubMenu('absen_tim_kiriman')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'absen_tim_kiriman'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            <span>Laporan Absen Tim Kiriman</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'absen_tim_kiriman' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+            <UserCheck className="w-3.5 h-3.5 shrink-0" />
+            <span>Absen Tim</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'absen_tim_kiriman' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {absenTimKirimanCount}
             </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveSubMenu('checkin_checkout')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'checkin_checkout'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <Clock className="w-4 h-4" />
-            <span>Laporan Check-In &amp; Check-Out</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'checkin_checkout' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span>Check-In &amp; Out</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'checkin_checkout' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {checkinCheckoutList.length}
             </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveSubMenu('pengisian_bbm')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'pengisian_bbm'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <Fuel className="w-4 h-4" />
-            <span>Laporan Pengisian BBM (Solar)</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'pengisian_bbm' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+            <Fuel className="w-3.5 h-3.5 shrink-0" />
+            <span>Pengisian BBM</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'pengisian_bbm' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {totalFuelReportsCount}
             </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveSubMenu('checklist_armada')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'checklist_armada'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Laporan Checklist Armada</span>
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+            <span>Checklist Armada</span>
           </button>
 
-          {/* Di sebelah Laporan Checklist Armada: Laporan GPS Form Kirim (beserta History GPS Awal, GPS Kedua, GPS Ketiga) */}
           <button
+            type="button"
             onClick={() => setActiveSubMenu('peringatan_offline')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'peringatan_offline'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <Navigation className="w-4 h-4" />
-            <span>Laporan GPS Form Kirim</span>
+            <Navigation className="w-3.5 h-3.5 shrink-0" />
+            <span>GPS Form Kirim</span>
             <span
-              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+              className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${
                 activeSubMenu === 'peringatan_offline'
                   ? 'bg-white/20 text-white font-bold'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
@@ -1171,14 +1177,30 @@ export const DriverReportsManagement: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveSubMenu('validasi_jadwal_portal')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
               activeSubMenu === 'validasi_jadwal_portal'
-                ? 'bg-blue-600 text-white font-black shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
             }`}
           >
-            <FileCheck2 className="w-4 h-4" />
-            <span>Validasi Jadwal vs Portal</span>
+            <FileCheck2 className="w-3.5 h-3.5 shrink-0" />
+            <span>Validasi Jadwal</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubMenu('retur_muat_salah')}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
+              activeSubMenu === 'retur_muat_salah'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+            <span>Retur &amp; Muat</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'retur_muat_salah' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+              {reports.filter(r => r.category === 'retur' || r.category === 'kurang_muat' || r.category === 'lebih_muat' || r.category === 'salah_muat').length}
+            </span>
           </button>
         </div>
       </div>
@@ -2073,6 +2095,8 @@ export const DriverReportsManagement: React.FC = () => {
           onBack={() => setActiveSubMenu('operasional')}
           backLabel="Kembali ke Laporan Kru"
         />
+      ) : activeSubMenu === 'retur_muat_salah' ? (
+        <MuatReturValidationTab embeddedInLogistics />
       ) : (
         <>
           {/* Header Section - Compact & Dense */}

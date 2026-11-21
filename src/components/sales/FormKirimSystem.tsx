@@ -971,16 +971,71 @@ export const SalesFormKirimTab: React.FC = () => {
 
       const startRow = headerRowIndex !== -1 ? headerRowIndex + 1 : 0;
       const parsedItems: FormKirimInvoiceItem[] = [];
+      let currentSectionCategory: 'COD' | 'TEMPO' | null = null;
+      let detectedFooterDate = '';
+      let detectedFooterMobil = '';
+      let detectedFooterDaerah = '';
+      let detectedFooterPengirim = '';
+
+      const parseFooterDateToIso = (val: string): string => {
+        const clean = val.trim();
+        const dmy = clean.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+        if (dmy) {
+          return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+        }
+        const ymd = clean.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/);
+        if (ymd) {
+          return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+        }
+        return '';
+      };
 
       for (let r = startRow; r < rawRows.length; r++) {
         const row = rawRows[r] || [];
-        const rowJoinedUpper = row
-          .map((c: any) => String(c ?? '').trim().toUpperCase())
-          .filter(Boolean)
-          .join(' ');
+        const nonEmptyCells = row
+          .map((c: any) => String(c ?? '').trim())
+          .filter(Boolean);
+        const rowJoinedUpper = nonEmptyCells.map(c => c.toUpperCase()).join(' ');
         if (!rowJoinedUpper) continue;
 
-        if (rowJoinedUpper === 'COD' || rowJoinedUpper === 'TEMPO') continue;
+        if (rowJoinedUpper === 'COD' || /^COD\b/.test(rowJoinedUpper) && nonEmptyCells.length === 1) {
+          currentSectionCategory = 'COD';
+          continue;
+        }
+        if (rowJoinedUpper === 'TEMPO' || /^TEMPO\b/.test(rowJoinedUpper) && nonEmptyCells.length === 1) {
+          currentSectionCategory = 'TEMPO';
+          continue;
+        }
+
+        // Check footer metadata rows: TANGGAL, MOBIL, DAERAH, PENGIRIM, JAM BERANGKAT, JAM TARGET, JAM PULANG, ISI BBM, TOTAL CUSTOMER
+        const firstLabelUpper = String(row[0] ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+        const metaValue = nonEmptyCells
+          .slice(1)
+          .map(c => c.replace(/^:\s*/, '').trim())
+          .filter(c => c && c !== ':')[0] || '';
+
+        if (
+          /^(TANGGAL|MOBIL|ARMADA|DAERAH|AREA|PENGIRIM|DRIVER|SOPIR|JAM BERANGKAT|JAM TARGET|JAM PULANG|ISI BBM|TOTAL CUSTOMER|TOTAL PELANGGAN|JUMLAH PELANGGAN)\b/.test(
+            firstLabelUpper
+          )
+        ) {
+          if (firstLabelUpper.startsWith('TANGGAL') && metaValue) {
+            const iso = parseFooterDateToIso(metaValue);
+            if (iso) detectedFooterDate = iso;
+          } else if ((firstLabelUpper.startsWith('MOBIL') || firstLabelUpper.startsWith('ARMADA')) && metaValue) {
+            detectedFooterMobil = metaValue.toUpperCase();
+          } else if ((firstLabelUpper.startsWith('DAERAH') || firstLabelUpper.startsWith('AREA')) && metaValue) {
+            detectedFooterDaerah = metaValue.toUpperCase();
+          } else if (
+            (firstLabelUpper.startsWith('PENGIRIM') ||
+              firstLabelUpper.startsWith('DRIVER') ||
+              firstLabelUpper.startsWith('SOPIR')) &&
+            metaValue
+          ) {
+            detectedFooterPengirim = metaValue;
+          }
+          continue;
+        }
 
         const rawNoFaktur = String(row[colMap.noFaktur] ?? '').trim();
         const rawNamaPelanggan = String(row[colMap.namaPelanggan] ?? '').trim();
@@ -994,7 +1049,7 @@ export const SalesFormKirimTab: React.FC = () => {
           continue;
         }
 
-        const tglFaktur = formatExcelDateValue(row[colMap.tglFaktur] || uploadDraftTanggalKirim);
+        const tglFaktur = formatExcelDateValue(row[colMap.tglFaktur] || detectedFooterDate || uploadDraftTanggalKirim);
         const nilaiFaktur = parseNumericValue(row[colMap.nilaiFaktur]);
         const bayar = String(row[colMap.bayar] ?? '').trim();
         const alamatPelanggan = String(row[colMap.alamat] ?? '').trim().toUpperCase();
@@ -1003,7 +1058,13 @@ export const SalesFormKirimTab: React.FC = () => {
         const rawNetDaysStr = String(row[colMap.netDays] ?? '').trim();
         const netDaysVal = parseNumericValue(rawNetDaysStr);
 
-        const paymentCategory: 'COD' | 'TEMPO' = netDaysVal > 0 ? 'TEMPO' : 'COD';
+        const paymentCategory: 'COD' | 'TEMPO' =
+          netDaysVal > 0
+            ? 'TEMPO'
+            : currentSectionCategory
+            ? currentSectionCategory
+            : 'COD';
+        const effectiveNetDays = paymentCategory === 'TEMPO' && netDaysVal <= 0 ? 14 : netDaysVal > 0 ? netDaysVal : 0;
         const isOtherSbu = isNonGudangFaktur(rawNoFaktur);
 
         parsedItems.push({
@@ -1012,14 +1073,58 @@ export const SalesFormKirimTab: React.FC = () => {
           tglFaktur,
           namaPelanggan: rawNamaPelanggan.toUpperCase() || 'PELANGGAN UMUM',
           nilaiFaktur,
-          coly: 0,
+          coly: parseNumericValue(row[colMap.coly]) || 0,
           bayar,
           alamatPelanggan,
           keterangan,
-          netDays: netDaysVal > 0 ? netDaysVal : 0,
+          netDays: effectiveNetDays,
           paymentCategory,
           isManualSbu: isOtherSbu
         });
+      }
+
+      if (detectedFooterDate) {
+        setUploadDraftTanggalKirim(detectedFooterDate);
+        setTanggalKirim(detectedFooterDate);
+      }
+      if (detectedFooterDaerah) {
+        setUploadDraftAreaKirim(detectedFooterDaerah);
+        setSelectedAreaKirim(detectedFooterDaerah);
+      }
+      if (detectedFooterMobil) {
+        const mobilTokens = detectedFooterMobil
+          .split(/[\s/\-_]+/)
+          .map(t => t.trim().toUpperCase())
+          .filter(t => t.length >= 2);
+        const matchedFleet = fleets.find(f => {
+          const initUpper = String(f.initialCode || '').toUpperCase();
+          const plateClean = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+          const fleetTokens = initUpper
+            .split(/[\s/\-_]+/)
+            .map(t => t.trim())
+            .filter(t => t.length >= 2);
+          return (
+            mobilTokens.some(mt => fleetTokens.includes(mt) || plateClean.includes(mt)) ||
+            initUpper.includes(detectedFooterMobil)
+          );
+        });
+        if (matchedFleet) {
+          setSelectedFleetId(matchedFleet.id);
+        }
+      }
+      if (detectedFooterPengirim) {
+        const parts = detectedFooterPengirim
+          .split(/\s*[-/&]\s*/)
+          .map(p => p.trim())
+          .filter(Boolean);
+        if (parts[0]) {
+          const drvMatch = crews.find(c => c.name.toUpperCase().includes(parts[0].toUpperCase()));
+          setSelectedDriverName(drvMatch ? drvMatch.name : parts[0]);
+        }
+        if (parts[1]) {
+          const hlpMatch = crews.find(c => c.name.toUpperCase().includes(parts[1].toUpperCase()));
+          setSelectedHelperName(hlpMatch ? hlpMatch.name : parts[1]);
+        }
       }
 
       if (parsedItems.length === 0) {

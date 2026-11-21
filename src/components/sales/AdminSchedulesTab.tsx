@@ -20,7 +20,9 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   Lock,
-  Percent
+  Percent,
+  Briefcase,
+  ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -153,14 +155,13 @@ function formatShortDateId(isoDate: string): string {
 function getInitials(name: string): string {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'AD';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return parts[0].slice(0, 2).toUpperCase();
 }
 
 function getShortAdminName(name: string): string {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length <= 2) return parts.join(' ');
-  return `${parts[0]} ${parts[1][0]}.`;
+  if (parts.length === 0) return 'ADMIN';
+  return parts[0].toUpperCase();
 }
 
 function getCompactAreaLabel(area: string): string {
@@ -169,66 +170,139 @@ function getCompactAreaLabel(area: string): string {
   return area;
 }
 
-function createInitialSchedules(adminNames: string[]): AdminDailyScheduleItem[] {
+function createInitialSchedules(_adminNames?: string[]): AdminDailyScheduleItem[] {
   const now = new Date();
   const y = now.getFullYear();
   const m = now.getMonth();
   const getD = (day: number) => formatDateIso(y, m, Math.min(day, getDaysInMonth(y, m)));
 
-  const a1 = adminNames[0] || 'MUHAMMAD SHOIM';
-  const a2 = adminNames[1] || adminNames[0] || 'ISTI';
-  const a3 = adminNames[2] || adminNames[0] || 'IZZUL';
-  const a4 = adminNames[3] || adminNames[1] || adminNames[0] || 'FATA';
+  const buildDayEntries = (
+    day: number,
+    rows: Array<{
+      adminName: string;
+      duties: string[];
+      additionalDuties: string[];
+      attendanceStatus?: AdminAttendanceStatus;
+      isBackupAcc?: boolean;
+    }>
+  ): AdminDailyScheduleItem[] =>
+    rows.map((r, idx) => ({
+      id: `sch-${day}-${idx + 1}`,
+      date: getD(day),
+      adminName: r.adminName,
+      branchId: 'cab-banyuwangi',
+      duties: r.duties,
+      additionalDuties: r.additionalDuties,
+      shiftTime: '08:00 - 16:00',
+      isBackupAcc: Boolean(r.isBackupAcc),
+      notes: '',
+      attendanceStatus: r.attendanceStatus || 'hadir'
+    }));
+
+  const standardSevenRows = [
+    {
+      adminName: 'MEINDA MAULINA',
+      duties: ['Toko DR. Soetomo'],
+      additionalDuties: [],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: true
+    },
+    {
+      adminName: 'CANDRA MAULANA',
+      duties: ['Sanggar Retail'],
+      additionalDuties: [],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    },
+    {
+      adminName: 'BINTANG MEDITA SARI',
+      duties: ['Ketapang Wongsorejo'],
+      additionalDuties: ['NX', 'AKS'],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    },
+    {
+      adminName: 'FATAUDIN RIFKY MAULANA',
+      duties: ['Kalibaru Retail'],
+      additionalDuties: ['Ekspor Argo', 'BT'],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    },
+    {
+      adminName: 'PIPIT ISTIANI',
+      duties: ['Grosir Srono Sumberayu Muncar'],
+      additionalDuties: ['HP Telkomsel', 'Retur'],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    },
+    {
+      adminName: 'IZZUL BAHRUL HISAM',
+      duties: ['Susulan Rogojampi Muncar'],
+      additionalDuties: ['HP XL', 'Ekspor Transaksi'],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    },
+    {
+      adminName: 'MOHAMMAD SHOIM',
+      duties: ['Sempu Stail'],
+      additionalDuties: [],
+      attendanceStatus: 'hadir' as const,
+      isBackupAcc: false
+    }
+  ];
 
   return [
-    {
-      id: 'sch-1',
-      date: getD(12),
-      adminName: a1,
-      branchId: 'cab-banyuwangi',
-      duties: ['Muncar Pasar', 'Rogojampi Retail'],
-      additionalDuties: ['HP Telkomsel', 'Ekspor Argo'],
-      shiftTime: '08:00 - 16:00',
-      isBackupAcc: true,
-      notes: 'Penjadwalan harian operasional',
-      attendanceStatus: 'hadir'
-    },
-    {
-      id: 'sch-2',
-      date: getD(12),
-      adminName: a2,
-      branchId: 'cab-banyuwangi',
-      duties: ['Denpasar 1', 'Denpasar 2'],
-      additionalDuties: ['Ekspor Transaksi', 'HP XL'],
-      shiftTime: '08:00 - 16:00',
-      isBackupAcc: false,
-      notes: 'Fokus area luar kota & antar pulau',
-      attendanceStatus: 'hadir'
-    },
-    {
-      id: 'sch-3',
-      date: getD(12),
-      adminName: a3,
-      branchId: 'cab-banyuwangi',
-      duties: ['Genteng Retail', 'BWI Kota Selatan'],
-      additionalDuties: ['NX', 'Retur'],
-      shiftTime: '08:00 - 16:00',
-      isBackupAcc: false,
-      notes: 'Koordinasi ritase pagi',
-      attendanceStatus: 'hadir'
-    },
-    {
-      id: 'sch-4',
-      date: getD(12),
-      adminName: a4,
-      branchId: 'cab-banyuwangi',
-      duties: ['Jember Selatan', 'Jember Barat'],
-      additionalDuties: ['BT', 'AKS'],
-      shiftTime: '08:00 - 16:00',
-      isBackupAcc: false,
-      notes: 'Koordinasi pengiriman area Jember',
-      attendanceStatus: 'hadir'
-    }
+    ...buildDayEntries(12, [
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Kalibaru Retail'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['Ketapang Wongsorejo'], additionalDuties: ['NX', 'AKS'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Grosir Srono Sumberayu Muncar'], additionalDuties: ['HP Telkomsel', 'Retur'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Susulan Rogojampi Muncar'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Sempu Stail'], additionalDuties: [] },
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true }
+    ]),
+    ...buildDayEntries(13, [
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['Srono Retail'], additionalDuties: ['NX', 'Retur'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Grosir Jajag Sanggar Purwo'], additionalDuties: ['HP Telkomsel'] },
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Purwo Pasar'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Negara'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Jember Kota'], additionalDuties: ['AKS'] }
+    ]),
+    ...buildDayEntries(14, [
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['Susulan Genteng Rogojampi'], additionalDuties: ['NX'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Kanvas LKT'], additionalDuties: ['HP Telkomsel', 'Retur'] },
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Denpasar 1'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Situbondo'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Bondowoso'], additionalDuties: ['AKS'] }
+    ]),
+    ...buildDayEntries(16, [
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['Galekan Retail'], additionalDuties: ['NX', 'AKS'] },
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Sumberayu Retail'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Grosir Banyuwangi Rogojampi'], additionalDuties: ['HP Telkomsel', 'Retur'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Susulan Sanggar Jajag'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Muncar Pinggir'], additionalDuties: [] }
+    ]),
+    ...buildDayEntries(17, [
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['Muncar Pasar'], additionalDuties: ['NX', 'AKS'] },
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Denpasar 1'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Rogojampi Retail'], additionalDuties: ['HP Telkomsel', 'Retur'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Genteng Retail'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Jember Selatan'], additionalDuties: [] }
+    ]),
+    ...buildDayEntries(18, [
+      { adminName: 'MEINDA MAULINA', duties: ['Toko DR. Soetomo'], additionalDuties: [], isBackupAcc: true },
+      { adminName: 'BINTANG MEDITA SARI', duties: ['BWI Kota Selatan'], additionalDuties: ['NX', 'AKS'] },
+      { adminName: 'FATAUDIN RIFKY MAULANA', duties: ['Jember Barat'], additionalDuties: ['Ekspor Argo', 'BT'] },
+      { adminName: 'PIPIT ISTIANI', duties: ['Grosir Genteng Gendoh'], additionalDuties: ['HP Telkomsel', 'Retur'] },
+      { adminName: 'IZZUL BAHRUL HISAM', duties: ['Singaraja'], additionalDuties: ['HP XL', 'Ekspor Transaksi'] },
+      { adminName: 'MOHAMMAD SHOIM', duties: ['Denpasar 2'], additionalDuties: [] }
+    ]),
+    ...buildDayEntries(19, standardSevenRows),
+    ...buildDayEntries(20, standardSevenRows),
+    ...buildDayEntries(21, standardSevenRows)
   ];
 }
 
@@ -544,7 +618,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   }, [selectedMonth, selectedYear, yearNum, monthIndex]);
 
   const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
-    return createInitialSchedules(['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA']);
+    return createInitialSchedules();
   });
 
   const persistAdminSchedulesToServer = (nextSchedules: AdminDailyScheduleItem[]) => {
@@ -566,13 +640,17 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       .then(r => r.json())
       .then(res => {
         if (!active) return;
-        if (res && res.success && Array.isArray(res.schedules) && res.schedules.length > 0) {
-          setSchedules(res.schedules);
+        const incoming = Array.isArray(res?.schedules) ? res.schedules : [];
+        const isLegacyFourStub =
+          incoming.length <= 4 &&
+          incoming.every((it: any) => ['sch-1', 'sch-2', 'sch-3', 'sch-4'].includes(String(it?.id || '')));
+        if (res && res.success && incoming.length > 0 && !isLegacyFourStub) {
+          setSchedules(incoming);
           try {
-            localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(res.schedules));
+            localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(incoming));
           } catch {}
         } else {
-          const initial = createInitialSchedules(['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA']);
+          const initial = createInitialSchedules();
           setSchedules(initial);
           persistAdminSchedulesToServer(initial);
         }
@@ -583,7 +661,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
           if (saved) {
             const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (Array.isArray(parsed) && parsed.length > 4) {
               setSchedules(parsed);
             }
           }
@@ -1036,29 +1114,97 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Shared Sales Header & Branch/Period Filters */}
-      <SalesHeaderFilter
-        title="Jadwal & Penugasan Admin Penjualan"
-        subtitle={`Pengaturan jadwal harian, area handling, dan kehadiran admin · Cabang ${activeBranchName}`}
-        activeTab="jadwal_admin"
-        onTabChange={handleTopTabChange}
-        selectedAdmin={selectedAdmin}
-        onAdminChange={setSelectedAdmin}
-        selectedMonth={selectedMonth}
-        onMonthChange={setSelectedMonth}
-        selectedYear={selectedYear}
-        onYearChange={setSelectedYear}
-        selectedBranchId={effectiveBranchId}
-        onBranchChange={branchId => {
-          setSelectedBranchId(branchId);
-          branchStore.setActiveBranchId(branchId);
-          setSelectedAdmin('SEMUA ADMIN');
-        }}
-        showBranchFilter={true}
-        hideStatsCards={true}
-        adminOptions={adminOptions}
-      />
+    <div className="space-y-5">
+      {/* Page Title & Subtitle */}
+      <div>
+        <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          Jadwal &amp; Penugasan Admin Penjualan
+        </h1>
+        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+          Kelola jadwal kerja bulanan, rincian jadwal area kirim, jobdesk tambahan harian, dan pemilahan Admin Cabang Nusantara &amp; Sidoarjo.
+        </p>
+      </div>
+
+      {/* Filter Bar Card (Cabang, Periode Bulan & Tahun, Ekspor to Excel) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xs">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-4 flex-1">
+            {/* Filter Cabang Admin Penjualan */}
+            <div className="w-full sm:w-72">
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
+                Filter Cabang Admin Penjualan
+              </label>
+              <div className="relative">
+                <select
+                  value={effectiveBranchId}
+                  onChange={e => {
+                    const nextId = e.target.value;
+                    setSelectedBranchId(nextId);
+                    branchStore.setActiveBranchId(nextId);
+                    setSelectedAdmin('SEMUA ADMIN');
+                  }}
+                  className="w-full appearance-none px-3.5 py-2.5 pr-9 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  {accessibleBranches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      Cabang {b.id === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Periode Bulan & Tahun */}
+            <div>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
+                Periode Bulan &amp; Tahun
+              </label>
+              <div className="flex items-center gap-2.5">
+                <div className="relative w-40 sm:w-44">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <select
+                    value={selectedMonth}
+                    onChange={e => setSelectedMonth(e.target.value)}
+                    className="w-full appearance-none pl-9 pr-8 py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {MONTH_OPTIONS.map(m => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+
+                <div className="relative w-28 sm:w-32">
+                  <select
+                    value={selectedYear}
+                    onChange={e => setSelectedYear(e.target.value)}
+                    className="w-full appearance-none px-3.5 pr-8 py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 cursor-pointer tabular-nums"
+                  >
+                    {['2025', '2026', '2027'].map(y => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs transition cursor-pointer shrink-0"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Ekspor to Excel</span>
+          </button>
+        </div>
+      </div>
 
       {/* Toast Notification */}
       {saveToast && (
@@ -1077,130 +1223,35 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         </div>
       )}
 
-      {/* Compact 3-Card KPI Strip (Jadwal Bulan Ini, Hadir Hari Ini, Prosentase Kehadiran Admin) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Jadwal Bulan Ini
-            </span>
-            <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-slate-900 dark:text-white tabular-nums">
-              {kpiStats.totalMonthEntries}
-            </span>
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Penugasan
-            </span>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Hadir ({formatShortDateId(selectedDateIso)})
-            </span>
-            <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-slate-900 dark:text-white tabular-nums">
-              {kpiStats.hadirTodayCount}
-            </span>
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              / {salesAdminNames.length} Admin {activeBranchName}
-            </span>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Prosentase Kehadiran Admin
-            </span>
-            <Percent className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline justify-between gap-2">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {kpiStats.attendancePercent}%
-              </span>
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400 tabular-nums">
-                ({kpiStats.hadirMonthCount}/{kpiStats.totalMonthEntries} Hadir)
-              </span>
-            </div>
-            {kpiStats.absentMonthCount > 0 && (
-              <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 shrink-0 tabular-nums">
-                {kpiStats.absentMonthCount} Ijin/Sakit
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Monthly Calendar Card (Zero Nested Scrollbars Inside Cells) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3.5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+      {/* Monthly Calendar Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
-              <Calendar className="w-4 h-4" />
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/70 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+              <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
-                  Kalender Penugasan — {selectedMonth} {selectedYear}
-                </h2>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                  <Building2 className="w-3 h-3 text-indigo-500" />
-                  Cabang {activeBranchName}
+              <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                Kalender Jadwal &amp; Penugasan Admin ({selectedMonth} {selectedYear}){' '}
+                <span className="font-semibold text-slate-500 dark:text-slate-400">
+                  · Cabang {activeBranchName}
                 </span>
-              </div>
+              </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Pilih tanggal untuk melihat rincian area handling dan status kehadiran admin.
+                Klik tanggal pada kalender untuk melihat dan mengelola rincian jadwal area kirim &amp; jobdesk di tabel bawah.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Compact Legend */}
-            <div className="hidden xl:flex items-center gap-3 mr-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-indigo-500" /> Hadir
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-500" /> Ijin / Sakit
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Ekspor Excel</span>
-            </button>
-
-            {canEditSchedules && filteredMonthSchedules.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950/70 text-rose-700 dark:text-rose-300 text-xs font-bold border border-rose-200 dark:border-rose-900 transition cursor-pointer"
-                title={`Kosongkan jadwal Cabang ${activeBranchName} bulan ini`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Kosongkan Bulan</span>
-              </button>
-            )}
-
+          <div className="flex items-center gap-2.5 flex-wrap">
             {canEditSchedules ? (
               <button
                 type="button"
                 onClick={() => openManualModalForDate(selectedDateIso)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Buat Jadwal Manual</span>
+                <span>Buat Jadwal</span>
               </button>
             ) : (
               <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-bold border border-slate-200 dark:border-slate-700">
@@ -1212,22 +1263,36 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         </div>
 
         {/* 7-Column Weekday Header */}
-        <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-950/70 py-2 rounded-xl border border-slate-200 dark:border-slate-800">
-          <div className="text-rose-600 dark:text-rose-400">Minggu</div>
-          <div>Senin</div>
-          <div>Selasa</div>
-          <div>Rabu</div>
-          <div>Kamis</div>
-          <div>Jumat</div>
-          <div className="text-indigo-600 dark:text-indigo-400">Sabtu</div>
+        <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-black uppercase tracking-wider">
+          <div className="py-2 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400">
+            Minggu
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Senin
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Selasa
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Rabu
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Kamis
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Jumat
+          </div>
+          <div className="py-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300">
+            Sabtu
+          </div>
         </div>
 
-        {/* Calendar Grid — Clean, Spacious, Zero Inner Scrollbars */}
-        <div className="grid grid-cols-7 gap-1.5">
+        {/* Calendar Grid */}
+        <div className="grid grid-cols-7 gap-2">
           {Array.from({ length: firstDayOfWeek }).map((_, idx) => (
             <div
               key={`empty-${idx}`}
-              className="min-h-[92px] sm:min-h-[104px] rounded-xl bg-slate-50/40 dark:bg-slate-950/20 border border-dashed border-slate-200/70 dark:border-slate-800/50"
+              className="min-h-[116px] sm:min-h-[126px] rounded-2xl bg-slate-50/40 dark:bg-slate-950/20 border border-dashed border-slate-200/70 dark:border-slate-800/50"
             />
           ))}
 
@@ -1236,84 +1301,85 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
             const dateIso = formatDateIso(yearNum, monthIndex, dayNum);
             const daySchedules = schedulesByDate[dateIso] || [];
             const isSelected = dateIso === selectedDateIso;
-            const isToday = dateIso === todayIso;
             const dayOfWeek = (firstDayOfWeek + idx) % 7;
             const isSunday = dayOfWeek === 0;
-            const visibleItems = daySchedules.slice(0, 3);
-            const overflowCount = daySchedules.length - visibleItems.length;
 
             return (
               <div
                 key={dateIso}
                 onClick={() => setSelectedDateIso(dateIso)}
-                className={`min-h-[92px] sm:min-h-[104px] p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between select-none ${
+                className={`min-h-[116px] sm:min-h-[126px] p-2.5 rounded-2xl border transition-all cursor-pointer flex flex-col select-none ${
                   isSelected
-                    ? 'bg-indigo-50/90 dark:bg-indigo-950/45 border-indigo-500 ring-2 ring-indigo-500/30 shadow-xs z-10'
+                    ? 'bg-indigo-50/40 dark:bg-indigo-950/35 border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs z-10'
                     : isSunday
-                    ? 'bg-rose-50/55 dark:bg-rose-950/20 border-rose-200/80 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/35'
-                    : daySchedules.length > 0
-                    ? 'bg-white dark:bg-slate-900/90 border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:bg-slate-50/60 dark:hover:bg-slate-800/50'
-                    : 'bg-slate-50/50 dark:bg-slate-950/30 border-slate-200/70 dark:border-slate-800/70 hover:bg-slate-100/70 dark:hover:bg-slate-900/60'
+                    ? 'bg-rose-50/20 dark:bg-rose-950/15 border-rose-100/90 dark:border-rose-900/40 hover:border-rose-200'
+                    : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700'
                 }`}
               >
                 {/* Cell Header */}
-                <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span
-                    className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black tabular-nums ${
+                    className={`inline-flex items-center justify-center text-xs font-black tabular-nums ${
                       isSelected
-                        ? 'bg-indigo-600 text-white'
-                        : isToday
-                        ? 'bg-indigo-100 dark:bg-indigo-900/70 text-indigo-700 dark:text-indigo-200 ring-1 ring-indigo-400'
+                        ? 'w-6 h-6 rounded-lg bg-indigo-600 text-white'
                         : isSunday
                         ? 'text-rose-600 dark:text-rose-400'
-                        : daySchedules.length > 0
-                        ? 'text-slate-900 dark:text-white'
-                        : 'text-slate-400 dark:text-slate-500'
+                        : 'text-slate-900 dark:text-white'
                     }`}
                   >
                     {dayNum}
                   </span>
 
                   {daySchedules.length > 0 && (
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 tabular-nums">
-                      {daySchedules.length} Adm
+                    <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/70 tabular-nums">
+                      {daySchedules.length} Admin
                     </span>
                   )}
                 </div>
 
-                {/* Cell Content (Max 3 Clean Rows + Overflow) */}
-                {daySchedules.length > 0 ? (
-                  <div className="mt-1.5 space-y-1">
-                    {visibleItems.map(item => {
+                {/* Cell Content (Admin Name + Area Kirim Badge) */}
+                {daySchedules.length > 0 && (
+                  <div className="space-y-1 overflow-y-auto max-h-[86px] pr-0.5">
+                    {daySchedules.map(item => {
                       const isAbsent =
                         item.attendanceStatus === 'ijin' || item.attendanceStatus === 'sakit';
-                      const dotColor = isAbsent ? 'bg-rose-500' : 'bg-indigo-500';
-                      const rowBg = isAbsent
-                        ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200/80 dark:border-rose-800/70'
-                        : 'bg-slate-100/90 dark:bg-slate-800/90 text-slate-800 dark:text-slate-200 border-slate-200/80 dark:border-slate-700/80';
+                      const safeDuties = Array.isArray(item.duties) ? item.duties : [];
+                      const areaDuties = safeDuties.filter(
+                        d =>
+                          typeof d === 'string' &&
+                          !ADDITIONAL_JOBDESK_OPTIONS.includes(d) &&
+                          d !== 'Back Up ACC' &&
+                          !isNonAreaTerm(d)
+                      );
+                      const primaryAreaLabel = isAbsent
+                        ? item.attendanceStatus === 'sakit'
+                          ? 'Sakit'
+                          : 'Ijin'
+                        : areaDuties.length > 0
+                        ? getCompactAreaLabel(areaDuties[0])
+                        : 'Bertugas';
 
                       return (
                         <div
                           key={item.id}
-                          className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded-md border text-[10px] font-bold leading-tight ${rowBg}`}
-                          title={`${item.adminName}${isAbsent ? ` (${item.attendanceStatus?.toUpperCase()})` : ''}`}
+                          className="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-md bg-slate-50/90 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 text-[10px] leading-tight"
+                          title={`${item.adminName} — ${primaryAreaLabel}`}
                         >
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-                          <span className="truncate flex-1">{getShortAdminName(item.adminName)}</span>
+                          <span className="font-black text-slate-800 dark:text-slate-200 truncate max-w-[44%]">
+                            {getShortAdminName(item.adminName)}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-semibold truncate max-w-[54%] ${
+                              isAbsent
+                                ? 'bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300'
+                                : 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300'
+                            }`}
+                          >
+                            {primaryAreaLabel}
+                          </span>
                         </div>
                       );
                     })}
-                    {overflowCount > 0 && (
-                      <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 px-1">
-                        +{overflowCount} lainnya
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <span className={`text-[10px] font-medium ${isSunday ? 'text-rose-400 dark:text-rose-500' : 'text-slate-300 dark:text-slate-700'}`}>
-                      {isSunday ? 'Libur' : '—'}
-                    </span>
                   </div>
                 )}
               </div>
@@ -1322,38 +1388,48 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         </div>
       </div>
 
-      {/* Selected Day Detail Table Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70 dark:bg-slate-950/40">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-center shrink-0">
-              <ClipboardList className="w-4 h-4" />
+      {/* Selected Day Detail Table Card (Desain Semula Sesuai Gambar 2) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
+              <ClipboardList className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Rincian Penugasan — {formatReadableDateId(selectedDateIso)}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                  Rincian Jadwal &amp; Penugasan Admin — {formatReadableDateId(selectedDateIso)}
                 </h3>
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 tabular-nums">
-                  ({selectedDateSchedules.length} Admin)
+                <span className="px-2.5 py-0.5 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800 tabular-nums">
+                  {selectedDateSchedules.length} Admin
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Cabang {activeBranchName} · Mapping otomatis mengikuti hak akses User Manajemen
+                {isSidoarjoBranch
+                  ? 'Rincian penugasan harian area kirim faktur dan kehadiran.'
+                  : 'Rincian penugasan harian area kirim faktur, jobdesk tambahan, status Back Up ACC, dan kehadiran.'}
               </p>
             </div>
           </div>
 
-          {canEditSchedules && (
-            <button
-              type="button"
-              onClick={() => openManualModalForDate(selectedDateIso)}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah Penugasan Tanggal Ini</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 tabular-nums">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              Hadir: {kpiStats.hadirTodayCount}
+            </span>
+
+            {!isSidoarjoBranch && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 tabular-nums">
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                Back Up ACC:{' '}
+                {
+                  selectedDateSchedules.filter(
+                    s => s.isBackupAcc && s.attendanceStatus !== 'ijin' && s.attendanceStatus !== 'sakit'
+                  ).length
+                }
+              </span>
+            )}
+          </div>
         </div>
 
         {selectedDateSchedules.length === 0 ? (
@@ -1368,34 +1444,41 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
                 {salesAdminNames.length === 0
                   ? `Belum ada akun Adm. Penjualan yang terpetakan ke Cabang ${activeBranchName} di menu User Manajemen.`
-                  : `Klik tombol di bawah untuk membuat jadwal penugasan Admin Penjualan Cabang ${activeBranchName}.`}
+                  : `Gunakan tombol "Buat Jadwal" di atas kalender untuk mengatur jadwal penugasan Admin Penjualan Cabang ${activeBranchName}.`}
               </p>
             </div>
-            {canEditSchedules && salesAdminNames.length > 0 && (
-              <button
-                type="button"
-                onClick={() => openManualModalForDate(selectedDateIso)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Buat Jadwal untuk {formatShortDateId(selectedDateIso)}</span>
-              </button>
-            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[640px]">
+            <table className="w-full text-left border-collapse min-w-[780px]">
               <thead>
-                <tr className="bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  <th className="py-2.5 px-4 w-56">Admin Penjualan</th>
-                  <th className="py-2.5 px-4 w-36">Status Kehadiran</th>
-                  <th className="py-2.5 px-4">Area Handling</th>
-                  {!isSidoarjoBranch && <th className="py-2.5 px-4 w-64">Jobdesk Tambahan</th>}
-                  {canEditSchedules && <th className="py-2.5 px-4 text-right w-24">Aksi</th>}
+                <tr className="bg-slate-50/90 dark:bg-slate-950/60 border-b border-slate-200/80 dark:border-slate-800 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <th className="py-3.5 px-4 text-center w-14 border-r border-slate-100 dark:border-slate-800/70">
+                    NO
+                  </th>
+                  <th className="py-3.5 px-5 w-72 border-r border-slate-100 dark:border-slate-800/70">
+                    NAMA ADMIN
+                  </th>
+                  <th className="py-3.5 px-5 w-48 border-r border-slate-100 dark:border-slate-800/70">
+                    STATUS &amp; PERAN
+                  </th>
+                  <th className="py-3.5 px-5 border-r border-slate-100 dark:border-slate-800/70">
+                    RINCIAN JADWAL (AREA KIRIM)
+                  </th>
+                  {!isSidoarjoBranch && (
+                    <th
+                      className={`py-3.5 px-5 w-80 ${
+                        canEditSchedules ? 'border-r border-slate-100 dark:border-slate-800/70' : ''
+                      }`}
+                    >
+                      JOBDESK TAMBAHAN
+                    </th>
+                  )}
+                  {canEditSchedules && <th className="py-3.5 px-4 text-right w-24">AKSI</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
-                {selectedDateSchedules.map(item => {
+                {selectedDateSchedules.map((item, idx) => {
                   const safeDuties = Array.isArray(item.duties) ? item.duties : [];
                   const safeAdditional = Array.isArray(item.additionalDuties) ? item.additionalDuties : [];
                   const areaDuties = safeDuties.filter(
@@ -1418,69 +1501,84 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                      className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                     >
-                      {/* Admin Name */}
-                      <td className="py-3 px-4 align-top">
-                        <div className="flex items-center gap-2.5">
+                      {/* NO */}
+                      <td className="py-4 px-4 text-center font-bold text-slate-600 dark:text-slate-400 text-xs tabular-nums border-r border-slate-100 dark:border-slate-800/70">
+                        {idx + 1}
+                      </td>
+
+                      {/* NAMA ADMIN */}
+                      <td className="py-4 px-5 border-r border-slate-100 dark:border-slate-800/70">
+                        <div className="flex items-center gap-3.5">
                           <div
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-black shrink-0 ${
+                            className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xs font-black shrink-0 border ${
                               isAbsent
-                                ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300'
-                                : 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300'
+                                ? 'bg-rose-100/80 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border-rose-200/80 dark:border-rose-800'
+                                : 'bg-indigo-100/80 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200/80 dark:border-indigo-800'
                             }`}
                           >
                             {getInitials(item.adminName)}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-bold text-slate-900 dark:text-white truncate">
+                            <div className="font-black text-slate-900 dark:text-white uppercase tracking-tight truncate">
                               {item.adminName}
                             </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              {meta?.roleLabel || 'Adm. Penjualan'} · {activeBranchName}
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
+                              {meta?.roleLabel || 'Adm. Penjualan'}
                             </div>
                           </div>
                         </div>
                       </td>
 
-                      {/* Attendance Status */}
-                      <td className="py-3 px-4 align-top">
-                        <div className="flex flex-col items-start gap-1.5">
-                          {isAbsent ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                              <UserX className="w-3 h-3" />
-                              {item.attendanceStatus === 'sakit' ? 'Sakit' : 'Ijin'}
+                      {/* STATUS & PERAN */}
+                      <td className="py-4 px-5 border-r border-slate-100 dark:border-slate-800/70">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {item.attendanceStatus === 'sakit' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                              Sakit
+                            </span>
+                          ) : item.attendanceStatus === 'ijin' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                              Ijin
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                              <UserCheck className="w-3 h-3" />
-                              Hadir
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                              Hadir Kerja
                             </span>
                           )}
 
                           {isAbsent && item.absenceReason && (
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug block w-full">
                               {item.absenceReason}
                             </span>
                           )}
                         </div>
                       </td>
 
-                      {/* Area Handling */}
-                      <td className="py-3 px-4 align-top">
+                      {/* RINCIAN JADWAL (AREA KIRIM) */}
+                      <td className="py-4 px-5 border-r border-slate-100 dark:border-slate-800/70">
                         {isAbsent ? (
-                          <span className="text-slate-400 italic">Tidak bertugas (Absen)</span>
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50/60 dark:bg-amber-950/40 text-slate-700 dark:text-amber-200 border border-amber-200/90 dark:border-amber-800">
+                            <UserX className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>
+                              Tidak bertugas ({item.attendanceStatus === 'sakit' ? 'Sakit' : 'Ijin'})
+                            </span>
+                          </span>
                         ) : areaDuties.length === 0 ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-slate-400 italic">Belum ada area kirim</span>
                         ) : (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-2">
                             {areaDuties.map(area => (
                               <span
                                 key={area}
                                 title={area}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50/70 dark:bg-indigo-950/50 text-indigo-950 dark:text-indigo-200 border border-indigo-200/80 dark:border-indigo-800/80"
                               >
-                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <MapPin className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
                                 <span>{getCompactAreaLabel(area)}</span>
                               </span>
                             ))}
@@ -1488,26 +1586,28 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                         )}
                       </td>
 
-                      {/* Jobdesk Tambahan (Khusus Non-Sidoarjo / Cabang Nusantara) */}
+                      {/* JOBDESK TAMBAHAN (Khusus Non-Sidoarjo / Cabang Nusantara) */}
                       {!isSidoarjoBranch && (
-                        <td className="py-3 px-4 align-top">
+                        <td
+                          className={`py-4 px-5 ${
+                            canEditSchedules ? 'border-r border-slate-100 dark:border-slate-800/70' : ''
+                          }`}
+                        >
                           {isAbsent ? (
-                            <span className="text-slate-400 italic">—</span>
-                          ) : rowAdditionalDuties.length === 0 && !item.isBackupAcc ? (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-slate-400 font-bold">—</span>
+                          ) : rowAdditionalDuties.length === 0 ? (
+                            <span className="text-xs italic text-slate-400 dark:text-slate-500">
+                              Tidak ada jobdesk tambahan
+                            </span>
                           ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {item.isBackupAcc && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
-                                  Back Up ACC
-                                </span>
-                              )}
+                            <div className="flex flex-wrap gap-2">
                               {rowAdditionalDuties.map(duty => (
                                 <span
                                   key={duty}
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50/70 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 border border-amber-200/90 dark:border-amber-800/80"
                                 >
-                                  {duty}
+                                  <Briefcase className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                  <span>{duty}</span>
                                 </span>
                               ))}
                             </div>
@@ -1515,9 +1615,9 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                         </td>
                       )}
 
-                      {/* Actions */}
+                      {/* AKSI */}
                       {canEditSchedules && (
-                        <td className="py-3 px-4 align-top text-right">
+                        <td className="py-4 px-4 text-right">
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"

@@ -8,6 +8,7 @@ import { SkillMatrixTab } from './SkillMatrixTab';
 import { JobdeskConfigTab } from './JobdeskConfigTab';
 import { SalesInvoiceSoTab, SalesRfidScannerAppTab } from './SalesLoadingRfidSystem';
 import { SalesFormKirimTab } from './FormKirimSystem';
+import { MuatReturValidationTab } from './MuatReturValidationTab';
 import type { NavTab } from '../Sidebar';
 
 export type SalesAdminSubTab =
@@ -18,6 +19,7 @@ export type SalesAdminSubTab =
   | 'invoice_so'
   | 'form_kirim'
   | 'rfid_scanner'
+  | 'muat_validation'
   | 'skill_matrix'
   | 'jobdesk';
 
@@ -77,6 +79,9 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
       )}
       {effectiveTab === 'form_kirim' && (
         <SalesFormKirimTab />
+      )}
+      {effectiveTab === 'muat_validation' && (
+        <MuatReturValidationTab />
       )}
       {effectiveTab === 'skill_matrix' && (
         <SkillMatrixTab adminOptions={adminOptions} />

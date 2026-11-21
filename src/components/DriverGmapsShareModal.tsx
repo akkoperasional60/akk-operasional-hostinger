@@ -19,12 +19,19 @@ import {
   Trash2,
   Images,
   ChevronDown,
-  Check
+  Check,
+  RotateCcw,
+  PackageMinus,
+  PackagePlus,
+  PackageX,
+  Search,
+  Package
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { driverReportService, DriverHelperReport } from '../services/driverReportService';
 import { driverWaybillService } from '../services/driverWaybillService';
+import { databaseBarangService, DatabaseBarangRecord } from '../services/databaseBarangService';
 import { logisticsStore } from '../services/store';
 import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
 import {
@@ -35,7 +42,16 @@ import {
   drawExifMetadataOnCanvas
 } from '../utils/exifMetadata';
 
-export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'isi_bbm';
+export type GmapsReportCategory =
+  | 'kendala_jalan'
+  | 'akhir_kiriman'
+  | 'istirahat'
+  | 'update_lokasi'
+  | 'isi_bbm'
+  | 'retur'
+  | 'kurang_muat'
+  | 'lebih_muat'
+  | 'salah_muat';
 
 interface DriverGmapsShareModalProps {
   isOpen: boolean;
@@ -73,10 +89,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   initialCategory,
   onReportSubmitted
 }) => {
-  const isHelperJobdesk = userJobdeskRole === 'helper';
-  const [category, setCategory] = useState<GmapsReportCategory>(
-    isHelperJobdesk ? 'kendala_jalan' : 'isi_bbm'
-  );
+  const [category, setCategory] = useState<GmapsReportCategory>(initialCategory || 'isi_bbm');
+  const isItemIssueCategory =
+    category === 'retur' ||
+    category === 'kurang_muat' ||
+    category === 'lebih_muat' ||
+    category === 'salah_muat';
   const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
   const [photoList, setPhotoList] = useState<string[]>([]);
@@ -88,10 +106,19 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const photoDataUrl = photoList[activePhotoIndex] || photoList[0] || null;
   const activePhotoExif = photoExifList[activePhotoIndex] || photoExifList[0] || null;
 
-  // State Fitur Antri di Customer & Absen Setiap Kiriman ke Pelanggan
+  // State Fitur Antri di Customer, Absen Pelanggan, serta Retur / Kurang Muat / Lebih Muat / Salah Muat
   const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
   const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
   const [customerNameInput, setCustomerNameInput] = useState<string>('');
+  const [issueItemName, setIssueItemName] = useState<string>('');
+  const [issueItemCode, setIssueItemCode] = useState<string>('');
+  const [issueItemUnit, setIssueItemUnit] = useState<string>('');
+  const [issueQty, setIssueQty] = useState<string>('');
+  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
+  const [dbBarangItems, setDbBarangItems] = useState<DatabaseBarangRecord[]>(() => databaseBarangService.getAll());
+  const [isLoadingDbBarang, setIsLoadingDbBarang] = useState<boolean>(false);
+  const [isBarangDropdownOpen, setIsBarangDropdownOpen] = useState<boolean>(false);
+  const [barangSearchQuery, setBarangSearchQuery] = useState<string>('');
   const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('Farly');
   const [isFuelDropdownOpen, setIsFuelDropdownOpen] = useState<boolean>(false);
   const [fuelLiters, setFuelLiters] = useState<string>('');
@@ -159,6 +186,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     setActivePhotoIndex(0);
     setCustomerOutletInput('');
     setCustomerNameInput('');
+    setIssueItemName('');
+    setIssueItemCode('');
+    setIssueItemUnit('');
+    setIssueQty('');
+    setInvoiceNumber('');
+    setIsBarangDropdownOpen(false);
+    setBarangSearchQuery('');
     setFuelLiters('');
     setValidationError(null);
     setCameraError(null);
@@ -166,6 +200,42 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (cameraInputRef.current) cameraInputRef.current.value = '';
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  // Sinkronisasi Database Barang untuk dropdown Nama Barang + fitur pencarian identik Database Barang
+  useEffect(() => {
+    if (!isOpen) return;
+    const current = databaseBarangService.getAll();
+    if (current.length > 0) {
+      setDbBarangItems(current);
+    } else {
+      setIsLoadingDbBarang(true);
+    }
+    void databaseBarangService.ensureHydrated().then(rows => {
+      setDbBarangItems(rows);
+      setIsLoadingDbBarang(false);
+    }).catch(() => {
+      setIsLoadingDbBarang(false);
+    });
+
+    const handleDbBarangUpdate = () => {
+      setDbBarangItems(databaseBarangService.getAll());
+      setIsLoadingDbBarang(false);
+    };
+    window.addEventListener('akk-database-barang-updated', handleDbBarangUpdate);
+    return () => {
+      window.removeEventListener('akk-database-barang-updated', handleDbBarangUpdate);
+    };
+  }, [isOpen]);
+
+  const filteredDbBarangItems = React.useMemo(() => {
+    const q = barangSearchQuery.trim();
+    if (!q) {
+      return dbBarangItems.slice(0, 80);
+    }
+    return dbBarangItems
+      .filter(item => databaseBarangService.matchesSearchQuery(item, q))
+      .slice(0, 80);
+  }, [dbBarangItems, barangSearchQuery]);
 
   // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini
   const todayStr = new Date().toISOString().split('T')[0];
@@ -241,11 +311,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (isOpen) {
       resetFormFields();
       setQueueCompletedToast(null);
-      if (initialCategory) {
-        setCategory(isHelperJobdesk && initialCategory === 'isi_bbm' ? 'kendala_jalan' : initialCategory);
-      } else {
-        setCategory(isHelperJobdesk ? 'kendala_jalan' : 'isi_bbm');
-      }
+      setCategory(initialCategory || 'isi_bbm');
       setAutoPlateNumber(plateNumber ? plateNumber.trim() : '');
 
       refreshActiveQueue();
@@ -286,7 +352,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         gpsWatchIdRef.current = null;
       }
     };
-  }, [isOpen, driverId, plateNumber, isHelperJobdesk, initialCategory]);
+  }, [isOpen, driverId, plateNumber, userJobdeskRole, initialCategory]);
 
   // Timer detikan real-time selama kru sedang mengantri di customer
   useEffect(() => {
@@ -409,8 +475,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const effectivePreciseGps = React.useMemo(() => {
     const targetPointName =
-      category === 'istirahat'
-        ? customerNameInput.trim()
+      category === 'istirahat' || isItemIssueCategory
+        ? customerNameInput.trim() || issueItemName.trim()
         : category === 'isi_bbm'
         ? `SPBU ${fuelLocation}`
         : customerOutletInput.trim();
@@ -420,7 +486,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       rawLat: hasLiveGpsFix ? driverLat : null,
       rawLng: hasLiveGpsFix ? driverLng : null
     });
-  }, [category, customerNameInput, fuelLocation, customerOutletInput, currentAreaName, hasLiveGpsFix, driverLat, driverLng]);
+  }, [category, isItemIssueCategory, customerNameInput, issueItemName, fuelLocation, customerOutletInput, currentAreaName, hasLiveGpsFix, driverLat, driverLng]);
 
   // Watermark stamper helper (disertai EXIF Tag Metadata Kunci: DateTimeOriginal, DateTimeDigitized, OffsetTimeOriginal, SubSecTimeOriginal)
   const applyWatermarkToCanvas = (canvas: HTMLCanvasElement, exifInput?: ExifTimestampMetadata): string => {
@@ -441,13 +507,31 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     ctx.fillStyle = grad;
     ctx.fillRect(0, bannerY, w, bannerHeight);
 
-    ctx.fillStyle = category === 'kendala_jalan' ? '#e11d48' : category === 'isi_bbm' ? '#d97706' : '#2563eb';
+    ctx.fillStyle =
+      category === 'kendala_jalan' || category === 'salah_muat'
+        ? '#e11d48'
+        : category === 'isi_bbm' || category === 'kurang_muat'
+        ? '#d97706'
+        : category === 'lebih_muat'
+        ? '#0d9488'
+        : category === 'retur'
+        ? '#9333ea'
+        : '#2563eb';
     ctx.fillRect(0, bannerY, w, 4);
 
     const fontSize = Math.max(12, Math.floor(w * 0.024));
     ctx.textBaseline = 'top';
 
-    ctx.fillStyle = category === 'isi_bbm' ? '#fbbf24' : '#60a5fa';
+    ctx.fillStyle =
+      category === 'isi_bbm' || category === 'kurang_muat'
+        ? '#fbbf24'
+        : category === 'lebih_muat'
+        ? '#2dd4bf'
+        : category === 'retur'
+        ? '#c084fc'
+        : category === 'salah_muat'
+        ? '#fb7185'
+        : '#60a5fa';
     ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
     const titleTag =
       category === 'kendala_jalan' && reportSubMode === 'antri_customer'
@@ -456,6 +540,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         ? '⚠️ KENDALA DI JALAN'
         : category === 'isi_bbm'
         ? `⛽ ISI BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
+        : category === 'retur'
+        ? '🔄 BARANG RETUR PELANGGAN'
+        : category === 'kurang_muat'
+        ? '📦 LAPORAN KURANG MUAT'
+        : category === 'lebih_muat'
+        ? '📦+ LAPORAN LEBIH MUAT'
+        : category === 'salah_muat'
+        ? '⚠️ LAPORAN SALAH MUAT'
         : category === 'akhir_kiriman'
         ? '📦 AKHIR KIRIMAN (POD)'
         : '✅ ABSEN KIRIMAN PELANGGAN';
@@ -467,6 +559,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const targetCustomerLabel =
       category === 'istirahat' && customerNameInput.trim()
         ? `Pelanggan: ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})`
+        : isItemIssueCategory
+        ? `${customerNameInput.trim() ? `Toko: ${customerNameInput.trim()} | ` : ''}${issueItemName.trim() || 'Barang'}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}`
         : category === 'isi_bbm'
         ? `Lokasi BBM: ${fuelLocation}`
         : `Area: ${currentAreaName}`;
@@ -579,6 +673,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         ? '🚨 LAPORAN KENDALA DI JALAN'
         : category === 'isi_bbm'
         ? `⛽ LAPORAN PENGISIAN BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
+        : category === 'retur'
+        ? '🔄 LAPORAN BARANG RETUR'
+        : category === 'kurang_muat'
+        ? '📦 LAPORAN KURANG MUAT BARANG'
+        : category === 'lebih_muat'
+        ? '📦+ LAPORAN LEBIH MUAT BARANG'
+        : category === 'salah_muat'
+        ? '⚠️ LAPORAN SALAH MUAT BARANG'
         : category === 'akhir_kiriman'
         ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
         : '✅ ABSEN KIRIMAN KE PELANGGAN';
@@ -586,6 +688,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const customerLine =
       category === 'istirahat' && customerNameInput.trim()
         ? `*Nama Pelanggan:* ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})\n`
+        : isItemIssueCategory
+        ? `${customerNameInput.trim() ? `*Nama Pelanggan / Toko:* ${customerNameInput.trim()}\n` : ''}${invoiceNumber.trim() ? `*No. Faktur / SO:* ${invoiceNumber.trim()}\n` : ''}${issueItemName.trim() ? `*Nama Barang:* ${issueItemName.trim()}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}\n` : ''}`
         : category === 'isi_bbm'
         ? `*Lokasi SPBU:* ${fuelLocation}\n`
         : '';
@@ -637,16 +741,64 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       }
     }
 
+    if (isItemIssueCategory) {
+      if (category === 'retur' && !customerNameInput.trim()) {
+        setValidationError('Harap isi Nama Pelanggan / Toko untuk laporan Barang Retur.');
+        return;
+      }
+      if (!issueItemName.trim()) {
+        setValidationError(
+          category === 'retur'
+            ? 'Harap pilih Nama Barang yang diretur dari daftar Database Barang.'
+            : category === 'kurang_muat'
+            ? 'Harap pilih Nama Barang yang kurang muat dari daftar Database Barang.'
+            : category === 'lebih_muat'
+            ? 'Harap pilih Nama Barang yang lebih muat dari daftar Database Barang.'
+            : 'Harap pilih Nama Barang yang salah muat dari daftar Database Barang.'
+        );
+        return;
+      }
+      if (photoList.length === 0) {
+        setValidationError(
+          category === 'retur'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Barang Retur terlebih dahulu.'
+            : category === 'kurang_muat'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Kurang Muat terlebih dahulu.'
+            : category === 'lebih_muat'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Lebih Muat terlebih dahulu.'
+            : 'Harap ambil atau unggah minimal 1 Foto Bukti Salah Muat terlebih dahulu.'
+        );
+        return;
+      }
+    }
+
+    const issuePrefix =
+      category === 'retur'
+        ? `[RETUR BARANG${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
+        : category === 'kurang_muat'
+        ? `[KURANG MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
+        : category === 'lebih_muat'
+        ? `[LEBIH MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
+        : category === 'salah_muat'
+        ? `[SALAH MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
+        : '';
+    const itemSummaryPart = isItemIssueCategory
+      ? `Barang: ${issueItemName.trim()}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}${invoiceNumber.trim() ? ` | No. Faktur/SO: ${invoiceNumber.trim()}` : ''} | GPS: ${effectivePreciseGps.coordsFormatted}`
+      : '';
+
     const submittedNotes =
       category === 'istirahat'
         ? `[ABSEN KIRIMAN PELANGGAN: ${customerNameInput.trim()}] ${notes.trim() || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}`
         : category === 'isi_bbm'
         ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}${photoList.length > 1 ? ` (${photoList.length} Foto Bukti)` : ''}`
+        : isItemIssueCategory
+        ? `${issuePrefix} ${itemSummaryPart}${notes.trim() ? ` — ${notes.trim()}` : ''}`
         : notes.trim() || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Laporan kendala pengiriman di jalan');
 
     const submittedPhoto = photoList[0] || null;
     const submittedPhotos = [...photoList];
-    const submittedCustomer = category === 'istirahat' ? customerNameInput.trim() : undefined;
+    const submittedCustomer =
+      category === 'istirahat' || isItemIssueCategory ? customerNameInput.trim() || undefined : undefined;
     const finalLat = effectivePreciseGps.latitude;
     const finalLng = effectivePreciseGps.longitude;
     const finalGmapsUrl = effectivePreciseGps.gmapsUrl;
@@ -656,10 +808,18 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
       driverName: driverName,
+      userRole: userJobdeskRole === 'helper' ? 'Helper' : 'Driver',
       plateNumber: autoPlateNumber || '-',
       category,
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
       customerOutletName: submittedCustomer,
+      issueItemName: isItemIssueCategory ? issueItemName.trim() : undefined,
+      issueItemCode: isItemIssueCategory && issueItemCode ? issueItemCode : undefined,
+      issueItemUnit: isItemIssueCategory && issueItemUnit ? issueItemUnit : undefined,
+      issueQty: isItemIssueCategory ? issueQty.trim() || undefined : undefined,
+      invoiceNumber: isItemIssueCategory ? invoiceNumber.trim() || undefined : undefined,
+      validationDecision: isItemIssueCategory ? 'pending' : undefined,
+      gpsValidationStatus: isItemIssueCategory ? 'unchecked' : undefined,
       fuelLocation: category === 'isi_bbm' ? fuelLocation : undefined,
       exifMetadata: primaryExif,
       deliveryId: activeDelivery?.id,
@@ -700,6 +860,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       ? 'KENDALA DI JALAN'
       : category === 'isi_bbm'
       ? `ISI BBM (${fuelLocation.toUpperCase()})`
+      : category === 'retur'
+      ? 'BARANG RETUR'
+      : category === 'kurang_muat'
+      ? 'KURANG MUAT'
+      : category === 'lebih_muat'
+      ? 'LEBIH MUAT'
+      : category === 'salah_muat'
+      ? 'SALAH MUAT'
       : category === 'akhir_kiriman'
       ? 'AKHIR KIRIMAN'
       : 'ABSEN PELANGGAN';
@@ -926,23 +1094,17 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Header - Clean Cohesive Design */}
           <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-sm font-black shrink-0 ${
-                isHelperJobdesk ? 'bg-cyan-600' : 'bg-blue-600'
-              }`}>
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm font-black shrink-0">
                 <Share2 className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-sm font-black text-white">
-                    {isHelperJobdesk
-                      ? 'Laporan Kendala & Absen Pelanggan'
-                      : 'Laporan BBM, Kendala & Absen Pelanggan'}
+                    Laporan BBM, Kendala, Absen &amp; Barang
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  {isHelperJobdesk
-                    ? 'Unggah foto bukti kendala rute dan penyerahan kiriman pelanggan'
-                    : 'Unggah foto bukti pengisian BBM, kendala rute, atau penyerahan kiriman pelanggan'}
+                  Unggah foto bukti pengisian BBM, kendala rute, absen pelanggan, retur, kurang muat, lebih muat, atau salah muat
                 </p>
               </div>
             </div>
@@ -966,25 +1128,23 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Pilih Kategori:
               </label>
-              <div className={`grid grid-cols-1 ${isHelperJobdesk ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2`}>
-                {!isHelperJobdesk && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetFormFields();
-                      setCategory('isi_bbm');
-                      setReportSubMode('kendala_umum');
-                    }}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                      category === 'isi_bbm'
-                        ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Fuel className="w-3.5 h-3.5 shrink-0" />
-                    <span>Isi (Foto) BBM</span>
-                  </button>
-                )}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFields();
+                    setCategory('isi_bbm');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'isi_bbm'
+                      ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Fuel className="w-3.5 h-3.5 shrink-0" />
+                  <span>Isi BBM</span>
+                </button>
 
                 <button
                   type="button"
@@ -993,14 +1153,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     setCategory('kendala_jalan');
                     setReportSubMode('kendala_umum');
                   }}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     category === 'kendala_jalan'
                       ? 'bg-rose-600 border-rose-500 text-white shadow-xs'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Fitur Kendala</span>
+                  <span>Kendala</span>
                 </button>
 
                 <button
@@ -1010,7 +1170,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     setCategory('istirahat');
                     setReportSubMode('kendala_umum');
                   }}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     category === 'istirahat' || category === 'update_lokasi'
                       ? 'bg-blue-600 border-blue-500 text-white shadow-xs'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -1018,6 +1178,25 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 >
                   <Store className="w-3.5 h-3.5 shrink-0" />
                   <span>Absen Pelanggan</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isItemIssueCategory) {
+                      resetFormFields();
+                      setCategory('retur');
+                      setReportSubMode('kendala_umum');
+                    }
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    isItemIssueCategory
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <PackageX className="w-3.5 h-3.5 shrink-0" />
+                  <span>Upload Kesalahan</span>
                 </button>
               </div>
             </div>
@@ -1247,6 +1426,353 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             )}
 
+            {/* 🔄📦⚠️ FITUR UPLOAD KESALAHAN (RETUR, KURANG MUAT, LEBIH MUAT & SALAH MUAT) */}
+            {isItemIssueCategory && (
+              <div className={`p-3.5 rounded-2xl border bg-slate-950 space-y-3 ${
+                category === 'retur'
+                  ? 'border-purple-500/35'
+                  : category === 'kurang_muat'
+                  ? 'border-orange-500/35'
+                  : category === 'lebih_muat'
+                  ? 'border-teal-500/35'
+                  : 'border-red-500/35'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                    category === 'retur'
+                      ? 'bg-purple-500/15 border-purple-500/30 text-purple-400'
+                      : category === 'kurang_muat'
+                      ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
+                      : category === 'lebih_muat'
+                      ? 'bg-teal-500/15 border-teal-500/30 text-teal-400'
+                      : 'bg-red-500/15 border-red-500/30 text-red-400'
+                  }`}>
+                    {category === 'retur' ? (
+                      <RotateCcw className="w-4 h-4" />
+                    ) : category === 'kurang_muat' ? (
+                      <PackageMinus className="w-4 h-4" />
+                    ) : category === 'lebih_muat' ? (
+                      <PackagePlus className="w-4 h-4" />
+                    ) : (
+                      <PackageX className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">
+                      Upload Kesalahan Barang ({category === 'retur'
+                        ? 'Retur'
+                        : category === 'kurang_muat'
+                        ? 'Kurang Muat'
+                        : category === 'lebih_muat'
+                        ? 'Lebih Muat'
+                        : 'Salah Muat'})
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Pilih kategori kesalahan di bawah dan lampirkan foto bukti untuk divalidasi Admin Penjualan &amp; SPV Logistik.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Dropdown Pilihan Kategori Upload Kesalahan */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                    Pilih Jenis Kesalahan *
+                  </label>
+                  <select
+                    value={category}
+                    onChange={(e) => {
+                      setCategory(e.target.value as GmapsReportCategory);
+                      if (validationError) setValidationError(null);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="retur">Retur</option>
+                    <option value="kurang_muat">Kurang Muat</option>
+                    <option value="lebih_muat">Lebih Muat</option>
+                    <option value="salah_muat">Salah Muat</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      Nama Pelanggan / Toko {category === 'retur' ? '*' : '(Opsional)'}
+                    </label>
+                    <input
+                      type="text"
+                      value={customerNameInput}
+                      onChange={(e) => {
+                        setCustomerNameInput(e.target.value);
+                        if (validationError) setValidationError(null);
+                      }}
+                      placeholder="Contoh: Toko Sumber Makmur / KDS"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      No. Faktur / SO (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      placeholder="Contoh: FJ02-1126-0615"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="sm:col-span-2 space-y-1 relative">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between gap-2">
+                      <span>Nama Barang / Item Bermasalah *</span>
+                      <span className="text-[9px] font-semibold text-blue-400">
+                        Database Barang ({dbBarangItems.length} SKU)
+                      </span>
+                    </label>
+
+                    {/* Dropdown Trigger untuk Nama Barang dari Database Barang */}
+                    <button
+                      type="button"
+                      onClick={() => setIsBarangDropdownOpen(prev => !prev)}
+                      className={`w-full bg-slate-900 border rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                        isBarangDropdownOpen
+                          ? 'border-blue-500 ring-2 ring-blue-500/20'
+                          : 'border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Package className={`w-3.5 h-3.5 shrink-0 ${issueItemName ? 'text-blue-400' : 'text-slate-500'}`} />
+                        {issueItemName ? (
+                          <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                            {issueItemCode && (
+                              <span className="px-1.5 py-0.2 rounded bg-blue-500/20 border border-blue-500/35 text-blue-300 font-mono text-[10px] font-bold shrink-0">
+                                {issueItemCode}
+                              </span>
+                            )}
+                            <span className="text-white font-bold truncate">
+                              {issueItemName}
+                            </span>
+                            {issueItemUnit && (
+                              <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[9px] font-bold shrink-0">
+                                {issueItemUnit}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500 font-medium truncate">
+                            Pilih atau cari barang dari Database Barang...
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown
+                        className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
+                          isBarangDropdownOpen ? 'rotate-180 text-blue-400' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {/* Dropdown Panel Database Barang dengan Fitur Pencarian Identik Database Barang */}
+                    {isBarangDropdownOpen && (
+                      <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 z-30">
+                        {/* Search Bar Identik Database Barang */}
+                        <div className="p-2 bg-slate-950 border-b border-slate-800">
+                          <div className="relative flex items-center">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={barangSearchQuery}
+                              onChange={(e) => setBarangSearchQuery(e.target.value)}
+                              placeholder="Cari kode barang, nama barang, ukuran, atau satuan..."
+                              autoFocus
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-8 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                            />
+                            {barangSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setBarangSearchQuery('')}
+                                className="absolute right-2.5 text-slate-400 hover:text-white cursor-pointer"
+                                title="Bersihkan pencarian"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 px-1">
+                            <span>
+                              {isLoadingDbBarang
+                                ? 'Memuat katalog Database Barang...'
+                                : barangSearchQuery.trim()
+                                ? `Ditemukan ${filteredDbBarangItems.length} barang sesuai pencarian`
+                                : `Menampilkan daftar dari ${dbBarangItems.length} SKU Database Barang`}
+                            </span>
+                            {issueItemName && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIssueItemName('');
+                                  setIssueItemCode('');
+                                  setIssueItemUnit('');
+                                }}
+                                className="text-rose-400 hover:underline font-bold cursor-pointer"
+                              >
+                                Reset Pilihan
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* List Barang dari Database Barang */}
+                        <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/80">
+                          {filteredDbBarangItems.length > 0 ? (
+                            filteredDbBarangItems.map((item) => {
+                              const formattedLabel = `${item.deskripsiBarang}`;
+                              const isSelected =
+                                (issueItemCode && issueItemCode === item.noBarang) ||
+                                issueItemName === formattedLabel ||
+                                issueItemName === `${item.deskripsiBarang} [${item.noBarang}]`;
+                              const unitLabel = item.unit1 || item.satuan || 'Pcs';
+                              const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
+                              return (
+                                <button
+                                  key={item.id || item.noBarang}
+                                  type="button"
+                                  onClick={() => {
+                                    setIssueItemName(formattedLabel);
+                                    setIssueItemCode(item.noBarang);
+                                    setIssueItemUnit(unitLabel);
+                                    setIsBarangDropdownOpen(false);
+                                    if (validationError) setValidationError(null);
+                                  }}
+                                  className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected ? 'bg-blue-600/15' : 'hover:bg-slate-800/80'
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-blue-300 font-mono text-[10px] font-bold">
+                                        {item.noBarang}
+                                      </span>
+                                      <span className={`text-xs font-bold truncate ${isSelected ? 'text-blue-300' : 'text-white'}`}>
+                                        {item.deskripsiBarang}
+                                      </span>
+                                    </div>
+                                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
+                                      <span>Satuan: <strong className="text-slate-300">{unitLabel}</strong></span>
+                                      {item.unit2 && (
+                                        <span>• Unit 2: {item.unit2}</span>
+                                      )}
+                                      {hasDim && (
+                                        <span className="font-mono">
+                                          • {item.panjangCm}×{item.lebarCm}×{item.tinggiCm} cm
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div
+                                    className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
+                                      isSelected
+                                        ? 'bg-blue-600 border-blue-400 text-white'
+                                        : 'border-slate-700 bg-slate-950 text-transparent'
+                                    }`}
+                                  >
+                                    <Check className="w-3 h-3 stroke-[3]" />
+                                  </div>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="p-4 text-center text-slate-400 space-y-1">
+                              <div className="text-xs font-bold text-slate-300">
+                                {isLoadingDbBarang
+                                  ? 'Sedang memuat data dari Database Barang...'
+                                  : 'Barang tidak ditemukan di Database Barang'}
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                Ketik nama barang di kolom pencarian di atas atau gunakan tombol di bawah.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Opsi Gunakan Kata Kunci Pencarian Manual jika item khusus */}
+                          {barangSearchQuery.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIssueItemName(barangSearchQuery.trim());
+                                setIssueItemCode('');
+                                setIssueItemUnit('');
+                                setIsBarangDropdownOpen(false);
+                                if (validationError) setValidationError(null);
+                              }}
+                              className="w-full px-3 py-2.5 bg-slate-950 hover:bg-slate-800 text-left flex items-center justify-between gap-2 text-blue-300 font-bold text-xs cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Plus className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                                <span className="truncate">
+                                  Gunakan nama barang: &ldquo;{barangSearchQuery.trim()}&rdquo;
+                                </span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 shrink-0">
+                                Pilih Manual
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      Jumlah / Qty
+                    </label>
+                    <input
+                      type="text"
+                      value={issueQty}
+                      onChange={(e) => setIssueQty(e.target.value)}
+                      placeholder={issueItemUnit ? `Cth: 2 ${issueItemUnit}` : 'Cth: 2 Bal / 5 Pcs'}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Precise GPS Pin Preview untuk Validasi Super Admin & SPV Logistik */}
+                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-blue-500/30 flex items-center justify-between gap-2">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <MapPin className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[11px] font-bold text-white truncate">
+                          {effectivePreciseGps.subAreaLabel}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[9px] font-bold">
+                          Validasi GPS Super Admin &amp; SPV Logistik
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-mono tabular-nums text-blue-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <span>GPS: {effectivePreciseGps.coordsFormatted}</span>
+                        {gpsAccuracyMeters !== null && hasLiveGpsFix && (
+                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
+                            Akurasi ±{gpsAccuracyMeters}m
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={requestFreshGpsLocation}
+                    className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                    title="Segarkan titik koordinat GPS presisi"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingGps ? 'animate-spin' : ''}`} />
+                    <span>Perbarui GPS</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Nomor Kendaraan Armada */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
@@ -1310,7 +1836,19 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <span>{category === 'istirahat' ? 'Foto Bukti Kiriman ke Pelanggan (Kamera) *:' : 'Unggah Foto Bukti (Kamera):'}</span>
+                  <span>
+                    {category === 'istirahat'
+                      ? 'Foto Bukti Kiriman ke Pelanggan (Kamera) *:'
+                      : category === 'retur'
+                      ? 'Foto Bukti Barang Retur (Kamera / Upload) *:'
+                      : category === 'kurang_muat'
+                      ? 'Foto Bukti Kurang Muat (Kamera / Upload) *:'
+                      : category === 'lebih_muat'
+                      ? 'Foto Bukti Lebih Muat (Kamera / Upload) *:'
+                      : category === 'salah_muat'
+                      ? 'Foto Bukti Salah Muat (Kamera / Upload) *:'
+                      : 'Unggah Foto Bukti (Kamera):'}
+                  </span>
                   {photoList.length > 0 && (
                     <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-black">
                       {photoList.length} Foto Siap Kirim
@@ -1504,6 +2042,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                           ? 'Foto penyerahan kiriman (bisa >1 foto)'
                           : category === 'isi_bbm'
                           ? `Foto isi BBM (${fuelLocation})`
+                          : category === 'retur'
+                          ? 'Foto bukti barang retur (bisa >1 foto)'
+                          : category === 'kurang_muat'
+                          ? 'Foto bukti kurang muat (bisa >1 foto)'
+                          : category === 'lebih_muat'
+                          ? 'Foto bukti lebih muat (bisa >1 foto)'
+                          : category === 'salah_muat'
+                          ? 'Foto bukti salah muat (bisa >1 foto)'
                           : 'Ambil foto bukti kamera (bisa >1 foto)'}
                       </div>
                     </div>
@@ -1537,6 +2083,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   {category === 'istirahat'
                     ? 'Catatan Kiriman Pelanggan (Opsional):'
+                    : isItemIssueCategory
+                    ? 'Kronologi / Keterangan Tambahan (Opsional):'
                     : 'Keterangan / Catatan Laporan:'}
                 </label>
                 <textarea
@@ -1547,6 +2095,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       ? 'Contoh: Sedang mengantri bongkar di gudang customer karena ada 2 armada di depan...'
                       : category === 'kendala_jalan'
                       ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
+                      : category === 'retur'
+                      ? 'Contoh: Barang dikembalikan toko karena kemasan penyok / salah ukuran...'
+                      : category === 'kurang_muat'
+                      ? 'Contoh: Di faktur tertulis 10 bal, fisik yang termuat di armada hanya 8 bal...'
+                      : category === 'lebih_muat'
+                      ? 'Contoh: Di faktur tertulis 10 bal, fisik yang termuat di armada ada 12 bal (lebih 2 bal)...'
+                      : category === 'salah_muat'
+                      ? 'Contoh: Tertukar item dus ukuran 30x20 seharusnya 40x30...'
                       : category === 'akhir_kiriman'
                       ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
                       : 'Contoh: Barang diterima lengkap oleh PIC toko dalam kondisi baik...'
@@ -1581,6 +2137,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   ? `Simpan Absen${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
                   : category === 'isi_bbm'
                   ? `Simpan Laporan BBM${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'retur'
+                  ? `Simpan Retur${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'kurang_muat'
+                  ? `Simpan Kurang Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'lebih_muat'
+                  ? `Simpan Lebih Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'salah_muat'
+                  ? `Simpan Salah Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
                   : `Simpan Laporan${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`}
               </span>
             </button>

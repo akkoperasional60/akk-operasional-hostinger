@@ -4586,7 +4586,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.put("/api/logistics/crew-rotation-state", requireLogisticsWrite, express.json({ limit: '15mb' }), async (req, res) => {
+  app.put("/api/logistics/crew-rotation-state", requireAuth, express.json({ limit: '15mb' }), async (req, res) => {
     const payload = req.body || {};
     inMemoryCrewRotationState = payload;
     try {

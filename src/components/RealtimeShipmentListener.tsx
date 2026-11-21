@@ -27,8 +27,18 @@ export const RealtimeShipmentListener: React.FC = () => {
 
   useEffect(() => {
     return logisticsStore.subscribe(() => {
-      setCurrentUser(logisticsStore.getCurrentUser());
-      setActiveCrew(logisticsStore.getActiveDriverCrew());
+      const nextUser = logisticsStore.getCurrentUser();
+      setCurrentUser(prev =>
+        prev?.id === nextUser?.id &&
+        prev?.role === nextUser?.role &&
+        prev?.fullName === nextUser?.fullName
+          ? prev
+          : nextUser
+      );
+      const nextCrew = logisticsStore.getActiveDriverCrew();
+      setActiveCrew(prev =>
+        prev?.id === nextCrew?.id && prev?.name === nextCrew?.name ? prev : nextCrew
+      );
     });
   }, []);
 

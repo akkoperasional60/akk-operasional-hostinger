@@ -19,8 +19,8 @@ import { canAccess, getFirstAccessibleTabForUser, getUserRoleDisplayTitle } from
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
+import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import {
-  loadExecutiveDashboard,
   loadScheduleManagement,
   loadFleetCrewManagement,
   loadSparePartManagement,
@@ -50,7 +50,15 @@ import {
   lazyWithRetry
 } from './utils/tabLoaders';
 
-const ExecutiveDashboard = lazyWithRetry(loadExecutiveDashboard);
+if (typeof window !== 'undefined') {
+  try {
+    const initialTab = resolveTabFromUrl(window.location).tab;
+    if (initialTab) {
+      preloadTabsSequential([initialTab], 0);
+    }
+  } catch {}
+}
+
 const ScheduleManagement = lazyWithRetry(loadScheduleManagement);
 const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
 const SparePartManagement = lazyWithRetry(loadSparePartManagement);
@@ -509,7 +517,7 @@ export default function App() {
       if (active) {
         setIsAuthChecking(false);
       }
-    }, 1800);
+    }, 400);
 
     void logisticsStore.restoreServerSession().catch(() => {}).finally(() => {
       if (active) {
@@ -652,6 +660,7 @@ export default function App() {
       case 'sales_schedules': return 'Admin Penjualan: Jadwal & Penugasan Admin';
       case 'sales_loading_duration': return 'Sales Hub: Durasi Muat Real-Time';
       case 'sales_form_kirim': return 'Sales Hub: Form Kirim Barang';
+      case 'sales_muat_validation': return 'Admin Penjualan: Validasi Muat & Retur (Salah Muat, Kurang Muat & Retur)';
       case 'sales_skill_matrix': return 'Sales Hub: Matriks Keterampilan Admin';
       case 'sales_jobdesk': return 'Sales Hub: Konfigurasi SOP & Jobdesk';
       case 'sales_kpi': return 'Sales Hub: Data Kinerja & KPI Penjualan';
@@ -1099,6 +1108,13 @@ export default function App() {
           {currentTab === 'sales_rfid_scanner' && (
             <SalesAdminHub
               activeSubTab="rfid_scanner"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_muat_validation' && (
+            <SalesAdminHub
+              activeSubTab="muat_validation"
               onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
             />
           )}

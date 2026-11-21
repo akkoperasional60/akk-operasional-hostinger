@@ -71,7 +71,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
   const branchScopedFleets = useMemo(() => {
     return fleets.filter(fl => {
-      const bId = branchStore.getFleetBranchId(fl.id, fl.plateNumber, fl.initialCode);
+      const bId = branchStore.getFleetBranchId(fl.id, fl.plateNumber, fl.initialCode, fl.branchId);
       if (effectiveBranchId === 'ALL') return accessibleBranchIdSet.has(bId);
       return bId === effectiveBranchId;
     });
@@ -95,17 +95,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     setCrewFilterSearch('');
     setFleetFilterSearch('');
   }, [effectiveBranchId]);
-  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
-    const schedules = logisticsStore.getSchedules();
-    const validDates = schedules
-      .map(s => new Date(s.departureDate || s.returnDate || ''))
-      .filter(d => !isNaN(d.getTime()))
-      .sort((a, b) => b.getTime() - a.getTime());
-    if (validDates.length > 0) {
-      return validDates[0].getMonth();
-    }
-    return new Date().getMonth();
-  });
+  const [selectedMonth, setSelectedMonth] = useState<number>(-1);
   const [selectedYear, setSelectedYear] = useState<number>(() => {
     const schedules = logisticsStore.getSchedules();
     const validDates = schedules
@@ -207,10 +197,33 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     setTimeout(() => setFeedbackMessage(null), 3500);
   };
 
+  const getDeduplicatedCrewAreaTrips = (crewName: string, crewId: string, areaName: string): CrewDeliveryHistory[] => {
+    const targetNameNorm = (crewName || '').trim().toLowerCase();
+    const targetAreaNorm = (areaName || '').trim().toUpperCase();
+    const sourceList = filteredHistory.length > 0 ? filteredHistory : history;
+    const rawMatches = sourceList.filter(h => {
+      const matchesPerson =
+        (crewId && h.crewId === crewId) ||
+        (targetNameNorm && (h.crewName || '').trim().toLowerCase() === targetNameNorm);
+      const matchesArea = (h.area || '').trim().toUpperCase() === targetAreaNorm;
+      return matchesPerson && matchesArea;
+    });
+
+    const seenKeys = new Set<string>();
+    const deduped: CrewDeliveryHistory[] = [];
+    rawMatches.forEach(item => {
+      const dateSlice = (item.completionDate || '').slice(0, 10);
+      const dedupKey = item.scheduleId || `${dateSlice}_${(item.area || '').trim().toUpperCase()}`;
+      if (seenKeys.has(dedupKey)) return;
+      seenKeys.add(dedupKey);
+      deduped.push(item);
+    });
+    return deduped;
+  };
+
   const handleOpenSimulateApproval = (crewName: string, crewId: string, areaName: string, tripCount: number) => {
-    const areaTrips = history.filter(
-      h => (h.crewId === crewId || h.crewName === crewName) && h.area.toLowerCase() === areaName.toLowerCase()
-    );
+    const areaTrips = getDeduplicatedCrewAreaTrips(crewName, crewId, areaName);
+    const effectiveCount = Math.max(tripCount, areaTrips.length);
 
     setModalData({
       isOpen: true,
@@ -219,24 +232,23 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       areaName,
       storeName: areaTrips[0]?.storeName || `Distribusi ${areaName}`,
       plateNumber: areaTrips[0]?.vehiclePlate || 'P 8125 VC',
-      tripCount,
+      tripCount: effectiveCount,
       threshold,
       recentTrips: areaTrips
     });
   };
 
   const handleOpenInspectPopover = (crewName: string, crewId: string, areaName: string, tripCount: number) => {
-    const areaTrips = history.filter(
-      h => (h.crewId === crewId || h.crewName === crewName) && h.area.toLowerCase() === areaName.toLowerCase()
-    );
+    const areaTrips = getDeduplicatedCrewAreaTrips(crewName, crewId, areaName);
+    const effectiveCount = Math.max(tripCount, areaTrips.length);
     setPopoverData({
       isOpen: true,
       title: `${areaName} · ${crewName}`,
-      subtitle: `Rincian ${tripCount} perjalanan tercatat pada log operasional`,
+      subtitle: `Rincian ${effectiveCount} perjalanan tercatat pada log operasional`,
       crewName,
       crewId,
       areaName,
-      tripCount,
+      tripCount: effectiveCount,
       maxLimit: threshold,
       trips: areaTrips
     });
@@ -398,20 +410,33 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     const seenCrewTripKeys = new Set<string>();
 
     filteredHistory.forEach(item => {
-      const key = item.crewId || item.crewName;
+      const cleanName = (item.crewName || '').trim();
+      const matchedCrew = crews.find(
+        c => c.id === item.crewId || (cleanName && c.name.trim().toLowerCase() === cleanName.toLowerCase())
+      );
+      const canonicalId = matchedCrew?.id || item.crewId || cleanName;
+      const canonicalName = matchedCrew?.name || cleanName || item.crewId;
+      const key = (canonicalName || canonicalId).trim().toLowerCase();
+
+      const areaNorm = (item.area || '').trim().toUpperCase();
       const dateSlice = (item.completionDate || '').slice(0, 10);
-      const dedupKey = `${key}__${item.scheduleId || `${dateSlice}_${item.area.toLowerCase().trim()}`}`;
+      const dedupKey = `${key}__${item.scheduleId || `${dateSlice}_${areaNorm}`}`;
       if (seenCrewTripKeys.has(dedupKey)) return;
       seenCrewTripKeys.add(dedupKey);
 
-      const rawInit = item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
+      const trkFullInit = item.trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i)?.[1]?.trim();
+      const rawInit = item.initialCode || trkFullInit || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
       const resolvedFl = resolveCanonicalFleet(rawInit, item.vehiclePlate);
 
       if (!map[key]) {
+        const rawRole = matchedCrew?.role || (item.notes?.includes('Helper') ? 'Helper' : 'Driver');
+        const normalizedRole = rawRole.toLowerCase().includes('helper') || rawRole.toLowerCase().includes('kernet')
+          ? 'Helper'
+          : 'Driver';
         map[key] = {
-          crewId: item.crewId,
-          crewName: item.crewName,
-          role: item.notes?.includes('Helper') ? 'Kru Helper' : 'Driver Utama',
+          crewId: canonicalId,
+          crewName: canonicalName,
+          role: normalizedRole,
           totalTrips: 0,
           exceededCount: 0,
           maxSingleAreaTrips: 0,
@@ -423,20 +448,19 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         map[key].fleetsUsed.add(resolvedFl.initialCode);
       }
       map[key].totalTrips += 1;
-      const areaKey = item.area;
-      if (!map[key].areas[areaKey]) {
-        map[key].areas[areaKey] = {
-          areaName: areaKey,
+      if (!map[key].areas[areaNorm]) {
+        map[key].areas[areaNorm] = {
+          areaName: item.area.trim(),
           tripCount: 0,
           isExceeded: false,
           lastDate: item.completionDate
         };
       }
-      map[key].areas[areaKey].tripCount += 1;
-      if (item.completionDate > map[key].areas[areaKey].lastDate) {
-        map[key].areas[areaKey].lastDate = item.completionDate;
+      map[key].areas[areaNorm].tripCount += 1;
+      if (item.completionDate > map[key].areas[areaNorm].lastDate) {
+        map[key].areas[areaNorm].lastDate = item.completionDate;
       }
-      map[key].areas[areaKey].isExceeded = map[key].areas[areaKey].tripCount >= threshold;
+      map[key].areas[areaNorm].isExceeded = map[key].areas[areaNorm].tripCount >= threshold;
     });
 
     const list = Object.values(map).map(crew => {
@@ -456,7 +480,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       : list;
 
     return filteredByToggle.sort((a, b) => b.totalTrips - a.totalTrips);
-  }, [filteredHistory, threshold, onlyExceededFilter, resolveCanonicalFleet]);
+  }, [filteredHistory, crews, threshold, onlyExceededFilter, resolveCanonicalFleet]);
 
   // Integrated Real-time Fleet (Inisial Mobil) Area Stats from Jadwal & Penugasan (1 Jadwal / Hari = 1 Trip Armada, tanpa terduplikasi baris Helper)
   const fleetAreaStatsList = useMemo(() => {
@@ -518,10 +542,12 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         return;
       }
 
+      const trkFullInit = item.trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i)?.[1]?.trim();
       const rawInit =
-        item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || 'DS3';
+        item.initialCode || trkFullInit || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || 'DS3';
       const resolved = resolveCanonicalFleet(rawInit, item.vehiclePlate);
       const key = resolved.initialCode;
+      const areaNorm = (item.area || '').trim().toUpperCase();
 
       const resolvedIso =
         (item.scheduleId && scheduleDateById.get(item.scheduleId)) ||
@@ -529,10 +555,10 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       const dateSlice = resolvedIso.slice(0, 10);
       const uniqueTripKey = item.scheduleId
         ? `${key}__sch__${item.scheduleId}`
-        : `${key}__date__${dateSlice}__${item.area.toLowerCase().trim()}`;
+        : `${key}__date__${dateSlice}__${areaNorm}`;
 
       // Pastikan juga 1 mobil di tanggal & area yang sama tidak dihitung ganda
-      const dateAreaKey = `${key}__day__${dateSlice}__${item.area.toLowerCase().trim()}`;
+      const dateAreaKey = `${key}__day__${dateSlice}__${areaNorm}`;
       if (seenFleetTripKeys.has(uniqueTripKey) || (dateSlice && seenFleetTripKeys.has(dateAreaKey))) {
         return;
       }
@@ -554,11 +580,11 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
       const formattedDate = formatFleetTripDate(resolvedIso || item.completionDate);
       map[key].totalTrips += 1;
-      if (!map[key].areas[item.area]) {
-        map[key].areas[item.area] = { count: 0, dates: [] };
+      if (!map[key].areas[areaNorm]) {
+        map[key].areas[areaNorm] = { count: 0, dates: [] };
       }
-      map[key].areas[item.area].count += 1;
-      map[key].areas[item.area].dates.push({
+      map[key].areas[areaNorm].count += 1;
+      map[key].areas[areaNorm].dates.push({
         iso: formattedDate.iso,
         label: formattedDate.label,
         driverName: item.crewName || '-'
@@ -953,9 +979,9 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
       {/* Main Workspace: Collapsible Filter & Konfigurasi Bar + Full-Width Content Viewport */}
       <div className="space-y-3">
-        {/* 2. FILTER & KONFIGURASI (Full-width sleek bar when minimized, structured grid when expanded — no empty space below) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 transition-all">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* 2. FILTER & KONFIGURASI (Balanced, clean grid when expanded — no uneven protruding cards) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 transition-all shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -966,29 +992,39 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 <Sliders className="w-3.5 h-3.5 text-blue-400" />
                 <span>Filter &amp; Konfigurasi</span>
                 {activeFiltersCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-blue-600 text-white">
+                  <span className="px-1.5 py-0.2 rounded-md text-[10px] font-black font-mono bg-blue-600 text-white">
                     {activeFiltersCount}
                   </span>
                 )}
               </button>
 
-              {/* Ringkasan Filter Aktif saat Diminimize */}
+              {/* Ringkasan Filter & Status Data Ditampilkan */}
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                <span className="px-2 py-1 rounded-md bg-slate-950 border border-slate-800 font-medium text-slate-300">
-                  Periode: {selectedMonth === -1 ? 'Semua Bulan' : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'short' })} {selectedYear}
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-medium text-slate-300">
+                  Periode: <strong className="text-white">{selectedMonth === -1 ? 'Semua Bulan' : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'short' })} {selectedYear}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-medium text-slate-300 flex items-center gap-1.5">
+                  <Users className="w-3 h-3 text-blue-400" />
+                  <span>Kru Aktif:</span>
+                  <strong className="text-white font-mono tabular-nums">{crewAreaStatsList.length} Kru</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-medium text-slate-300 flex items-center gap-1.5">
+                  <Truck className="w-3 h-3 text-amber-400" />
+                  <span>Unit Armada:</span>
+                  <strong className="text-white font-mono tabular-nums">{fleetAreaStatsList.length} Unit</strong>
                 </span>
                 {selectedCrewId !== 'all' && (
-                  <span className="px-2 py-1 rounded-md bg-blue-500/15 border border-blue-500/30 font-semibold text-blue-300">
+                  <span className="px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 font-semibold text-blue-300">
                     Kru Terfilter
                   </span>
                 )}
                 {selectedFleetFilter !== 'all' && (
-                  <span className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
+                  <span className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
                     Armada: {selectedFleetFilter}
                   </span>
                 )}
                 {onlyExceededFilter && (
-                  <span className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
+                  <span className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 font-semibold text-amber-300">
                     &ge; {threshold}x Kirim
                   </span>
                 )}
@@ -1015,7 +1051,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                   onClick={() => {
                     setSelectedCrewId('all');
                     setSelectedFleetFilter('all');
-                    setSelectedMonth(0);
+                    setSelectedMonth(-1);
                     setSelectedAreaFilter('all');
                     setSearchQuery('');
                     setAreaQuickFilter('');
@@ -1042,425 +1078,418 @@ export const CrewDeliveryHistoryView: React.FC = () => {
           </div>
 
           {isFilterSidebarOpen && (
-            <div className="pt-3 mt-3 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
-              {/* Kolom 1: Pencarian Teks */}
-              <div className="space-y-2.5">
-                <UiTextField
-                  label="Pencarian Nama Kru / Armada"
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder="Ketik nama kru atau armada (misal: N4/NS2)..."
-                  icon={<Search className="w-3.5 h-3.5" />}
-                />
-                <UiTextField
-                  label="Filter Nama Area Kirim"
-                  value={areaQuickFilter}
-                  onChange={setAreaQuickFilter}
-                  placeholder="Contoh: Denpasar, Purwo..."
-                  icon={<MapPin className="w-3.5 h-3.5" />}
-                />
-              </div>
-
-              {/* Kolom 2: Periode & Personel Kru */}
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Bulan Custom Dropdown */}
-                  <div className="space-y-1 relative">
-                    <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
-                    <button
-                      type="button"
-                      onClick={() => setOpenFilterDropdown(openFilterDropdown === 'month' ? null : 'month')}
-                      className="w-full px-2.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
-                    >
-                      <span className="truncate">
-                        {selectedMonth === -1
-                          ? 'Semua Bulan'
-                          : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'long' })}
-                      </span>
-                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'month' ? 'rotate-180 text-blue-400' : ''}`} />
-                    </button>
-                    {openFilterDropdown === 'month' && (
-                      <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedMonth(-1);
-                            setOpenFilterDropdown(null);
-                          }}
-                          className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
-                            selectedMonth === -1 ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
-                          }`}
-                        >
-                          <span>Semua Bulan</span>
-                          {selectedMonth === -1 && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                        </button>
-                        {Array.from({ length: 12 }).map((_, i) => {
-                          const mName = new Date(0, i).toLocaleString('id-ID', { month: 'long' });
-                          const isSel = selectedMonth === i;
-                          return (
-                            <button
-                              key={'month-' + i}
-                              type="button"
-                              onClick={() => {
-                                setSelectedMonth(i);
-                                setOpenFilterDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
-                                isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
-                              }`}
-                            >
-                              <span>{mName}</span>
-                              {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Tahun Custom Dropdown */}
-                  <div className="space-y-1 relative">
-                    <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
-                    <button
-                      type="button"
-                      onClick={() => setOpenFilterDropdown(openFilterDropdown === 'year' ? null : 'year')}
-                      className="w-full px-2.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-mono font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
-                    >
-                      <span>{selectedYear}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'year' ? 'rotate-180 text-blue-400' : ''}`} />
-                    </button>
-                    {openFilterDropdown === 'year' && (
-                      <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
-                        {Array.from({ length: 5 }).map((_, i) => {
-                          const yr = 2024 + i;
-                          const isSel = selectedYear === yr;
-                          return (
-                            <button
-                              key={'year-' + i}
-                              type="button"
-                              onClick={() => {
-                                setSelectedYear(yr);
-                                setOpenFilterDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left text-xs font-mono font-bold flex items-center justify-between transition cursor-pointer ${
-                                isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
-                              }`}
-                            >
-                              <span>{yr}</span>
-                              {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+            <div className="pt-3.5 mt-3 border-t border-slate-800/80 space-y-3">
+              {/* Baris 1: 3 Kolom Simetris (Masing-masing 2 Input Sejajar) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 items-start">
+                {/* Kolom 1: Pencarian Teks */}
+                <div className="space-y-2.5">
+                  <UiTextField
+                    label="Pencarian Nama Kru / Armada"
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    placeholder="Ketik nama kru atau armada (misal: N4/NS2)..."
+                    icon={<Search className="w-3.5 h-3.5" />}
+                  />
+                  <UiTextField
+                    label="Filter Nama Area Kirim"
+                    value={areaQuickFilter}
+                    onChange={setAreaQuickFilter}
+                    placeholder="Contoh: Denpasar, Purwo, Jember..."
+                    icon={<MapPin className="w-3.5 h-3.5" />}
+                  />
                 </div>
 
-                {/* Pilih Personel Kru Custom Dropdown (Tersaring Ketat per Cabang) */}
-                <div className="space-y-1 relative">
-                  <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
-                  {(() => {
-                    const activeCrewObj = branchScopedCrews.find(cr => cr.id === selectedCrewId);
-                    const filteredCrewList = branchScopedCrews.filter(cr => {
-                      const q = crewFilterSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return cr.name.toLowerCase().includes(q) || (cr.role || '').toLowerCase().includes(q);
-                    });
-
-                    return (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'crew' ? null : 'crew')}
-                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            <span className="truncate">
-                              {activeCrewObj ? activeCrewObj.name : `Semua Pengemudi (${branchScopedCrews.length})`}
-                            </span>
-                          </div>
-                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'crew' ? 'rotate-180 text-blue-400' : ''}`} />
-                        </button>
-
-                        {openFilterDropdown === 'crew' && (
-                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
-                            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
-                              <div className="relative">
-                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                                <input
-                                  type="text"
-                                  placeholder="Cari nama personel kru..."
-                                  value={crewFilterSearch}
-                                  onChange={(e) => setCrewFilterSearch(e.target.value)}
-                                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                                />
-                              </div>
-                            </div>
-                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                {/* Kolom 2: Periode & Personel Kru */}
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {/* Bulan Custom Dropdown */}
+                    <div className="space-y-1 relative">
+                      <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
+                      <button
+                        type="button"
+                        onClick={() => setOpenFilterDropdown(openFilterDropdown === 'month' ? null : 'month')}
+                        className="w-full h-9 px-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
+                      >
+                        <span className="truncate">
+                          {selectedMonth === -1
+                            ? 'Semua Bulan'
+                            : new Date(0, selectedMonth).toLocaleString('id-ID', { month: 'long' })}
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'month' ? 'rotate-180 text-blue-400' : ''}`} />
+                      </button>
+                      {openFilterDropdown === 'month' && (
+                        <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedMonth(-1);
+                              setOpenFilterDropdown(null);
+                            }}
+                            className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                              selectedMonth === -1 ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                            }`}
+                          >
+                            <span>Semua Bulan</span>
+                            {selectedMonth === -1 && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                          </button>
+                          {Array.from({ length: 12 }).map((_, i) => {
+                            const mName = new Date(0, i).toLocaleString('id-ID', { month: 'long' });
+                            const isSel = selectedMonth === i;
+                            return (
                               <button
+                                key={'month-' + i}
                                 type="button"
                                 onClick={() => {
-                                  setSelectedCrewId('all');
+                                  setSelectedMonth(i);
                                   setOpenFilterDropdown(null);
-                                  setCrewFilterSearch('');
                                 }}
-                                className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                  selectedCrewId === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                                  isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
                                 }`}
                               >
-                                <span>Semua Pengemudi ({branchScopedCrews.length})</span>
-                                {selectedCrewId === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                <span>{mName}</span>
+                                {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
                               </button>
-                              {filteredCrewList.length === 0 ? (
-                                <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
-                                  Tidak ada personel kru di cabang ini.
-                                </div>
-                              ) : (
-                                filteredCrewList.map(cr => {
-                                  const isSel = selectedCrewId === cr.id;
-                                  return (
-                                    <button
-                                      key={cr.id}
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedCrewId(cr.id);
-                                        setOpenFilterDropdown(null);
-                                        setCrewFilterSearch('');
-                                      }}
-                                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                        isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
-                                      }`}
-                                    >
-                                      <div className="min-w-0">
-                                        <div className="font-bold truncate">{cr.name}</div>
-                                        <div className="text-[10px] text-slate-400 truncate">{cr.role || 'Kru Armada'}</div>
-                                      </div>
-                                      {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                    </button>
-                                  );
-                                })
-                              )}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Tahun Custom Dropdown */}
+                    <div className="space-y-1 relative">
+                      <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
+                      <button
+                        type="button"
+                        onClick={() => setOpenFilterDropdown(openFilterDropdown === 'year' ? null : 'year')}
+                        className="w-full h-9 px-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-mono font-bold text-slate-100 flex items-center justify-between gap-1.5 transition cursor-pointer"
+                      >
+                        <span>{selectedYear}</span>
+                        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'year' ? 'rotate-180 text-blue-400' : ''}`} />
+                      </button>
+                      {openFilterDropdown === 'year' && (
+                        <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
+                          {Array.from({ length: 5 }).map((_, i) => {
+                            const yr = 2024 + i;
+                            const isSel = selectedYear === yr;
+                            return (
+                              <button
+                                key={'year-' + i}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedYear(yr);
+                                  setOpenFilterDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 text-left text-xs font-mono font-bold flex items-center justify-between transition cursor-pointer ${
+                                  isSel ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                }`}
+                              >
+                                <span>{yr}</span>
+                                {isSel && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Pilih Personel Kru Custom Dropdown (Tersaring Ketat per Cabang) */}
+                  <div className="space-y-1 relative">
+                    <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
+                    {(() => {
+                      const activeCrewObj = branchScopedCrews.find(cr => cr.id === selectedCrewId);
+                      const filteredCrewList = branchScopedCrews.filter(cr => {
+                        const q = crewFilterSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return cr.name.toLowerCase().includes(q) || (cr.role || '').toLowerCase().includes(q);
+                      });
+
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOpenFilterDropdown(openFilterDropdown === 'crew' ? null : 'crew')}
+                            className="w-full h-9 px-3 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span className="truncate">
+                                {activeCrewObj ? activeCrewObj.name : `Semua Pengemudi (${branchScopedCrews.length})`}
+                              </span>
                             </div>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
+                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'crew' ? 'rotate-180 text-blue-400' : ''}`} />
+                          </button>
 
-              {/* Kolom 3: Filter Cabang & Armada */}
-              <div className="space-y-2.5">
-                {/* Pilih Cabang Custom Dropdown */}
-                <div className="space-y-1 relative">
-                  <label className="block text-[11px] font-medium text-slate-400">Pilih Cabang</label>
-                  {(() => {
-                    const activeBranchObj = accessibleBranches.find(b => b.id === effectiveBranchId);
-                    const canSwitchBranch = accessibleBranches.length > 1;
-                    return (
-                      <>
-                        <button
-                          type="button"
-                          disabled={!canSwitchBranch}
-                          onClick={() => canSwitchBranch && setOpenFilterDropdown(openFilterDropdown === 'branch' ? null : 'branch')}
-                          className={`w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400 flex items-center justify-between gap-2 transition ${
-                            canSwitchBranch ? 'hover:bg-slate-900 hover:border-emerald-500/50 cursor-pointer' : 'opacity-90 cursor-default'
-                          }`}
-                        >
-                          <span className="truncate">
-                            {effectiveBranchId === 'ALL' || !activeBranchObj ? 'Semua Cabang' : `Cabang ${activeBranchObj.name}`}
-                          </span>
-                          {canSwitchBranch && (
-                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'branch' ? 'rotate-180 text-emerald-400' : ''}`} />
-                          )}
-                        </button>
-
-                        {openFilterDropdown === 'branch' && canSwitchBranch && (
-                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedBranchId('ALL');
-                                branchStore.setSelectedOriginBranchId('ALL');
-                                setOpenFilterDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                effectiveBranchId === 'ALL' ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
-                              }`}
-                            >
-                              <span>Semua Cabang</span>
-                              {effectiveBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-                            </button>
-                            {accessibleBranches.map(b => {
-                              const isSel = effectiveBranchId === b.id;
-                              return (
+                          {openFilterDropdown === 'crew' && (
+                            <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                                <div className="relative">
+                                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                  <input
+                                    type="text"
+                                    placeholder="Cari nama personel kru..."
+                                    value={crewFilterSearch}
+                                    onChange={(e) => setCrewFilterSearch(e.target.value)}
+                                    className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
                                 <button
-                                  key={b.id}
                                   type="button"
                                   onClick={() => {
-                                    setSelectedBranchId(b.id);
-                                    branchStore.setSelectedOriginBranchId(b.id);
+                                    setSelectedCrewId('all');
                                     setOpenFilterDropdown(null);
+                                    setCrewFilterSearch('');
                                   }}
                                   className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                    isSel ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
+                                    selectedCrewId === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
                                   }`}
                                 >
-                                  <span>Cabang {b.name}</span>
-                                  {isSel && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                                  <span>Semua Pengemudi ({branchScopedCrews.length})</span>
+                                  {selectedCrewId === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
                                 </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-
-                {/* Pilih Armada Custom Dropdown (Tersaring Ketat per Cabang) */}
-                <div className="space-y-1 relative">
-                  <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
-                  {(() => {
-                    const activeFleetObj = branchScopedFleets.find(fl => (fl.initialCode || fl.plateNumber) === selectedFleetFilter);
-                    const filteredFleetList = branchScopedFleets.filter(fl => {
-                      const q = fleetFilterSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
-                        fl.plateNumber.toLowerCase().includes(q) ||
-                        (fl.initialCode || '').toLowerCase().includes(q) ||
-                        fl.vehicleType.toLowerCase().includes(q)
-                      );
-                    });
-
-                    return (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setOpenFilterDropdown(openFilterDropdown === 'fleet' ? null : 'fleet')}
-                          className="w-full px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span className="truncate">
-                              {activeFleetObj
-                                ? `${activeFleetObj.initialCode ? `[${activeFleetObj.initialCode}] ` : ''}${activeFleetObj.plateNumber}`
-                                : `Semua Armada (${branchScopedFleets.length})`}
-                            </span>
-                          </div>
-                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'fleet' ? 'rotate-180 text-blue-400' : ''}`} />
-                        </button>
-
-                        {openFilterDropdown === 'fleet' && (
-                          <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
-                            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
-                              <div className="relative">
-                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                                <input
-                                  type="text"
-                                  placeholder="Cari plat atau inisial armada..."
-                                  value={fleetFilterSearch}
-                                  onChange={(e) => setFleetFilterSearch(e.target.value)}
-                                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                                />
+                                {filteredCrewList.length === 0 ? (
+                                  <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
+                                    Tidak ada personel kru di cabang ini.
+                                  </div>
+                                ) : (
+                                  filteredCrewList.map(cr => {
+                                    const isSel = selectedCrewId === cr.id;
+                                    return (
+                                      <button
+                                        key={cr.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedCrewId(cr.id);
+                                          setOpenFilterDropdown(null);
+                                          setCrewFilterSearch('');
+                                        }}
+                                        className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                          isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                        }`}
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="font-bold truncate">{cr.name}</div>
+                                          <div className="text-[10px] text-slate-400 truncate">{cr.role || 'Kru Armada'}</div>
+                                        </div>
+                                        {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })
+                                )}
                               </div>
                             </div>
-                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Kolom 3: Filter Cabang & Armada */}
+                <div className="space-y-2.5">
+                  {/* Pilih Cabang Custom Dropdown */}
+                  <div className="space-y-1 relative">
+                    <label className="block text-[11px] font-medium text-slate-400">Pilih Cabang</label>
+                    {(() => {
+                      const activeBranchObj = accessibleBranches.find(b => b.id === effectiveBranchId);
+                      const canSwitchBranch = accessibleBranches.length > 1;
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            disabled={!canSwitchBranch}
+                            onClick={() => canSwitchBranch && setOpenFilterDropdown(openFilterDropdown === 'branch' ? null : 'branch')}
+                            className={`w-full h-9 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400 flex items-center justify-between gap-2 transition ${
+                              canSwitchBranch ? 'hover:bg-slate-900 hover:border-emerald-500/50 cursor-pointer' : 'opacity-90 cursor-default'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {effectiveBranchId === 'ALL' || !activeBranchObj ? 'Semua Cabang' : `Cabang ${activeBranchObj.name}`}
+                            </span>
+                            {canSwitchBranch && (
+                              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'branch' ? 'rotate-180 text-emerald-400' : ''}`} />
+                            )}
+                          </button>
+
+                          {openFilterDropdown === 'branch' && canSwitchBranch && (
+                            <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSelectedFleetFilter('all');
+                                  setSelectedBranchId('ALL');
+                                  branchStore.setSelectedOriginBranchId('ALL');
                                   setOpenFilterDropdown(null);
-                                  setFleetFilterSearch('');
                                 }}
                                 className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                  selectedFleetFilter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                  effectiveBranchId === 'ALL' ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
                                 }`}
                               >
-                                <span>Semua Armada ({branchScopedFleets.length})</span>
-                                {selectedFleetFilter === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                <span>Semua Cabang</span>
+                                {effectiveBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
                               </button>
-                              {filteredFleetList.length === 0 ? (
-                                <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
-                                  Belum ada unit armada terdaftar di cabang ini.
-                                </div>
-                              ) : (
-                                filteredFleetList.map(fl => {
-                                  const valKey = fl.initialCode || fl.plateNumber;
-                                  const isSel = selectedFleetFilter === valKey;
-                                  return (
-                                    <button
-                                      key={fl.id}
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedFleetFilter(valKey);
-                                        setOpenFilterDropdown(null);
-                                        setFleetFilterSearch('');
-                                      }}
-                                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                        isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
-                                          {fl.initialCode || 'UNIT'}
-                                        </span>
-                                        <div className="min-w-0">
-                                          <div className="font-mono font-bold text-white truncate">{fl.plateNumber}</div>
-                                          <div className="text-[10px] text-slate-400 truncate">{fl.vehicleType}</div>
-                                        </div>
-                                      </div>
-                                      {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                    </button>
-                                  );
-                                })
-                              )}
+                              {accessibleBranches.map(b => {
+                                const isSel = effectiveBranchId === b.id;
+                                return (
+                                  <button
+                                    key={b.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedBranchId(b.id);
+                                      branchStore.setSelectedOriginBranchId(b.id);
+                                      setOpenFilterDropdown(null);
+                                    }}
+                                    className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                      isSel ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-slate-800 text-slate-200'
+                                    }`}
+                                  >
+                                    <span>Cabang {b.name}</span>
+                                    {isSel && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                                  </button>
+                                );
+                              })}
                             </div>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">
-                  <div className="text-[11px] font-semibold text-slate-300">Status Data Ditampilkan</div>
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>Total Kru Aktif:</span>
-                    <strong className="text-white font-mono">{crewAreaStatsList.length} Kru</strong>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>Total Unit Armada:</span>
-                    <strong className="text-white font-mono">{fleetAreaStatsList.length} Unit</strong>
+
+                  {/* Pilih Armada Custom Dropdown (Tersaring Ketat per Cabang) */}
+                  <div className="space-y-1 relative">
+                    <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
+                    {(() => {
+                      const activeFleetObj = branchScopedFleets.find(fl => (fl.initialCode || fl.plateNumber) === selectedFleetFilter);
+                      const filteredFleetList = branchScopedFleets.filter(fl => {
+                        const q = fleetFilterSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return (
+                          fl.plateNumber.toLowerCase().includes(q) ||
+                          (fl.initialCode || '').toLowerCase().includes(q) ||
+                          fl.vehicleType.toLowerCase().includes(q)
+                        );
+                      });
+
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOpenFilterDropdown(openFilterDropdown === 'fleet' ? null : 'fleet')}
+                            className="w-full h-9 px-3 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-xs font-bold text-slate-100 flex items-center justify-between gap-2 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate">
+                                {activeFleetObj
+                                  ? `${activeFleetObj.initialCode ? `[${activeFleetObj.initialCode}] ` : ''}${activeFleetObj.plateNumber}`
+                                  : `Semua Armada (${branchScopedFleets.length})`}
+                              </span>
+                            </div>
+                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${openFilterDropdown === 'fleet' ? 'rotate-180 text-blue-400' : ''}`} />
+                          </button>
+
+                          {openFilterDropdown === 'fleet' && (
+                            <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                                <div className="relative">
+                                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                  <input
+                                    type="text"
+                                    placeholder="Cari plat atau inisial armada..."
+                                    value={fleetFilterSearch}
+                                    onChange={(e) => setFleetFilterSearch(e.target.value)}
+                                    className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFleetFilter('all');
+                                    setOpenFilterDropdown(null);
+                                    setFleetFilterSearch('');
+                                  }}
+                                  className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                    selectedFleetFilter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <span>Semua Armada ({branchScopedFleets.length})</span>
+                                  {selectedFleetFilter === 'all' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                </button>
+                                {filteredFleetList.length === 0 ? (
+                                  <div className="px-3 py-3 text-[11px] text-slate-400 text-center">
+                                    Belum ada unit armada terdaftar di cabang ini.
+                                  </div>
+                                ) : (
+                                  filteredFleetList.map(fl => {
+                                    const valKey = fl.initialCode || fl.plateNumber;
+                                    const isSel = selectedFleetFilter === valKey;
+                                    return (
+                                      <button
+                                        key={fl.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedFleetFilter(valKey);
+                                          setOpenFilterDropdown(null);
+                                          setFleetFilterSearch('');
+                                        }}
+                                        className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                          isSel ? 'bg-blue-500/20 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                                            {fl.initialCode || 'UNIT'}
+                                          </span>
+                                          <div className="min-w-0">
+                                            <div className="font-mono font-bold text-white truncate">{fl.plateNumber}</div>
+                                            <div className="text-[10px] text-slate-400 truncate">{fl.vehicleType}</div>
+                                          </div>
+                                        </div>
+                                        {isSel && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
 
-              {/* Kolom 4: Toggle Switches Preferensi */}
-              <div className="space-y-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                <div className="text-[11px] font-semibold text-slate-400">Preferensi Tampilan &amp; Filter</div>
-
-                <UiToggleSwitch
-                  checked={useAccordionLayout}
-                  onChange={setUseAccordionLayout}
-                  label="Mode Accordion Ringkas"
-                  description="Susun bertumpuk tanpa perlu scroll panjang"
-                />
-
-                <UiToggleSwitch
-                  checked={onlyExceededFilter}
-                  onChange={setOnlyExceededFilter}
-                  label="Hanya Melebihi Batas"
-                  description={`Tampilkan kru dengan >= ${threshold}x kirim`}
-                />
-
-                <UiToggleSwitch
-                  checked={autoSyncEnabled}
-                  onChange={setAutoSyncEnabled}
-                  label="Auto-Sync Jadwal"
-                  description="Integrasi otomatis dari penugasan"
-                />
+              {/* Baris 2: Strip Horizontal Preferensi Tampilan & Filter */}
+              <div className="pt-2.5 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800/80">
+                  <UiToggleSwitch
+                    checked={useAccordionLayout}
+                    onChange={setUseAccordionLayout}
+                    label="Mode Accordion Ringkas"
+                    description="Susun bertumpuk tanpa perlu scroll panjang"
+                  />
+                </div>
+                <div className="bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800/80">
+                  <UiToggleSwitch
+                    checked={onlyExceededFilter}
+                    onChange={setOnlyExceededFilter}
+                    label="Hanya Melebihi Batas"
+                    description={`Tampilkan kru dengan >= ${threshold}x kirim`}
+                  />
+                </div>
+                <div className="bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800/80">
+                  <UiToggleSwitch
+                    checked={autoSyncEnabled}
+                    onChange={setAutoSyncEnabled}
+                    label="Auto-Sync Jadwal"
+                    description="Integrasi otomatis dari penugasan"
+                  />
+                </div>
               </div>
             </div>
           )}

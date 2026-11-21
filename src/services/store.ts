@@ -605,7 +605,7 @@ class LogisticsStore {
     }
     this.fleets = isProd ? [] : INITIAL_FLEETS;
     this.crews = isProd ? [] : INITIAL_CREWS;
-    this.stores = isProd ? [] : INITIAL_STORES;
+    this.stores = [...INITIAL_STORES];
     this.schedules = [];
     this.devices = isProd ? [] : INITIAL_TRACKSOLID_DEVICES;
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
@@ -1125,25 +1125,10 @@ class LogisticsStore {
           store: nextS.store ? { ...nextS.store, storeName: 'DENPASAR 1', address: 'Area Pengiriman Distribusi DENPASAR 1' } : nextS.store
         };
       }
-      const depIso = String(nextS.departureDate || '').slice(0, 10);
-      if (
-        depIso >= '2026-11-12' &&
-        nextS.status === 'delivered' &&
-        !nextS.podPhotoUrl &&
-        !nextS.isChecklistBypassed
-      ) {
-        updatedSchedules = true;
-        nextS = {
-          ...nextS,
-          status: 'scheduled',
-          isChecklistBypassed: false,
-          actualArrival: undefined
-        };
-      }
       return nextS;
     });
     if (updatedSchedules) {
-      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules, true);
     }
 
     // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal aktif hari ini (WIB)
@@ -1549,7 +1534,7 @@ class LogisticsStore {
     this.cachedSchedules = null;
   }
 
-  private saveToStorage(key: string, data: any) {
+  private saveToStorage(key: string, data: any, silent = false) {
     this.invalidateReadCaches();
     // Data operasional bisnis disimpan di Hostinger MySQL (/api/*), bukan localStorage browser
     if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
@@ -1558,7 +1543,7 @@ class LogisticsStore {
           localStorage.removeItem(key);
         }
       } catch {}
-      this.notify();
+      if (!silent) this.notify();
       return;
     }
     try {
@@ -1566,7 +1551,7 @@ class LogisticsStore {
     } catch {
       // Safe fallback - in-memory state remains fully intact
     }
-    this.notify();
+    if (!silent) this.notify();
   }
 
   private notify() {
@@ -1770,13 +1755,21 @@ class LogisticsStore {
       pickNum(f.boxInnerCapacityM3, localRef?.boxInnerCapacityM3, canonical?.boxInnerCapacityM3) ??
       Number((boxCapacityM3 * (boxInnerMultiplierPercent / 100)).toFixed(2));
 
+    const resolvedId = pickStr(f.id, localRef?.id, canonical?.id) || f.id;
+    const resolvedPlate = pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber;
+    const resolvedInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const explicitBranch = pickStr(f.branchId, localRef?.branchId, canonical?.branchId);
+    const resolvedBranchId = branchStore.getFleetBranchId(resolvedId, resolvedPlate, resolvedInitial, explicitBranch);
+    branchStore.syncFleetBranchIdSilent(resolvedId, resolvedBranchId);
+
     return {
       ...(canonical || ({} as Fleet)),
       ...(localRef || ({} as Fleet)),
       ...f,
-      id: pickStr(f.id, localRef?.id, canonical?.id) || f.id,
-      plateNumber: pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber,
-      initialCode: pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode),
+      id: resolvedId,
+      plateNumber: resolvedPlate,
+      initialCode: resolvedInitial,
+      branchId: resolvedBranchId,
       vehicleType: (pickStr(f.vehicleType, localRef?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as Fleet['vehicleType'],
       brand: pickExplicitStr(f.brand, localRef?.brand, canonical?.brand),
       engineCc: pickExplicitStr(f.engineCc, localRef?.engineCc, canonical?.engineCc),
@@ -2197,10 +2190,11 @@ class LogisticsStore {
   }
 
   public getStores(): RetailStore[] {
-    if (this.cachedStores !== null) {
+    if (this.cachedStores !== null && this.cachedStores.length > 0) {
       return this.cachedStores;
     }
-    this.cachedStores = this.stores.filter(s => !isAreaRouteItem(s));
+    const sourceStores = this.stores && this.stores.length > 0 ? this.stores : INITIAL_STORES;
+    this.cachedStores = sourceStores.filter(s => !isAreaRouteItem(s));
     return this.cachedStores;
   }
 
@@ -2358,14 +2352,158 @@ class LogisticsStore {
    *    Otherwise, uses the first approved user holding the 'spv_logistik' role.
    * 3. Fallback to any user matching Syaiful Bahri or official default.
    */
-  public getLogisticsCoordinator(): string {
-    if (this.currentUser && this.currentUser.role === 'spv_logistik' && this.currentUser.status === 'approved') {
-      return this.currentUser.fullName;
+  public resolveLogisticsBranchId(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): string {
+    if (typeof branchIdOrContext === 'string' && branchIdOrContext.trim()) {
+      const clean = branchIdOrContext.trim();
+      if (clean === 'cab-sidoarjo' || clean.toLowerCase().includes('sidoarjo')) return 'cab-sidoarjo';
+      if (clean === 'cab-banyuwangi' || clean.toLowerCase().includes('nusantara') || clean.toLowerCase().includes('banyuwangi')) {
+        return 'cab-banyuwangi';
+      }
+      return branchStore.getScheduleBranchId(undefined, clean);
     }
+
+    if (branchIdOrContext && typeof branchIdOrContext === 'object') {
+      if (branchIdOrContext.branchId && branchIdOrContext.branchId !== 'ALL') {
+        return branchIdOrContext.branchId;
+      }
+      if (branchIdOrContext.plateNumber || branchIdOrContext.initialCode || branchIdOrContext.fleetId) {
+        const matchedFleet =
+          this.findFleetByCodeOrPlate(branchIdOrContext.initialCode) ||
+          this.findFleetByCodeOrPlate(branchIdOrContext.plateNumber) ||
+          this.findFleetByCodeOrPlate(branchIdOrContext.fleetId);
+        const fBranch = branchStore.getFleetBranchId(
+          matchedFleet?.id || branchIdOrContext.fleetId || '',
+          matchedFleet?.plateNumber || branchIdOrContext.plateNumber,
+          matchedFleet?.initialCode || branchIdOrContext.initialCode,
+          matchedFleet?.branchId
+        );
+        if (fBranch === 'cab-sidoarjo' || fBranch === 'cab-banyuwangi') {
+          return fBranch;
+        }
+      }
+      if (branchIdOrContext.areaName || branchIdOrContext.scheduleId) {
+        const sBranch = branchStore.getScheduleBranchId(
+          branchIdOrContext.scheduleId,
+          branchIdOrContext.areaName,
+          branchIdOrContext.fleetId
+        );
+        if (sBranch === 'cab-sidoarjo' || sBranch === 'cab-banyuwangi') {
+          return sBranch;
+        }
+      }
+      if (branchIdOrContext.driverId || branchIdOrContext.driverName) {
+        const cBranch = branchStore.getCrewBranchId(branchIdOrContext.driverId || '', branchIdOrContext.driverName);
+        if (cBranch === 'cab-sidoarjo' || cBranch === 'cab-banyuwangi') {
+          return cBranch;
+        }
+      }
+    }
+
+    return branchStore.getSelectedOriginBranchId() || 'cab-banyuwangi';
+  }
+
+  public getLogisticsCoordinatorUser(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): { fullName: string; role: string } {
+    const targetBranchId = this.resolveLogisticsBranchId(branchIdOrContext);
+
+    const doesUserMatchBranch = (u: UserProfile, bId: string): boolean => {
+      const bMap = branchStore.getUserBranchPermissions(
+        u.id,
+        u.role,
+        u.permissions?.modules,
+        u.permissions?.branchPermissions
+      );
+      if (bMap && Object.keys(bMap).length > 0) {
+        const sdaEnabled = Boolean(bMap['cab-sidoarjo']?.enabled);
+        const bwiEnabled = Boolean(bMap['cab-banyuwangi']?.enabled);
+        if (sdaEnabled && !bwiEnabled) return bId === 'cab-sidoarjo';
+        if (bwiEnabled && !sdaEnabled) return bId === 'cab-banyuwangi';
+      }
+      const lowerName = (u.fullName || '').trim().toLowerCase();
+      const lowerNotes = (u.notes || '').trim().toLowerCase();
+      if (lowerName.includes('allan') || lowerNotes.includes('sidoarjo')) {
+        return bId === 'cab-sidoarjo';
+      }
+      if (
+        lowerName.includes('bahri') ||
+        lowerName.includes('syaiful') ||
+        lowerNotes.includes('nusantara') ||
+        lowerNotes.includes('banyuwangi')
+      ) {
+        return bId === 'cab-banyuwangi';
+      }
+      const crewB = branchStore.getCrewBranchId(u.id, u.fullName);
+      if (crewB === 'cab-sidoarjo' || crewB === 'cab-banyuwangi') {
+        return crewB === bId;
+      }
+      return true;
+    };
+
+    if (
+      this.currentUser &&
+      this.currentUser.role === 'spv_logistik' &&
+      this.currentUser.status === 'approved' &&
+      doesUserMatchBranch(this.currentUser, targetBranchId)
+    ) {
+      return { fullName: this.currentUser.fullName, role: 'spv_logistik' };
+    }
+
     const approvedSpvLogistiks = this.users.filter(u => u.role === 'spv_logistik' && u.status === 'approved');
-    if (approvedSpvLogistiks.length > 0) {
-      return approvedSpvLogistiks[0].fullName;
+    const branchMatchedSpv = approvedSpvLogistiks.find(u => doesUserMatchBranch(u, targetBranchId));
+    if (branchMatchedSpv) {
+      return { fullName: branchMatchedSpv.fullName, role: 'spv_logistik' };
     }
+
+    if (targetBranchId === 'cab-banyuwangi') {
+      const bahriUser = this.users.find(
+        u =>
+          (u.fullName || '').toLowerCase().includes('bahri') ||
+          (u.fullName || '').toLowerCase().includes('syaiful')
+      );
+      if (bahriUser) {
+        return { fullName: bahriUser.fullName, role: 'spv_logistik' };
+      }
+      return { fullName: 'Muhammad Syaiful Bahri', role: 'spv_logistik' };
+    }
+
+    if (targetBranchId === 'cab-sidoarjo') {
+      const allanUser = this.users.find(u => (u.fullName || '').toLowerCase().includes('allan'));
+      if (allanUser) {
+        return { fullName: allanUser.fullName, role: 'spv_logistik' };
+      }
+    }
+
+    if (approvedSpvLogistiks.length > 0) {
+      return { fullName: approvedSpvLogistiks[0].fullName, role: 'spv_logistik' };
+    }
+
     const approvedLogisticsUsers = this.users.filter(
       u =>
         u.status === 'approved' &&
@@ -2376,14 +2514,41 @@ class LogisticsStore {
         (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
           u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
     );
+    const branchMatchedLogisticsUser = approvedLogisticsUsers.find(u => doesUserMatchBranch(u, targetBranchId));
+    if (branchMatchedLogisticsUser) {
+      return { fullName: branchMatchedLogisticsUser.fullName, role: branchMatchedLogisticsUser.role };
+    }
     if (approvedLogisticsUsers.length > 0) {
-      return approvedLogisticsUsers[0].fullName;
+      return { fullName: approvedLogisticsUsers[0].fullName, role: approvedLogisticsUsers[0].role };
     }
-    const anySpv = this.users.find(u => u.role === 'spv_logistik');
+
+    const anySpv = this.users.find(u => u.role === 'spv_logistik' && doesUserMatchBranch(u, targetBranchId)) ||
+      this.users.find(u => u.role === 'spv_logistik');
     if (anySpv) {
-      return anySpv.fullName;
+      return { fullName: anySpv.fullName, role: 'spv_logistik' };
     }
-    return 'SPV Logistik';
+    return {
+      fullName: targetBranchId === 'cab-sidoarjo' ? 'Allan E.' : 'Muhammad Syaiful Bahri',
+      role: 'spv_logistik'
+    };
+  }
+
+  public getLogisticsCoordinator(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): string {
+    return this.getLogisticsCoordinatorUser(branchIdOrContext).fullName;
   }
 
   /**
@@ -2565,57 +2730,98 @@ class LogisticsStore {
     targetSchedules.forEach((sch) => {
       // Flexible crew lookup by ID or name
       const driverName = (sch.crew?.name || (sch as any).driver || '').trim();
-      const crew = this.crews.find(c => c.id === sch.crewId || c.id === sch.crew?.id || (driverName && c.name.toLowerCase() === driverName.toLowerCase())) || {
-        id: sch.crewId || `c-custom-${Math.random().toString(36).substring(2, 6)}`,
-        name: driverName || sch.crewId || 'Driver Utama',
+      const crew = this.crews.find(
+        c =>
+          c.id === sch.crewId ||
+          c.id === sch.crew?.id ||
+          (driverName && c.name.trim().toLowerCase() === driverName.toLowerCase())
+      ) || {
+        id: sch.crewId || `c-custom-${driverName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || Math.random().toString(36).substring(2, 6)}`,
+        name: driverName || sch.crewId || 'Driver',
         phone: '081234567890',
-        role: 'Driver Utama' as const,
-        licenseNumber: 'SIM B2 Umum',
-        licenseType: 'SIM B2 Umum',
+        role: 'Driver' as const,
+        licenseNumber: 'SIM B1',
+        licenseType: 'SIM B1',
         status: 'available' as const,
         tripsCompleted: 10,
         rating: 4.8
       };
 
       const helperName = (sch.crewHelper?.name || (sch as any).helper || '').trim();
-      const helper = sch.crewHelperId 
-        ? this.crews.find(c => c.id === sch.crewHelperId) 
-        : (sch.crewHelper ? sch.crewHelper : (helperName && helperName !== '-' ? { id: `hlp-${helperName}`, name: helperName } : null));
+      const matchedHelperInCrews = this.crews.find(
+        c =>
+          (sch.crewHelperId && c.id === sch.crewHelperId) ||
+          (sch.crewHelper?.id && c.id === sch.crewHelper.id) ||
+          (helperName && helperName !== '-' && c.name.trim().toLowerCase() === helperName.toLowerCase())
+      );
+      const helper = matchedHelperInCrews
+        ? matchedHelperInCrews
+        : sch.crewHelper && sch.crewHelper.name && sch.crewHelper.name !== '-'
+        ? {
+            id: sch.crewHelper.id || `hlp-${sch.crewHelper.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            name: sch.crewHelper.name.trim()
+          }
+        : helperName && helperName !== '-'
+        ? {
+            id: `hlp-${helperName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            name: helperName
+          }
+        : null;
 
-      const fleet = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
+      const fleet =
+        this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber) ||
+        this.findFleetByCodeOrPlate(sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId);
       const store = this.stores.find(s => s.id === sch.storeId);
-      
-      const areaName = resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim';
-      const island = areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA') || areaName.toUpperCase().includes('BALI')
-        ? 'Bali & Nusa Tenggara' 
-        : 'Jawa';
-      const city = areaName.toUpperCase().includes('DENPASAR') ? 'Denpasar' 
-        : (areaName.toUpperCase().includes('SINGARAJA') ? 'Singaraja' 
-        : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso' 
-        : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo' 
-        : (areaName.toUpperCase().includes('JEMBER') ? 'Jember' : 'Banyuwangi'))));
-      
-      const departureDate = sch.departureDate || '2026-01-05T07:30:00Z';
+
+      const rawAreaName = (resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim').trim();
+      const areaName = rawAreaName;
+      const island =
+        areaName.toUpperCase().includes('DENPASAR') ||
+        areaName.toUpperCase().includes('SINGARAJA') ||
+        areaName.toUpperCase().includes('NEGARA') ||
+        areaName.toUpperCase().includes('BALI')
+          ? 'Bali & Nusa Tenggara'
+          : 'Jawa';
+      const city = areaName.toUpperCase().includes('DENPASAR')
+        ? 'Denpasar'
+        : areaName.toUpperCase().includes('SINGARAJA')
+        ? 'Singaraja'
+        : areaName.toUpperCase().includes('BONDOWOSO')
+        ? 'Bondowoso'
+        : areaName.toUpperCase().includes('SITUBONDO')
+        ? 'Situbondo'
+        : areaName.toUpperCase().includes('JEMBER')
+        ? 'Jember'
+        : 'Banyuwangi';
+
+      const calIso = this.getScheduleCalendarIso(sch);
+      const departureDate = calIso
+        ? `${calIso}T07:30:00+07:00`
+        : sch.departureDate || '2026-01-05T07:30:00+07:00';
       const trackingNumber = sch.trackingNumber || `PO-AKK-20260105-${fleet?.plateNumber || sch.fleetId || 'DS3'}`;
 
       // Extract Inisial Mobil (e.g. DS1, DS3, NS2, NL1, N20)
+      const trkFullMatch = trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i);
       const poCodeMatch = trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/i);
-      const extractedCode = poCodeMatch ? poCodeMatch[1] : null;
-      const initialCode = fleet?.initialCode || sch.fleet?.initialCode || extractedCode || sch.fleetId || 'DS3';
+      const extractedCode = trkFullMatch ? trkFullMatch[1].trim() : poCodeMatch ? poCodeMatch[1] : null;
+      const initialCode = fleet?.initialCode || sch.fleet?.initialCode || sch.armada || extractedCode || sch.fleetId || 'DS3';
 
       const existingIndex = this.crewHistory.findIndex(
-        h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === crew.id || h.crewName === crew.name)
+        h =>
+          (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
+          (h.crewId === crew.id || h.crewName.trim().toLowerCase() === crew.name.trim().toLowerCase())
       );
 
       const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
       const seqNum = (existingIndex !== -1 ? this.crewHistory[existingIndex].areaTripSequenceNumber : areaStats.tripCount + 1) || 1;
-      const totalAreaTrips = this.crewHistory.filter(h => h.area.toUpperCase() === areaName.toUpperCase()).length + 1;
+      const totalAreaTrips = this.crewHistory.filter(h => h.area.trim().toUpperCase() === areaName.toUpperCase()).length + 1;
       const reqAppr = seqNum >= this.areaThreshold;
 
       const historyItem: CrewDeliveryHistory = {
-        id: existingIndex !== -1 
-          ? this.crewHistory[existingIndex].id 
-          : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
+        id:
+          existingIndex !== -1
+            ? this.crewHistory[existingIndex].id
+            : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
         crewId: crew.id,
         crewName: crew.name,
         scheduleId: sch.id,
@@ -2624,7 +2830,7 @@ class LogisticsStore {
         area: areaName,
         city,
         island,
-        vehiclePlate: fleet?.plateNumber || sch.fleetId || 'DS3',
+        vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
         initialCode,
         vehicleType: fleet?.vehicleType || 'Engkel STD',
         cargoWeightTon: sch.cargoWeightTon || 3.5,
@@ -2650,12 +2856,22 @@ class LogisticsStore {
       // Also track Helper history if assigned
       if (helper) {
         const helperExistingIndex = this.crewHistory.findIndex(
-          h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === helper.id || h.crewName === helper.name)
+          h =>
+            (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
+            (h.crewId === helper.id || h.crewName.trim().toLowerCase() === helper.name.trim().toLowerCase())
         );
+        const helperAreaStats = this.checkCrewAreaThreshold(helper.id, areaName);
+        const helperSeqNum =
+          (helperExistingIndex !== -1
+            ? this.crewHistory[helperExistingIndex].areaTripSequenceNumber
+            : helperAreaStats.tripCount + 1) || 1;
+        const helperReqAppr = helperSeqNum >= this.areaThreshold;
+
         const helperHistoryItem: CrewDeliveryHistory = {
-          id: helperExistingIndex !== -1 
-            ? this.crewHistory[helperExistingIndex].id 
-            : `cdh-sync-hlp-${helper.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
+          id:
+            helperExistingIndex !== -1
+              ? this.crewHistory[helperExistingIndex].id
+              : `cdh-sync-hlp-${helper.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
           crewId: helper.id,
           crewName: helper.name,
           scheduleId: sch.id,
@@ -2664,7 +2880,7 @@ class LogisticsStore {
           area: areaName,
           city,
           island,
-          vehiclePlate: fleet?.plateNumber || sch.fleetId || 'DS3',
+          vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
           initialCode,
           vehicleType: fleet?.vehicleType || 'Engkel STD',
           cargoWeightTon: sch.cargoWeightTon || 3.5,
@@ -2673,9 +2889,10 @@ class LogisticsStore {
           status: 'delivered',
           onTimeStatus: 'Tepat Waktu',
           ratingReceived: 5.0,
-          areaTripSequenceNumber: 1,
-          requiresAreaApproval: false,
-          areaApprovalStatus: 'not_required',
+          areaTripSequenceNumber: helperSeqNum,
+          totalAreaTrips,
+          requiresAreaApproval: helperReqAppr,
+          areaApprovalStatus: helperReqAppr ? 'approved' : 'not_required',
           notes: `Tugas Helper mendampingi Driver: ${crew.name}`
         };
 
@@ -3612,19 +3829,31 @@ class LogisticsStore {
               mergedMap.set(targetKey, this.enrichFleetItem({ ...remoteF, id: targetKey }, matchExisting));
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
-            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
           } else {
             this.fleets = sortFleetsByCanonicalOrder(baseFleets);
-            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
           }
         }
         if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
           this.crews = crewPayload.data;
-          this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+          this.saveToStorage(STORAGE_KEYS.CREWS, this.crews, true);
         }
-        if (storeRes.ok && Array.isArray(storePayload?.data) && (storePayload.source === 'hostinger_mysql' || storePayload.data.length > 0)) {
-          this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
-          this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+        if (storeRes.ok && Array.isArray(storePayload?.data)) {
+          const validRemoteStores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
+          if (validRemoteStores.length > 0) {
+            const storeMap = new Map<string, RetailStore>();
+            INITIAL_STORES.forEach(s => {
+              if (!isAreaRouteItem(s)) storeMap.set(s.id, s);
+            });
+            validRemoteStores.forEach((remS: RetailStore) => {
+              storeMap.set(remS.id, remS);
+            });
+            this.stores = Array.from(storeMap.values());
+          } else if (!this.stores || this.stores.length === 0) {
+            this.stores = [...INITIAL_STORES];
+          }
+          this.saveToStorage(STORAGE_KEYS.STORES, this.stores, true);
         }
         if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.source === 'disk_database' || schedulePayload?.exists)) {
           const remoteSchedules: Schedule[] = (Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : []).filter(
@@ -3648,7 +3877,7 @@ class LogisticsStore {
             const remTime = rem?.updatedAt ? new Date(rem.updatedAt).getTime() : 0;
 
             // Server database is authoritative. Only prefer local if local has a strictly newer updatedAt timestamp.
-            let combined: Schedule = (loc && locTime > 0 && remTime > 0 && locTime > remTime)
+            const combined: Schedule = (loc && locTime > 0 && remTime > 0 && locTime > remTime)
               ? { ...rem, ...loc }
               : (loc ? { ...loc, ...rem } : { ...rem });
 
@@ -3664,37 +3893,30 @@ class LogisticsStore {
               combined.checklistBypassedBy = rem.checklistBypassedBy || loc?.checklistBypassedBy || 'Super Admin';
               combined.checklistBypassedAt = rem.checklistBypassedAt || loc?.checklistBypassedAt;
             }
-
-            const depIso = String(combined.departureDate || '').slice(0, 10);
-            if (
-              depIso >= '2026-11-12' &&
-              combined.status === 'delivered' &&
-              !combined.podPhotoUrl &&
-              !combined.isChecklistBypassed
-            ) {
-              combined = {
-                ...combined,
-                status: 'scheduled',
-                isChecklistBypassed: false,
-                actualArrival: undefined
-              };
+            if (loc?.status === 'delivered' && (loc.actualArrival || loc.podPhotoTimestamp || loc.podReceiverName)) {
+              combined.status = 'delivered';
+              combined.actualArrival = combined.actualArrival || loc.actualArrival;
+              combined.podPhotoTimestamp = combined.podPhotoTimestamp || loc.podPhotoTimestamp;
+              combined.podReceiverName = combined.podReceiverName || loc.podReceiverName;
+              combined.podConditionNote = combined.podConditionNote || loc.podConditionNote;
             }
+
             mergedSchedules.push(combined);
           }
 
-          // Only keep un-synced local schedules if they were just created within the last 15 seconds on this browser
+          // Keep un-synced local schedules created recently or portal self-checkin schedules
           const nowMs = Date.now();
           for (const loc of this.schedules || []) {
             if (loc?.id && !mergedIds.has(loc.id) && !deletedIdsSet.has(String(loc.id)) && !String(loc.id).startsWith('batch-')) {
               const createdMs = loc.createdAt ? new Date(loc.createdAt).getTime() : 0;
-              if (createdMs > 0 && nowMs - createdMs < 15000) {
+              if (String(loc.id).startsWith('PORTAL-') || (createdMs > 0 && nowMs - createdMs < 60000)) {
                 mergedSchedules.push(loc);
               }
             }
           }
 
           this.schedules = mergedSchedules;
-          this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+          this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules, true);
         }
 
         this.reconcileFleetAndScheduleStatuses(true);

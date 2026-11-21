@@ -224,22 +224,18 @@ export async function downloadSuratJalanPdf(
     };
 
     const allUsers = logisticsStore.getUsers();
-    const resolvedSpvUser =
-      allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') ||
-      allUsers.find(
-        u =>
-          u.status === 'approved' &&
-          u.role !== 'super_admin' &&
-          u.role !== 'driver' &&
-          u.role !== 'crew_helper' &&
-          u.permissions?.modules?.logistics?.enabled &&
-          (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
-            u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
-      ) ||
-      allUsers.find(u => u.role === 'spv_logistik');
+    const resolvedSpvUser = logisticsStore.getLogisticsCoordinatorUser({
+      scheduleId: waybill.scheduleId,
+      areaName: waybill.destination?.areaName || waybill.destination?.storeName,
+      fleetId: waybill.fleet?.id,
+      plateNumber: waybill.fleet?.plateNumber,
+      initialCode: waybill.fleet?.initialCode,
+      driverId: waybill.crew?.driverId,
+      driverName: waybill.crew?.driverName
+    });
     const spvName = formatConcisePdfName(
-      (waybill.preparedBySigned && waybill.preparedByName ? waybill.preparedByName : resolvedSpvUser?.fullName) ||
-        logisticsStore.getLogisticsCoordinator()
+      (waybill.preparedBySigned && waybill.preparedByName ? waybill.preparedByName : resolvedSpvUser.fullName) ||
+        resolvedSpvUser.fullName
     );
     const operasionalName = formatConcisePdfName(waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Bayu Novianto Dimas Permana');
     const secName = formatConcisePdfName(waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Hairul Rozikin');
