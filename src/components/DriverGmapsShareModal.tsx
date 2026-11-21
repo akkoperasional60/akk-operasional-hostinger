@@ -147,12 +147,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     : undefined;
   const fleetInitial = matchedFleet?.initialCode;
 
-  // GPS Coordinates (Direkam otomatis secara real-time high-accuracy untuk sistem)
+  // GPS Coordinates (Direkam otomatis secara real-time high-accuracy untuk validasi admin)
   const [driverLat, setDriverLat] = useState<number>(-8.2190);
   const [driverLng, setDriverLng] = useState<number>(114.3680);
   const [hasLiveGpsFix, setHasLiveGpsFix] = useState<boolean>(false);
-  const [gpsAccuracyMeters, setGpsAccuracyMeters] = useState<number | null>(null);
-  const [isRefreshingGps, setIsRefreshingGps] = useState<boolean>(false);
   const gpsWatchIdRef = useRef<number | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -291,18 +289,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const requestFreshGpsLocation = () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-    setIsRefreshingGps(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setDriverLat(pos.coords.latitude);
         setDriverLng(pos.coords.longitude);
         setHasLiveGpsFix(true);
-        setGpsAccuracyMeters(typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null);
-        setIsRefreshingGps(false);
       },
-      () => {
-        setIsRefreshingGps(false);
-      },
+      () => {},
       { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   };
@@ -327,7 +320,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               setDriverLat(pos.coords.latitude);
               setDriverLng(pos.coords.longitude);
               setHasLiveGpsFix(true);
-              setGpsAccuracyMeters(typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null);
             },
             () => {},
             { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
@@ -1395,34 +1387,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   />
                 </div>
 
-                {/* Live Precise GPS Pin Preview per Pelanggan */}
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-blue-500/30 flex items-center justify-between gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    <MapPin className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-white truncate">
-                        {effectivePreciseGps.subAreaLabel}
-                      </div>
-                      <div className="text-[10px] font-mono text-blue-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        <span>GPS: {effectivePreciseGps.coordsFormatted}</span>
-                        {gpsAccuracyMeters !== null && hasLiveGpsFix && (
-                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                            Akurasi ±{gpsAccuracyMeters}m
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestFreshGpsLocation}
-                    className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Segarkan titik koordinat GPS presisi"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isRefreshingGps ? 'animate-spin' : ''}`} />
-                    <span>Perbarui GPS</span>
-                  </button>
-                </div>
               </div>
             )}
 
@@ -1523,16 +1487,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="sm:col-span-2 space-y-1 relative">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between gap-2">
-                      <span>Nama Barang / Item Bermasalah *</span>
-                      <span className="text-[9px] font-semibold text-blue-400">
-                        Database Barang ({dbBarangItems.length} SKU)
-                      </span>
+                <div className="space-y-2.5">
+                  <div className="space-y-1 relative">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
+                      Nama Barang / Item Bermasalah *
                     </label>
 
-                    {/* Dropdown Trigger untuk Nama Barang dari Database Barang */}
+                    {/* Dropdown Trigger untuk Nama Barang */}
                     <button
                       type="button"
                       onClick={() => setIsBarangDropdownOpen(prev => !prev)}
@@ -1542,27 +1503,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                           : 'border-slate-700 hover:border-slate-500'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <Package className={`w-3.5 h-3.5 shrink-0 ${issueItemName ? 'text-blue-400' : 'text-slate-500'}`} />
                         {issueItemName ? (
-                          <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                            {issueItemCode && (
-                              <span className="px-1.5 py-0.2 rounded bg-blue-500/20 border border-blue-500/35 text-blue-300 font-mono text-[10px] font-bold shrink-0">
-                                {issueItemCode}
-                              </span>
-                            )}
-                            <span className="text-white font-bold truncate">
-                              {issueItemName}
-                            </span>
-                            {issueItemUnit && (
-                              <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[9px] font-bold shrink-0">
-                                {issueItemUnit}
-                              </span>
-                            )}
-                          </div>
+                          <span className="text-white font-bold truncate">
+                            {issueItemName}
+                          </span>
                         ) : (
                           <span className="text-slate-500 font-medium truncate">
-                            Pilih atau cari barang dari Database Barang...
+                            Pilih atau cari nama barang...
                           </span>
                         )}
                       </div>
@@ -1573,10 +1522,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       />
                     </button>
 
-                    {/* Dropdown Panel Database Barang dengan Fitur Pencarian Identik Database Barang */}
+                    {/* Dropdown Panel Nama Barang Full-Width */}
                     {isBarangDropdownOpen && (
-                      <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 z-30">
-                        {/* Search Bar Identik Database Barang */}
+                      <div className="mt-1.5 w-full rounded-xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 z-30">
                         <div className="p-2 bg-slate-950 border-b border-slate-800">
                           <div className="relative flex items-center">
                             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
@@ -1584,7 +1532,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                               type="text"
                               value={barangSearchQuery}
                               onChange={(e) => setBarangSearchQuery(e.target.value)}
-                              placeholder="Cari kode barang, nama barang, ukuran, atau satuan..."
+                              placeholder="Cari nama barang..."
                               autoFocus
                               className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-8 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
                             />
@@ -1599,31 +1547,33 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                               </button>
                             )}
                           </div>
-                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 px-1">
-                            <span>
-                              {isLoadingDbBarang
-                                ? 'Memuat katalog Database Barang...'
-                                : barangSearchQuery.trim()
-                                ? `Ditemukan ${filteredDbBarangItems.length} barang sesuai pencarian`
-                                : `Menampilkan daftar dari ${dbBarangItems.length} SKU Database Barang`}
-                            </span>
-                            {issueItemName && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIssueItemName('');
-                                  setIssueItemCode('');
-                                  setIssueItemUnit('');
-                                }}
-                                className="text-rose-400 hover:underline font-bold cursor-pointer"
-                              >
-                                Reset Pilihan
-                              </button>
-                            )}
-                          </div>
+                          {(isLoadingDbBarang || barangSearchQuery.trim() || issueItemName) && (
+                            <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 px-1">
+                              <span>
+                                {isLoadingDbBarang
+                                  ? 'Memuat daftar barang...'
+                                  : barangSearchQuery.trim()
+                                  ? `Ditemukan ${filteredDbBarangItems.length} barang sesuai pencarian`
+                                  : ''}
+                              </span>
+                              {issueItemName && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIssueItemName('');
+                                    setIssueItemCode('');
+                                    setIssueItemUnit('');
+                                  }}
+                                  className="text-rose-400 hover:underline font-bold cursor-pointer"
+                                >
+                                  Reset Pilihan
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        {/* List Barang dari Database Barang */}
+                        {/* List Keterangan Item Barang Saja */}
                         <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/80">
                           {filteredDbBarangItems.length > 0 ? (
                             filteredDbBarangItems.map((item) => {
@@ -1633,7 +1583,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                                 issueItemName === formattedLabel ||
                                 issueItemName === `${item.deskripsiBarang} [${item.noBarang}]`;
                               const unitLabel = item.unit1 || item.satuan || 'Pcs';
-                              const hasDim = item.panjangCm > 0 || item.lebarCm > 0 || item.tinggiCm > 0;
                               return (
                                 <button
                                   key={item.id || item.noBarang}
@@ -1645,40 +1594,18 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                                     setIsBarangDropdownOpen(false);
                                     if (validationError) setValidationError(null);
                                   }}
-                                  className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                    isSelected ? 'bg-blue-600/15' : 'hover:bg-slate-800/80'
+                                  className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-blue-600/15 text-blue-300 font-bold'
+                                      : 'hover:bg-slate-800/80 text-white font-medium'
                                   }`}
                                 >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-blue-300 font-mono text-[10px] font-bold">
-                                        {item.noBarang}
-                                      </span>
-                                      <span className={`text-xs font-bold truncate ${isSelected ? 'text-blue-300' : 'text-white'}`}>
-                                        {item.deskripsiBarang}
-                                      </span>
-                                    </div>
-                                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
-                                      <span>Satuan: <strong className="text-slate-300">{unitLabel}</strong></span>
-                                      {item.unit2 && (
-                                        <span>• Unit 2: {item.unit2}</span>
-                                      )}
-                                      {hasDim && (
-                                        <span className="font-mono">
-                                          • {item.panjangCm}×{item.lebarCm}×{item.tinggiCm} cm
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div
-                                    className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
-                                      isSelected
-                                        ? 'bg-blue-600 border-blue-400 text-white'
-                                        : 'border-slate-700 bg-slate-950 text-transparent'
-                                    }`}
-                                  >
-                                    <Check className="w-3 h-3 stroke-[3]" />
-                                  </div>
+                                  <span className="text-xs leading-snug break-words flex-1">
+                                    {item.deskripsiBarang}
+                                  </span>
+                                  {isSelected && (
+                                    <Check className="w-3.5 h-3.5 text-blue-400 shrink-0 stroke-[2.5]" />
+                                  )}
                                 </button>
                               );
                             })
@@ -1686,8 +1613,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                             <div className="p-4 text-center text-slate-400 space-y-1">
                               <div className="text-xs font-bold text-slate-300">
                                 {isLoadingDbBarang
-                                  ? 'Sedang memuat data dari Database Barang...'
-                                  : 'Barang tidak ditemukan di Database Barang'}
+                                  ? 'Sedang memuat daftar barang...'
+                                  : 'Barang tidak ditemukan'}
                               </div>
                               <p className="text-[10px] text-slate-500">
                                 Ketik nama barang di kolom pencarian di atas atau gunakan tombol di bawah.
@@ -1724,7 +1651,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
                       Jumlah / Qty
                     </label>
                     <input
@@ -1735,40 +1662,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
                     />
                   </div>
-                </div>
-
-                {/* Live Precise GPS Pin Preview untuk Validasi Super Admin & SPV Logistik */}
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-blue-500/30 flex items-center justify-between gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    <MapPin className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[11px] font-bold text-white truncate">
-                          {effectivePreciseGps.subAreaLabel}
-                        </span>
-                        <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[9px] font-bold">
-                          Validasi GPS Super Admin &amp; SPV Logistik
-                        </span>
-                      </div>
-                      <div className="text-[10px] font-mono tabular-nums text-blue-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        <span>GPS: {effectivePreciseGps.coordsFormatted}</span>
-                        {gpsAccuracyMeters !== null && hasLiveGpsFix && (
-                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                            Akurasi ±{gpsAccuracyMeters}m
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestFreshGpsLocation}
-                    className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Segarkan titik koordinat GPS presisi"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isRefreshingGps ? 'animate-spin' : ''}`} />
-                    <span>Perbarui GPS</span>
-                  </button>
                 </div>
               </div>
             )}

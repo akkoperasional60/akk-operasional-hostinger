@@ -1896,7 +1896,11 @@ class LogisticsStore {
     const nB = norm(cleanB);
     if (!nA || !nB) return false;
     if (nA === nB) return true;
+    const compactA = nA.replace(/\s+/g, '');
+    const compactB = nB.replace(/\s+/g, '');
+    if (compactA && compactB && compactA === compactB) return true;
     if (nA.length >= 6 && nB.length >= 6 && (nA.includes(nB) || nB.includes(nA))) return true;
+    if (compactA.length >= 6 && compactB.length >= 6 && (compactA.includes(compactB) || compactB.includes(compactA))) return true;
     return false;
   }
 

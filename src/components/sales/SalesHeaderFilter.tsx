@@ -141,18 +141,6 @@ export function getSalesAdminAssignedBranchId(u: UserProfile): string {
     return 'cab-banyuwangi';
   }
 
-  // Priority 3: manual admin-branch override map
-  try {
-    const rawMap = localStorage.getItem('akk_sales_admin_branch_map_v1');
-    if (rawMap) {
-      const parsedMap = JSON.parse(rawMap);
-      const key = (u.fullName || '').trim().toUpperCase();
-      if (parsedMap && parsedMap[key] && enabledSalesBranches.includes(parsedMap[key])) {
-        return parsedMap[key];
-      }
-    }
-  } catch {}
-
   const crewBranch = branchStore.getCrewBranchId(u.id, u.fullName);
   if (crewBranch && enabledSalesBranches.includes(crewBranch)) {
     return crewBranch;

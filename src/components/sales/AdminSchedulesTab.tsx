@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Calendar,
   Plus,
@@ -22,14 +22,17 @@ import {
   Lock,
   Percent,
   Briefcase,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   SalesHeaderFilter,
   SalesTopTab,
   MONTH_OPTIONS,
-  useSalesAdminUsers
+  useSalesAdminUsers,
+  getSalesAdminAssignedBranchId
 } from './SalesHeaderFilter';
 import {
   getOfficialAreasForBranch,
@@ -93,19 +96,6 @@ function isNonAreaTerm(value?: string | null): boolean {
   const clean = String(value || '').trim().toLowerCase();
   if (!clean || clean === '-') return true;
   return NON_AREA_TERM_SET.has(clean);
-}
-
-const LS_ADMIN_BRANCH_MAP_KEY = 'akk_sales_admin_branch_map_v1';
-
-function loadAdminBranchMap(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LS_ADMIN_BRANCH_MAP_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
-  } catch {}
-  return {};
 }
 
 const DAY_NAMES_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -529,15 +519,17 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     return map;
   }, [allSalesAdminUsers, effectiveBranchId]);
 
-  // Admin -> Branch mapping
-  const [adminBranchMap, setAdminBranchMap] = useState<Record<string, string>>(() => loadAdminBranchMap());
-
+  // Admin -> Branch resolution purely from User Management RBAC & branchStore (no localStorage)
   const getAdminBranchId = (adminName: string): string => {
     const key = (adminName || '').trim().toUpperCase();
     const matchedUser = allSalesAdminUsers.find(
       u => (u.fullName || '').trim().toUpperCase() === key
     );
     if (matchedUser) {
+      const assigned = getSalesAdminAssignedBranchId(matchedUser);
+      if (assigned === 'cab-sidoarjo' || assigned === 'cab-banyuwangi') {
+        return assigned;
+      }
       const rawPerms = matchedUser.permissions?.branchPermissions;
       if (rawPerms && typeof rawPerms === 'object') {
         const sdaOn = Boolean(rawPerms['cab-sidoarjo']?.enabled);
@@ -556,20 +548,9 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
       if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
     }
-    if (adminBranchMap[key] && adminBranchMap[key] !== 'ALL') return adminBranchMap[key];
+    const crewBranch = branchStore.getCrewBranchId(matchedUser?.id || '', adminName);
+    if (crewBranch === 'cab-sidoarjo' || crewBranch === 'cab-banyuwangi') return crewBranch;
     return 'cab-banyuwangi';
-  };
-
-  const setAdminBranchId = (adminName: string, branchId: string) => {
-    const key = (adminName || '').trim().toUpperCase();
-    if (!key) return;
-    setAdminBranchMap(prev => {
-      const next = { ...prev, [key]: branchId };
-      try {
-        localStorage.setItem(LS_ADMIN_BRANCH_MAP_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
   };
 
   // Synchronized Nama Area Kirim strictly scoped by active branch (Sidoarjo 9 areas vs Nusantara 37 areas)
@@ -598,8 +579,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
   const [selectedAdmin, setSelectedAdmin] = useState('SEMUA ADMIN');
   const [selectedMonth, setSelectedMonth] = useState<string>(() => currentMonthName);
   const [selectedYear, setSelectedYear] = useState<string>(() => currentYearStr);
-  const [saveToast, setSaveToast] = useState<string | null>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [saveToast, setSaveToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const monthIndex = Math.max(0, MONTH_OPTIONS.indexOf(selectedMonth));
   const yearNum = Number(selectedYear) || nowCurrent.getFullYear();
@@ -617,64 +597,84 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setSelectedDateIso(formatDateIso(yearNum, monthIndex, clampedDay));
   }, [selectedMonth, selectedYear, yearNum, monthIndex]);
 
-  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>(() => {
-    return createInitialSchedules();
-  });
+  const [schedules, setSchedules] = useState<AdminDailyScheduleItem[]>([]);
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState<boolean>(true);
+  const [isSavingSchedules, setIsSavingSchedules] = useState<boolean>(false);
+  const [scheduleSyncError, setScheduleSyncError] = useState<string | null>(null);
 
-  const persistAdminSchedulesToServer = (nextSchedules: AdminDailyScheduleItem[]) => {
+  const persistAdminSchedulesToServer = useCallback(async (nextSchedules: AdminDailyScheduleItem[]): Promise<boolean> => {
+    setIsSavingSchedules(true);
     try {
-      localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(nextSchedules));
-      localStorage.setItem('akk_admin_calendar_initialized_v1', 'true');
-    } catch {}
-    fetch('/api/admin-schedules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schedules: nextSchedules })
-    }).catch(err => console.warn('[Admin Schedules Sync Warning]', err));
-  };
-
-  // Load and hydrate admin schedules from Hostinger MySQL database (/api/admin-schedules)
-  useEffect(() => {
-    let active = true;
-    fetch('/api/admin-schedules', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(res => {
-        if (!active) return;
-        const incoming = Array.isArray(res?.schedules) ? res.schedules : [];
-        const isLegacyFourStub =
-          incoming.length <= 4 &&
-          incoming.every((it: any) => ['sch-1', 'sch-2', 'sch-3', 'sch-4'].includes(String(it?.id || '')));
-        if (res && res.success && incoming.length > 0 && !isLegacyFourStub) {
-          setSchedules(incoming);
-          try {
-            localStorage.setItem('akk_admin_calendar_schedules_v1', JSON.stringify(incoming));
-          } catch {}
-        } else {
-          const initial = createInitialSchedules();
-          setSchedules(initial);
-          persistAdminSchedulesToServer(initial);
-        }
-      })
-      .catch(err => {
-        console.warn('[Admin Schedules Fetch from MySQL Error]', err);
-        try {
-          const saved = localStorage.getItem('akk_admin_calendar_schedules_v1');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 4) {
-              setSchedules(parsed);
-            }
-          }
-        } catch {}
+      const resp = await fetch('/api/admin-schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules: nextSchedules })
       });
-    return () => {
-      active = false;
-    };
+      const json = await resp.json().catch(() => null);
+      if (!resp.ok || !json?.success) {
+        const msg = json?.error || `Gagal menyimpan jadwal admin ke database MySQL (HTTP ${resp.status})`;
+        setScheduleSyncError(msg);
+        return false;
+      }
+      setScheduleSyncError(null);
+      return true;
+    } catch (err: any) {
+      const msg = err?.message || 'Koneksi ke database MySQL terganggu saat menyimpan jadwal';
+      setScheduleSyncError(msg);
+      return false;
+    } finally {
+      setIsSavingSchedules(false);
+    }
   }, []);
 
-  const showToastMessage = (msg: string) => {
-    setSaveToast(msg);
-    setTimeout(() => setSaveToast(null), 3200);
+  const fetchAdminSchedulesFromServer = useCallback(async () => {
+    setIsLoadingSchedules(true);
+    setScheduleSyncError(null);
+    try {
+      const resp = await fetch('/api/admin-schedules', { cache: 'no-store' });
+      const res = await resp.json().catch(() => null);
+      if (!resp.ok || !res?.success) {
+        throw new Error(res?.error || res?.dbError || 'Gagal mengambil jadwal admin dari database MySQL');
+      }
+
+      const incoming = Array.isArray(res?.schedules) ? res.schedules : [];
+      const isLegacyFourStub =
+        incoming.length <= 4 &&
+        incoming.length > 0 &&
+        incoming.every((it: any) => ['sch-1', 'sch-2', 'sch-3', 'sch-4'].includes(String(it?.id || '')));
+
+      if (incoming.length > 0 && !isLegacyFourStub) {
+        setSchedules(incoming);
+      } else if (res.exists === true && !isLegacyFourStub) {
+        setSchedules(incoming);
+      } else if (!res.dbError && (res.exists === false || isLegacyFourStub)) {
+        const initial = createInitialSchedules();
+        setSchedules(initial);
+        await persistAdminSchedulesToServer(initial);
+      } else if (res.dbError) {
+        setScheduleSyncError(res.dbError);
+      }
+    } catch (err: any) {
+      console.warn('[Admin Schedules Fetch from MySQL Error]', err);
+      setScheduleSyncError(err?.message || 'Gagal memuat jadwal admin dari database MySQL.');
+    } finally {
+      setIsLoadingSchedules(false);
+    }
+  }, [persistAdminSchedulesToServer]);
+
+  // Clean up deprecated localStorage keys and hydrate strictly from MySQL (/api/admin-schedules)
+  useEffect(() => {
+    try {
+      localStorage.removeItem('akk_admin_calendar_schedules_v1');
+      localStorage.removeItem('akk_admin_calendar_initialized_v1');
+      localStorage.removeItem('akk_sales_admin_branch_map_v1');
+    } catch {}
+    void fetchAdminSchedulesFromServer();
+  }, [fetchAdminSchedulesFromServer]);
+
+  const showToastMessage = (msg: string, type: 'success' | 'error' = 'success') => {
+    setSaveToast({ message: msg, type });
+    setTimeout(() => setSaveToast(null), 3500);
   };
 
   // Manual Schedule Modal State
@@ -798,7 +798,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       const matchBranch = itemBranch === effectiveBranchId;
       return matchMonth && matchAdmin && matchBranch;
     });
-  }, [schedules, monthPrefix, selectedAdmin, effectiveBranchId, adminBranchMap]);
+  }, [schedules, monthPrefix, selectedAdmin, effectiveBranchId, allSalesAdminUsers]);
 
   const schedulesByDate = useMemo(() => {
     const map: Record<string, AdminDailyScheduleItem[]> = {};
@@ -823,7 +823,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
       const matchBranch = itemBranch === effectiveBranchId;
       return matchDate && matchAdmin && matchBranch;
     });
-  }, [schedules, selectedDateIso, selectedAdmin, effectiveBranchId, adminBranchMap]);
+  }, [schedules, selectedDateIso, selectedAdmin, effectiveBranchId, allSalesAdminUsers]);
 
   // KPI metrics for compact dashboard summary strip
   const kpiStats = useMemo(() => {
@@ -853,13 +853,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     };
   }, [filteredMonthSchedules, selectedDateSchedules]);
 
-  const handleSaveManualSchedule = (e: React.FormEvent) => {
+  const handleSaveManualSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEditSchedules || !manualAdmin || !manualDate) return;
+    if (!canEditSchedules || !manualAdmin || !manualDate || isSavingSchedules) return;
 
     const targetBranch = effectiveBranchId;
-    setAdminBranchId(manualAdmin, targetBranch);
-
     const isAbsent = manualAttendanceStatus === 'ijin' || manualAttendanceStatus === 'sakit';
     const isTargetSidoarjo = targetBranch === 'cab-sidoarjo';
     const fallbackArea = synchronizedDeliveryAreas[0] || (isSidoarjoBranch ? 'SIDOARJO' : 'Muncar Pasar');
@@ -874,67 +872,67 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         : Array.from(new Set(manualAdditionalDuties.map(d => d.trim()).filter(Boolean)));
     const finalBackupAcc = !isAbsent && !isTargetSidoarjo && manualIsBackupAcc;
 
-    setSchedules(prev => {
-      const next = [...prev];
-      const existingIdx = next.findIndex(
-        item =>
-          item.date === manualDate &&
-          item.adminName.toUpperCase() === manualAdmin.toUpperCase() &&
-          getScheduleEffectiveBranchId(item) === targetBranch
-      );
+    const next = [...schedules];
+    const existingIdx = next.findIndex(
+      item =>
+        item.date === manualDate &&
+        item.adminName.toUpperCase() === manualAdmin.toUpperCase() &&
+        getScheduleEffectiveBranchId(item) === targetBranch
+    );
 
-      if (existingIdx >= 0) {
-        const existing = next[existingIdx];
-        const mergedDuties = isAbsent
+    if (existingIdx >= 0) {
+      const existing = next[existingIdx];
+      const mergedDuties = isAbsent
+        ? []
+        : Array.from(new Set([...existing.duties, ...finalDuties]));
+      const existingAdd = Array.isArray(existing.additionalDuties) ? existing.additionalDuties : [];
+      const mergedAdditionalDuties =
+        isAbsent || isTargetSidoarjo
           ? []
-          : Array.from(new Set([...existing.duties, ...finalDuties]));
-        const existingAdd = Array.isArray(existing.additionalDuties) ? existing.additionalDuties : [];
-        const mergedAdditionalDuties =
-          isAbsent || isTargetSidoarjo
-            ? []
-            : Array.from(new Set([...existingAdd, ...finalAdditionalDuties]));
-        next[existingIdx] = {
-          ...existing,
-          branchId: targetBranch,
-          duties: mergedDuties,
-          additionalDuties: mergedAdditionalDuties,
-          isBackupAcc: isAbsent || isTargetSidoarjo ? false : Boolean(existing.isBackupAcc || finalBackupAcc),
-          attendanceStatus: manualAttendanceStatus,
-          absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
-        };
-      } else {
-        next.push({
-          id: 'sch-' + Math.random().toString(36).substring(2, 9),
-          date: manualDate,
-          adminName: manualAdmin,
-          branchId: targetBranch,
-          duties: finalDuties,
-          additionalDuties: finalAdditionalDuties,
-          shiftTime: '08:00 - 16:00',
-          isBackupAcc: finalBackupAcc,
-          notes: '',
-          attendanceStatus: manualAttendanceStatus,
-          absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
-        });
-      }
+          : Array.from(new Set([...existingAdd, ...finalAdditionalDuties]));
+      next[existingIdx] = {
+        ...existing,
+        branchId: targetBranch,
+        duties: mergedDuties,
+        additionalDuties: mergedAdditionalDuties,
+        isBackupAcc: isAbsent || isTargetSidoarjo ? false : Boolean(existing.isBackupAcc || finalBackupAcc),
+        attendanceStatus: manualAttendanceStatus,
+        absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
+      };
+    } else {
+      next.push({
+        id: 'sch-' + Math.random().toString(36).substring(2, 9),
+        date: manualDate,
+        adminName: manualAdmin,
+        branchId: targetBranch,
+        duties: finalDuties,
+        additionalDuties: finalAdditionalDuties,
+        shiftTime: '08:00 - 16:00',
+        isBackupAcc: finalBackupAcc,
+        notes: '',
+        attendanceStatus: manualAttendanceStatus,
+        absenceReason: isAbsent ? manualAbsenceReason.trim() : undefined
+      });
+    }
 
-      persistAdminSchedulesToServer(next);
-      return next;
-    });
+    const ok = await persistAdminSchedulesToServer(next);
+    if (!ok) {
+      showToastMessage('Gagal menyimpan jadwal ke database MySQL. Silakan coba lagi.', 'error');
+      return;
+    }
 
+    setSchedules(next);
     setSelectedDateIso(manualDate);
     setIsManualModalOpen(false);
-    showToastMessage(`Jadwal penugasan ${manualAdmin} (Cabang ${activeBranchName}) berhasil disimpan.`);
+    showToastMessage(`Jadwal penugasan ${manualAdmin} (Cabang ${activeBranchName}) berhasil disimpan ke database MySQL.`);
   };
 
-  const handleSaveEditSchedule = (e: React.FormEvent) => {
+  const handleSaveEditSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEditSchedules || !editingSchedule || !editAdmin) return;
+    if (!canEditSchedules || !editingSchedule || !editAdmin || isSavingSchedules) return;
 
     const targetBranch = editBranchId || effectiveBranchId;
     const isTargetSidoarjo = targetBranch === 'cab-sidoarjo';
-    setAdminBranchId(editAdmin, targetBranch);
-
     const isAbsent = editAttendanceStatus === 'ijin' || editAttendanceStatus === 'sakit';
     const finalDuties = isAbsent ? [] : Array.from(new Set(editAreaDuties));
     const finalAdditionalDuties =
@@ -943,55 +941,47 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         : Array.from(new Set(editAdditionalDuties.map(d => d.trim()).filter(Boolean)));
     const finalBackupAcc = !isAbsent && !isTargetSidoarjo && editIsBackupAcc;
 
-    setSchedules(prev => {
-      const updatedList = prev.map(item => {
-        if (item.id === editingSchedule.id) {
-          return {
-            ...item,
-            branchId: targetBranch,
-            adminName: editAdmin,
-            duties: finalDuties,
-            additionalDuties: finalAdditionalDuties,
-            isBackupAcc: finalBackupAcc,
-            attendanceStatus: editAttendanceStatus,
-            absenceReason: isAbsent ? editAbsenceReason.trim() : undefined
-          };
-        }
-        return item;
-      });
-      persistAdminSchedulesToServer(updatedList);
-      return updatedList;
+    const updatedList = schedules.map(item => {
+      if (item.id === editingSchedule.id) {
+        return {
+          ...item,
+          branchId: targetBranch,
+          adminName: editAdmin,
+          duties: finalDuties,
+          additionalDuties: finalAdditionalDuties,
+          isBackupAcc: finalBackupAcc,
+          attendanceStatus: editAttendanceStatus,
+          absenceReason: isAbsent ? editAbsenceReason.trim() : undefined
+        };
+      }
+      return item;
     });
 
+    const ok = await persistAdminSchedulesToServer(updatedList);
+    if (!ok) {
+      showToastMessage('Gagal memperbarui jadwal ke database MySQL. Silakan coba lagi.', 'error');
+      return;
+    }
+
+    setSchedules(updatedList);
     setEditingSchedule(null);
-    showToastMessage(`Perubahan penugasan ${editAdmin} berhasil diperbarui.`);
+    showToastMessage(`Perubahan penugasan ${editAdmin} berhasil disimpan ke database MySQL.`);
   };
 
-  const handleConfirmDeleteSchedule = () => {
-    if (!canEditSchedules || !deletingSchedule) return;
+  const handleConfirmDeleteSchedule = async () => {
+    if (!canEditSchedules || !deletingSchedule || isSavingSchedules) return;
     const deletedName = deletingSchedule.adminName;
-    setSchedules(prev => {
-      const next = prev.filter(item => item.id !== deletingSchedule.id);
-      persistAdminSchedulesToServer(next);
-      return next;
-    });
-    setDeletingSchedule(null);
-    showToastMessage(`Jadwal penugasan ${deletedName} berhasil dihapus.`);
-  };
+    const next = schedules.filter(item => item.id !== deletingSchedule.id);
 
-  const handleConfirmClearBranchMonth = () => {
-    if (!canEditSchedules) return;
-    setSchedules(prev => {
-      const next = prev.filter(item => {
-        const isSameBranch = getScheduleEffectiveBranchId(item) === effectiveBranchId;
-        const isSameMonth = String(item.date || '').startsWith(monthPrefix);
-        return !(isSameBranch && isSameMonth);
-      });
-      persistAdminSchedulesToServer(next);
-      return next;
-    });
-    setShowClearConfirm(false);
-    showToastMessage(`Jadwal Cabang ${activeBranchName} bulan ${selectedMonth} ${selectedYear} berhasil dikosongkan.`);
+    const ok = await persistAdminSchedulesToServer(next);
+    if (!ok) {
+      showToastMessage('Gagal menghapus jadwal dari database MySQL. Silakan coba lagi.', 'error');
+      return;
+    }
+
+    setSchedules(next);
+    setDeletingSchedule(null);
+    showToastMessage(`Jadwal penugasan ${deletedName} berhasil dihapus dari database MySQL.`);
   };
 
   const handleExportExcel = () => {
@@ -1206,17 +1196,46 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         </div>
       </div>
 
+      {/* Database Sync Error Banner */}
+      {scheduleSyncError && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-bold shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            <span>{scheduleSyncError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchAdminSchedulesFromServer()}
+            disabled={isLoadingSchedules}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer shrink-0 self-start sm:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSchedules ? 'animate-spin' : ''}`} />
+            <span>Muat Ulang dari MySQL</span>
+          </button>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {saveToast && (
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold shadow-xs animate-in fade-in duration-150">
+        <div
+          className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border text-xs font-bold shadow-xs animate-in fade-in duration-150 ${
+            saveToast.type === 'error'
+              ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+              : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>{saveToast}</span>
+            {saveToast.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            )}
+            <span>{saveToast.message}</span>
           </div>
           <button
             type="button"
             onClick={() => setSaveToast(null)}
-            className="text-emerald-600 dark:text-emerald-400 hover:opacity-75 cursor-pointer"
+            className="hover:opacity-75 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -1432,7 +1451,16 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           </div>
         </div>
 
-        {selectedDateSchedules.length === 0 ? (
+        {isLoadingSchedules && schedules.length === 0 ? (
+          <div className="px-6 py-10 text-center space-y-2.5">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
+              <Loader2 className="w-5 h-5 animate-spin" />
+            </div>
+            <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+              Memuat jadwal admin dari database MySQL...
+            </p>
+          </div>
+        ) : selectedDateSchedules.length === 0 ? (
           <div className="px-6 py-10 text-center space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
               <Users className="w-6 h-6" />
@@ -1647,7 +1675,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         )}
       </div>
 
-      {/* Modal: Buat Jadwal Manual */}
+      {/* Modal: Buat Jadwal */}
       {isManualModalOpen && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -1976,10 +2004,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={!manualAdmin}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                  disabled={!manualAdmin || isSavingSchedules}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-xs transition cursor-pointer"
                 >
-                  Simpan Penugasan
+                  {isSavingSchedules && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSavingSchedules ? 'Menyimpan...' : 'Simpan Penugasan'}</span>
                 </button>
               </div>
             </form>
@@ -2257,9 +2286,11 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                  disabled={!editAdmin || isSavingSchedules}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-xs transition cursor-pointer"
                 >
-                  Simpan Perubahan
+                  {isSavingSchedules && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSavingSchedules ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
                 </button>
               </div>
             </form>
@@ -2281,7 +2312,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                   Jadwal penugasan <strong>{deletingSchedule.adminName}</strong> pada{' '}
-                  <strong>{formatReadableDateId(deletingSchedule.date)}</strong> akan dihapus dari database.
+                  <strong>{formatReadableDateId(deletingSchedule.date)}</strong> akan dihapus dari database MySQL.
                 </p>
               </div>
             </div>
@@ -2289,54 +2320,19 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
               <button
                 type="button"
                 onClick={() => setDeletingSchedule(null)}
-                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                disabled={isSavingSchedules}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={handleConfirmDeleteSchedule}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-xs cursor-pointer"
+                disabled={isSavingSchedules}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold shadow-xs cursor-pointer"
               >
-                Ya, Hapus
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Konfirmasi Kosongkan Bulan Ini (Cabang Aktif Saja) */}
-      {showClearConfirm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-                <AlertCircle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Kosongkan Jadwal Bulan Ini?
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Semua penugasan Admin Penjualan untuk <strong>Cabang {activeBranchName}</strong> pada periode{' '}
-                  <strong>{selectedMonth} {selectedYear}</strong> akan dihapus. Data cabang lain tidak terpengaruh.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmClearBranchMonth}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-xs cursor-pointer"
-              >
-                Ya, Kosongkan
+                {isSavingSchedules && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSavingSchedules ? 'Menghapus...' : 'Ya, Hapus'}</span>
               </button>
             </div>
           </div>

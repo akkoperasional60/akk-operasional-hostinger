@@ -5799,17 +5799,27 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state & Disk Fallback)
+  // 🗓️ Jadwal & Penugasan Admin Penjualan (Persistent ke Database Hostinger MySQL app_state)
   let inMemoryAdminCalendarSchedules: any[] = (() => {
     const disk = readPersistentAppState('admin_calendar_schedules_payload');
     return Array.isArray(disk) ? disk : [];
   })();
   let inMemoryAdminCalendarSchedulesLoaded = inMemoryAdminCalendarSchedules.length > 0;
+  let adminCalendarSchedulesExistsInDb = inMemoryAdminCalendarSchedules.length > 0;
   let lastAdminSchedulesDbSyncAt = 0;
-  let adminSchedulesDbRefreshPromise: Promise<any[] | null> | null = null;
 
-  const refreshAdminCalendarSchedulesFromDb = async (): Promise<any[] | null> => {
-    if (!isDatabaseConfigured()) return null;
+  interface AdminSchedulesDbFetchResult {
+    schedules: any[] | null;
+    exists: boolean;
+    dbError?: string;
+  }
+
+  let adminSchedulesDbRefreshPromise: Promise<AdminSchedulesDbFetchResult> | null = null;
+
+  const refreshAdminCalendarSchedulesFromDb = async (): Promise<AdminSchedulesDbFetchResult> => {
+    if (!isDatabaseConfigured()) {
+      return { schedules: null, exists: false };
+    }
     if (adminSchedulesDbRefreshPromise) return adminSchedulesDbRefreshPromise;
     adminSchedulesDbRefreshPromise = (async () => {
       try {
@@ -5821,16 +5831,24 @@ Kembalikan HANYA JSON valid:
           if (Array.isArray(parsed)) {
             inMemoryAdminCalendarSchedules = parsed;
             inMemoryAdminCalendarSchedulesLoaded = true;
+            adminCalendarSchedulesExistsInDb = true;
             lastAdminSchedulesDbSyncAt = Date.now();
             writePersistentAppState('admin_calendar_schedules_payload', parsed);
-            return parsed;
+            return { schedules: parsed, exists: true };
           }
         }
+        adminCalendarSchedulesExistsInDb = false;
         lastAdminSchedulesDbSyncAt = Date.now();
-      } catch {} finally {
+        return { schedules: [], exists: false };
+      } catch (err: any) {
+        return {
+          schedules: null,
+          exists: adminCalendarSchedulesExistsInDb,
+          dbError: err?.message || 'Gagal membaca data jadwal dari MySQL'
+        };
+      } finally {
         adminSchedulesDbRefreshPromise = null;
       }
-      return null;
     })();
     return adminSchedulesDbRefreshPromise;
   };
@@ -5842,24 +5860,63 @@ Kembalikan HANYA JSON valid:
   app.get('/api/admin-schedules', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      if (inMemoryAdminCalendarSchedulesLoaded && Date.now() - lastAdminSchedulesDbSyncAt < 3000) {
-        return res.json({
-          success: true,
-          schedules: inMemoryAdminCalendarSchedules,
-          count: inMemoryAdminCalendarSchedules.length,
-          source: 'hostinger_mysql_cache'
-        });
+      if (isDatabaseConfigured()) {
+        const dbResult = await refreshAdminCalendarSchedulesFromDb();
+        if (!dbResult.dbError && Array.isArray(dbResult.schedules)) {
+          return res.json({
+            success: true,
+            schedules: dbResult.schedules,
+            count: dbResult.schedules.length,
+            exists: dbResult.exists,
+            source: 'hostinger_mysql'
+          });
+        }
+
+        if (dbResult.dbError) {
+          if (inMemoryAdminCalendarSchedulesLoaded) {
+            return res.json({
+              success: true,
+              schedules: inMemoryAdminCalendarSchedules,
+              count: inMemoryAdminCalendarSchedules.length,
+              exists: true,
+              dbError: dbResult.dbError,
+              source: 'memory_cache'
+            });
+          }
+          const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
+          if (Array.isArray(diskSaved)) {
+            inMemoryAdminCalendarSchedules = diskSaved;
+            inMemoryAdminCalendarSchedulesLoaded = true;
+            return res.json({
+              success: true,
+              schedules: diskSaved,
+              count: diskSaved.length,
+              exists: true,
+              dbError: dbResult.dbError,
+              source: 'disk_fallback'
+            });
+          }
+          return res.status(500).json({
+            success: false,
+            error: dbResult.dbError,
+            dbError: dbResult.dbError,
+            schedules: [],
+            exists: false
+          });
+        }
       }
 
-      if (isDatabaseConfigured()) {
-        const timeoutMs = inMemoryAdminCalendarSchedulesLoaded ? 700 : 1500;
-        const dbResult = await Promise.race([
-          refreshAdminCalendarSchedulesFromDb(),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs))
-        ]);
-        if (Array.isArray(dbResult)) {
-          return res.json({ success: true, schedules: dbResult, count: dbResult.length, source: 'hostinger_mysql' });
-        }
+      const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
+      if (Array.isArray(diskSaved)) {
+        inMemoryAdminCalendarSchedules = diskSaved;
+        inMemoryAdminCalendarSchedulesLoaded = true;
+        return res.json({
+          success: true,
+          schedules: diskSaved,
+          count: diskSaved.length,
+          exists: true,
+          source: 'disk_database'
+        });
       }
 
       if (inMemoryAdminCalendarSchedulesLoaded) {
@@ -5867,22 +5924,25 @@ Kembalikan HANYA JSON valid:
           success: true,
           schedules: inMemoryAdminCalendarSchedules,
           count: inMemoryAdminCalendarSchedules.length,
+          exists: true,
           source: 'memory_cache'
         });
       }
 
-      const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
-      if (Array.isArray(diskSaved)) {
-        inMemoryAdminCalendarSchedules = diskSaved;
-        inMemoryAdminCalendarSchedulesLoaded = true;
-        return res.json({ success: true, schedules: diskSaved, count: diskSaved.length, source: 'disk_database' });
-      }
-
-      return res.json({ success: true, schedules: inMemoryAdminCalendarSchedules, count: inMemoryAdminCalendarSchedules.length, source: 'in_memory' });
+      return res.json({
+        success: true,
+        schedules: [],
+        count: 0,
+        exists: false,
+        source: 'disk_database'
+      });
     } catch (err: any) {
-      const diskSaved = readPersistentAppState('admin_calendar_schedules_payload');
-      const fallback = Array.isArray(diskSaved) ? diskSaved : inMemoryAdminCalendarSchedules;
-      return res.json({ success: true, schedules: fallback, count: fallback.length, source: 'disk_fallback' });
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Gagal memuat jadwal admin',
+        schedules: [],
+        exists: false
+      });
     }
   });
 
@@ -5892,35 +5952,38 @@ Kembalikan HANYA JSON valid:
       if (!Array.isArray(incoming)) {
         return res.status(400).json({ success: false, error: 'Expected schedules array' });
       }
+
+      if (isDatabaseConfigured()) {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          [JSON.stringify(incoming)]
+        );
+      }
+
       inMemoryAdminCalendarSchedules = incoming;
       inMemoryAdminCalendarSchedulesLoaded = true;
+      adminCalendarSchedulesExistsInDb = true;
       lastAdminSchedulesDbSyncAt = Date.now();
       writePersistentAppState('admin_calendar_schedules_payload', incoming);
 
-      if (isDatabaseConfigured()) {
-        setImmediate(() => {
-          mysqlQuery(
-            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('admin_calendar_schedules_payload', ?, NOW())
-             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-            [JSON.stringify(incoming)]
-          ).catch((dbErr: any) => {
-            console.warn('[Hostinger MySQL Sync Warning for Admin Schedules]', dbErr?.message);
-          });
-        });
-      }
-
       const msg = incoming.length === 0
-        ? 'Jadwal admin berhasil dikosongkan & disimpan ke database'
-        : `${incoming.length} jadwal admin berhasil disimpan permanen ke database`;
+        ? 'Jadwal admin berhasil dikosongkan & disimpan ke database MySQL'
+        : `${incoming.length} jadwal admin berhasil disimpan permanen ke database MySQL`;
 
       return res.json({
         success: true,
         count: incoming.length,
+        exists: true,
         source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database',
         message: msg
       });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message });
+      console.error('[Hostinger MySQL Error for Admin Schedules]', err?.message || err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Gagal menyimpan jadwal admin ke database MySQL'
+      });
     }
   });
 

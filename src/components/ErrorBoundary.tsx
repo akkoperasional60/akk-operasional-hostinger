@@ -6,8 +6,6 @@ interface Props {
 }
 
 const CACHE_KEYS_TO_PURGE_ON_ERROR = [
-  'akk_admin_calendar_schedules_v1',
-  'akk_sales_admin_branch_map_v1',
   'akk_admin_schedules_v1',
   'akk_daily_checklist_v1',
   'akk_task_status_v1',

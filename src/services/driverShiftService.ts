@@ -19,6 +19,13 @@ function normalizePersonName(rawName?: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function normalizeCompactName(rawName?: string): string {
+  return String(rawName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
 function isSameDriverIdentity(
   shiftDriverId?: string,
   shiftDriverName?: string,
@@ -43,7 +50,7 @@ function isSameDriverIdentity(
   const sNameNorm = normalizePersonName(shiftDriverName);
   const tNameNorm = normalizePersonName(targetDriverName) || activeCrewNameNorm || currentUserNameNorm;
 
-  if (sNameNorm && tNameNorm && sNameNorm === tNameNorm) {
+  if (sNameNorm && tNameNorm && (sNameNorm === tNameNorm || normalizeCompactName(shiftDriverName) === normalizeCompactName(targetDriverName))) {
     return true;
   }
 
@@ -54,7 +61,15 @@ function isSameDriverIdentity(
 
   if (targetMatchesCurrentUser) {
     if (sIdNorm && (sIdNorm === currentUserIdNorm || sIdNorm === activeCrewIdNorm)) return true;
-    if (sNameNorm && (sNameNorm === currentUserNameNorm || sNameNorm === activeCrewNameNorm)) return true;
+    if (
+      sNameNorm &&
+      (sNameNorm === currentUserNameNorm ||
+        sNameNorm === activeCrewNameNorm ||
+        normalizeCompactName(sNameNorm) === normalizeCompactName(currentUserNameNorm) ||
+        normalizeCompactName(sNameNorm) === normalizeCompactName(activeCrewNameNorm))
+    ) {
+      return true;
+    }
   }
 
   return false;
@@ -748,7 +763,7 @@ class DriverShiftService {
       }
     });
 
-    this.persistShifts(shifts);
+    await this.persistShiftsToServer(shifts);
 
     // Gabungkan Check-Out dengan Check-In pada Laporan Kiriman Kru
     driverReportService.upsertShiftCheckinCheckoutReport({
@@ -756,11 +771,19 @@ class DriverShiftService {
       driverId: active.driverId,
       driverName: meta?.driverName || active.driverName,
       userRole: roleLabel,
+      helperName: [active.helper1Name, active.helper2Name].filter(Boolean).join(', ') || undefined,
       plateNumber: meta?.plateNumber || active.plateNumber || '-',
-      areaName: meta?.areaName || 'Presensi Shift Operasional DC',
+      areaName: meta?.areaName || active.selectedArea || 'Presensi Shift Operasional DC',
       checkinTimeFormatted: active.checkinTimeFormatted,
       checkoutTimeFormatted: checkoutFormatted,
       securityPin: '****'
+    });
+    driverReportService.closeOpenPresensiReportsForTeam({
+      shiftIds: [active.id],
+      crewNames: [active.driverName, active.helper1Name, active.helper2Name, meta?.driverName],
+      plateNumber: meta?.plateNumber || active.plateNumber,
+      areaName: meta?.areaName || active.selectedArea,
+      checkoutTimeFormatted: checkoutFormatted
     });
 
     if (typeof window !== 'undefined') {
@@ -805,6 +828,7 @@ class DriverShiftService {
     const targetPlate = normPlate(params.plateNumber);
     const targetArea = normText(params.areaName);
     const targetDate = String(params.tripDate || '').slice(0, 10) || getLocalDateStr();
+    const yesterdayDate = getLocalDateStr(new Date(Date.now() - 24 * 3600 * 1000));
 
     // Kumpulkan semua nama kru dalam tim (actor + driver + helper1 + helper2 + rekan di shift aktif actor)
     const teamNamesSet = new Set<string>();
@@ -831,9 +855,18 @@ class DriverShiftService {
 
     const isNameInTeam = (candidate?: string): boolean => {
       const clean = normText(candidate);
+      const compact = normalizeCompactName(candidate);
       if (!clean) return false;
       for (const tn of teamNamesSet) {
-        if (clean === tn || clean.includes(tn) || tn.includes(clean)) return true;
+        const tnCompact = normalizeCompactName(tn);
+        if (
+          clean === tn ||
+          clean.includes(tn) ||
+          tn.includes(clean) ||
+          (compact && tnCompact && (compact === tnCompact || compact.includes(tnCompact) || tnCompact.includes(compact)))
+        ) {
+          return true;
+        }
       }
       return false;
     };
@@ -841,15 +874,16 @@ class DriverShiftService {
     const matchedShifts: DriverShiftCheckin[] = [];
     shifts.forEach(s => {
       if (s.status === 'checked_out') return;
-      const sameDate = !s.date || s.date.slice(0, 10) === targetDate;
+      const sDate = s.date ? s.date.slice(0, 10) : targetDate;
+      const relevantDate = sDate === targetDate || sDate === yesterdayDate;
       const isActor = isSameDriverIdentity(s.driverId, s.driverName, params.actorDriverId, params.actorName);
-      const samePlate = Boolean(effectivePlate && effectivePlate !== '-' && normPlate(s.plateNumber) === effectivePlate && sameDate);
-      const sameArea = Boolean(effectiveArea && normText(s.selectedArea) === effectiveArea && sameDate);
+      const samePlate = Boolean(effectivePlate && effectivePlate !== '-' && normPlate(s.plateNumber) === effectivePlate && relevantDate);
+      const sameArea = Boolean(effectiveArea && normText(s.selectedArea) === effectiveArea && relevantDate);
       const linkedByCrewName =
-        sameDate &&
+        relevantDate &&
         (isNameInTeam(s.driverName) || isNameInTeam(s.helper1Name) || isNameInTeam(s.helper2Name));
 
-      if (isActor || samePlate || linkedByCrewName || (sameArea && (samePlate || linkedByCrewName))) {
+      if (isActor || samePlate || (linkedByCrewName && (sameArea || samePlate || !effectiveArea)) || (sameArea && (samePlate || linkedByCrewName))) {
         s.status = 'checked_out';
         s.arrivedAtWarehouseAt = arrivedIso;
         s.checkoutTime = arrivedIso;
@@ -862,14 +896,16 @@ class DriverShiftService {
     });
 
     if (matchedShifts.length > 0) {
-      this.persistShifts(shifts);
+      await this.persistShiftsToServer(shifts);
       matchedShifts.forEach(s => {
         const memberRole = s.checkinRole === 'helper' ? 'Helper' : 'Driver';
+        const helperList = [s.helper1Name, s.helper2Name].filter(h => h && !isSameDriverIdentity(s.driverId, s.driverName, '', h)).join(', ');
         driverReportService.upsertShiftCheckinCheckoutReport({
           shiftId: s.id,
           driverId: s.driverId,
           driverName: s.driverName,
           userRole: memberRole,
+          helperName: helperList || undefined,
           plateNumber: s.plateNumber || params.plateNumber || '-',
           areaName: s.selectedArea || params.areaName || 'Gudang Argo',
           checkinTimeFormatted: s.checkinTimeFormatted,
@@ -878,9 +914,24 @@ class DriverShiftService {
         });
       });
 
+      driverReportService.closeOpenPresensiReportsForTeam({
+        shiftIds: matchedShifts.map(s => s.id),
+        crewNames: Array.from(teamNamesSet),
+        plateNumber: params.plateNumber || actorShift?.plateNumber,
+        areaName: params.areaName || actorShift?.selectedArea,
+        checkoutTimeFormatted: checkoutFormatted
+      });
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: matchedShifts[0] }));
       }
+    } else {
+      driverReportService.closeOpenPresensiReportsForTeam({
+        crewNames: Array.from(teamNamesSet),
+        plateNumber: params.plateNumber,
+        areaName: params.areaName,
+        checkoutTimeFormatted: checkoutFormatted
+      });
     }
 
     return {

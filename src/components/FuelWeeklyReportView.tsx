@@ -5,21 +5,12 @@ import {
   Calendar,
   Truck,
   User,
-  Fuel,
-  TrendingUp,
-  AlertTriangle,
   CheckCircle2,
-  DollarSign,
-  Gauge,
-  Activity,
-  Award,
-  Filter,
   Search,
   Printer,
   ChevronDown,
-  Layers,
-  Sparkles,
-  Info
+  ArrowUpDown,
+  MapPin
 } from 'lucide-react';
 import { FuelLog } from '../types';
 import {
@@ -28,8 +19,7 @@ import {
   exportFuelReportToExcel,
   exportFuelReportToPDF,
   formatRupiah,
-  WeeklyFleetFuelSummary,
-  WeeklyDriverFuelSummary
+  getWeekBounds
 } from '../utils/fuelReportGenerator';
 
 interface FuelWeeklyReportViewProps {
@@ -38,32 +28,61 @@ interface FuelWeeklyReportViewProps {
 }
 
 export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
-  fuelLogs,
-  onOpenExportModal
+  fuelLogs
 }) => {
   const [reportTab, setReportTab] = useState<'fleet' | 'driver'>('fleet');
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
+  const [selectedSpbu, setSelectedSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
+  const [sortBy, setSortBy] = useState<'period' | 'efficient_asc' | 'wasteful_desc'>('period');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
-  // Compute all weekly summaries
-  const allFleetSummaries = useMemo(() => computeWeeklyFleetSummaries(fuelLogs), [fuelLogs]);
-  const allDriverSummaries = useMemo(() => computeWeeklyDriverSummaries(fuelLogs), [fuelLogs]);
+  // Filter logs by SPBU first so weekly summaries accurately reflect the selected SPBU
+  const spbuFilteredLogs = useMemo(() => {
+    if (selectedSpbu === 'all') return fuelLogs;
+    return fuelLogs.filter(log => {
+      const gs = (log.gasStation || '').toLowerCase();
+      if (selectedSpbu === 'Farly') return gs.includes('farly');
+      if (selectedSpbu === 'Gajah Mada') return gs.includes('gajah mada');
+      return !gs.includes('farly') && !gs.includes('gajah mada');
+    });
+  }, [fuelLogs, selectedSpbu]);
 
-  // Extract distinct weeks for filter dropdown
+  // Compute all weekly summaries from SPBU-filtered logs
+  const allFleetSummaries = useMemo(() => computeWeeklyFleetSummaries(spbuFilteredLogs), [spbuFilteredLogs]);
+  const allDriverSummaries = useMemo(() => computeWeeklyDriverSummaries(spbuFilteredLogs), [spbuFilteredLogs]);
+
+  // Extract distinct calendar months
+  const availableMonths = useMemo(() => {
+    const map = new Map<string, string>();
+    spbuFilteredLogs.forEach(l => {
+      const b = getWeekBounds(l.date);
+      if (!map.has(b.monthKey)) {
+        map.set(b.monthKey, b.monthLabel);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [spbuFilteredLogs]);
+
+  // Extract distinct weeks for filter dropdown (scoped to selectedMonth if chosen)
   const availableWeeks = useMemo(() => {
     const map = new Map<string, string>();
     allFleetSummaries.forEach(f => {
+      if (selectedMonth !== 'all' && !f.weekKey.startsWith(`${selectedMonth}-`)) return;
       if (!map.has(f.weekKey)) {
         map.set(f.weekKey, f.weekLabel);
       }
     });
     return Array.from(map.entries()).map(([key, label]) => ({ key, label }));
-  }, [allFleetSummaries]);
+  }, [allFleetSummaries, selectedMonth]);
 
-  // Filtered summaries based on user selection
+  // Filtered and sorted summaries
   const filteredFleetSummaries = useMemo(() => {
-    return allFleetSummaries.filter(f => {
+    const list = allFleetSummaries.filter(f => {
+      const matchMonth = selectedMonth === 'all' || f.weekKey.startsWith(`${selectedMonth}-`);
       const matchWeek = selectedWeek === 'all' || f.weekKey === selectedWeek;
       const q = searchQuery.toLowerCase();
       const matchQuery = !q ||
@@ -72,12 +91,29 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
         f.vehicleType.toLowerCase().includes(q) ||
         f.driverNames.some(d => d.toLowerCase().includes(q));
 
-      return matchWeek && matchQuery;
+      return matchMonth && matchWeek && matchQuery;
     });
-  }, [allFleetSummaries, selectedWeek, searchQuery]);
+
+    if (sortBy === 'efficient_asc') {
+      return [...list].sort((a, b) => {
+        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : -1;
+        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : -1;
+        return bVal - aVal;
+      });
+    }
+    if (sortBy === 'wasteful_desc') {
+      return [...list].sort((a, b) => {
+        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : 9999;
+        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : 9999;
+        return aVal - bVal;
+      });
+    }
+    return list;
+  }, [allFleetSummaries, selectedMonth, selectedWeek, searchQuery, sortBy]);
 
   const filteredDriverSummaries = useMemo(() => {
-    return allDriverSummaries.filter(d => {
+    const list = allDriverSummaries.filter(d => {
+      const matchMonth = selectedMonth === 'all' || d.weekKey.startsWith(`${selectedMonth}-`);
       const matchWeek = selectedWeek === 'all' || d.weekKey === selectedWeek;
       const q = searchQuery.toLowerCase();
       const matchQuery = !q ||
@@ -85,9 +121,25 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
         d.fleetPlates.some(p => p.toLowerCase().includes(q)) ||
         d.predicate.toLowerCase().includes(q);
 
-      return matchWeek && matchQuery;
+      return matchMonth && matchWeek && matchQuery;
     });
-  }, [allDriverSummaries, selectedWeek, searchQuery]);
+
+    if (sortBy === 'efficient_asc') {
+      return [...list].sort((a, b) => {
+        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : -1;
+        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : -1;
+        return bVal - aVal;
+      });
+    }
+    if (sortBy === 'wasteful_desc') {
+      return [...list].sort((a, b) => {
+        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : 9999;
+        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : 9999;
+        return aVal - bVal;
+      });
+    }
+    return list;
+  }, [allDriverSummaries, selectedMonth, selectedWeek, searchQuery, sortBy]);
 
   // Aggregate Metrics for Active Filter
   const activeMetrics = useMemo(() => {
@@ -120,10 +172,17 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   }, [filteredFleetSummaries, filteredDriverSummaries]);
 
   const selectedWeekLabel = useMemo(() => {
-    if (selectedWeek === 'all') return 'Seluruh Minggu Terdata';
-    const found = availableWeeks.find(w => w.key === selectedWeek);
-    return found ? found.label : selectedWeek;
-  }, [selectedWeek, availableWeeks]);
+    const spbuTag = selectedSpbu !== 'all' ? ` • ${selectedSpbu}` : '';
+    if (selectedWeek !== 'all') {
+      const found = availableWeeks.find(w => w.key === selectedWeek);
+      return `${found ? found.label : selectedWeek}${spbuTag}`;
+    }
+    if (selectedMonth !== 'all') {
+      const foundM = availableMonths.find(m => m.key === selectedMonth);
+      return `Bulan ${foundM ? foundM.label : selectedMonth}${spbuTag}`;
+    }
+    return `Seluruh Periode Terdata${spbuTag}`;
+  }, [selectedMonth, selectedWeek, selectedSpbu, availableWeeks, availableMonths]);
 
   const handleExportPDF = () => {
     setIsExporting(true);
@@ -131,13 +190,12 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       exportFuelReportToPDF({
         fleetSummaries: filteredFleetSummaries,
         driverSummaries: filteredDriverSummaries,
-        filterWeekKey: selectedWeek === 'all' ? undefined : selectedWeek,
+        filterWeekKey: selectedWeek !== 'all' ? selectedWeek : selectedMonth !== 'all' ? selectedMonth : undefined,
         filterWeekLabel: selectedWeekLabel,
         printedBy: 'Super Admin Logistik PT AKK'
       });
     } catch (err) {
       console.error(err);
-      alert('Gagal mengekspor PDF.');
     } finally {
       setIsExporting(false);
     }
@@ -146,24 +204,22 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   const handleExportExcel = () => {
     setIsExporting(true);
     try {
-      const matchingLogs = selectedWeek === 'all'
-        ? fuelLogs
-        : fuelLogs.filter(l => {
-            const bounds = allFleetSummaries.find(f => f.weekKey === selectedWeek);
-            if (!bounds) return true;
-            return l.date >= bounds.startDate && l.date <= bounds.endDate;
-          });
+      const matchingLogs = spbuFilteredLogs.filter(l => {
+        const b = getWeekBounds(l.date);
+        if (selectedMonth !== 'all' && b.monthKey !== selectedMonth) return false;
+        if (selectedWeek !== 'all' && b.weekKey !== selectedWeek) return false;
+        return true;
+      });
 
       exportFuelReportToExcel({
         fleetSummaries: filteredFleetSummaries,
         driverSummaries: filteredDriverSummaries,
         detailedLogs: matchingLogs,
-        filterWeekKey: selectedWeek === 'all' ? undefined : selectedWeek,
+        filterWeekKey: selectedWeek !== 'all' ? selectedWeek : selectedMonth !== 'all' ? selectedMonth : undefined,
         filterWeekLabel: selectedWeekLabel
       });
     } catch (err) {
       console.error(err);
-      alert('Gagal mengekspor Excel.');
     } finally {
       setIsExporting(false);
     }
@@ -225,28 +281,83 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
-          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-            {/* Week Selector */}
-            <div className="relative min-w-[260px]">
-              <Calendar className="w-4 h-4 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-3 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            {/* Month Selector */}
+            <div className="relative min-w-[165px]">
+              <Calendar className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  const nextMonth = e.target.value;
+                  setSelectedMonth(nextMonth);
+                  if (nextMonth !== 'all' && selectedWeek !== 'all' && !selectedWeek.startsWith(`${nextMonth}-`)) {
+                    setSelectedWeek('all');
+                  }
+                }}
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+              >
+                <option value="all">Semua Bulan ({availableMonths.length})</option>
+                {availableMonths.map(m => (
+                  <option key={m.key} value={m.key}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
+            {/* Week Selector (Minggu 1 - Minggu 5) */}
+            <div className="relative min-w-[215px]">
+              <Calendar className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedWeek}
                 onChange={(e) => setSelectedWeek(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
               >
-                <option value="all">Semua Periode Minggu ({availableWeeks.length} Minggu)</option>
+                <option value="all">Semua Minggu ({availableWeeks.length} Minggu)</option>
                 {availableWeeks.map(w => (
                   <option key={w.key} value={w.key}>
                     {w.label}
                   </option>
                 ))}
               </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
+            {/* SPBU Filter */}
+            <div className="relative min-w-[155px]">
+              <MapPin className="w-3.5 h-3.5 text-blue-400 absolute left-3 top-2.5 pointer-events-none" />
+              <select
+                value={selectedSpbu}
+                onChange={(e) => setSelectedSpbu(e.target.value as any)}
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+              >
+                <option value="all">Semua SPBU</option>
+                <option value="Farly">SPBU Farly</option>
+                <option value="Gajah Mada">SPBU Gajah Mada</option>
+                <option value="SPBU Lain">SPBU Lain (Urgent)</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
+            {/* Sort Terefisien - Boros */}
+            <div className="relative min-w-[195px]">
+              <ArrowUpDown className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+              >
+                <option value="period">Urutkan: Periode Terbaru</option>
+                <option value="efficient_asc">Terefisien &rarr; Paling Boros</option>
+                <option value="wasteful_desc">Paling Boros &rarr; Terefisien</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
             {/* Search Input */}
-            <div className="relative flex-1 sm:w-60">
+            <div className="relative flex-1 sm:w-48">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
@@ -258,7 +369,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             </div>
           </div>
 
-          <div className="text-xs text-slate-400 font-medium">
+          <div className="text-xs text-slate-400 font-medium shrink-0">
             Periode: <span className="font-bold text-amber-400">{selectedWeekLabel}</span>
           </div>
         </div>

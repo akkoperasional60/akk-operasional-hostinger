@@ -130,6 +130,9 @@ function matchSamePerson(nameA?: string, nameB?: string): boolean {
   const b = (nameB || '').trim().toLowerCase();
   if (!a || !b || a === '-' || b === '-') return false;
   if (a === b || a.includes(b) || b.includes(a)) return true;
+  const compactA = a.replace(/[^a-z0-9]/g, '');
+  const compactB = b.replace(/[^a-z0-9]/g, '');
+  if (compactA && compactB && compactA === compactB) return true;
   if (
     (a.includes('saiful') || a.includes('saifur')) &&
     (b.includes('saiful') || b.includes('saifur')) &&
@@ -452,6 +455,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     isChecking: false
   });
 
+  const [gateOutBusyId, setGateOutBusyId] = useState<string | null>(null);
   const [expandedRouteDeliveryId, setExpandedRouteDeliveryId] = useState<string | null>(null);
 
   const requestNativeGpsLock = (
@@ -488,6 +492,51 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         return;
       }
 
+      let settled = false;
+      const finish = (payload: {
+        ok: boolean;
+        lat: number;
+        lng: number;
+        accuracy: number;
+        speedKmh: number;
+        reason?: string;
+      }) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(safetyTimer);
+        resolve(payload);
+      };
+
+      const safetyTimer = window.setTimeout(() => {
+        const timeoutMsg = 'Waktu pencarian sinyal GPS habis. Pastikan GPS aktif dan coba lagi atau gunakan konfirmasi darurat.';
+        setDeviceGps(prev => ({
+          ...prev,
+          isSyncing: false,
+          errorMsg: prev.source === 'native' ? null : timeoutMsg
+        }));
+        if (deviceGps.source === 'native' && deviceGps.permissionState === 'granted') {
+          finish({
+            ok: true,
+            lat: deviceGps.lat,
+            lng: deviceGps.lng,
+            accuracy: deviceGps.accuracy,
+            speedKmh: deviceGps.speedKmh
+          });
+        } else {
+          if (showToast) {
+            addNotification('sla_warning', 'GPS Timeout', timeoutMsg);
+          }
+          finish({
+            ok: false,
+            lat: deviceGps.lat,
+            lng: deviceGps.lng,
+            accuracy: deviceGps.accuracy,
+            speedKmh: 0,
+            reason: timeoutMsg
+          });
+        }
+      }, 3500);
+
       setDeviceGps(prev => ({ ...prev, isSyncing: true, errorMsg: null }));
       navigator.geolocation.getCurrentPosition(
         pos => {
@@ -515,7 +564,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               `Koordinat terkunci: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (±${acc}m)`
             );
           }
-          resolve({
+          finish({
             ok: true,
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
@@ -543,7 +592,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           if (showToast) {
             addNotification('sla_warning', 'GPS Belum Aktif', reason);
           }
-          resolve({
+          finish({
             ok: false,
             lat: deviceGps.lat,
             lng: deviceGps.lng,
@@ -552,7 +601,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             reason
           });
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+        { enableHighAccuracy: true, timeout: 3200, maximumAge: 15000 }
       );
     });
   };
@@ -2388,6 +2437,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
         const existingMatchIdx = sorted.findIndex(
           s =>
+            (shiftItem.status === 'checked_out' || s.status !== 'delivered') &&
             standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd &&
             ((s.departureDate || s.createdAt || '').slice(0, 10) === (shiftItem.date || todayIsoLocal)) &&
             (!isManagerPortal ||
@@ -2593,6 +2643,40 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       setDeliveries(sorted);
       setIsSupabaseLive(false);
       driverOfflineSyncService.cacheDeliveries(sorted);
+
+      // Rekonsiliasi otomatis: jika shift aktif saat ini sudah memiliki jadwal PORTAL-* atau jadwal shift berstatus delivered + arrivedAtWarehouse, tutup shiftnya agar tidak terus tertulis "Aktif HH:MM WIB"
+      if (latestShiftNow && latestShiftNow.status !== 'checked_out') {
+        const portalMatch = sorted.find(d => d.id === `PORTAL-${latestShiftNow.id}`);
+        const shiftStartMs = new Date(latestShiftNow.checkinTime || latestShiftNow.createdAt || 0).getTime();
+        const finishedPostCheckinSchedule = sorted.find(d => {
+          if (d.status !== 'delivered' || !d.actualArrival) return false;
+          if (d.id === `PORTAL-${latestShiftNow.id}`) return true;
+          const areaStd = standardizeAreaName(d.areaName || d.store?.city || '');
+          const shiftArea = standardizeAreaName(latestShiftNow.selectedArea || '');
+          if (!areaStd || !shiftArea || areaStd !== shiftArea) return false;
+          const arrMs = new Date(d.actualArrival).getTime();
+          return Number.isFinite(arrMs) && Number.isFinite(shiftStartMs) && arrMs >= shiftStartMs;
+        });
+        if (latestShiftNow.arrivedAtWarehouseAt || portalMatch?.status === 'delivered' || finishedPostCheckinSchedule) {
+          const arrivalIso =
+            latestShiftNow.arrivedAtWarehouseAt ||
+            finishedPostCheckinSchedule?.actualArrival ||
+            new Date().toISOString();
+          void driverShiftService.checkOutCrewTeamForTrip({
+            actorDriverId: latestShiftNow.driverId,
+            actorName: latestShiftNow.driverName,
+            actorRole: latestShiftNow.checkinRole,
+            plateNumber: latestShiftNow.plateNumber || '-',
+            areaName: latestShiftNow.selectedArea || 'Gudang Argo',
+            tripDate: latestShiftNow.date,
+            crewNames: [latestShiftNow.driverName, latestShiftNow.helper1Name, latestShiftNow.helper2Name],
+            arrivedAtWarehouseAt: arrivalIso,
+            notes: 'Auto Check-Out Selesai Pengiriman'
+          }).then(() => {
+            setActiveShift(null);
+          });
+        }
+      }
     } catch (err) {
       console.warn('[DriverMobileView] Error fetching deliveries:', err);
       setDeliveries([]);
@@ -4356,109 +4440,120 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Konfirmasi Gate-Out Terintegrasi (Driver & Helper): Pastikan GPS aktif terlebih dahulu agar Live Trips mendeteksi track armada secara akurat
   const handleConfirmSharedGateOut = async (delivery: Schedule, bypassGpsCheck = false) => {
-    let lockedLat = deviceGps.lat;
-    let lockedLng = deviceGps.lng;
-
-    if (!bypassGpsCheck) {
-      const gpsResult = await requestNativeGpsLock(false);
-      if (!gpsResult.ok) {
-        setGpsGateModal({
-          open: true,
-          delivery,
-          reason:
-            gpsResult.reason ||
-            'GPS perangkat belum aktif. Aktifkan GPS terlebih dahulu agar rute perjalanan terekam di Live Trips.',
-          isChecking: false
-        });
-        return;
-      }
-      lockedLat = gpsResult.lat;
-      lockedLng = gpsResult.lng;
-    }
-
-    const preparedSchedule: Schedule = {
-      ...delivery,
-      status: 'in_transit',
-      fleet: assignedFleet || delivery.fleet,
-      fleetId: assignedFleet?.id || delivery.fleetId
-    };
-    const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
-    driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
-
-    const gateOutIso = new Date().toISOString();
-    const nowTimeWib =
-      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-    const nextGateOutMap = { ...keluarArgoMap, [delivery.id]: nowTimeWib };
-    setKeluarArgoMap(nextGateOutMap);
+    if (gateOutBusyId) return;
+    setGateOutBusyId(delivery.id);
     try {
-      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextGateOutMap));
-    } catch {}
-    syncPortalFlowToMysql({ keluarArgoMap: nextGateOutMap });
+      let lockedLat = deviceGps.lat;
+      let lockedLng = deviceGps.lng;
 
-    if (activeShift) {
-      await driverShiftService.updateShiftProgress(activeShift.id, {
-        gateOutAt: gateOutIso
+      if (!bypassGpsCheck) {
+        if (deviceGps.source === 'native' && deviceGps.permissionState === 'granted') {
+          lockedLat = deviceGps.lat;
+          lockedLng = deviceGps.lng;
+        } else {
+          const gpsResult = await requestNativeGpsLock(false);
+          if (!gpsResult.ok) {
+            setGpsGateModal({
+              open: true,
+              delivery,
+              reason:
+                gpsResult.reason ||
+                'GPS perangkat belum aktif. Aktifkan GPS terlebih dahulu agar rute perjalanan terekam di Live Trips.',
+              isChecking: false
+            });
+            return;
+          }
+          lockedLat = gpsResult.lat;
+          lockedLng = gpsResult.lng;
+        }
+      }
+
+      const preparedSchedule: Schedule = {
+        ...delivery,
+        status: 'in_transit',
+        fleet: assignedFleet || delivery.fleet,
+        fleetId: assignedFleet?.id || delivery.fleetId
+      };
+      const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
+      driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
+
+      const gateOutIso = new Date().toISOString();
+      const nowTimeWib =
+        new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+      const nextGateOutMap = { ...keluarArgoMap, [delivery.id]: nowTimeWib };
+      setKeluarArgoMap(nextGateOutMap);
+      try {
+        localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextGateOutMap));
+      } catch {}
+      syncPortalFlowToMysql({ keluarArgoMap: nextGateOutMap });
+
+      if (activeShift) {
+        await driverShiftService.updateShiftProgress(activeShift.id, {
+          gateOutAt: gateOutIso
+        });
+      }
+
+      logisticsStore.updateSchedule(delivery.id, {
+        actualDeparture: gateOutIso
       });
-    }
 
-    logisticsStore.updateSchedule(delivery.id, {
-      actualDeparture: gateOutIso
-    });
-
-    updateSharedScheduleFlow([delivery.id], {
-      fleetId: preparedSchedule.fleetId,
-      plateNumber: preparedSchedule.fleet?.plateNumber || '-',
-      vehicleType: preparedSchedule.fleet?.vehicleType || '-',
-      checklistCompleted: true,
-      preparedForGateOut: true,
-      gateOutConfirmed: true,
-      gateOutBy: portalDisplayName,
-      gateOutTimestamp: gateOutIso
-    });
-
-    // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips) dengan koordinat GPS asli yang baru terkunci
-    const { driverName: tripDriver, helper1Name: tripHelper1, helper2Name: tripHelper2 } = getDeliveryCrewComposition(preparedSchedule);
-    void fetch('/api/gps-trips', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: `TRIP-${delivery.id}`,
-        tripDate: (delivery.departureDate || getLocalDateStr()).slice(0, 10),
-        branchId: effectivePortalBranchId || 'cab-banyuwangi',
+      updateSharedScheduleFlow([delivery.id], {
         fleetId: preparedSchedule.fleetId,
-        plateNumber: preparedSchedule.fleet?.plateNumber || activeShift?.plateNumber || '-',
-        initialCode: preparedSchedule.fleet?.initialCode || activeShift?.fleetInitialCode,
-        vehicleType: preparedSchedule.fleet?.vehicleType || activeShift?.vehicleType,
-        driverName: tripDriver,
-        helper1Name: tripHelper1 !== 'Tanpa Helper' ? tripHelper1 : activeShift?.helper1Name,
-        helper2Name: tripHelper2 || activeShift?.helper2Name,
-        areaName: delivery.areaName || delivery.store?.storeName || activeShift?.selectedArea || '-',
-        status: 'active',
-        startedAt: gateOutIso,
-        lat: lockedLat,
-        lng: lockedLng,
-        locationName: 'Gate-Out Gudang DC PT AKK'
-      })
-    })
-      .then(() => {
-        window.dispatchEvent(new CustomEvent('gps-trip-updated'));
-      })
-      .catch(() => {});
+        plateNumber: preparedSchedule.fleet?.plateNumber || '-',
+        vehicleType: preparedSchedule.fleet?.vehicleType || '-',
+        checklistCompleted: true,
+        preparedForGateOut: true,
+        gateOutConfirmed: true,
+        gateOutBy: portalDisplayName,
+        gateOutTimestamp: gateOutIso
+      });
 
-    await handleUpdateStatus(
-      delivery,
-      'in_transit',
-      `Tim pengiriman keluar dari gerbang gudang DC (Gate-Out oleh ${portalDisplayName})`
-    );
-    setWaybillRefreshTick(t => t + 1);
-    setBottomNav('surat_jalan');
-    setWaybillStatusFilter('in_transit');
-    addNotification(
-      'schedule',
-      'Gate-Out Dikonfirmasi • Live GPS Trip Aktif & Siap Cetak SJ',
-      `Armada ${preparedSchedule.fleet?.plateNumber || ''} resmi keluar gerbang DC. Surat Jalan (${wb.waybillNumber}) siap dicetak & lokasi perjalanan terekam di Live Trips.`
-    );
+      // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips) dengan koordinat GPS asli yang baru terkunci
+      const { driverName: tripDriver, helper1Name: tripHelper1, helper2Name: tripHelper2 } = getDeliveryCrewComposition(preparedSchedule);
+      void fetch('/api/gps-trips', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: `TRIP-${delivery.id}`,
+          tripDate: (delivery.departureDate || getLocalDateStr()).slice(0, 10),
+          branchId: effectivePortalBranchId || 'cab-banyuwangi',
+          fleetId: preparedSchedule.fleetId,
+          plateNumber: preparedSchedule.fleet?.plateNumber || activeShift?.plateNumber || '-',
+          initialCode: preparedSchedule.fleet?.initialCode || activeShift?.fleetInitialCode,
+          vehicleType: preparedSchedule.fleet?.vehicleType || activeShift?.vehicleType,
+          driverName: tripDriver,
+          helper1Name: tripHelper1 !== 'Tanpa Helper' ? tripHelper1 : activeShift?.helper1Name,
+          helper2Name: tripHelper2 || activeShift?.helper2Name,
+          areaName: delivery.areaName || delivery.store?.storeName || activeShift?.selectedArea || '-',
+          status: 'active',
+          startedAt: gateOutIso,
+          lat: lockedLat,
+          lng: lockedLng,
+          locationName: 'Gate-Out Gudang DC PT AKK'
+        })
+      })
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('gps-trip-updated'));
+        })
+        .catch(() => {});
+
+      await handleUpdateStatus(
+        delivery,
+        'in_transit',
+        `Tim pengiriman keluar dari gerbang gudang DC (Gate-Out oleh ${portalDisplayName})`
+      );
+      setWaybillRefreshTick(t => t + 1);
+      setBottomNav('surat_jalan');
+      setWaybillStatusFilter('in_transit');
+      addNotification(
+        'schedule',
+        'Gate-Out Dikonfirmasi • Live GPS Trip Aktif & Siap Cetak SJ',
+        `Armada ${preparedSchedule.fleet?.plateNumber || ''} resmi keluar gerbang DC. Surat Jalan (${wb.waybillNumber}) siap dicetak & lokasi perjalanan terekam di Live Trips.`
+      );
+    } finally {
+      setGateOutBusyId(null);
+    }
   };
 
   // 📋 Alur Khusus Helper: Validasi SJ (Surat Jalan) sebelum Gate-Out
@@ -6841,10 +6936,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
                                           <button
                                             type="button"
+                                            disabled={gateOutBusyId !== null}
                                             onClick={() => handleConfirmSharedGateOut(delivery)}
-                                            className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                            className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer disabled:cursor-wait"
                                           >
-                                            <span>Gate-Out</span>
+                                            {gateOutBusyId === delivery.id && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                                            <span>{gateOutBusyId === delivery.id ? 'Memproses...' : 'Gate-Out'}</span>
                                           </button>
                                         </div>
                                       )}
@@ -6872,10 +6969,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                       <div className="grid grid-cols-2 gap-2">
                                         <button
                                           type="button"
+                                          disabled={gateOutBusyId !== null}
                                           onClick={() => handleConfirmSharedGateOut(delivery)}
-                                          className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                          className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer disabled:cursor-wait"
                                         >
-                                          <span>Gate-Out</span>
+                                          {gateOutBusyId === delivery.id && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                                          <span>{gateOutBusyId === delivery.id ? 'Memproses...' : 'Gate-Out'}</span>
                                         </button>
 
                                         <button
@@ -7696,6 +7795,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         {wb.status === 'checker_verified' && (
                           <button
                             type="button"
+                            disabled={gateOutBusyId !== null}
                             onClick={async () => {
                               const nowIso = new Date().toISOString();
                               const nowTimeWib =
@@ -7771,10 +7871,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 };
                               await handleConfirmSharedGateOut(matchedSchedule);
                             }}
-                            className="min-h-[42px] py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                            className="min-h-[42px] py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer disabled:cursor-wait shrink-0"
                             title="Konfirmasi Keluar Gerbang DC (Gate-Out)"
                           >
-                            <span>Gate-Out</span>
+                            {gateOutBusyId !== null && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                            <span>{gateOutBusyId !== null ? 'Memproses...' : 'Gate-Out'}</span>
                           </button>
                         )}
 
@@ -9324,7 +9425,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialChecklist={activeChecklistToEdit}
         defaultInspectionType={checklistInspectionType}
         canSelectPostTrip={hasConfirmedArrivalToday}
-        onSaved={(saved) => {
+        onSaved={async (saved) => {
           const todayStr = getLocalDateStr();
           const completedAtIso = new Date().toISOString();
           setIsFleetLockedAfterCheckin(true);
@@ -9417,16 +9518,36 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               activeShift ||
               driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
             if (shiftToFinish) {
-              void driverShiftService.updateShiftProgress(shiftToFinish.id, {
+              await driverShiftService.updateShiftProgress(shiftToFinish.id, {
                 arrivedAtWarehouseAt: shiftToFinish.arrivedAtWarehouseAt || completedAtIso
               });
-              driverShiftService.checkOutCrewTeamForTrip({
-                actorDriverId: selectedDriverId,
-                actorName: portalDisplayName,
+              await driverShiftService.checkOutCrewTeamForTrip({
+                actorDriverId: shiftToFinish.driverId || selectedDriverId,
+                actorName: currentDriver?.name || shiftToFinish.driverName || portalDisplayName,
+                actorRole: syncedUserRoleInfo.roleLabel,
                 plateNumber: saved.plateNumber || shiftToFinish.plateNumber,
                 areaName: shiftToFinish.selectedArea || targetDeliveries[0]?.areaName,
                 tripDate: todayStr,
+                crewNames: [
+                  shiftToFinish.driverName,
+                  shiftToFinish.helper1Name,
+                  shiftToFinish.helper2Name,
+                  portalDisplayName
+                ],
                 arrivedAtWarehouseAt: shiftToFinish.arrivedAtWarehouseAt || completedAtIso,
+                notes: 'Auto Check-Out Selesai Checklist Pasca-Jalan (Pulang)'
+              });
+              setActiveShift(null);
+            } else {
+              await driverShiftService.checkOutCrewTeamForTrip({
+                actorDriverId: selectedDriverId,
+                actorName: currentDriver?.name || portalDisplayName,
+                actorRole: syncedUserRoleInfo.roleLabel,
+                plateNumber: saved.plateNumber,
+                areaName: targetDeliveries[0]?.areaName,
+                tripDate: todayStr,
+                crewNames: [portalDisplayName, saved.driverName],
+                arrivedAtWarehouseAt: completedAtIso,
                 notes: 'Auto Check-Out Selesai Checklist Pasca-Jalan (Pulang)'
               });
               setActiveShift(null);
@@ -9483,8 +9604,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             ...deliveries.map(d => d.areaName || d.store?.city || '').filter(Boolean)
           ])
         )}
-        availableFleets={fleets}
-        availableCrews={crews}
+        branchId={effectivePortalBranchId}
+        availableFleets={fleets.filter(
+          f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === effectivePortalBranchId
+        )}
+        availableCrews={crews.filter(c => {
+          const matchedU = logisticsStore.getUsers().find(
+            u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName || '', c.name || '')
+          );
+          if (matchedU) return logisticsStore.isActiveDeliveryCrewUser(matchedU, effectivePortalBranchId);
+          return branchStore.getCrewBranchId(c.id, c.name) === effectivePortalBranchId;
+        })}
         fleetId={activeShift?.fleetId || ''}
         plateNumber={activeShift?.plateNumber || '-'}
         vehicleType={activeShift?.vehicleType || '-'}
@@ -10425,7 +10555,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       {/* Modal Wajib Aktifkan GPS untuk Live Trips saat Gate-Out */}
       {gpsGateModal.open && gpsGateModal.delivery && (
-        <div className="fixed inset-0 z-[130] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[9999] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-4">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">

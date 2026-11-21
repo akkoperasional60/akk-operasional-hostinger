@@ -56,6 +56,7 @@ import {
   FormKirimInvoiceItem,
   FormKirimGpsLockEntry
 } from '../services/formKirimStore';
+import { getAreaScheduleTiming } from '../utils/areaScheduleRules';
 
 export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
 
@@ -963,8 +964,79 @@ export const DriverReportsManagement: React.FC = () => {
     [formKirimGpsReportsList]
   );
 
-  // Data Laporan Check-In & Check-Out Terpadu
+  // Data Laporan Check-In & Check-Out Terpadu + Ketepatan Waktu vs Target Jadwal
   const checkinCheckoutList = useMemo(() => {
+    const parseClockMinutes = (raw?: string): number | null => {
+      if (!raw || raw === '-' || raw === 'Belum Check-Out') return null;
+      const isoMatch = raw.match(/T(\d{1,2}):(\d{2})/);
+      if (isoMatch) {
+        const hh = parseInt(isoMatch[1], 10);
+        const mm = parseInt(isoMatch[2], 10);
+        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return hh * 60 + mm;
+      }
+      const clockMatch = raw.match(/(\d{1,2})[:.](\d{2})/);
+      if (!clockMatch) return null;
+      const hh = parseInt(clockMatch[1], 10);
+      const mm = parseInt(clockMatch[2], 10);
+      if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return hh * 60 + mm;
+      return null;
+    };
+
+    const formatMinutesHHMM = (mins: number): string => {
+      const normalized = ((mins % 1440) + 1440) % 1440;
+      const hh = Math.floor(normalized / 60);
+      const mm = normalized % 60;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    };
+
+    const formatDiffMinutes = (diffMins: number): string => {
+      const sign = diffMins > 0 ? '+' : diffMins < 0 ? '-' : '';
+      const abs = Math.abs(diffMins);
+      if (abs >= 60) {
+        const h = Math.floor(abs / 60);
+        const m = abs % 60;
+        return `${sign}${h}j ${m}m`;
+      }
+      return `${sign}${abs} mnt`;
+    };
+
+    const evalPunctuality = (
+      actualStr: string | undefined,
+      targetMinutes: number,
+      isNightMode: boolean
+    ): {
+      status: 'tepat' | 'awal' | 'terlambat' | 'belum';
+      label: string;
+      diffMinutes: number | null;
+    } => {
+      const actualMin = parseClockMinutes(actualStr);
+      if (actualMin === null) {
+        return { status: 'belum', label: 'Belum Ada', diffMinutes: null };
+      }
+      let diff = actualMin - targetMinutes;
+      // Handle midnight wraparound for night departures (e.g. target 21:00, check-in 00:15 = +195 mnt)
+      if (isNightMode && targetMinutes >= 18 * 60 && actualMin < 6 * 60) {
+        diff = actualMin + 1440 - targetMinutes;
+      }
+      if (diff === 0) {
+        return { status: 'tepat', label: 'Tepat Waktu (0 mnt)', diffMinutes: 0 };
+      }
+      if (diff < 0) {
+        return { status: 'awal', label: `Lebih Awal (${formatDiffMinutes(diff)})`, diffMinutes: diff };
+      }
+      return { status: 'terlambat', label: `Terlambat (${formatDiffMinutes(diff)})`, diffMinutes: diff };
+    };
+
+    const extractHelperFromNotes = (notes?: string): string => {
+      if (!notes) return '';
+      const match = notes.match(/Helper(?:\s*1)?:\s*([^|•\n]+?)(?:\s*\||$|\n)/i);
+      if (match && match[1]) {
+        const cleaned = match[1].trim();
+        if (cleaned && cleaned !== '-') return cleaned;
+      }
+      return '';
+    };
+
     const shiftRecords = driverShiftService.getShifts();
     const reportShiftRecords = reports.filter(r => r.category === 'presensi_shift');
     const combinedMap = new Map<string, {
@@ -972,6 +1044,7 @@ export const DriverReportsManagement: React.FC = () => {
       shiftId?: string;
       date: string;
       driverName: string;
+      helperName: string;
       userRole: string;
       plateNumber: string;
       areaName: string;
@@ -979,48 +1052,160 @@ export const DriverReportsManagement: React.FC = () => {
       checkoutTime: string;
       status: 'sedang_bertugas' | 'selesai_shift';
       notes: string;
+      targetDepartureLabel: string;
+      targetReturnLabel: string;
+      checkinPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
+      checkoutPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
     }>();
+
+    const buildRecord = (base: {
+      id: string;
+      shiftId?: string;
+      date: string;
+      driverName: string;
+      helperName?: string;
+      userRole: string;
+      plateNumber: string;
+      areaName: string;
+      checkinTime: string;
+      checkoutTime: string;
+      status: 'sedang_bertugas' | 'selesai_shift';
+      notes: string;
+    }) => {
+      const cleanPlate = (base.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      const lowerArea = (base.areaName || '').toLowerCase().trim();
+      const lowerDriver = (base.driverName || '').toLowerCase().trim();
+
+      const resolveCrewName = (c: any): string => (typeof c === 'string' ? c : c?.name || '');
+
+      // Match schedule from Jadwal & Penugasan
+      const matchedSchedule = schedules.find(s => {
+        const sDate = getLocalDateStr(s.departureDate);
+        if (sDate !== base.date) return false;
+        const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        const sArea = (s.areaName || s.store?.storeName || '').toLowerCase().trim();
+        const sDriver = (s.crew?.name || '').toLowerCase().trim();
+        const sHelper = resolveCrewName(s.crewHelper).toLowerCase().trim();
+        if (cleanPlate && sPlate && cleanPlate === sPlate && (!lowerArea || sArea === lowerArea || lowerArea.includes(sArea) || sArea.includes(lowerArea))) {
+          return true;
+        }
+        if (lowerDriver && (sDriver === lowerDriver || sHelper === lowerDriver)) return true;
+        return Boolean(lowerArea && sArea && sArea === lowerArea);
+      });
+
+      // Resolve Helper name
+      const matchedShift = shiftRecords.find(s =>
+        (base.shiftId && s.id === base.shiftId) ||
+        (s.id === base.id) ||
+        (s.date === base.date &&
+          s.driverName.toLowerCase().trim() === lowerDriver &&
+          (!cleanPlate || (s.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate))
+      );
+
+      let helperName = (base.helperName || '').trim();
+      if (!helperName && matchedShift) {
+        const hParts = [matchedShift.helper1Name, matchedShift.helper2Name]
+          .map(v => (v || '').trim())
+          .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
+        if (hParts.length > 0) helperName = hParts.join(', ');
+      }
+      if (!helperName && matchedSchedule) {
+        const schHelpers = [resolveCrewName(matchedSchedule.crewHelper), resolveCrewName(matchedSchedule.crewHelper2)]
+          .map(v => v.trim())
+          .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
+        if (schHelpers.length > 0) helperName = schHelpers.join(', ');
+      }
+      if (!helperName) {
+        helperName = extractHelperFromNotes(base.notes);
+      }
+
+      // Target departure & return from matched Schedule or SOP Area Timing
+      const sopTiming = getAreaScheduleTiming(
+        base.areaName,
+        matchedSchedule?.store?.storeName,
+        matchedSchedule?.store?.city
+      );
+      const schedDepMin = matchedSchedule ? parseClockMinutes(matchedSchedule.departureDate) : null;
+      const schedArrMin = matchedSchedule ? parseClockMinutes(matchedSchedule.estimatedArrival) : null;
+
+      const targetDepMinutes =
+        schedDepMin !== null && schedDepMin > 0
+          ? schedDepMin
+          : sopTiming.departureHour * 60 + sopTiming.departureMinute;
+      const targetArrMinutes =
+        schedArrMin !== null && schedArrMin > 0
+          ? schedArrMin
+          : sopTiming.returnHour * 60 + sopTiming.returnMinute;
+
+      const targetDepartureLabel = `${formatMinutesHHMM(targetDepMinutes)} WIB`;
+      const targetReturnLabel = `${formatMinutesHHMM(targetArrMinutes)} WIB`;
+
+      return {
+        ...base,
+        helperName: helperName || '-',
+        targetDepartureLabel,
+        targetReturnLabel,
+        checkinPunctuality: evalPunctuality(base.checkinTime, targetDepMinutes, sopTiming.isNightDeparture),
+        checkoutPunctuality: evalPunctuality(base.checkoutTime, targetArrMinutes, false)
+      };
+    };
 
     reportShiftRecords.forEach(r => {
       const key = r.shiftId || `${r.driverName.toLowerCase()}-${r.date || getLocalDateStr(r.timestamp)}`;
-      combinedMap.set(key, {
-        id: r.id,
-        shiftId: r.shiftId,
-        date: r.date || getLocalDateStr(r.timestamp),
-        driverName: r.driverName,
-        userRole: r.userRole || 'Driver',
-        plateNumber: r.plateNumber || '-',
-        areaName: r.areaName || 'Operasional DC',
-        checkinTime: r.checkinTimeFormatted || new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
-        checkoutTime: r.checkoutTimeFormatted || '-',
-        status: r.checkoutTimeFormatted ? 'selesai_shift' : 'sedang_bertugas',
-        notes: r.notes
-      });
+      combinedMap.set(
+        key,
+        buildRecord({
+          id: r.id,
+          shiftId: r.shiftId,
+          date: r.date || getLocalDateStr(r.timestamp),
+          driverName: r.driverName,
+          helperName: r.helperName,
+          userRole: r.userRole || 'Driver',
+          plateNumber: r.plateNumber || '-',
+          areaName: r.areaName || 'Operasional DC',
+          checkinTime: r.checkinTimeFormatted || new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+          checkoutTime: r.checkoutTimeFormatted || '-',
+          status: r.checkoutTimeFormatted ? 'selesai_shift' : 'sedang_bertugas',
+          notes: r.notes
+        })
+      );
     });
 
     shiftRecords.forEach(s => {
       const key = s.id || `${s.driverName.toLowerCase()}-${s.date}`;
       const existing = combinedMap.get(key);
+      const shiftHelperCombined = [s.helper1Name, s.helper2Name].map(v => (v || '').trim()).filter(v => v && v !== '-').join(', ');
       if (existing) {
-        if (!existing.checkoutTime || existing.checkoutTime === '-') {
-          if (s.checkoutTimeFormatted) {
-            existing.checkoutTime = s.checkoutTimeFormatted;
-            existing.status = 'selesai_shift';
-          }
+        let needsRebuild = false;
+        if ((!existing.checkoutTime || existing.checkoutTime === '-') && s.checkoutTimeFormatted) {
+          existing.checkoutTime = s.checkoutTimeFormatted;
+          existing.status = 'selesai_shift';
+          needsRebuild = true;
+        }
+        if ((!existing.helperName || existing.helperName === '-') && shiftHelperCombined) {
+          existing.helperName = shiftHelperCombined;
+        }
+        if (needsRebuild) {
+          combinedMap.set(key, buildRecord(existing));
         }
       } else {
-        combinedMap.set(key, {
-          id: s.id,
-          date: s.date,
-          driverName: s.driverName,
-          userRole: 'Driver',
-          plateNumber: s.plateNumber || '-',
-          areaName: s.locationName || 'DC Banyuwangi',
-          checkinTime: s.checkinTimeFormatted || '-',
-          checkoutTime: s.checkoutTimeFormatted || '-',
-          status: s.status === 'checked_out' || Boolean(s.checkoutTimeFormatted) ? 'selesai_shift' : 'sedang_bertugas',
-          notes: s.notes || 'Presensi Shift Operasional'
-        });
+        combinedMap.set(
+          key,
+          buildRecord({
+            id: s.id,
+            shiftId: s.id,
+            date: s.date,
+            driverName: s.driverName,
+            helperName: shiftHelperCombined,
+            userRole: s.checkinRole === 'helper' ? 'Helper' : 'Driver',
+            plateNumber: s.plateNumber || '-',
+            areaName: s.selectedArea || s.locationName || 'DC Banyuwangi',
+            checkinTime: s.checkinTimeFormatted || '-',
+            checkoutTime: s.checkoutTimeFormatted || '-',
+            status: s.status === 'checked_out' || Boolean(s.checkoutTimeFormatted) ? 'selesai_shift' : 'sedang_bertugas',
+            notes: s.notes || 'Presensi Shift Operasional'
+          })
+        );
       }
     });
 
@@ -1029,11 +1214,12 @@ export const DriverReportsManagement: React.FC = () => {
     const q = checkinSearchQuery.toLowerCase().trim();
     return list.filter(item =>
       item.driverName.toLowerCase().includes(q) ||
+      item.helperName.toLowerCase().includes(q) ||
       item.plateNumber.toLowerCase().includes(q) ||
       item.areaName.toLowerCase().includes(q) ||
       item.date.includes(q)
     );
-  }, [reports, checkinSearchQuery]);
+  }, [reports, checkinSearchQuery, schedules]);
 
   // Data Laporan Pengisian BBM (Solar)
   const fuelReportsList = useMemo(() => {
@@ -1245,15 +1431,34 @@ export const DriverReportsManagement: React.FC = () => {
                 type="button"
                 onClick={() => {
                   if (checkinCheckoutList.length === 0) return;
-                  const headers = ['Tanggal', 'Nama Kru', 'Peran', 'Armada', 'Area / Lokasi', 'Waktu Check-In', 'Waktu Check-Out', 'Status Shift'];
+                  const headers = [
+                    'Tanggal',
+                    'Nama Driver / Kru',
+                    'Peran',
+                    'Nama Helper',
+                    'Armada',
+                    'Area / Lokasi',
+                    'Target Berangkat',
+                    'Target Pulang',
+                    'Waktu Check-In',
+                    'Ketepatan & Selisih Check-In',
+                    'Waktu Check-Out',
+                    'Ketepatan & Selisih Check-Out',
+                    'Status Shift'
+                  ];
                   const rows = checkinCheckoutList.map(item => [
                     item.date,
                     `"${item.driverName}"`,
                     item.userRole,
+                    `"${item.helperName}"`,
                     item.plateNumber,
                     `"${item.areaName}"`,
+                    item.targetDepartureLabel,
+                    item.targetReturnLabel,
                     item.checkinTime,
+                    `"${item.checkinPunctuality.label}"`,
                     item.checkoutTime,
+                    `"${item.checkoutPunctuality.label}"`,
                     item.status === 'selesai_shift' ? 'Sudah Check-Out' : 'Sedang Bertugas (Check-In)'
                   ]);
                   const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -1348,11 +1553,13 @@ export const DriverReportsManagement: React.FC = () => {
                   <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     <th className="py-3 px-4 w-12 text-center">#</th>
                     <th className="py-3 px-4">Tanggal</th>
-                    <th className="py-3 px-4">Nama Kru &amp; Peran</th>
+                    <th className="py-3 px-4">Nama Kru (Driver &amp; Helper)</th>
                     <th className="py-3 px-4">Nomor Kendaraan</th>
                     <th className="py-3 px-4">Area / Lokasi</th>
+                    <th className="py-3 px-4 text-center">Target Berangkat &amp; Pulang</th>
                     <th className="py-3 px-4 text-center">Waktu Check-In</th>
                     <th className="py-3 px-4 text-center">Waktu Check-Out</th>
+                    <th className="py-3 px-4 text-center">Ketepatan Waktu &amp; Selisih</th>
                     <th className="py-3 px-4 text-center">Status Shift</th>
                     {isSuperAdmin && <th className="py-3 px-4 text-center">Tindakan</th>}
                   </tr>
@@ -1360,7 +1567,7 @@ export const DriverReportsManagement: React.FC = () => {
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {checkinCheckoutList.length === 0 ? (
                     <tr>
-                      <td colSpan={isSuperAdmin ? 9 : 8} className="py-10 text-center text-slate-500">
+                      <td colSpan={isSuperAdmin ? 11 : 10} className="py-10 text-center text-slate-500">
                         Belum ada data laporan Check-In &amp; Check-Out kru pengiriman.
                       </td>
                     </tr>
@@ -1372,8 +1579,17 @@ export const DriverReportsManagement: React.FC = () => {
                           {item.date}
                         </td>
                         <td className="py-3 px-4">
-                          <div className="font-bold text-slate-900 dark:text-white">{item.driverName}</div>
-                          <div className="text-[10px] text-slate-500">{item.userRole}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-900 dark:text-white">{item.driverName}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 text-[9px] font-bold">
+                              {item.userRole}
+                            </span>
+                          </div>
+                          {item.helperName && item.helperName !== '-' && (
+                            <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5 font-semibold">
+                              Helper: {item.helperName}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
@@ -1381,6 +1597,16 @@ export const DriverReportsManagement: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{item.areaName}</td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <div className="text-[10px] font-mono text-slate-700 dark:text-slate-200">
+                            <span className="text-slate-400">Berangkat:</span>{' '}
+                            <strong className="text-emerald-700 dark:text-emerald-400">{item.targetDepartureLabel}</strong>
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-700 dark:text-slate-200 mt-0.5">
+                            <span className="text-slate-400">Pulang:</span>{' '}
+                            <strong className="text-blue-700 dark:text-blue-400">{item.targetReturnLabel}</strong>
+                          </div>
+                        </td>
                         <td className="py-3 px-4 text-center">
                           <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-mono font-bold text-[11px]">
                             {item.checkinTime}
@@ -1394,6 +1620,32 @@ export const DriverReportsManagement: React.FC = () => {
                           ) : (
                             <span className="text-slate-400 italic text-[11px]">Belum Check-Out</span>
                           )}
+                        </td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                item.checkinPunctuality.status === 'terlambat'
+                                  ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
+                                  : item.checkinPunctuality.status === 'tepat' || item.checkinPunctuality.status === 'awal'
+                                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              In: {item.checkinPunctuality.label}
+                            </span>
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                item.checkoutPunctuality.status === 'terlambat'
+                                  ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
+                                  : item.checkoutPunctuality.status === 'tepat' || item.checkoutPunctuality.status === 'awal'
+                                  ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              Out: {item.checkoutPunctuality.label}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-center">
                           {item.status === 'selesai_shift' ? (

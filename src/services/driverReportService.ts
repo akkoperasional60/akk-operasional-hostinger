@@ -547,18 +547,40 @@ class DriverReportService {
   }): DriverHelperReport {
     const list = this.getReports();
     const today = getLocalDateStr();
-    const helperSuffix = params.helperName ? ` | Helper: ${params.helperName}` : '';
+    const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const targetNameCompact = normCompact(params.driverName);
+    const targetPlateNorm = normPlate(params.plateNumber);
 
-    // Cari laporan presensi aktif untuk shiftId atau driverId pada hari ini
-    const existingIdx = list.findIndex(
-      r =>
-        r.category === 'presensi_shift' &&
-        (r.shiftId === params.shiftId || (r.driverId === params.driverId && r.date === today && !r.checkoutTimeFormatted))
-    );
+    const resolveHelperText = (h?: string) => {
+      const clean = String(h || '').trim();
+      return clean && clean !== '-' ? clean : '';
+    };
+
+    const matchesPersonOrShift = (r: DriverHelperReport) => {
+      if (r.category !== 'presensi_shift') return false;
+      if (params.shiftId && r.shiftId === params.shiftId) return true;
+      const isClosed = Boolean(r.checkoutTimeFormatted && r.checkoutTimeFormatted.trim() !== '' && r.checkoutTimeFormatted.trim() !== '-');
+      if (isClosed) return false;
+      const sameId = Boolean(r.driverId && params.driverId && r.driverId.replace(/^crw-/, '') === params.driverId.replace(/^crw-/, ''));
+      const sameName = Boolean(targetNameCompact && normCompact(r.driverName) === targetNameCompact);
+      if (r.date === today && (sameId || sameName)) return true;
+      // When checking out a recent open shift, match by name + plate even across midnight / earlier open row
+      if (params.checkoutTimeFormatted && (sameId || sameName)) {
+        if (!targetPlateNorm || targetPlateNorm === '-' || normPlate(r.plateNumber) === targetPlateNorm) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const existingIdx = list.findIndex(matchesPersonOrShift);
 
     if (existingIdx >= 0) {
       const existing = list[existingIdx];
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
+      const mergedHelperName = resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined;
+      const helperSuffix = mergedHelperName ? ` | Helper: ${mergedHelperName}` : '';
       const mergedPin = '****';
       const updatedNotes = mergedCheckout
         ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout}${helperSuffix} | PIN Keamanan: Terverifikasi`
@@ -568,6 +590,7 @@ class DriverReportService {
         ...existing,
         driverName: params.driverName || existing.driverName,
         userRole: params.userRole || existing.userRole,
+        helperName: mergedHelperName,
         plateNumber: params.plateNumber || existing.plateNumber,
         areaName: params.areaName || existing.areaName,
         checkoutTimeFormatted: mergedCheckout,
@@ -587,6 +610,8 @@ class DriverReportService {
       return list[existingIdx];
     }
 
+    const cleanHelper = resolveHelperText(params.helperName) || undefined;
+    const helperSuffix = cleanHelper ? ` | Helper: ${cleanHelper}` : '';
     const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
       ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted}${helperSuffix} | PIN Keamanan: Terverifikasi`
@@ -596,6 +621,7 @@ class DriverReportService {
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
+      helperName: cleanHelper,
       plateNumber: params.plateNumber || '-',
       category: 'presensi_shift',
       areaName: params.areaName || 'Presensi Operasional DC',
@@ -607,6 +633,63 @@ class DriverReportService {
       status: 'verified',
       verifiedBy: 'Sistem Presensi Terpadu'
     });
+  }
+
+  public closeOpenPresensiReportsForTeam(params: {
+    shiftIds?: string[];
+    crewNames?: Array<string | undefined>;
+    plateNumber?: string;
+    areaName?: string;
+    checkoutTimeFormatted: string;
+  }): number {
+    const list = this.getReports();
+    const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const shiftIdSet = new Set((params.shiftIds || []).filter(Boolean));
+    const nameSet = new Set((params.crewNames || []).map(normCompact).filter(v => Boolean(v && v.length >= 3)));
+    const targetPlate = normPlate(params.plateNumber);
+    const today = getLocalDateStr();
+    const yesterday = getLocalDateStr(new Date(Date.now() - 24 * 3600 * 1000));
+
+    let updatedCount = 0;
+    const updatedReports: DriverHelperReport[] = [];
+
+    const nextList = list.map(r => {
+      if (r.category !== 'presensi_shift') return r;
+      const alreadyClosed = Boolean(r.checkoutTimeFormatted && r.checkoutTimeFormatted.trim() !== '' && r.checkoutTimeFormatted.trim() !== '-');
+      if (alreadyClosed) return r;
+
+      const byShiftId = Boolean(r.shiftId && shiftIdSet.has(r.shiftId));
+      const rDate = r.date || getLocalDateStr(new Date(r.timestamp));
+      const recentDate = rDate === today || rDate === yesterday;
+      const byName = nameSet.has(normCompact(r.driverName));
+      const byPlate = Boolean(targetPlate && targetPlate !== '-' && normPlate(r.plateNumber) === targetPlate && recentDate);
+
+      if (byShiftId || (recentDate && byName) || byPlate) {
+        const helperSuffix = r.helperName ? ` | Helper: ${r.helperName}` : '';
+        const updatedRow: DriverHelperReport = {
+          ...r,
+          checkoutTimeFormatted: params.checkoutTimeFormatted,
+          notes: `[PRESENSI SHIFT TERPADU] Check-In: ${r.checkinTimeFormatted || '-'} | Check-Out: ${params.checkoutTimeFormatted}${helperSuffix} | PIN Keamanan: Terverifikasi`,
+          status: 'verified',
+          verifiedBy: 'Sistem Presensi Terpadu',
+          verifiedAt: new Date().toISOString()
+        };
+        updatedCount += 1;
+        updatedReports.push(updatedRow);
+        return updatedRow;
+      }
+      return r;
+    });
+
+    if (updatedCount > 0) {
+      this.saveReports(nextList);
+      updatedReports.forEach(rep => this.pushReportToServer(rep));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: updatedReports[0] }));
+      }
+    }
+    return updatedCount;
   }
 
   /**

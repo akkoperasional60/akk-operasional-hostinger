@@ -6,7 +6,6 @@ import {
   Award,
   Calendar,
   Search,
-  Filter,
   Download,
   Plus,
   Truck,
@@ -15,7 +14,6 @@ import {
   CheckCircle2,
   DollarSign,
   Gauge,
-  HelpCircle,
   FileText,
   Calculator,
   ArrowRight,
@@ -24,20 +22,17 @@ import {
   X,
   Printer,
   ChevronRight,
-  ShieldCheck,
-  Zap,
-  Clock,
-  Sparkles,
   Settings,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Layers,
   Activity,
   FileSpreadsheet,
   ChevronDown,
   ChevronLeft,
-  Check
+  Check,
+  Building2,
+  Edit
 } from 'lucide-react';
 import {
   BarChart,
@@ -50,10 +45,7 @@ import {
   Legend,
   AreaChart,
   Area,
-  PieChart,
-  Pie,
-  Cell,
-  ReferenceLine
+  Cell
 } from 'recharts';
 import {
   FuelLog,
@@ -61,13 +53,15 @@ import {
   EfficiencyStatus,
   Fleet,
   Crew,
-  VehicleType
+  VehicleType,
+  FleetFuelSummary,
+  DriverFuelScore
 } from '../types';
 import { logisticsStore } from '../services/store';
+import { branchStore } from '../services/branchStore';
 import {
   FUEL_TARGET_RATIOS,
-  STANDARD_FUEL_PRICES,
-  COMMON_GAS_STATIONS
+  STANDARD_FUEL_PRICES
 } from '../data/fuelMockData';
 import { getCanonicalFleetOrderIndex, sortFleetsByCanonicalOrder } from '../data/mockData';
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
@@ -78,20 +72,20 @@ interface FuelEfficiencyManagementProps {
   onNavigateToFleets?: () => void;
 }
 
-export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> = ({
-  onNavigateToFleets
-}) => {
+const compactPersonKey = (raw?: string): string =>
+  (raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> = () => {
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(logisticsStore.getFuelLogs());
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
-  const [activeTab, setActiveTab] = useState<'overview' | 'daily' | 'liter_km' | 'weekly_report' | 'leaderboard' | 'logs' | 'calculator'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'liter_km' | 'weekly_report' | 'leaderboard' | 'logs'>('overview');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<'all' | 'cab-banyuwangi' | 'cab-sidoarjo'>('all');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-
-  // Daily Bar Chart Filter States
-  const [dailyFleetFilter, setDailyFleetFilter] = useState<string>('all');
-  const [dailyRangeDays, setDailyRangeDays] = useState<number>(14); // 7, 14, 30, or 0 (all)
-  const [dailyMetric, setDailyMetric] = useState<'liters' | 'literPerKm' | 'distanceKm'>('liters');
-  const [dailyChartMode, setDailyChartMode] = useState<'grouped' | 'stacked'>('grouped');
+  const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
 
   // Liter per KM Unit Analysis Filter States
   const [lKmSortBy, setLKmSortBy] = useState<'canonical_order' | 'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'>('canonical_order');
@@ -100,40 +94,86 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Interactive Converter Calculator
   const [simKmL, setSimKmL] = useState<number>(0);
-  const [simLKm, setSimLKm] = useState<number>(0);
 
   // Search & Filters for logs table
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFleetId, setFilterFleetId] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
+  const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
+  const [logSortBy, setLogSortBy] = useState<'date_desc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [selectedLogForDetail, setSelectedLogForDetail] = useState<FuelLog | null>(null);
 
-  // Form states for new fuel log
+  // Form states for new / edit fuel log
+  const [formBranchId, setFormBranchId] = useState<'cab-banyuwangi' | 'cab-sidoarjo'>('cab-banyuwangi');
   const [formFleetId, setFormFleetId] = useState<string>('');
   const [formDriverName, setFormDriverName] = useState<string>('');
   const [formDriverId, setFormDriverId] = useState<string>('');
+  const [formHelperName, setFormHelperName] = useState<string>('');
+  const [formHelperId, setFormHelperId] = useState<string>('');
   const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [formFuelType, setFormFuelType] = useState<FuelType>('BioSolar');
   const [formLiters, setFormLiters] = useState<string>('');
-  const [formCostPerLiter, setFormCostPerLiter] = useState<string>('');
+  const [formCostPerLiter, setFormCostPerLiter] = useState<string>('6800');
   const [formStartOdo, setFormStartOdo] = useState<string>('');
   const [formEndOdo, setFormEndOdo] = useState<string>('');
   const [formGasStation, setFormGasStation] = useState<string>('SPBU Farly');
   const [isGasStationDropdownOpen, setIsGasStationDropdownOpen] = useState<boolean>(false);
-  const [formReceiptNumber, setFormReceiptNumber] = useState<string>('');
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
 
   // Modern Custom Popover Dropdown & Calendar States
-  const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
+  const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'helper' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
+  const [fleetSearchFilter, setFleetSearchFilter] = useState<string>('');
   const [driverSearchFilter, setDriverSearchFilter] = useState<string>('');
+  const [helperSearchFilter, setHelperSearchFilter] = useState<string>('');
   const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
   const [calendarViewMonth, setCalendarViewMonth] = useState<Date>(() => new Date());
+
+  const resolveFleetBranchId = (fleet: Fleet): 'cab-banyuwangi' | 'cab-sidoarjo' => {
+    const resolved = branchStore.getFleetBranchId(fleet.id, fleet.plateNumber, fleet.initialCode);
+    return resolved === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi';
+  };
+
+  const resolveLogBranchId = (log: FuelLog): 'cab-banyuwangi' | 'cab-sidoarjo' => {
+    const resolved = log.branchId || branchStore.getFleetBranchId(log.fleetId, log.plateNumber, log.initialCode);
+    return resolved === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi';
+  };
+
+  // Branch-scoped Fleets & Fuel Logs for Dashboard & Analytics
+  const branchScopedFleets = useMemo(() => {
+    const ordered = sortFleetsByCanonicalOrder(fleets);
+    if (selectedBranchFilter === 'all') return ordered;
+    return ordered.filter(f => resolveFleetBranchId(f) === selectedBranchFilter);
+  }, [fleets, selectedBranchFilter]);
+
+  const branchScopedLogs = useMemo(() => {
+    if (selectedBranchFilter === 'all') return fuelLogs;
+    return fuelLogs.filter(l => resolveLogBranchId(l) === selectedBranchFilter);
+  }, [fuelLogs, selectedBranchFilter]);
+
+  // Modal Branch-scoped Fleets
+  const modalBranchFleets = useMemo(() => {
+    return sortFleetsByCanonicalOrder(
+      fleets.filter(f => resolveFleetBranchId(f) === formBranchId)
+    );
+  }, [fleets, formBranchId]);
+
+  const filteredModalFleets = useMemo(() => {
+    const q = fleetSearchFilter.trim().toLowerCase();
+    if (!q) return modalBranchFleets;
+    return modalBranchFleets.filter(f =>
+      (f.initialCode || '').toLowerCase().includes(q) ||
+      (f.plateNumber || '').toLowerCase().includes(q) ||
+      (f.vehicleType || '').toLowerCase().includes(q) ||
+      (f.brand || '').toLowerCase().includes(q)
+    );
+  }, [modalBranchFleets, fleetSearchFilter]);
 
   // Tersinkronisasi 100% dengan daftar Area Tujuan pada Jadwal & Penugasan
   const deliveryAreaOptions = useMemo(() => {
@@ -151,53 +191,115 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     return Array.from(set);
   }, []);
 
-  // Daftar nama driver untuk dropdown pengisian manual BBM
-  const driverDropdownOptions = useMemo(() => {
-    const defaultDrivers = [
-      'Zainul Agustiar',
-      'Ach Taufiq',
-      'Faisol Arifin',
-      'Aldi Wahyu Pradana',
-      'Arif Bagus Muhammad Iqbal',
-      'Budiono',
-      'Suwarno',
-      'Rudin Slamet',
-      'Supriyanto',
-      'Nanda Tegar Hadi Saputra',
-      'Adit',
-      'Aan Adi Saputra',
-      'Bintang Wahyu Pratama',
-      'Alphian Bayu Nugraha',
-      'Mohamad Rohman',
-      'Riki Novandito Ardiansyah',
-      'Saifur Rizal'
-    ];
+  const filteredAreaOptions = useMemo(() => {
+    const q = areaSearchFilter.trim().toLowerCase();
+    if (!q) return deliveryAreaOptions;
+    return deliveryAreaOptions.filter(a => a.toLowerCase().includes(q));
+  }, [deliveryAreaOptions, areaSearchFilter]);
+
+  // Daftar Kru (Driver & Helper) terscoping Cabang + Deduplikasi Spasi (mengatasi Arif Bagus Muhammadiqbal vs Arif Bagus Muhammad Iqbal)
+  const crewOptionsForModal = useMemo(() => {
     const map = new Map<string, { id: string; name: string; role: string }>();
+
+    // 1. User Management aktif sesuai cabang terpilih
+    try {
+      const activeUsers = logisticsStore.getUsers ? logisticsStore.getUsers() : [];
+      activeUsers.forEach(u => {
+        if (logisticsStore.isActiveDeliveryCrewUser(u, formBranchId) && u.fullName?.trim()) {
+          const cleanName = u.fullName.trim();
+          const cKey = compactPersonKey(cleanName);
+          if (cKey && !map.has(cKey)) {
+            map.set(cKey, {
+              id: u.id,
+              name: cleanName,
+              role: u.role === 'crew_helper' ? 'Helper' : 'Driver'
+            });
+          }
+        }
+      });
+    } catch {
+      // ignore
+    }
+
+    // 2. Data master kru cabang terpilih
     crews.forEach(c => {
-      if (c.name && c.name.trim()) {
-        map.set(c.name.trim().toLowerCase(), {
+      if (!c.name || !c.name.trim()) return;
+      const cBranch = branchStore.getCrewBranchId(c.id, c.name);
+      if (cBranch !== formBranchId) return;
+      const cleanName = c.name.trim();
+      const cKey = compactPersonKey(cleanName);
+      if (cKey && !map.has(cKey)) {
+        map.set(cKey, {
           id: c.id,
-          name: c.name.trim(),
+          name: cleanName,
           role: c.role || 'Driver'
         });
       }
     });
-    defaultDrivers.forEach((name, idx) => {
-      const key = name.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, { id: `drv-${idx + 1}`, name, role: 'Driver' });
-      }
+
+    // 3. Fallback default khusus Nusantara bila belum ada di user/crew
+    if (formBranchId === 'cab-banyuwangi') {
+      const defaultDrivers = [
+        'Zainul Agustiar',
+        'Ach Taufiq',
+        'Faisol Arifin',
+        'Aldi Wahyu Pradana',
+        'Arif Bagus Muhammad Iqbal',
+        'Budiono',
+        'Suwarno',
+        'Rudin Slamet',
+        'Supriyanto',
+        'Nanda Tegar Hadi Saputra',
+        'Adit',
+        'Aan Adi Saputra',
+        'Bintang Wahyu Pratama',
+        'Alphian Bayu Nugraha',
+        'Mohamad Rohman',
+        'Riki Novandito Ardiansyah',
+        'Saifur Rizal'
+      ];
+      defaultDrivers.forEach((name, idx) => {
+        const cKey = compactPersonKey(name);
+        if (cKey && !map.has(cKey)) {
+          map.set(cKey, { id: `drv-${idx + 1}`, name, role: 'Driver' });
+        }
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [crews, formBranchId]);
+
+  const filteredDriverOptions = useMemo(() => {
+    const q = driverSearchFilter.trim().toLowerCase();
+    const list = [...crewOptionsForModal].sort((a, b) => {
+      const aIsDrv = a.role.toLowerCase().includes('driver') ? 0 : 1;
+      const bIsDrv = b.role.toLowerCase().includes('driver') ? 0 : 1;
+      if (aIsDrv !== bIsDrv) return aIsDrv - bIsDrv;
+      return a.name.localeCompare(b.name);
     });
-    return Array.from(map.values());
-  }, [crews]);
+    if (!q) return list;
+    return list.filter(d => d.name.toLowerCase().includes(q));
+  }, [crewOptionsForModal, driverSearchFilter]);
+
+  const filteredHelperOptions = useMemo(() => {
+    const q = helperSearchFilter.trim().toLowerCase();
+    const list = [...crewOptionsForModal].sort((a, b) => {
+      const aIsHlp = a.role.toLowerCase().includes('helper') ? 0 : 1;
+      const bIsHlp = b.role.toLowerCase().includes('helper') ? 0 : 1;
+      if (aIsHlp !== bIsHlp) return aIsHlp - bIsHlp;
+      return a.name.localeCompare(b.name);
+    });
+    if (!q) return list;
+    return list.filter(d => d.name.toLowerCase().includes(q));
+  }, [crewOptionsForModal, helperSearchFilter]);
 
   // Trip route calculator state
   const [calcFleetType, setCalcFleetType] = useState<VehicleType>('Engkel Long');
-  const [calcDistanceKm, setCalcDistanceKm] = useState<number>(620); // Default Banyuwangi - Surabaya PP
+  const [calcDistanceKm, setCalcDistanceKm] = useState<number>(620);
   const [calcSelectedRoute, setCalcSelectedRoute] = useState<string>('bwi-sby-pp');
   const [calcFuelType, setCalcFuelType] = useState<FuelType>('BioSolar');
-  const [calcCustomPrice, setCalcCustomPrice] = useState<number>(STANDARD_FUEL_PRICES['BioSolar']);
-  const [calcCargoBoxes, setCalcCargoBoxes] = useState<number>(12000); // 12,000 pcs corrugated boxes
+  const [calcCustomPrice, setCalcCustomPrice] = useState<number>(STANDARD_FUEL_PRICES['BioSolar'] || 6800);
+  const [calcCargoBoxes, setCalcCargoBoxes] = useState<number>(12000);
 
   useEffect(() => {
     return logisticsStore.subscribe(() => {
@@ -207,29 +309,110 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     });
   }, []);
 
-  // When formFleetId changes, autofill default odometer only if previous fuel log exists
+  // Reset all fields cleanly before opening Add Fuel modal
+  const openAddFuelModal = () => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    setEditingLogId(null);
+    setFormBranchId(selectedBranchFilter === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi');
+    setFormFleetId('');
+    setFormDriverId('');
+    setFormDriverName('');
+    setFormHelperId('');
+    setFormHelperName('');
+    setFormRouteTrip('');
+    setFormDate(todayIso);
+    setFormFuelType('BioSolar');
+    setFormCostPerLiter('6800');
+    setFormLiters('');
+    setFormStartOdo('');
+    setFormEndOdo('');
+    setFormGasStation('SPBU Farly');
+    setFormCargoLoadTon('');
+    setFormNotes('');
+    setFleetSearchFilter('');
+    setDriverSearchFilter('');
+    setHelperSearchFilter('');
+    setAreaSearchFilter('');
+    setActiveModalDropdown(null);
+    setIsGasStationDropdownOpen(false);
+    setIsAddModalOpen(true);
+  };
+
+  // Populate modal fields for Editing an existing FuelLog
+  const openEditFuelModal = (log: FuelLog) => {
+    setEditingLogId(log.id);
+    setFormBranchId(resolveLogBranchId(log));
+    setFormFleetId(log.fleetId || '');
+    setFormDriverId(log.driverId || '');
+    setFormDriverName(log.driverName || '');
+    setFormHelperId(log.helperId || '');
+    setFormHelperName(log.helperName || '');
+    setFormRouteTrip(log.routeTrip || '');
+    setFormDate(log.date || new Date().toISOString().split('T')[0]);
+    setFormFuelType(log.fuelType || 'BioSolar');
+    setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
+    setFormLiters(String(log.liters || ''));
+    setFormStartOdo(String(log.startOdometerKm || ''));
+    setFormEndOdo(String(log.endOdometerKm || ''));
+    setFormGasStation(log.gasStation || 'SPBU Farly');
+    setFormCargoLoadTon(log.cargoLoadTon ? String(log.cargoLoadTon) : '');
+    setFormNotes(log.notes || '');
+    setFleetSearchFilter('');
+    setDriverSearchFilter('');
+    setHelperSearchFilter('');
+    setAreaSearchFilter('');
+    setActiveModalDropdown(null);
+    setIsGasStationDropdownOpen(false);
+    setIsAddModalOpen(true);
+  };
+
+  // Autofill Kilometer Awal (KM) from the latest Kilometer Isi (endOdometerKm) of the fleet across ANY SPBU
   const handleFleetSelection = (fleetId: string) => {
     setFormFleetId(fleetId);
     const flt = fleets.find(f => f.id === fleetId);
     if (flt) {
-      const latestFleetLog = fuelLogs.find(l => l.fleetId === flt.id || l.plateNumber === flt.plateNumber);
-      if (latestFleetLog && latestFleetLog.endOdometerKm > 0) {
-        setFormStartOdo(latestFleetLog.endOdometerKm.toString());
-      } else {
-        setFormStartOdo('');
+      const targetPlateClean = (flt.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      const matchingLogs = fuelLogs
+        .filter(l => {
+          if (editingLogId && l.id === editingLogId) return false;
+          const logPlateClean = (l.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+          return l.fleetId === flt.id || (targetPlateClean && logPlateClean === targetPlateClean);
+        })
+        .sort((a, b) => {
+          const dateDiff = (b.date || '').localeCompare(a.date || '');
+          if (dateDiff !== 0) return dateDiff;
+          const createdDiff = (b.createdAt || '').localeCompare(a.createdAt || '');
+          if (createdDiff !== 0) return createdDiff;
+          return (b.endOdometerKm || 0) - (a.endOdometerKm || 0);
+        });
+
+      const latestFleetLog = matchingLogs[0];
+      if (!editingLogId) {
+        if (latestFleetLog && latestFleetLog.endOdometerKm > 0) {
+          setFormStartOdo(String(latestFleetLog.endOdometerKm));
+        } else {
+          setFormStartOdo('');
+        }
       }
-      // If driver is assigned to fleet or current crew
-      const assignedCrew = crews.find(c => c.currentFleetId === flt.id);
-      if (assignedCrew) {
-        setFormDriverName(assignedCrew.name);
-        setFormDriverId(assignedCrew.id);
+
+      if (!formDriverName) {
+        const assignedCrew = crews.find(
+          c => c.currentFleetId === flt.id && branchStore.getCrewBranchId(c.id, c.name) === formBranchId
+        );
+        if (assignedCrew) {
+          setFormDriverName(assignedCrew.name);
+          setFormDriverId(assignedCrew.id);
+        }
       }
     }
   };
 
-  // When fuel type changes in form
+  // When fuel type changes in form (BioSolar fixed default 6800, others update if still empty or default)
   const handleFuelTypeChange = (type: FuelType) => {
     setFormFuelType(type);
+    if (!formCostPerLiter.trim()) {
+      setFormCostPerLiter(String(STANDARD_FUEL_PRICES[type] || 6800));
+    }
   };
 
   // Live calculation for Add Form
@@ -282,66 +465,208 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return;
     }
 
-    logisticsStore.addFuelLog({
+    const payload = {
       fleetId: flt.id,
       plateNumber: flt.plateNumber,
       initialCode: flt.initialCode,
       vehicleType: flt.vehicleType,
+      branchId: formBranchId,
       driverId: formDriverId || undefined,
       driverName: formDriverName,
+      helperId: formHelperId || undefined,
+      helperName: formHelperName || undefined,
       date: formDate,
       fuelType: formFuelType,
       liters: Number(formLiters),
-      costPerLiter: Number(formCostPerLiter) || 0,
+      costPerLiter: Number(formCostPerLiter) || 6800,
       startOdometerKm: startKm,
       endOdometerKm: endKm,
       gasStation: formGasStation,
-      receiptNumber: formReceiptNumber || undefined,
       routeTrip: formRouteTrip || undefined,
       cargoLoadTon: formCargoLoadTon ? Number(formCargoLoadTon) : undefined,
       notes: formNotes || undefined
-    });
+    };
 
-    // Reset form
+    if (editingLogId) {
+      logisticsStore.updateFuelLog(editingLogId, payload);
+    } else {
+      logisticsStore.addFuelLog(payload);
+    }
+
     setIsAddModalOpen(false);
+    setEditingLogId(null);
     setFormLiters('');
-    setFormCostPerLiter('');
+    setFormCostPerLiter('6800');
     setFormStartOdo('');
     setFormEndOdo('');
+    setFormDriverId('');
+    setFormDriverName('');
+    setFormHelperId('');
+    setFormHelperName('');
     setFormNotes('');
-    setFormReceiptNumber('');
     setFormRouteTrip('');
     setFormCargoLoadTon('');
   };
 
-  // Summaries & Stats
+  // Branch-scoped Fleet Summaries
+  const fleetSummaries: FleetFuelSummary[] = useMemo(() => {
+    return branchScopedFleets.map(fleet => {
+      const logs = branchScopedLogs.filter(
+        l => l.fleetId === fleet.id || (l.plateNumber && l.plateNumber.toUpperCase() === fleet.plateNumber.toUpperCase())
+      );
+      const totalLogs = logs.length;
+      const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
+      const totalCost = logs.reduce((acc, l) => acc + l.totalCost, 0);
+      const totalDistanceKm = logs.reduce((acc, l) => acc + l.distanceKm, 0);
+
+      const targetConfig = FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
+      const targetRatio = targetConfig.target;
+      const avgKmPerLiter = totalLiters > 0 && totalDistanceKm > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+      const avgLiterPerKm = totalDistanceKm > 0 && totalLiters > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
+      const avgLiterPer100Km = totalDistanceKm > 0 && totalLiters > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
+      const targetLiterPerKm = targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0;
+      const targetLiterPer100Km = targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0;
+
+      const avgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
+      const efficiencyScore = totalDistanceKm > 0 && targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 0;
+      const anomaliesCount = logs.filter(l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali').length;
+
+      let status: EfficiencyStatus = 'Efisien / Normal';
+      if (totalLogs === 0 || totalDistanceKm === 0) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 105) {
+        status = 'Sangat Efisien';
+      } else if (efficiencyScore >= 90) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 75) {
+        status = 'Boros';
+      } else {
+        status = 'Kritis / Potensi Anomali';
+      }
+
+      return {
+        fleetId: fleet.id,
+        plateNumber: fleet.plateNumber,
+        initialCode: fleet.initialCode,
+        vehicleType: fleet.vehicleType,
+        totalLogs,
+        totalLiters,
+        totalCost,
+        totalDistanceKm,
+        avgKmPerLiter,
+        avgLiterPerKm,
+        avgLiterPer100Km,
+        targetRatio,
+        targetLiterPerKm,
+        targetLiterPer100Km,
+        avgCostPerKm,
+        efficiencyScore,
+        status,
+        anomaliesCount
+      };
+    });
+  }, [branchScopedFleets, branchScopedLogs]);
+
+  // Branch-scoped Driver Eco Scores (deduplicated by space-collapsed key so Arif Bagus never splits)
+  const driverScores: DriverFuelScore[] = useMemo(() => {
+    const driverMap = new Map<string, { driverId: string; driverName: string; logs: FuelLog[] }>();
+    branchScopedLogs.forEach(log => {
+      const displayName = (log.driverName || 'Driver Tidak Terdaftar').trim();
+      const key = compactPersonKey(displayName) || displayName.toLowerCase();
+      if (!driverMap.has(key)) {
+        driverMap.set(key, {
+          driverId: log.driverId || key,
+          driverName: displayName,
+          logs: []
+        });
+      } else if (displayName.length > driverMap.get(key)!.driverName.length) {
+        driverMap.get(key)!.driverName = displayName;
+      }
+      driverMap.get(key)!.logs.push(log);
+    });
+
+    const scores: DriverFuelScore[] = Array.from(driverMap.values()).map(item => {
+      const totalTrips = item.logs.length;
+      const totalDistanceKm = item.logs.reduce((acc, l) => acc + l.distanceKm, 0);
+      const totalLiters = item.logs.reduce((acc, l) => acc + l.liters, 0);
+      const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+
+      const avgEfficiencyRatio = item.logs.reduce((acc, l) => acc + (l.ratioKmPerLiter / (l.targetRatio || 7.5)), 0) / (totalTrips || 1);
+      const ecoDrivingScore = Math.min(100, Math.max(40, Math.round(avgEfficiencyRatio * 90)));
+
+      let badge: 'Master Eco-Driver' | 'Driver Efisien' | 'Perlu Pembinaan' = 'Driver Efisien';
+      let recommendation = 'Menjaga kecepatan stabil dan pola perpindahan gigi yang tepat.';
+
+      if (ecoDrivingScore >= 90) {
+        badge = 'Master Eco-Driver';
+        recommendation = 'Pengemudi teladan dengan akselerasi halus, pengereman terencana, dan efisiensi BBM prima.';
+      } else if (ecoDrivingScore < 75) {
+        badge = 'Perlu Pembinaan';
+        recommendation = 'Perlu evaluasi pola idling berlebih saat antre muat dan hindari akselerasi agresif di tanjakan.';
+      }
+
+      return {
+        driverId: item.driverId,
+        driverName: item.driverName,
+        totalTrips,
+        totalDistanceKm,
+        totalLiters,
+        avgKmPerLiter,
+        ecoDrivingScore,
+        ranking: 0,
+        badge,
+        recommendation
+      };
+    });
+
+    scores.sort((a, b) => b.ecoDrivingScore - a.ecoDrivingScore);
+    scores.forEach((s, idx) => {
+      s.ranking = idx + 1;
+    });
+    return scores;
+  }, [branchScopedLogs]);
+
+  // Branch-scoped KPI Summary
   const kpiSummary = useMemo(() => {
-    return logisticsStore.getFuelKPISummary();
-  }, [fuelLogs, fleets]);
+    const totalLiters = branchScopedLogs.reduce((acc, l) => acc + l.liters, 0);
+    const totalCost = branchScopedLogs.reduce((acc, l) => acc + l.totalCost, 0);
+    const totalDistanceKm = branchScopedLogs.reduce((acc, l) => acc + l.distanceKm, 0);
+    const overallAvgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+    const overallAvgLiterPerKm = totalDistanceKm > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
+    const overallAvgLiterPer100Km = totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
+    const overallAvgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
+    const totalAnomalies = branchScopedLogs.filter(
+      l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali'
+    ).length;
 
-  const fleetSummaries = useMemo(() => {
-    return logisticsStore.getFleetFuelSummary();
-  }, [fuelLogs, fleets]);
+    const activeFleets = fleetSummaries.filter(f => f.totalLogs > 0);
+    const sortedFleets = [...(activeFleets.length > 0 ? activeFleets : fleetSummaries)].sort(
+      (a, b) => b.efficiencyScore - a.efficiencyScore
+    );
+    const topFleet = sortedFleets[0];
+    const leastFleet = sortedFleets[sortedFleets.length - 1];
+    const topDriver = driverScores[0];
 
-  const driverScores = useMemo(() => {
-    return logisticsStore.getDriverFuelScores();
-  }, [fuelLogs]);
+    return {
+      totalLiters,
+      totalCost,
+      totalDistanceKm,
+      overallAvgKmPerLiter,
+      overallAvgLiterPerKm,
+      overallAvgLiterPer100Km,
+      overallAvgCostPerKm,
+      totalAnomalies,
+      topFleet,
+      leastFleet,
+      topDriver,
+      totalRecords: branchScopedLogs.length
+    };
+  }, [branchScopedLogs, fleetSummaries, driverScores]);
 
-  // Chart Data: Realization vs Target per fleet
-  const fleetComparisonChartData = useMemo(() => {
-    return fleetSummaries.map(fs => ({
-      name: fs.initialCode || fs.plateNumber,
-      plate: fs.plateNumber,
-      realisasi: fs.avgKmPerLiter,
-      target: fs.targetRatio,
-      tipe: fs.vehicleType
-    }));
-  }, [fleetSummaries]);
-
-  // Chart Data: Timeline fuel consumption (last 7 days or recent logs)
+  // Chart Data: Timeline fuel consumption
   const timelineChartData = useMemo(() => {
     const map = new Map<string, { date: string; liters: number; distance: number }>();
-    const sorted = [...fuelLogs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const sorted = [...branchScopedLogs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     sorted.forEach(l => {
       if (!map.has(l.date)) {
         map.set(l.date, { date: l.date.substring(5), liters: 0, distance: 0 });
@@ -351,162 +676,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       item.distance += l.distanceKm;
     });
     return Array.from(map.values()).slice(-7);
-  }, [fuelLogs]);
+  }, [branchScopedLogs]);
 
-  // Fuel Type Breakdown
-  const fuelTypePieData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    fuelLogs.forEach(l => {
-      counts[l.fuelType] = (counts[l.fuelType] || 0) + l.liters;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [fuelLogs]);
-
-  const PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6'];
-
-  // Color palette and labels for AKK Fleets
-  const FLEET_COLORS: Record<string, { fill: string; stroke: string; label: string }> = {
-    'EL-01': { fill: '#f59e0b', stroke: '#d97706', label: 'EL-01 (Engkel Long)' },
-    'DS-02': { fill: '#3b82f6', stroke: '#2563eb', label: 'DS-02 (Double STD)' },
-    'ES-03': { fill: '#10b981', stroke: '#059669', label: 'ES-03 (Engkel STD)' },
-    'DS-04': { fill: '#a855f7', stroke: '#9333ea', label: 'DS-04 (Double STD)' },
-    'PB-05': { fill: '#06b6d4', stroke: '#0891b2', label: 'PB-05 (Pick Up Box)' },
-    'DS-06': { fill: '#f43f5e', stroke: '#e11d48', label: 'DS-06 (Double STD)' },
-  };
-
-  // 1. Process Daily Fuel Consumption Data for Bar Chart
-  const dailyConsumptionData = useMemo(() => {
-    const now = new Date('2026-09-22');
-    const filteredByDays = fuelLogs.filter(l => {
-      if (dailyRangeDays === 0) return true;
-      const d = new Date(l.date);
-      const diffTime = Math.abs(now.getTime() - d.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays <= dailyRangeDays;
-    });
-
-    const dateMap = new Map<string, {
-      date: string;
-      displayDate: string;
-      totalLiters: number;
-      totalDistanceKm: number;
-      dailyLKm: number;
-      dailyKmL: number;
-      recordsCount: number;
-      details: { fleetCode: string; plateNumber: string; liters: number; distanceKm: number; driverName: string; routeTrip: string; lKm: number }[];
-      [key: string]: any;
-    }>();
-
-    const sortedLogs = [...filteredByDays].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    sortedLogs.forEach(l => {
-      const dKey = l.date;
-      if (!dateMap.has(dKey)) {
-        const dObj = new Date(dKey);
-        const displayDate = dObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-        dateMap.set(dKey, {
-          date: dKey,
-          displayDate,
-          totalLiters: 0,
-          totalDistanceKm: 0,
-          dailyLKm: 0,
-          dailyKmL: 0,
-          recordsCount: 0,
-          details: []
-        });
-      }
-
-      const item = dateMap.get(dKey)!;
-      const code = l.initialCode || l.plateNumber;
-      item[code] = Number(((item[code] || 0) + l.liters).toFixed(1));
-      item[`${code}_km`] = (item[`${code}_km`] || 0) + l.distanceKm;
-      const singleLKm = l.distanceKm > 0 ? Number((l.liters / l.distanceKm).toFixed(4)) : 0;
-      item[`${code}_lkm`] = singleLKm;
-
-      item.totalLiters = Number((item.totalLiters + l.liters).toFixed(1));
-      item.totalDistanceKm += l.distanceKm;
-      item.recordsCount += 1;
-      item.details.push({
-        fleetCode: code,
-        plateNumber: l.plateNumber,
-        liters: l.liters,
-        distanceKm: l.distanceKm,
-        driverName: l.driverName,
-        routeTrip: l.routeTrip || 'Rute Operasional AKK',
-        lKm: singleLKm
-      });
-    });
-
-    return Array.from(dateMap.values()).map(item => {
-      item.dailyLKm = item.totalDistanceKm > 0 ? Number((item.totalLiters / item.totalDistanceKm).toFixed(4)) : 0;
-      item.dailyKmL = item.totalLiters > 0 ? Number((item.totalDistanceKm / item.totalLiters).toFixed(2)) : 0;
-      return item;
-    });
-  }, [fuelLogs, dailyRangeDays]);
-
-  // Single Fleet Daily Chart Data
-  const singleFleetDailyData = useMemo(() => {
-    if (dailyFleetFilter === 'all') return [];
-    const flt = fleets.find(f => f.id === dailyFleetFilter);
-    const code = flt?.initialCode || flt?.plateNumber || '';
-    return dailyConsumptionData.map(d => {
-      const liters = d[code] || 0;
-      const distance = d[`${code}_km`] || 0;
-      const lkm = d[`${code}_lkm`] || (distance > 0 ? Number((liters / distance).toFixed(4)) : 0);
-      return {
-        date: d.date,
-        displayDate: d.displayDate,
-        liters,
-        distance,
-        lkm,
-        hasData: liters > 0,
-        fleetCode: code,
-        plateNumber: flt?.plateNumber
-      };
-    }).filter(d => d.hasData);
-  }, [dailyConsumptionData, dailyFleetFilter, fleets]);
-
-  // Daily Bar Chart Aggregate Statistics
-  const dailyChartStats = useMemo(() => {
-    let totalLiters = 0;
-    let totalDistance = 0;
-    let peakDay = { date: '-', liters: 0 };
-    const fleetTotals: Record<string, number> = {};
-
-    dailyConsumptionData.forEach(d => {
-      totalLiters += d.totalLiters;
-      totalDistance += d.totalDistanceKm;
-      if (d.totalLiters > peakDay.liters) {
-        peakDay = { date: d.displayDate, liters: d.totalLiters };
-      }
-      d.details.forEach(det => {
-        fleetTotals[det.fleetCode] = (fleetTotals[det.fleetCode] || 0) + det.liters;
-      });
-    });
-
-    let topFleet = { code: '-', liters: 0 };
-    Object.entries(fleetTotals).forEach(([code, liters]) => {
-      if (liters > topFleet.liters) {
-        topFleet = { code, liters };
-      }
-    });
-
-    const activeDays = dailyConsumptionData.length;
-    const avgLitersPerDay = activeDays > 0 ? Number((totalLiters / activeDays).toFixed(1)) : 0;
-    const avgLKmPeriod = totalDistance > 0 ? Number((totalLiters / totalDistance).toFixed(4)) : 0;
-
-    return {
-      totalLiters: Number(totalLiters.toFixed(1)),
-      totalDistance,
-      avgLitersPerDay,
-      avgLKmPeriod,
-      peakDay,
-      topFleet,
-      activeDays
-    };
-  }, [dailyConsumptionData]);
-
-  // 2. Unit Vehicles L/KM Calculation and In-depth Analysis (Sorted N1, A3, N3, N4, N5, N20, N21, N22, N23, S5, DS4, DS5)
+  // Unit Vehicles L/KM Calculation and In-depth Analysis
   const unitLKmAnalysis = useMemo(() => {
     const orderedSummaries = [...fleetSummaries].sort(
       (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
@@ -531,8 +703,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         else if (fs.status === 'Kritis / Potensi Anomali') statusColor = 'text-rose-400 bg-rose-500/10 border-rose-500/30';
       }
 
-      // Resolve latest driverName & areaKirim from fuelLogs for this unit
-      const unitLogs = fuelLogs.filter(
+      const unitLogs = branchScopedLogs.filter(
         l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
       );
       const latestLog = unitLogs[0];
@@ -555,7 +726,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       };
     });
 
-    // Apply search filter
     const filtered = list.filter(item => {
       if (!lKmSearch) return true;
       const q = lKmSearch.toLowerCase();
@@ -568,7 +738,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       );
     });
 
-    // Apply sorting (default: canonical sequence N1, A3, N3, N4, N5, N20, N21, N22, N23, S5, DS4, DS5)
     return filtered.sort((a, b) => {
       if (lKmSortBy === 'canonical_order') {
         return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
@@ -579,9 +748,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       if (lKmSortBy === 'distance_desc') return b.totalDistanceKm - a.totalDistanceKm;
       return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
     });
-  }, [fleetSummaries, fuelLogs, lKmSearch, lKmSortBy]);
+  }, [fleetSummaries, branchScopedLogs, lKmSearch, lKmSortBy]);
 
-  // Chart data for comparing Liter per KM vs Target L/KM (Strictly ordered N1..DS5)
+  // Chart data for comparing Liter per KM vs Target L/KM
   const lKmComparisonChartData = useMemo(() => {
     const orderedSummaries = [...fleetSummaries].sort(
       (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
@@ -590,7 +759,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       const hasData = fs.totalDistanceKm > 0 && fs.totalLiters > 0;
       const avgLKm = hasData ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : 0;
       const targetLKm = hasData && fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
-      const unitLogs = fuelLogs.filter(
+      const unitLogs = branchScopedLogs.filter(
         l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
       );
       const latestLog = unitLogs[0];
@@ -613,28 +782,46 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return mapped.filter(m => m.fleetId === comparisonSelectedFleetId);
     }
     return mapped;
-  }, [fleetSummaries, fuelLogs, comparisonSelectedFleetId]);
+  }, [fleetSummaries, branchScopedLogs, comparisonSelectedFleetId]);
 
-  // Filtered Fuel Logs
+  // Filtered & Sorted Fuel Logs
   const filteredLogs = useMemo(() => {
-    return fuelLogs.filter(log => {
+    const list = branchScopedLogs.filter(log => {
       const q = searchQuery.toLowerCase();
       const matchQuery =
         !searchQuery ||
         log.plateNumber.toLowerCase().includes(q) ||
         (log.initialCode && log.initialCode.toLowerCase().includes(q)) ||
         log.driverName.toLowerCase().includes(q) ||
+        (log.helperName && log.helperName.toLowerCase().includes(q)) ||
         log.gasStation.toLowerCase().includes(q) ||
-        (log.routeTrip && log.routeTrip.toLowerCase().includes(q)) ||
-        (log.receiptNumber && log.receiptNumber.toLowerCase().includes(q));
+        (log.routeTrip && log.routeTrip.toLowerCase().includes(q));
 
       const matchFleet = filterFleetId === 'all' || log.fleetId === filterFleetId;
       const matchStatus = filterStatus === 'all' || log.efficiencyStatus === filterStatus;
       const matchFuel = filterFuelType === 'all' || log.fuelType === filterFuelType;
 
-      return matchQuery && matchFleet && matchStatus && matchFuel;
+      const gsLower = (log.gasStation || '').toLowerCase();
+      const matchSpbu =
+        filterSpbu === 'all'
+          ? true
+          : filterSpbu === 'Farly'
+          ? gsLower.includes('farly')
+          : filterSpbu === 'Gajah Mada'
+          ? gsLower.includes('gajah mada')
+          : !gsLower.includes('farly') && !gsLower.includes('gajah mada');
+
+      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu;
     });
-  }, [fuelLogs, searchQuery, filterFleetId, filterStatus, filterFuelType]);
+
+    if (logSortBy === 'efficient_asc') {
+      return [...list].sort((a, b) => b.ratioKmPerLiter - a.ratioKmPerLiter);
+    }
+    if (logSortBy === 'wasteful_desc') {
+      return [...list].sort((a, b) => a.ratioKmPerLiter - b.ratioKmPerLiter);
+    }
+    return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [branchScopedLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy]);
 
   // Route Preset Selection Handler for Calculator
   const handlePresetRouteChange = (routeKey: string) => {
@@ -682,48 +869,54 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     const headers = [
       'ID Log',
       'Tanggal',
+      'Cabang',
       'Plat Nomor',
       'Inisial',
       'Tipe Kendaraan',
       'Driver',
+      'Helper',
       'Jenis BBM',
       'Liter',
       'Harga/L',
       'Total Biaya (Rp)',
       'KM Awal',
-      'KM Akhir',
+      'KM Isi',
       'Jarak (KM)',
       'Rasio (KM/L)',
       'Standar Target',
       'Status Efisiensi',
       'SPBU',
-      'No Struk',
       'Rute Perjalanan',
       'Catatan'
     ];
 
-    const rows = filteredLogs.map(l => [
-      l.id,
-      l.date,
-      l.plateNumber,
-      l.initialCode || '-',
-      l.vehicleType,
-      l.driverName,
-      l.fuelType,
-      l.liters,
-      l.costPerLiter,
-      l.totalCost,
-      l.startOdometerKm,
-      l.endOdometerKm,
-      l.distanceKm,
-      l.ratioKmPerLiter,
-      l.targetRatio,
-      l.efficiencyStatus,
-      `"${l.gasStation}"`,
-      l.receiptNumber || '-',
-      `"${l.routeTrip || '-'}"`,
-      `"${l.notes || '-'}"`
-    ]);
+    const rows = filteredLogs.map(l => {
+      const bId = l.branchId || branchStore.getFleetBranchId(l.fleetId, l.plateNumber, l.initialCode);
+      const bLabel = bId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara';
+      return [
+        l.id,
+        l.date,
+        bLabel,
+        l.plateNumber,
+        l.initialCode || '-',
+        l.vehicleType,
+        l.driverName,
+        l.helperName || '-',
+        l.fuelType,
+        l.liters,
+        l.costPerLiter,
+        l.totalCost,
+        l.startOdometerKm,
+        l.endOdometerKm,
+        l.distanceKm,
+        l.ratioKmPerLiter,
+        l.targetRatio,
+        l.efficiencyStatus,
+        `"${l.gasStation}"`,
+        `"${l.routeTrip || '-'}"`,
+        `"${l.notes || '-'}"`
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -736,29 +929,59 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* ========================================================================= */}
-      {/* 1. TOP HEADER & ACTION BAR (SIMPLIFIED UI/UX)                             */}
+      {/* 1. TOP HEADER, CABANG SWITCHER & COMPACT KPI SUMMARY                      */}
       {/* ========================================================================= */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
-              <Fuel className="w-5 h-5" />
+      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-3.5 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
+                <Fuel className="w-5 h-5" />
+              </div>
+              <div>
+                <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                  Efisiensi BBM Armada
+                </h1>
+                <p className="text-[11px] text-slate-400">
+                  Rasio KM/L, L/KM &amp; audit BBM terbagi per cabang
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                Efisiensi BBM Armada
-              </h1>
-              <p className="text-xs text-slate-400">
-                Rasio KM/L &amp; konsumsi BBM operasional
-              </p>
+
+            {/* Pembagian Cabang (Nusantara vs Sidoarjo) */}
+            <div className="inline-flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <Building2 className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-0.5 shrink-0" />
+              {([
+                { id: 'all', label: 'Semua Cabang' },
+                { id: 'cab-banyuwangi', label: 'Nusantara' },
+                { id: 'cab-sidoarjo', label: 'Sidoarjo' }
+              ] as const).map(br => (
+                <button
+                  key={br.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedBranchFilter(br.id);
+                    setComparisonSelectedFleetId('all');
+                    setFilterFleetId('all');
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    selectedBranchFilter === br.id
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {br.label}
+                </button>
+              ))}
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setIsAddModalOpen(true)}
+              type="button"
+              onClick={openAddFuelModal}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -766,6 +989,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             </button>
 
             <button
+              type="button"
               onClick={() => setIsExportModalOpen(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer"
               title="Export Laporan Konsumsi BBM (PDF / Excel)"
@@ -775,7 +999,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             </button>
 
             <button
-              onClick={() => setActiveTab('calculator')}
+              type="button"
+              onClick={() => setIsCalculatorModalOpen(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
             >
               <Calculator className="w-3.5 h-3.5 text-amber-400" />
@@ -783,6 +1008,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             </button>
 
             <button
+              type="button"
               onClick={handleExportCSV}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
               title="Ekspor Data Rekap ke CSV"
@@ -793,82 +1019,82 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           </div>
         </div>
 
-        {/* 5 PRIMARY METRICS ROW */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-5 mt-5 border-t border-slate-800/70">
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
-              <span className="font-semibold">Rata-rata Rasio Armada</span>
-              <Gauge className="w-4 h-4 text-blue-400" />
+        {/* 5 PRIMARY METRICS ROW (COMPACT) */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-3.5 mt-3.5 border-t border-slate-800/70">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
+              <span className="font-semibold">Rata-rata Rasio</span>
+              <Gauge className="w-3.5 h-3.5 text-blue-400" />
             </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white font-mono">
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-black text-white font-mono">
                 {kpiSummary.overallAvgKmPerLiter}
               </span>
-              <span className="text-xs text-slate-400 font-bold">KM / L</span>
+              <span className="text-[11px] text-slate-400 font-bold">KM / L</span>
             </div>
-            <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-medium">
+            <div className="text-[10px] text-emerald-400 mt-0.5 flex items-center gap-1 font-medium">
               <CheckCircle2 className="w-3 h-3" />
-              <span>Target Standard: 7.5 KM/L</span>
+              <span>Target: 7.5 KM/L</span>
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 ring-1 ring-amber-500/20">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 ring-1 ring-amber-500/20">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
               <span className="font-semibold text-amber-300">Rata-rata Liter / KM</span>
-              <Activity className="w-4 h-4 text-amber-400" />
+              <Activity className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-amber-400 font-mono">
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-black text-amber-400 font-mono">
                 {kpiSummary.overallAvgLiterPerKm || 0}
               </span>
-              <span className="text-xs text-amber-300/80 font-bold">L / KM</span>
+              <span className="text-[11px] text-amber-300/80 font-bold">L / KM</span>
             </div>
-            <div className="text-[11px] text-slate-300 mt-1 flex items-center gap-1 font-mono">
-              <span>{kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM</span>
+            <div className="text-[10px] text-slate-300 mt-0.5 font-mono">
+              {kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
               <span className="font-semibold">Total BBM Terdata</span>
-              <Fuel className="w-4 h-4 text-amber-400" />
+              <Fuel className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white font-mono">
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-black text-white font-mono">
                 {kpiSummary.totalLiters.toLocaleString('id-ID')}
               </span>
-              <span className="text-xs text-slate-400 font-bold">Liter</span>
+              <span className="text-[11px] text-slate-400 font-bold">Liter</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">
-              Jarak Total: <span className="font-bold text-slate-300">{kpiSummary.totalDistanceKm.toLocaleString('id-ID')} KM</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
-              <span className="font-semibold">Total Pengeluaran BBM</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div className="text-2xl font-black text-white font-mono">
-              Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} <span className="text-xs font-normal text-slate-400">Juta</span>
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">
-              Biaya rata-rata: <span className="font-bold text-emerald-400">Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')} / KM</span>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Jarak: <span className="font-bold text-slate-300">{kpiSummary.totalDistanceKm.toLocaleString('id-ID')} KM</span>
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
+              <span className="font-semibold">Total Pengeluaran</span>
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div className="text-xl font-black text-white font-mono">
+              Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} <span className="text-[11px] font-normal text-slate-400">Juta</span>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Rata-rata: <span className="font-bold text-emerald-400">Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM</span>
+            </div>
+          </div>
+
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
               <span className="font-semibold">Anomali / Perlu Cek</span>
-              <AlertTriangle className={`w-4 h-4 ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`} />
+              <AlertTriangle className={`w-3.5 h-3.5 ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`} />
             </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className={`text-2xl font-black font-mono ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+            <div className="flex items-baseline gap-1">
+              <span className={`text-xl font-black font-mono ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                 {kpiSummary.totalAnomalies}
               </span>
-              <span className="text-xs text-slate-400 font-bold">Armada</span>
+              <span className="text-[11px] text-slate-400 font-bold">Log</span>
             </div>
-            <div className="text-[11px] text-rose-300 mt-1 truncate">
+            <div className="text-[10px] text-rose-300 mt-0.5 truncate">
               {kpiSummary.leastFleet ? (
                 <span>Truk {kpiSummary.leastFleet.initialCode || kpiSummary.leastFleet.plateNumber} ({kpiSummary.leastFleet.avgKmPerLiter} KM/L)</span>
               ) : 'Semua armada efisien'}
@@ -878,133 +1104,110 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. TAB CONTROLS                                                           */}
+      {/* 2. TAB CONTROLS (WRAP RINGKAS, TANPA DAILY & CALCULATOR TAB)              */}
       {/* ========================================================================= */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-2 overflow-x-auto">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'overview'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            <span>Grafik & Analisis Efisiensi</span>
-          </button>
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-2.5">
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'overview'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <TrendingUp className="w-3.5 h-3.5" />
+          <span>Analisis Efisiensi</span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('daily')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'daily'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <BarChart className="w-4 h-4" />
-            <span>Grafik Konsumsi Harian Armada</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-              {dailyConsumptionData.length} Hari
-            </span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('liter_km')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'liter_km'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Gauge className="w-3.5 h-3.5" />
+          <span>Liter/KM Kendaraan</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
+            {fleetSummaries.length} Unit
+          </span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('liter_km')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'liter_km'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Gauge className="w-4 h-4" />
-            <span>Rata-rata Liter/KM Kendaraan</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-              {fleetSummaries.length} Unit
-            </span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('weekly_report')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'weekly_report'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Rekap Mingguan</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            PDF/Excel
+          </span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('weekly_report')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'weekly_report'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Laporan & Rekap Mingguan</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-              PDF/Excel
-            </span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('leaderboard')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'leaderboard'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Award className="w-3.5 h-3.5" />
+          <span>Eco-Driver</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
+            {driverScores.length}
+          </span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('leaderboard')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'leaderboard'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            <span>Papan Peringkat Eco-Driver</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-              {driverScores.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'logs'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Audit Riwayat Pengisian BBM</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-              {fuelLogs.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('calculator')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-              activeTab === 'calculator'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Calculator className="w-4 h-4" />
-            <span>Kalkulator Rute & Estimasi BBM</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('logs')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'logs'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>Audit Riwayat BBM</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
+            {branchScopedLogs.length}
+          </span>
+        </button>
       </div>
 
       {/* ========================================================================= */}
       {/* 3. TAB 1: OVERVIEW & CHARTS                                               */}
       {/* ========================================================================= */}
       {activeTab === 'overview' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* ANOMALY ALERT BANNER IF APPLICABLE */}
           {kpiSummary.totalAnomalies > 0 && (
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
                 <div className="p-2 bg-rose-500/20 text-rose-400 rounded-xl mt-0.5">
-                  <AlertTriangle className="w-5 h-5" />
+                  <AlertTriangle className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-rose-300">
+                  <h4 className="text-xs font-bold text-rose-300">
                     Peringatan Anomali Konsumsi BBM Terdeteksi ({kpiSummary.totalAnomalies} Catatan)
                   </h4>
-                  <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                    Terdapat armada dengan rasio konsumsi jauh di bawah target efisiensi pabrik (&lt; 5.0 KM/L). Mohon periksa kondisi nozzle injektor, filter solar, potensi kebocoran tangki, atau durasi idling mesin terlalu lama saat antrean muat karton box.
+                  <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                    Terdapat armada dengan rasio konsumsi jauh di bawah target efisiensi pabrik. Mohon periksa kondisi nozzle injektor, filter solar, atau durasi idling mesin.
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => {
                   setFilterStatus('Kritis / Potensi Anomali');
                   setActiveTab('logs');
@@ -1017,287 +1220,14 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           )}
 
           {/* STANDAR EFISIENSI PER JENIS KENDARAAN BANNER */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             {Object.entries(FUEL_TARGET_RATIOS).map(([vType, cfg]) => (
-              <div key={vType} className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+              <div key={vType} className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
                 <div className="text-[11px] text-slate-400 font-semibold">{vType}</div>
-                <div className="text-lg font-black text-amber-400 font-mono">{cfg.label}</div>
+                <div className="text-base font-black text-amber-400 font-mono">{cfg.label}</div>
                 <div className="text-[10px] text-slate-400">Batas Wajar Min: {cfg.minAcceptable} KM/L</div>
               </div>
             ))}
-          </div>
-
-          {/* ========================================================================= */}
-          {/* SECTION A: VISUALISASI KONSUMSI BBM HARIAN PER ARMADA (GRAFIK BATANG)      */}
-          {/* ========================================================================= */}
-          <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                    <BarChart className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-bold text-white tracking-tight">
-                    Visualisasi Konsumsi BBM Harian per Armada
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                    Grafik Batang Harian
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Grafik batang konsumsi bahan bakar (Liter) harian masing-masing armada PT AKK dengan filter rentang waktu dan unit truk.
-                </p>
-              </div>
-
-              {/* Interactive Controls Bar */}
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Fleet Filter */}
-                <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <Truck className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={dailyFleetFilter}
-                    onChange={(e) => setDailyFleetFilter(e.target.value)}
-                    className="bg-transparent text-slate-200 font-semibold text-xs focus:outline-none cursor-pointer"
-                  >
-                    <option value="all" className="bg-slate-900">Semua Armada</option>
-                    {fleets.map(f => (
-                      <option key={f.id} value={f.id} className="bg-slate-900">
-                        {f.initialCode || f.plateNumber} ({f.plateNumber})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Day Range Filter */}
-                <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={dailyRangeDays}
-                    onChange={(e) => setDailyRangeDays(Number(e.target.value))}
-                    className="bg-transparent text-slate-200 font-semibold text-xs focus:outline-none cursor-pointer"
-                  >
-                    <option value={7} className="bg-slate-900">7 Hari Terakhir</option>
-                    <option value={14} className="bg-slate-900">14 Hari Terakhir</option>
-                    <option value={30} className="bg-slate-900">30 Hari Terakhir</option>
-                    <option value={0} className="bg-slate-900">Semua Riwayat</option>
-                  </select>
-                </div>
-
-                {/* Metric Selector */}
-                {dailyFleetFilter === 'all' && (
-                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                    <button
-                      onClick={() => setDailyMetric('liters')}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'liters' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Liter BBM
-                    </button>
-                    <button
-                      onClick={() => setDailyMetric('literPerKm')}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'literPerKm' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Liter / KM
-                    </button>
-                    <button
-                      onClick={() => setDailyMetric('distanceKm')}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
-                        dailyMetric === 'distanceKm' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Jarak (KM)
-                    </button>
-                  </div>
-                )}
-
-                {/* Stacked or Grouped Bar Mode */}
-                {dailyFleetFilter === 'all' && dailyMetric === 'liters' && (
-                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                    <button
-                      onClick={() => setDailyChartMode('grouped')}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
-                        dailyChartMode === 'grouped' ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white'
-                      }`}
-                      title="Batang Berdampingan"
-                    >
-                      Berdampingan
-                    </button>
-                    <button
-                      onClick={() => setDailyChartMode('stacked')}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer text-[11px] ${
-                        dailyChartMode === 'stacked' ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white'
-                      }`}
-                      title="Batang Bertumpuk (Total Harian)"
-                    >
-                      Bertumpuk
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => setActiveTab('daily')}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <span>Tampilan Detail Harian</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Metrics of the Filtered Period */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                <div className="text-[11px] text-slate-400 font-medium">Total BBM Periode Ini</div>
-                <div className="text-lg font-black text-amber-400 font-mono mt-0.5">
-                  {dailyChartStats.totalLiters.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">Liter</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{dailyChartStats.activeDays} hari operasional aktif</div>
-              </div>
-
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                <div className="text-[11px] text-slate-400 font-medium">Rata-rata Konsumsi Harian</div>
-                <div className="text-lg font-black text-blue-400 font-mono mt-0.5">
-                  {dailyChartStats.avgLitersPerDay} <span className="text-xs font-normal text-slate-400">L / Hari</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">Rasio: {dailyChartStats.avgLKmPeriod} L/KM</div>
-              </div>
-
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                <div className="text-[11px] text-slate-400 font-medium">Hari Puncak Konsumsi (Peak)</div>
-                <div className="text-lg font-black text-rose-400 font-mono mt-0.5">
-                  {dailyChartStats.peakDay.liters} <span className="text-xs font-normal text-slate-400">Liter</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">Tanggal {dailyChartStats.peakDay.date}</div>
-              </div>
-
-              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                <div className="text-[11px] text-slate-400 font-medium">Armada Konsumsi Tertinggi</div>
-                <div className="text-lg font-black text-emerald-400 font-mono mt-0.5">
-                  {dailyChartStats.topFleet.code}
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{dailyChartStats.topFleet.liters} Liter di periode ini</div>
-              </div>
-            </div>
-
-            {/* THE BAR CHART */}
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-800/70">
-              <div className="h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  {dailyFleetFilter === 'all' ? (
-                    <BarChart
-                      data={dailyConsumptionData}
-                      margin={{ top: 15, right: 15, left: -15, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="displayDate" stroke="#94a3b8" fontSize={11} />
-                      <YAxis
-                        stroke="#94a3b8"
-                        fontSize={11}
-                        unit={dailyMetric === 'liters' ? ' L' : dailyMetric === 'literPerKm' ? '' : ' KM'}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '10px',
-                          fontSize: '12px',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)'
-                        }}
-                        formatter={(val: any, name: any) => {
-                          if (dailyMetric === 'literPerKm') return [`${val} L / KM`, 'Rata-rata Liter/KM'];
-                          if (dailyMetric === 'distanceKm') return [`${val} KM`, 'Total Jarak Tempuh'];
-                          return [`${val} Liter`, name];
-                        }}
-                        labelFormatter={(label, payload) => {
-                          const item = payload && payload[0]?.payload;
-                          return `Tanggal: ${label} (Total: ${item?.totalLiters || 0} Liter | ${item?.totalDistanceKm || 0} KM)`;
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-
-                      {dailyMetric === 'liters' ? (
-                        fleets.map((flt) => {
-                          const code = flt.initialCode || flt.plateNumber;
-                          const color = FLEET_COLORS[code]?.fill || '#3b82f6';
-                          return (
-                            <Bar
-                              key={flt.id}
-                              dataKey={code}
-                              name={`${code} (${flt.vehicleType})`}
-                              fill={color}
-                              stackId={dailyChartMode === 'stacked' ? 'dailyStack' : undefined}
-                              radius={dailyChartMode === 'stacked' ? undefined : [4, 4, 0, 0]}
-                            />
-                          );
-                        })
-                      ) : dailyMetric === 'literPerKm' ? (
-                        <>
-                          <ReferenceLine y={0.1333} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: 'Target 0.1333 L/KM', fill: '#f59e0b', fontSize: 10, position: 'top' }} />
-                          <Bar
-                            dataKey="dailyLKm"
-                            name="Rata-rata Konsumsi Harian (L/KM)"
-                            fill="#10b981"
-                            radius={[4, 4, 0, 0]}
-                          />
-                        </>
-                      ) : (
-                        <Bar
-                          dataKey="totalDistanceKm"
-                          name="Total Jarak Tempuh Seluruh Armada (KM)"
-                          fill="#3b82f6"
-                          radius={[4, 4, 0, 0]}
-                        />
-                      )}
-                    </BarChart>
-                  ) : (
-                    // Single Fleet Bar Chart
-                    <BarChart
-                      data={singleFleetDailyData}
-                      margin={{ top: 15, right: 15, left: -15, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="displayDate" stroke="#94a3b8" fontSize={11} />
-                      <YAxis stroke="#94a3b8" fontSize={11} unit=" L" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '10px',
-                          fontSize: '12px'
-                        }}
-                        formatter={(val: any, name: any, item: any) => [
-                          `${val} Liter (${item.payload.distance} KM • ${item.payload.lkm} L/KM)`,
-                          'Konsumsi BBM'
-                        ]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      <Bar
-                        dataKey="liters"
-                        name={`Konsumsi BBM Harian (Liter)`}
-                        fill="#f59e0b"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  )}
-                </ResponsiveContainer>
-              </div>
-
-              {/* Chart Footer Indicator */}
-              <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/80 mt-2">
-                <div className="flex items-center gap-2">
-                  <Info className="w-3.5 h-3.5 text-amber-400" />
-                  <span>
-                    Data diakumulasikan berdasarkan tanggal pengisian bahan bakar resmi SPBU tercatat di sistem logistik AKK.
-                  </span>
-                </div>
-                <div className="font-mono text-slate-300">
-                  {dailyConsumptionData.length} hari terdata
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* ========================================================================= */}
@@ -1388,7 +1318,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     <div className="text-[10px] text-slate-400">Standar Pabrik</div>
                     <div className="text-sm font-black text-slate-300 font-mono mt-0.5">
                       {comparisonSelectedFleetId === 'all'
-                        ? (fuelLogs.length > 0 ? 0.1333 : 0)
+                        ? (branchScopedLogs.length > 0 ? 0.1333 : 0)
                         : (unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId)?.targetLKm || 0)}{' '}
                       <span className="text-[10px] font-normal text-slate-400">L/KM</span>
                     </div>
@@ -1662,340 +1592,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       )}
 
       {/* ========================================================================= */}
-      {/* 4. TAB: GRAFIK KONSUMSI BBM HARIAN PER ARMADA                             */}
-      {/* ========================================================================= */}
-      {activeTab === 'daily' && (
-        <div className="space-y-6">
-          <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
-                    <BarChart className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-white tracking-tight">
-                      Visualisasi Grafik Batang Konsumsi BBM Harian per Armada
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Analisis fluktuasi harian konsumsi bahan bakar setiap unit kendaraan operasional ekspedisi karton box PT Anugrah Kemasan Kreatif.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* FILTER CONTROLS */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <span className="text-slate-400 font-medium">Armada:</span>
-                  <select
-                    value={dailyFleetFilter}
-                    onChange={(e) => setDailyFleetFilter(e.target.value)}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
-                  >
-                    <option value="all" className="bg-slate-900">Semua Armada (Berdampingan)</option>
-                    {fleets.map(f => (
-                      <option key={f.id} value={f.id} className="bg-slate-900">
-                        {f.initialCode || f.plateNumber} ({f.plateNumber} - {f.vehicleType})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={dailyRangeDays}
-                    onChange={(e) => setDailyRangeDays(Number(e.target.value))}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
-                  >
-                    <option value={7} className="bg-slate-900">7 Hari Terakhir</option>
-                    <option value={14} className="bg-slate-900">14 Hari Terakhir</option>
-                    <option value={30} className="bg-slate-900">30 Hari Terakhir</option>
-                    <option value={0} className="bg-slate-900">Semua Tanggal Operasional</option>
-                  </select>
-                </div>
-
-                {dailyFleetFilter === 'all' && (
-                  <>
-                    <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                      <button
-                        onClick={() => setDailyMetric('liters')}
-                        className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer text-xs ${
-                          dailyMetric === 'liters' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Liter BBM
-                      </button>
-                      <button
-                        onClick={() => setDailyMetric('literPerKm')}
-                        className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer text-xs ${
-                          dailyMetric === 'literPerKm' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Liter / KM
-                      </button>
-                      <button
-                        onClick={() => setDailyMetric('distanceKm')}
-                        className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer text-xs ${
-                          dailyMetric === 'distanceKm' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Jarak (KM)
-                      </button>
-                    </div>
-
-                    {dailyMetric === 'liters' && (
-                      <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                        <button
-                          onClick={() => setDailyChartMode('grouped')}
-                          className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer text-xs ${
-                            dailyChartMode === 'grouped' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Berdampingan
-                        </button>
-                        <button
-                          onClick={() => setDailyChartMode('stacked')}
-                          className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer text-xs ${
-                            dailyChartMode === 'stacked' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Bertumpuk
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* SUMMARY STATS BAR */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-medium">Total Konsumsi BBM</span>
-                <div className="text-xl font-black text-amber-400 font-mono mt-1">
-                  {dailyChartStats.totalLiters.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">Liter</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">{dailyChartStats.activeDays} Hari Terdata</div>
-              </div>
-
-              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-medium">Rata-rata Konsumsi Harian</span>
-                <div className="text-xl font-black text-blue-400 font-mono mt-1">
-                  {dailyChartStats.avgLitersPerDay} <span className="text-xs font-normal text-slate-400">L / Hari</span>
-                </div>
-                <div className="text-[10px] text-emerald-400 mt-1">Standar AKK: &le; 180 L/Hari</div>
-              </div>
-
-              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-medium">Rata-rata Periode (L/KM)</span>
-                <div className="text-xl font-black text-emerald-400 font-mono mt-1">
-                  {dailyChartStats.avgLKmPeriod} <span className="text-xs font-normal text-slate-400">L / KM</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">{Number((dailyChartStats.avgLKmPeriod * 100).toFixed(2))} L/100 KM</div>
-              </div>
-
-              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-medium">Hari Konsumsi Puncak</span>
-                <div className="text-xl font-black text-rose-400 font-mono mt-1">
-                  {dailyChartStats.peakDay.liters} <span className="text-xs font-normal text-slate-400">Liter</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">Tanggal: {dailyChartStats.peakDay.date}</div>
-              </div>
-
-              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-medium">Unit Konsumsi Terbesar</span>
-                <div className="text-xl font-black text-white font-mono mt-1">
-                  {dailyChartStats.topFleet.code}
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">{dailyChartStats.topFleet.liters} Liter di periode</div>
-              </div>
-            </div>
-
-            {/* MAIN DAILY BAR CHART */}
-            <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
-              <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  {dailyFleetFilter === 'all' ? (
-                    <BarChart
-                      data={dailyConsumptionData}
-                      margin={{ top: 20, right: 20, left: -10, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="displayDate" stroke="#94a3b8" fontSize={11} />
-                      <YAxis
-                        stroke="#94a3b8"
-                        fontSize={11}
-                        unit={dailyMetric === 'liters' ? ' L' : dailyMetric === 'literPerKm' ? '' : ' KM'}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '10px',
-                          fontSize: '12px',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)'
-                        }}
-                        formatter={(val: any, name: any) => {
-                          if (dailyMetric === 'literPerKm') return [`${val} L / KM`, 'Rata-rata Konsumsi'];
-                          if (dailyMetric === 'distanceKm') return [`${val} KM`, 'Total Jarak Tempuh'];
-                          return [`${val} Liter`, name];
-                        }}
-                        labelFormatter={(label, payload) => {
-                          const item = payload && payload[0]?.payload;
-                          return `Tanggal: ${label} (Total: ${item?.totalLiters || 0} Liter | ${item?.totalDistanceKm || 0} KM)`;
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-
-                      {dailyMetric === 'liters' ? (
-                        fleets.map((flt) => {
-                          const code = flt.initialCode || flt.plateNumber;
-                          const color = FLEET_COLORS[code]?.fill || '#3b82f6';
-                          return (
-                            <Bar
-                              key={flt.id}
-                              dataKey={code}
-                              name={`${code} (${flt.vehicleType})`}
-                              fill={color}
-                              stackId={dailyChartMode === 'stacked' ? 'dailyStack' : undefined}
-                              radius={dailyChartMode === 'stacked' ? undefined : [4, 4, 0, 0]}
-                            />
-                          );
-                        })
-                      ) : dailyMetric === 'literPerKm' ? (
-                        <>
-                          <ReferenceLine y={0.1333} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: 'Target 0.1333 L/KM', fill: '#f59e0b', fontSize: 10, position: 'top' }} />
-                          <Bar
-                            dataKey="dailyLKm"
-                            name="Rata-rata Konsumsi Harian (L/KM)"
-                            fill="#10b981"
-                            radius={[4, 4, 0, 0]}
-                          />
-                        </>
-                      ) : (
-                        <Bar
-                          dataKey="totalDistanceKm"
-                          name="Total Jarak Tempuh Seluruh Armada (KM)"
-                          fill="#3b82f6"
-                          radius={[4, 4, 0, 0]}
-                        />
-                      )}
-                    </BarChart>
-                  ) : (
-                    <BarChart
-                      data={singleFleetDailyData}
-                      margin={{ top: 20, right: 20, left: -10, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="displayDate" stroke="#94a3b8" fontSize={11} />
-                      <YAxis stroke="#94a3b8" fontSize={11} unit=" L" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '10px',
-                          fontSize: '12px'
-                        }}
-                        formatter={(val: any, name: any, item: any) => [
-                          `${val} Liter (${item.payload.distance} KM • ${item.payload.lkm} L/KM)`,
-                          'Konsumsi BBM'
-                        ]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      <Bar
-                        dataKey="liters"
-                        name={`Konsumsi BBM Harian (Liter)`}
-                        fill="#f59e0b"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  )}
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* TABULAR BREAKDOWN PER DAY */}
-            <div className="bg-slate-950/60 rounded-xl border border-slate-800/80 overflow-hidden">
-              <div className="p-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
-                <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-400" />
-                  <span>Rincian Pengisian BBM Harian Periode Terpilih</span>
-                </h4>
-                <span className="text-[11px] text-slate-400">
-                  Menampilkan {dailyConsumptionData.length} hari operasional
-                </span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/60 text-slate-400 text-[11px] uppercase border-b border-slate-800">
-                    <tr>
-                      <th className="py-2.5 px-3">Tanggal</th>
-                      <th className="py-2.5 px-3">Armada yang Beroperasi</th>
-                      <th className="py-2.5 px-3 text-right">Total Liter</th>
-                      <th className="py-2.5 px-3 text-right">Total Jarak (KM)</th>
-                      <th className="py-2.5 px-3 text-right font-bold text-amber-300">Rasio Harian L/KM</th>
-                      <th className="py-2.5 px-3 text-right">KM / Liter</th>
-                      <th className="py-2.5 px-3 text-center">Status Rata-rata</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {dailyConsumptionData.map((d) => (
-                      <tr key={d.date} className="hover:bg-slate-900/40 transition">
-                        <td className="py-2.5 px-3 text-white font-bold font-sans">
-                          {d.date} <span className="text-[10px] text-slate-400 font-normal">({d.displayDate})</span>
-                        </td>
-                        <td className="py-2.5 px-3 font-sans">
-                          <div className="flex flex-wrap gap-1.5">
-                            {d.details.map((det, i) => (
-                              <span
-                                key={i}
-                                className="px-2 py-0.5 rounded text-[10px] font-bold border border-slate-800 bg-slate-900 text-slate-200"
-                                title={`${det.driverName} - ${det.routeTrip} (${det.liters} L / ${det.distanceKm} KM = ${det.lKm} L/KM)`}
-                              >
-                                {det.fleetCode}: <span className="text-amber-400">{det.liters}L</span>
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-amber-400">
-                          {d.totalLiters} <span className="text-[10px] font-normal text-slate-400">L</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-300">
-                          {d.totalDistanceKm.toLocaleString('id-ID')} KM
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-emerald-400">
-                          {d.dailyLKm} <span className="text-[10px] font-normal text-slate-400">L/KM</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-blue-400">
-                          {d.dailyKmL} <span className="text-[10px] font-normal text-slate-400">KM/L</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-sans">
-                          {d.dailyLKm <= 0.1333 ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              Efisien
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              Perlu Review
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. TAB: RATA-RATA LITER PER KILOMETER (L/KM) TIAP UNIT KENDARAAN          */}
-      {/* ========================================================================= */}
+      {/* 4. TAB: RATA-RATA LITER PER KILOMETER (L/KM) TIAP UNIT KENDARAAN          */}
       {activeTab === 'liter_km' && (
         <div className="space-y-6">
           <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-5">
@@ -2270,7 +1867,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         setSimKmL(val);
-                        if (val > 0) setSimLKm(Number((1 / val).toFixed(4)));
                       }}
                       className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-amber-500"
                     />
@@ -2413,41 +2009,52 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       )}
 
       {/* ========================================================================= */}
-      {/* 5. TAB 3: AUDIT LOGS & TABLE                                              */}
+      {/* 5. TAB: AUDIT LOGS & TABLE (FILTER SPBU, SORT TEREFISIEN-BOROS, EDIT)     */}
       {/* ========================================================================= */}
       {activeTab === 'logs' && (
         <div className="space-y-4">
           {/* FILTER AND SEARCH CONTROLS */}
-          <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
-            <div className="relative w-full md:w-80">
+          <div className="bg-slate-900/80 p-3.5 rounded-2xl border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+            <div className="relative w-full lg:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari plat, inisial, driver, SPBU, rute..."
+                placeholder="Cari plat, inisial, driver, helper, SPBU..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
               <select
                 value={filterFleetId}
                 onChange={(e) => setFilterFleetId(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
               >
-                <option value="all">Semua Armada</option>
-                {fleets.map(f => (
+                <option value="all">Semua Armada ({branchScopedFleets.length})</option>
+                {branchScopedFleets.map(f => (
                   <option key={f.id} value={f.id}>{f.initialCode || f.plateNumber} ({f.plateNumber})</option>
                 ))}
               </select>
 
               <select
+                value={filterSpbu}
+                onChange={(e) => setFilterSpbu(e.target.value as any)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+              >
+                <option value="all">Semua SPBU</option>
+                <option value="Farly">SPBU Farly</option>
+                <option value="Gajah Mada">SPBU Gajah Mada</option>
+                <option value="SPBU Lain">SPBU Lain (Urgent)</option>
+              </select>
+
+              <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
               >
-                <option value="all">Semua Status Efisiensi</option>
+                <option value="all">Semua Status</option>
                 <option value="Sangat Efisien">Sangat Efisien</option>
                 <option value="Efisien / Normal">Efisien / Normal</option>
                 <option value="Boros">Boros</option>
@@ -2457,22 +2064,35 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <select
                 value={filterFuelType}
                 onChange={(e) => setFilterFuelType(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
               >
-                <option value="all">Semua Jenis BBM</option>
+                <option value="all">Semua BBM</option>
                 <option value="BioSolar">BioSolar</option>
                 <option value="Dexlite">Dexlite</option>
                 <option value="Pertamina Dex">Pertamina Dex</option>
                 <option value="Pertalite">Pertalite</option>
               </select>
 
-              {(searchQuery || filterFleetId !== 'all' || filterStatus !== 'all' || filterFuelType !== 'all') && (
+              <select
+                value={logSortBy}
+                onChange={(e) => setLogSortBy(e.target.value as any)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-amber-300 font-semibold focus:outline-none focus:border-amber-500"
+              >
+                <option value="date_desc">Urut: Terbaru</option>
+                <option value="efficient_asc">Terefisien &rarr; Paling Boros</option>
+                <option value="wasteful_desc">Paling Boros &rarr; Terefisien</option>
+              </select>
+
+              {(searchQuery || filterFleetId !== 'all' || filterSpbu !== 'all' || filterStatus !== 'all' || filterFuelType !== 'all' || logSortBy !== 'date_desc') && (
                 <button
+                  type="button"
                   onClick={() => {
                     setSearchQuery('');
                     setFilterFleetId('all');
+                    setFilterSpbu('all');
                     setFilterStatus('all');
                     setFilterFuelType('all');
+                    setLogSortBy('date_desc');
                   }}
                   className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
                   title="Reset Filter"
@@ -2489,10 +2109,10 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                   <tr>
-                    <th className="px-4 py-3">Tanggal & Armada</th>
-                    <th className="px-4 py-3">Driver & Rute</th>
-                    <th className="px-4 py-3">BBM & Biaya</th>
-                    <th className="px-4 py-3">KM Awal / Akhir</th>
+                    <th className="px-4 py-3">Tanggal &amp; Armada</th>
+                    <th className="px-4 py-3">Kru (Driver / Helper) &amp; Rute</th>
+                    <th className="px-4 py-3">BBM &amp; Biaya</th>
+                    <th className="px-4 py-3">KM Awal / Isi</th>
                     <th className="px-4 py-3 text-center">Jarak</th>
                     <th className="px-4 py-3 text-center">Rasio (KM/L)</th>
                     <th className="px-4 py-3 text-center">Status Efisiensi</th>
@@ -2511,11 +2131,21 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       const isAnomaly = log.efficiencyStatus === 'Kritis / Potensi Anomali';
                       const isHighEfficient = log.efficiencyStatus === 'Sangat Efisien';
                       const isWaste = log.efficiencyStatus === 'Boros';
+                      const logBranchId = resolveLogBranchId(log);
 
                       return (
                         <tr key={log.id} className="hover:bg-slate-800/40 transition">
                           <td className="px-4 py-3 whitespace-nowrap">
-                            <div className="font-semibold text-white">{log.date}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-white">{log.date}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                logBranchId === 'cab-sidoarjo'
+                                  ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                              }`}>
+                                {logBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
+                              </span>
+                            </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="font-bold text-amber-400 font-mono">
                                 {log.initialCode || log.plateNumber}
@@ -2532,6 +2162,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                               <User className="w-3 h-3 text-slate-400" />
                               <span>{log.driverName}</span>
                             </div>
+                            {log.helperName && (
+                              <div className="text-[10px] text-amber-300 mt-0.5">
+                                Helper: {log.helperName}
+                              </div>
+                            )}
                             <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5" title={log.routeTrip}>
                               {log.routeTrip || 'Rute lokal AKK'}
                             </div>
@@ -2554,8 +2189,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </td>
 
                           <td className="px-4 py-3 whitespace-nowrap font-mono text-[11px] text-slate-300">
-                            <div>{log.startOdometerKm.toLocaleString('id-ID')} KM</div>
-                            <div className="text-slate-400">&darr; {log.endOdometerKm.toLocaleString('id-ID')} KM</div>
+                            <div>Awal: {log.startOdometerKm.toLocaleString('id-ID')} KM</div>
+                            <div className="text-amber-300">Isi: {log.endOdometerKm.toLocaleString('id-ID')} KM</div>
                           </td>
 
                           <td className="px-4 py-3 text-center whitespace-nowrap font-mono font-bold text-white">
@@ -2587,18 +2222,26 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             </span>
                           </td>
 
-                          <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
+                          <td className="px-4 py-3 text-right whitespace-nowrap space-x-1.5">
                             <button
+                              type="button"
+                              onClick={() => openEditFuelModal(log)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 font-semibold text-[11px] transition cursor-pointer"
+                            >
+                              <Edit className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setSelectedLogForDetail(log)}
                               className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] transition cursor-pointer"
                             >
-                              Detail / Slip
+                              Detail
                             </button>
                             <button
+                              type="button"
                               onClick={() => {
-                                if (confirm(`Hapus catatan BBM ${log.plateNumber} (${log.liters} L)?`)) {
-                                  logisticsStore.deleteFuelLog(log.id);
-                                }
+                                logisticsStore.deleteFuelLog(log.id);
                               }}
                               className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-semibold text-[11px] transition cursor-pointer"
                             >
@@ -2617,175 +2260,186 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       )}
 
       {/* ========================================================================= */}
-      {/* 6. TAB 4: ROUTE & FUEL CALCULATOR                                         */}
+      {/* 6. POPUP MODAL: KALKULATOR ESTIMASI KEBUTUHAN & BIAYA BBM RUTE            */}
       {/* ========================================================================= */}
-      {activeTab === 'calculator' && (
-        <div className="bg-slate-900/80 p-6 rounded-2xl border border-slate-800 space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
-              <Calculator className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-white">
-                Kalkulator Estimasi Kebutuhan & Biaya BBM Rute Distribusi
-              </h3>
-              <p className="text-xs text-slate-400">
-                Gunakan simulator ini untuk menghitung alokasi dana operasional solar supir sebelum jadwal pengiriman karton box diberangkatkan dari Pabrik AKK Banyuwangi.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4 border-t border-slate-800">
-            {/* INPUT CONTROLS */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-bold text-amber-400 flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                <span>Parameter Pengiriman & Rute</span>
-              </h4>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Pilih Armada / Tipe Kendaraan
-                </label>
-                <select
-                  value={calcFleetType}
-                  onChange={(e) => setCalcFleetType(e.target.value as VehicleType)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                >
-                  <option value="Pick Up Box">Pick Up Box (Target: 11.0 KM/L)</option>
-                  <option value="Engkel STD">Engkel STD - 4 Roda (Target: 8.2 KM/L)</option>
-                  <option value="Engkel Long">Engkel Long - 4 Roda (Target: 7.5 KM/L)</option>
-                  <option value="Double STD">Double STD - 6 Roda (Target: 6.2 KM/L)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Preset Rute Distribusi Pabrik AKK Banyuwangi
-                </label>
-                <select
-                  value={calcSelectedRoute}
-                  onChange={(e) => handlePresetRouteChange(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                >
-                  <option value="bwi-sby-pp">Banyuwangi &harr; Surabaya Hub (620 KM Pulang-Pergi via Tol Probolinggo)</option>
-                  <option value="bwi-mlg-pp">Banyuwangi &harr; Malang Raya (560 KM Pulang-Pergi)</option>
-                  <option value="bwi-jbr-pp">Banyuwangi &harr; Jember & Lumajang (210 KM Pulang-Pergi via Gumitir)</option>
-                  <option value="bwi-dps-pp">Banyuwangi &harr; Denpasar Bali (340 KM PP + Ferry Ketapang-Gilimanuk)</option>
-                  <option value="bwi-solo-pp">Banyuwangi &harr; Solo / Yogyakarta (820 KM Pulang-Pergi Tol Trans-Jawa)</option>
-                  <option value="custom">Kustom Jarak Tempuh Sendiri</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Jarak Tempuh (KM)
-                  </label>
-                  <input
-                    type="number"
-                    value={calcDistanceKm}
-                    onChange={(e) => {
-                      setCalcDistanceKm(Number(e.target.value) || 0);
-                      setCalcSelectedRoute('custom');
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                  />
+      {isCalculatorModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-6">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/80">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  <Calculator className="w-5 h-5" />
                 </div>
-
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Muatan Karton Box (Pcs)
-                  </label>
-                  <input
-                    type="number"
-                    value={calcCargoBoxes}
-                    onChange={(e) => setCalcCargoBoxes(Number(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                  />
+                  <h3 className="text-sm font-bold text-white">
+                    Kalkulator Estimasi Kebutuhan &amp; Biaya BBM Rute
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Hitung estimasi solar, biaya operasional per KM/box, dan konversi KM/L &harr; L/KM.
+                  </p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setIsCalculatorModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
+            <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6 max-h-[82vh] overflow-y-auto">
+              {/* INPUT CONTROLS */}
+              <div className="space-y-3.5">
+                <h4 className="text-xs font-bold text-amber-400 flex items-center gap-2">
+                  <Settings className="w-4 h-4" />
+                  <span>Parameter Pengiriman &amp; Rute</span>
+                </h4>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Jenis Bahan Bakar
+                    Pilih Armada / Tipe Kendaraan
                   </label>
                   <select
-                    value={calcFuelType}
-                    onChange={(e) => {
-                      const ft = e.target.value as FuelType;
-                      setCalcFuelType(ft);
-                      setCalcCustomPrice(STANDARD_FUEL_PRICES[ft] || 6800);
-                    }}
+                    value={calcFleetType}
+                    onChange={(e) => setCalcFleetType(e.target.value as VehicleType)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
                   >
-                    <option value="BioSolar">BioSolar (Subsidi)</option>
-                    <option value="Dexlite">Dexlite (Non-Subsidi)</option>
-                    <option value="Pertamina Dex">Pertamina Dex</option>
-                    <option value="Pertalite">Pertalite</option>
+                    <option value="Pick Up Box">Pick Up Box (Target: 11.0 KM/L)</option>
+                    <option value="Engkel STD">Engkel STD - 4 Roda (Target: 8.2 KM/L)</option>
+                    <option value="Engkel Long">Engkel Long - 4 Roda (Target: 7.5 KM/L)</option>
+                    <option value="Double STD">Double STD - 6 Roda (Target: 6.2 KM/L)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Harga / Liter (Rp)
+                    Preset Rute Distribusi
                   </label>
-                  <input
-                    type="number"
-                    value={calcCustomPrice}
-                    onChange={(e) => setCalcCustomPrice(Number(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                  />
+                  <select
+                    value={calcSelectedRoute}
+                    onChange={(e) => handlePresetRouteChange(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+                  >
+                    <option value="bwi-sby-pp">Banyuwangi &harr; Surabaya Hub (620 KM PP)</option>
+                    <option value="bwi-mlg-pp">Banyuwangi &harr; Malang Raya (560 KM PP)</option>
+                    <option value="bwi-jbr-pp">Banyuwangi &harr; Jember &amp; Lumajang (210 KM PP)</option>
+                    <option value="bwi-dps-pp">Banyuwangi &harr; Denpasar Bali (340 KM PP)</option>
+                    <option value="bwi-solo-pp">Banyuwangi &harr; Solo / Yogyakarta (820 KM PP)</option>
+                    <option value="custom">Kustom Jarak Tempuh Sendiri</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Jarak Tempuh (KM)
+                    </label>
+                    <input
+                      type="number"
+                      value={calcDistanceKm}
+                      onChange={(e) => {
+                        setCalcDistanceKm(Number(e.target.value) || 0);
+                        setCalcSelectedRoute('custom');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Muatan Karton Box (Pcs)
+                    </label>
+                    <input
+                      type="number"
+                      value={calcCargoBoxes}
+                      onChange={(e) => setCalcCargoBoxes(Number(e.target.value) || 0)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Jenis Bahan Bakar
+                    </label>
+                    <select
+                      value={calcFuelType}
+                      onChange={(e) => {
+                        const ft = e.target.value as FuelType;
+                        setCalcFuelType(ft);
+                        setCalcCustomPrice(STANDARD_FUEL_PRICES[ft] || 6800);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+                    >
+                      <option value="BioSolar">BioSolar (Subsidi)</option>
+                      <option value="Dexlite">Dexlite (Non-Subsidi)</option>
+                      <option value="Pertamina Dex">Pertamina Dex</option>
+                      <option value="Pertalite">Pertalite</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Harga / Liter (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      value={calcCustomPrice}
+                      onChange={(e) => setCalcCustomPrice(Number(e.target.value) || 0)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* OUTPUT PREVIEW PANEL */}
-            <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800/90 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Hasil Kalkulasi Estimasi
-                  </span>
-                  <span className="text-xs font-bold text-amber-400 bg-amber-500/15 px-2.5 py-0.5 rounded-full border border-amber-500/30">
-                    Standar Rasio: {calcOutput.target} KM / Liter
-                  </span>
+              {/* OUTPUT PREVIEW PANEL */}
+              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800/90 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 mb-3">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      Hasil Kalkulasi Estimasi
+                    </span>
+                    <span className="text-[11px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      Standar: {calcOutput.target} KM/L
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+                      <div className="text-[11px] text-slate-400">Total Kebutuhan Bahan Bakar:</div>
+                      <div className="text-2xl font-black text-amber-400 font-mono mt-0.5">
+                        {calcOutput.estLiters} <span className="text-xs text-slate-400 font-bold">Liter {calcFuelType}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+                      <div className="text-[11px] text-slate-400">Estimasi Total Biaya BBM:</div>
+                      <div className="text-2xl font-black text-emerald-400 font-mono mt-0.5">
+                        Rp {calcOutput.estTotalCost.toLocaleString('id-ID')}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Biaya per KM: <strong className="text-slate-200">Rp {calcOutput.costPerKm.toLocaleString('id-ID')}/KM</strong>
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold text-blue-300">Biaya BBM Per Box:</div>
+                        <div className="text-[10px] text-slate-400">Muatan {calcCargoBoxes.toLocaleString('id-ID')} pcs</div>
+                      </div>
+                      <div className="text-lg font-black text-blue-400 font-mono">
+                        Rp {calcOutput.costPerBox} <span className="text-[10px] text-slate-400">/ pcs</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-400">Total Kebutuhan Bahan Bakar:</div>
-                    <div className="text-3xl font-black text-amber-400 font-mono mt-0.5">
-                      {calcOutput.estLiters} <span className="text-sm text-slate-400 font-bold">Liter {calcFuelType}</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-400">Estimasi Total Biaya BBM:</div>
-                    <div className="text-3xl font-black text-emerald-400 font-mono mt-0.5">
-                      Rp {calcOutput.estTotalCost.toLocaleString('id-ID')}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-1">
-                      Biaya per Kilometer: <strong className="text-slate-200">Rp {calcOutput.costPerKm.toLocaleString('id-ID')} / KM</strong>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-semibold text-blue-300">Biaya Bahan Bakar Per Karton Box:</div>
-                      <div className="text-[11px] text-slate-400">Berdasarkan muatan {calcCargoBoxes.toLocaleString('id-ID')} pcs</div>
-                    </div>
-                    <div className="text-xl font-black text-blue-400 font-mono">
-                      Rp {calcOutput.costPerBox} <span className="text-xs text-slate-400">/ pcs</span>
-                    </div>
-                  </div>
+                <div className="pt-2.5 border-t border-slate-800 text-[10px] text-slate-400 flex items-center gap-2">
+                  <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Gunakan estimasi ini sebagai acuan uang saku BBM operasional sebelum keberangkatan.</span>
                 </div>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
-                <Info className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Rekomendasi SPBU di rute ini: Rest Area Tol Probolinggo KM 833 atau SPBU Klatak Kalipuro sebelum berangkat.</span>
               </div>
             </div>
           </div>
@@ -2797,48 +2451,97 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       {/* ========================================================================= */}
       {activeTab === 'weekly_report' && (
         <FuelWeeklyReportView
-          fuelLogs={fuelLogs}
+          fuelLogs={branchScopedLogs}
           onOpenExportModal={() => setIsExportModalOpen(true)}
         />
       )}
 
       {/* ========================================================================= */}
-      {/* 7. MODAL: CATAT PENGISIAN BBM BARU                                        */}
+      {/* 7. MODAL: CATAT / EDIT PENGISIAN BBM                                      */}
       {/* ========================================================================= */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-6">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/70">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400">
                   <Fuel className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">Catat Pengisian Bahan Bakar Baru</h3>
-                  <p className="text-xs text-slate-400">Entri data struk SPBU dan kilometer armada logistik AKK.</p>
+                  <h3 className="text-sm font-bold text-white">
+                    {editingLogId ? 'Edit Catatan Pengisian BBM' : 'Catat Pengisian Bahan Bakar Baru'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Entri data pengisian BBM cabang, driver, helper &amp; kilometer armada.
+                  </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveFuelLog} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* 1. Custom Dropdown: Armada Truk */}
+            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+              {/* Filter Cabang Modal */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
+                  <Building2 className="w-4 h-4 text-amber-400" />
+                  <span>Cabang Operasional (Kru &amp; Armada):</span>
+                </div>
+                <div className="inline-flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  {([
+                    { id: 'cab-banyuwangi', label: 'Cabang Nusantara' },
+                    { id: 'cab-sidoarjo', label: 'Cabang Sidoarjo' }
+                  ] as const).map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => {
+                        if (formBranchId === b.id) return;
+                        setFormBranchId(b.id);
+                        if (!editingLogId) {
+                          setFormFleetId('');
+                          setFormDriverId('');
+                          setFormDriverName('');
+                          setFormHelperId('');
+                          setFormHelperName('');
+                          setFormStartOdo('');
+                        }
+                        setFleetSearchFilter('');
+                        setDriverSearchFilter('');
+                        setHelperSearchFilter('');
+                      }}
+                      className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                        formBranchId === b.id
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 1. Custom Searchable Dropdown: Armada Truk (Ketik + Enter) */}
                 <div className="relative">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Armada Truk <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet')}
+                    onClick={() => {
+                      setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet');
+                      setFleetSearchFilter('');
+                    }}
                     className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'fleet' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
@@ -2864,47 +2567,71 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      <div className="px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pilih Unit Armada (12 Unit)</span>
-                        <span className="text-[10px] text-amber-400 font-mono">N1 – DS5</span>
-                      </div>
-                      <div className="max-h-60 overflow-y-auto divide-y divide-slate-800/60">
-                        {sortFleetsByCanonicalOrder(fleets).map(f => {
-                          const isSelected = formFleetId === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              type="button"
-                              onClick={() => {
-                                handleFleetSelection(f.id);
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[230px]">
+                      <div className="p-2 bg-slate-950/90 border-b border-slate-800">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={fleetSearchFilter}
+                            onChange={(e) => setFleetSearchFilter(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (filteredModalFleets.length > 0) {
+                                  handleFleetSelection(filteredModalFleets[0].id);
+                                  setActiveModalDropdown(null);
+                                }
+                              } else if (e.key === 'Escape') {
                                 setActiveModalDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-amber-500/15 text-amber-300' : 'hover:bg-slate-800/80 text-slate-200'
-                              }`}
-                            >
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold flex items-center gap-1.5">
-                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono text-[10px] text-amber-400">
-                                    {f.initialCode || f.plateNumber}
-                                  </span>
-                                  <span className="truncate">{f.plateNumber}</span>
+                              }
+                            }}
+                            placeholder="Ketik inisial / plat lalu Enter..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                        {filteredModalFleets.length === 0 ? (
+                          <div className="p-3 text-center text-[11px] text-slate-400">Armada cabang tidak ditemukan</div>
+                        ) : (
+                          filteredModalFleets.map(f => {
+                            const isSelected = formFleetId === f.id;
+                            return (
+                              <button
+                                key={f.id}
+                                type="button"
+                                onClick={() => {
+                                  handleFleetSelection(f.id);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isSelected ? 'bg-amber-500/15 text-amber-300' : 'hover:bg-slate-800/80 text-slate-200'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono text-[10px] text-amber-400">
+                                      {f.initialCode || f.plateNumber}
+                                    </span>
+                                    <span className="truncate">{f.plateNumber}</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                    {f.vehicleType} {f.brand ? `• ${f.brand}` : ''}
+                                  </div>
                                 </div>
-                                <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                                  {f.vehicleType} {f.brand ? `• ${f.brand}` : ''}
-                                </div>
-                              </div>
-                              {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
-                            </button>
-                          );
-                        })}
+                                {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* 2. Custom Dropdown: Nama Driver */}
+                {/* 2. Custom Dropdown: Nama Driver (Ketik + Enter) */}
                 <div className="relative">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Nama Driver <span className="text-rose-400">*</span>
@@ -2917,7 +2644,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     }}
                     className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'driver' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
@@ -2926,60 +2653,174 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       {formDriverName ? (
                         <span className="truncate font-bold text-white">{formDriverName}</span>
                       ) : (
-                        <span className="text-slate-400">-- Pilih Nama Driver --</span>
+                        <span className="text-slate-400">-- Pilih Driver --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'driver' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
+                            autoFocus
                             value={driverSearchFilter}
                             onChange={(e) => setDriverSearchFilter(e.target.value)}
-                            placeholder="Cari nama driver..."
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (filteredDriverOptions.length > 0) {
+                                  setFormDriverName(filteredDriverOptions[0].name);
+                                  setFormDriverId(filteredDriverOptions[0].id);
+                                  setActiveModalDropdown(null);
+                                }
+                              } else if (e.key === 'Escape') {
+                                setActiveModalDropdown(null);
+                              }
+                            }}
+                            placeholder="Ketik nama lalu Enter..."
                             className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                           />
                         </div>
                       </div>
                       <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        {driverDropdownOptions
-                          .filter(d => !driverSearchFilter.trim() || d.name.toLowerCase().includes(driverSearchFilter.toLowerCase()))
-                          .map(d => {
-                            const isSelected = formDriverName === d.name;
-                            return (
-                              <button
-                                key={d.id}
-                                type="button"
-                                onClick={() => {
-                                  setFormDriverName(d.name);
-                                  setFormDriverId(d.id);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isSelected ? 'bg-sky-500/15 text-sky-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-sky-400 shrink-0">
-                                    {d.name.charAt(0).toUpperCase()}
-                                  </span>
-                                  <span className="text-xs truncate">{d.name}</span>
-                                </div>
-                                {isSelected && <Check className="w-4 h-4 text-sky-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
+                        {filteredDriverOptions.map(d => {
+                          const isSelected = formDriverName === d.name;
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => {
+                                setFormDriverName(d.name);
+                                setFormDriverId(d.id);
+                                setActiveModalDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isSelected ? 'bg-sky-500/15 text-sky-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-sky-400 shrink-0">
+                                  {d.name.charAt(0).toUpperCase()}
+                                </span>
+                                <span className="text-xs truncate">{d.name}</span>
+                              </div>
+                              {isSelected && (
+                                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* 3. Custom Dropdown: Area Kirim (Tersinkronisasi dengan Jadwal & Penugasan) */}
+                {/* 3. Custom Dropdown: Nama Helper (Ketik + Enter) */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Nama Helper
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModalDropdown(activeModalDropdown === 'helper' ? null : 'helper');
+                      setHelperSearchFilter('');
+                    }}
+                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                      activeModalDropdown === 'helper' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
+                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+                        <User className="w-3.5 h-3.5" />
+                      </span>
+                      {formHelperName ? (
+                        <span className="truncate font-bold text-white">{formHelperName}</span>
+                      ) : (
+                        <span className="text-slate-400">-- Opsional Helper --</span>
+                      )}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'helper' ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {activeModalDropdown === 'helper' && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
+                      <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={helperSearchFilter}
+                            onChange={(e) => setHelperSearchFilter(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (filteredHelperOptions.length > 0) {
+                                  setFormHelperName(filteredHelperOptions[0].name);
+                                  setFormHelperId(filteredHelperOptions[0].id);
+                                  setActiveModalDropdown(null);
+                                }
+                              } else if (e.key === 'Escape') {
+                                setActiveModalDropdown(null);
+                              }
+                            }}
+                            placeholder="Ketik helper lalu Enter..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500"
+                          />
+                        </div>
+                        {formHelperName && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormHelperName('');
+                              setFormHelperId('');
+                              setActiveModalDropdown(null);
+                            }}
+                            className="w-full text-[10px] text-rose-400 hover:text-rose-300 text-left px-1 font-semibold cursor-pointer"
+                          >
+                            &times; Kosongkan Pilihan Helper
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                        {filteredHelperOptions.map(d => {
+                          const isSelected = formHelperName === d.name;
+                          return (
+                            <button
+                              key={`hlp-${d.id}`}
+                              type="button"
+                              onClick={() => {
+                                setFormHelperName(d.name);
+                                setFormHelperId(d.id);
+                                setActiveModalDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isSelected ? 'bg-violet-500/15 text-violet-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-violet-400 shrink-0">
+                                  {d.name.charAt(0).toUpperCase()}
+                                </span>
+                                <span className="text-xs truncate">{d.name}</span>
+                              </div>
+                              {isSelected && (
+                                <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Custom Dropdown: Area Kirim (Ketik + Enter) */}
                 <div className="relative">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Area Kirim <span className="text-rose-400">*</span>
@@ -2992,7 +2833,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     }}
                     className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'area' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
@@ -3001,58 +2842,65 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       {formRouteTrip ? (
                         <span className="truncate font-bold text-white">{formRouteTrip}</span>
                       ) : (
-                        <span className="text-slate-400">-- Pilih Area Kirim --</span>
+                        <span className="text-slate-400">-- Pilih Area --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'area' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'area' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Area Jadwal & Penugasan</span>
-                          <span className="text-[10px] text-slate-400">{deliveryAreaOptions.length} Rute</span>
-                        </div>
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
+                            autoFocus
                             value={areaSearchFilter}
                             onChange={(e) => {
                               setAreaSearchFilter(e.target.value);
-                              setFormRouteTrip(e.target.value);
                             }}
-                            placeholder="Cari atau ketik area kirim..."
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (filteredAreaOptions.length > 0) {
+                                  setFormRouteTrip(filteredAreaOptions[0]);
+                                } else if (areaSearchFilter.trim()) {
+                                  setFormRouteTrip(areaSearchFilter.trim());
+                                }
+                                setActiveModalDropdown(null);
+                              } else if (e.key === 'Escape') {
+                                setActiveModalDropdown(null);
+                              }
+                            }}
+                            placeholder="Ketik area lalu Enter..."
                             className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                       </div>
                       <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        {deliveryAreaOptions
-                          .filter(area => !areaSearchFilter.trim() || area.toLowerCase().includes(areaSearchFilter.toLowerCase()))
-                          .map(area => {
-                            const isSelected = formRouteTrip.toLowerCase() === area.toLowerCase();
-                            return (
-                              <button
-                                key={area}
-                                type="button"
-                                onClick={() => {
-                                  setFormRouteTrip(area);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isSelected ? 'bg-emerald-500/15 text-emerald-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
-                                }`}
-                              >
-                                <span className="text-xs truncate flex items-center gap-2">
-                                  <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
-                                  {area}
-                                </span>
-                                {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
+                        {filteredAreaOptions.map(area => {
+                          const isSelected = formRouteTrip.toLowerCase() === area.toLowerCase();
+                          return (
+                            <button
+                              key={area}
+                              type="button"
+                              onClick={() => {
+                                setFormRouteTrip(area);
+                                setActiveModalDropdown(null);
+                              }}
+                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isSelected ? 'bg-emerald-500/15 text-emerald-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                              }`}
+                            >
+                              <span className="text-xs truncate flex items-center gap-2">
+                                <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                                {area}
+                              </span>
+                              {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -3301,7 +3149,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </label>
                   <input
                     type="number"
-                    placeholder="Odo saat isi sebelumnya"
+                    placeholder="Otomatis dari KM isi terakhir"
                     value={formStartOdo}
                     onChange={(e) => setFormStartOdo(e.target.value)}
                     required
@@ -3311,11 +3159,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Kilometer Akhir (KM) <span className="text-rose-400">*</span>
+                    Kilometer Isi (KM) <span className="text-rose-400">*</span>
                   </label>
                   <input
                     type="number"
-                    placeholder="Odo saat ini / refuel"
+                    placeholder="Kilometer saat pengisian BBM"
                     value={formEndOdo}
                     onChange={(e) => setFormEndOdo(e.target.value)}
                     required
@@ -3464,13 +3312,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Nomor Struk / Nota SPBU
+                    Catatan (Opsional)
                   </label>
                   <input
                     type="text"
-                    placeholder="Contoh: SPBU-833-1029"
-                    value={formReceiptNumber}
-                    onChange={(e) => setFormReceiptNumber(e.target.value)}
+                    placeholder="Catatan tambahan pengiriman..."
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
                   />
                 </div>
@@ -3488,7 +3336,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
                 >
-                  Simpan Catatan BBM
+                  {editingLogId ? 'Simpan Perubahan BBM' : 'Simpan Catatan BBM'}
                 </button>
               </div>
             </form>
@@ -3508,8 +3356,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 <h3 className="font-bold text-white text-sm">Slip Bukti Pengisian BBM</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedLogForDetail(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3518,9 +3367,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             <div className="p-5 space-y-4 text-xs">
               <div className="text-center border-b border-dashed border-slate-800 pb-3">
                 <div className="font-black text-white text-sm">PT ANUGRAH KEMASAN KREATIF</div>
-                <div className="text-[10px] text-slate-400">Divisi Distribusi & Logistik Armada</div>
+                <div className="text-[10px] text-slate-400">Divisi Distribusi &amp; Logistik Armada</div>
                 <div className="text-[11px] font-mono text-amber-400 mt-1">
-                  NO STRUK: {selectedLogForDetail.receiptNumber || selectedLogForDetail.id}
+                  ID LOG: {selectedLogForDetail.id}
                 </div>
               </div>
 
@@ -3537,6 +3386,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <span className="text-slate-400">Driver:</span>
                   <span className="text-white">{selectedLogForDetail.driverName}</span>
                 </div>
+                {selectedLogForDetail.helperName && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Helper:</span>
+                    <span className="text-amber-300">{selectedLogForDetail.helperName}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-400">SPBU:</span>
                   <span className="text-white truncate max-w-[200px]" title={selectedLogForDetail.gasStation}>{selectedLogForDetail.gasStation}</span>
@@ -3559,7 +3414,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
                 <div className="flex justify-between text-[11px] pt-1">
                   <span className="text-slate-400">Jarak Ditempuh:</span>
-                  <span className="text-white font-bold">{selectedLogForDetail.distanceKm} KM ({selectedLogForDetail.startOdometerKm} - {selectedLogForDetail.endOdometerKm})</span>
+                  <span className="text-white font-bold">{selectedLogForDetail.distanceKm} KM (Awal: {selectedLogForDetail.startOdometerKm} - Isi: {selectedLogForDetail.endOdometerKm})</span>
                 </div>
                 <div className="flex justify-between text-[11px]">
                   <span className="text-slate-400">Rasio Konsumsi:</span>
@@ -3579,8 +3434,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
               <div className="pt-2 flex items-center justify-between">
                 <button
+                  type="button"
                   onClick={() => window.print()}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
                   <span>Cetak Slip Rekap</span>
@@ -3597,7 +3453,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       <FuelConsumptionReportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        fuelLogs={fuelLogs}
+        fuelLogs={branchScopedLogs}
       />
     </div>
   );

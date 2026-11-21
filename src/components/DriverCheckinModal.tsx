@@ -22,6 +22,7 @@ import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { logisticsStore } from '../services/store';
+import { branchStore } from '../services/branchStore';
 
 interface ComboboxOption {
   value: string;
@@ -144,6 +145,19 @@ const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const firstEnabled = filtered.find(o => !o.disabled);
+                    if (firstEnabled) {
+                      onChange(firstEnabled.value);
+                      onClose();
+                    }
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    onClose();
+                  }
+                }}
                 placeholder={searchPlaceholder}
                 className="w-full min-h-[38px] pl-8 pr-7 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
               />
@@ -223,6 +237,7 @@ interface DriverCheckinModalProps {
   availableAreas?: string[];
   availableFleets?: Fleet[];
   availableCrews?: Crew[];
+  branchId?: string;
   initialMode?: 'checkin' | 'change_pin';
   onCheckinSuccess: (shift: DriverShiftCheckin) => void;
 }
@@ -241,6 +256,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   availableAreas,
   availableFleets = [],
   availableCrews,
+  branchId,
   initialMode = 'checkin',
   onCheckinSuccess
 }) => {
@@ -292,8 +308,10 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   }, [availableAreas]);
 
   const fleetOptions = useMemo(() => {
-    return availableFleets.filter(f => f && f.id);
-  }, [availableFleets]);
+    const valid = availableFleets.filter(f => f && f.id);
+    if (!branchId) return valid;
+    return valid.filter(f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === branchId);
+  }, [availableFleets, branchId]);
 
   const fleetComboboxOptions = useMemo<ComboboxOption[]>(() => {
     return fleetOptions.map(f => {
@@ -310,26 +328,23 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   }, [fleetOptions]);
 
   const crewPool = useMemo(() => {
+    const normalizeCompactKey = (val: string) => val.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const merged = new Map<string, { id: string; name: string; role: string; phone: string }>();
-    const currentNameLower = (driverName || '').trim().toLowerCase();
+    const currentCompactKey = normalizeCompactKey(driverName || '');
+
     const pushMember = (id: string, name: string, role: string, phone = '') => {
       const cleanName = String(name || '').trim();
       if (!cleanName || cleanName === '-' || cleanName.toLowerCase() === 'tanpa helper') return;
-      const lower = cleanName.toLowerCase();
-      if (lower === currentNameLower || id === driverId) return;
-      if (!merged.has(lower)) {
-        merged.set(lower, { id, name: cleanName, role, phone });
+      const compactKey = normalizeCompactKey(cleanName);
+      if (!compactKey || compactKey === currentCompactKey || id === driverId) return;
+      if (!merged.has(compactKey)) {
+        merged.set(compactKey, { id, name: cleanName, role, phone });
       }
     };
 
-    (availableCrews && availableCrews.length > 0 ? availableCrews : logisticsStore.getCrews()).forEach(c => {
-      if (c && c.status !== 'off') {
-        pushMember(c.id, c.name, c.role || 'Helper', c.phone || '');
-      }
-    });
-
-    logisticsStore.getUsers()
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u))
+    const allUsers = logisticsStore.getUsers();
+    allUsers
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchId))
       .forEach(u => {
         pushMember(
           u.id,
@@ -339,8 +354,23 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
         );
       });
 
+    (availableCrews && availableCrews.length > 0 ? availableCrews : logisticsStore.getCrews()).forEach(c => {
+      if (!c || c.status === 'off') return;
+      if (branchId) {
+        const matchedU = allUsers.find(
+          u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName || '', c.name || '')
+        );
+        if (matchedU) {
+          if (!logisticsStore.isActiveDeliveryCrewUser(matchedU, branchId)) return;
+        } else if (branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+          return;
+        }
+      }
+      pushMember(c.id, c.name, c.role || 'Helper', c.phone || '');
+    });
+
     return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name, 'id'));
-  }, [availableCrews, driverId, driverName]);
+  }, [availableCrews, driverId, driverName, branchId]);
 
   const helper1Options = useMemo<ComboboxOption[]>(() => {
     const emptyOpt: ComboboxOption = {

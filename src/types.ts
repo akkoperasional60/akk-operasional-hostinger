@@ -680,6 +680,9 @@ export interface FuelLog {
   vehicleType: VehicleType;
   driverId?: string;
   driverName: string;
+  helperId?: string;
+  helperName?: string;
+  branchId?: string;
   date: string; // YYYY-MM-DD
   fuelType: FuelType;
   liters: number;
