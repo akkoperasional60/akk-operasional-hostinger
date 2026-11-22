@@ -50,7 +50,8 @@ import {
   Link2,
   Receipt,
   FileCheck2,
-  Navigation
+  Navigation,
+  RotateCcw
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -118,6 +119,7 @@ export type NavTab =
   | 'warehouse_scanner'
   | 'warehouse_slotting'
   | 'warehouse_opname'
+  | 'warehouse_retur_muat'
   | 'warehouse_cubication'
   | 'warehouse_fleet_cubication'
   | 'marketing_online'
@@ -549,6 +551,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({
               label: 'Opname Gudang',
               icon: <ClipboardCheck className="w-4 h-4 text-purple-500" />,
               description: 'Pencatatan hasil hitung fisik barang gudang'
+            },
+            {
+              tab: 'warehouse_retur_muat',
+              label: 'Retur & Selisih Muat',
+              icon: <RotateCcw className="w-4 h-4 text-rose-500" />,
+              description: 'Daftar item barang & kuantiti retur, salah muat, lebih/kurang muat'
             }
           ]
         }

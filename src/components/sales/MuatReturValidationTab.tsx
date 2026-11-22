@@ -14,7 +14,6 @@ import {
   Camera,
   MapPin,
   ExternalLink,
-  Eye,
   ShieldCheck,
   Trash2,
   X,
@@ -41,6 +40,7 @@ type ValidationStatusFilter = 'all' | 'pending' | 'verified' | 'follow_up' | 're
 
 interface MuatReturValidationTabProps {
   embeddedInLogistics?: boolean;
+  warehouseOnlyMode?: boolean;
 }
 
 const getCategoryMeta = (cat: DriverHelperReport['category']) => {
@@ -118,7 +118,8 @@ const getValidationStatusMeta = (rep: DriverHelperReport) => {
 };
 
 export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
-  embeddedInLogistics = false
+  embeddedInLogistics = false,
+  warehouseOnlyMode = false
 }) => {
   const { addNotification } = useToast();
   const [branches, setBranches] = useState(() => branchStore.getActiveBranches());
@@ -148,7 +149,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
   const [validationNoteInput, setValidationNoteInput] = useState<string>('');
   const [gpsStatusInput, setGpsStatusInput] = useState<'valid' | 'mismatch'>('valid');
 
-  // GPS Validation & Map Modal (Khusus Super Admin & SPV Logistik)
+  // GPS Validation & Map Modal (Khusus Super Admin, SPV Operasional & SPV Logistik)
   const [gpsModalReport, setGpsModalReport] = useState<DriverHelperReport | null>(null);
   const [gpsModalDecision, setGpsModalDecision] = useState<'valid' | 'mismatch'>('valid');
   const [gpsModalNote, setGpsModalNote] = useState<string>('');
@@ -161,11 +162,73 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
   }, [currentUser]);
 
   const isSuperAdmin = normalizedRole === 'superadmin';
-  const isSpvLogistik = normalizedRole === 'spvlogistik';
-  // Hak akses melihat & memvalidasi titik GPS pada Retur, Salah Muat, Lebih Muat, Kurang Muat: Super Admin & SPV Logistik
-  const canViewGpsValidation = isSuperAdmin || isSpvLogistik;
+  const isSpvLogistik = normalizedRole === 'spvlogistik' || normalizedRole === 'dispatcher';
+  const isSpvOperasional = normalizedRole === 'operasional' || normalizedRole === 'spvoperasional';
+  const isWarehouseRole =
+    Boolean(warehouseOnlyMode) ||
+    normalizedRole === 'warehouseadmin' ||
+    normalizedRole === 'koordinatorgudang' ||
+    normalizedRole === 'gudang';
+  // Validasi titik GPS disembunyikan bagi Admin Penjualan & Gudang; hanya terlihat untuk Super Admin, SPV Operasional & SPV Logistik
+  const canViewGpsValidation = !isWarehouseRole && (isSuperAdmin || isSpvLogistik || isSpvOperasional);
+  const roleGpsBadgeLabel = isSuperAdmin
+    ? 'Super Admin'
+    : isSpvOperasional
+    ? 'SPV Operasional'
+    : 'SPV Logistik';
 
   const fleets = useMemo(() => logisticsStore.getFleets(), []);
+
+  const resolveFleetInitial = (rep: DriverHelperReport): string => {
+    const rawPlate = String(rep.plateNumber || '').trim();
+    if (!rawPlate || rawPlate === '-') return '-';
+    const norm = rawPlate.replace(/\s+/g, '').toUpperCase();
+    const matchedFleet = fleets.find(
+      f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === norm
+    );
+    if (matchedFleet?.initialCode) return matchedFleet.initialCode;
+    return rawPlate;
+  };
+
+  const formatCleanAreaName = (rawArea?: string): string => {
+    const clean = String(rawArea || '').trim();
+    if (!clean) return '-';
+    const parenMatch = clean.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+    if (parenMatch) {
+      const mainPart = parenMatch[1].trim();
+      const subPart = parenMatch[2].trim();
+      if (
+        mainPart.toLowerCase() === subPart.toLowerCase() ||
+        mainPart.toLowerCase().includes(subPart.toLowerCase()) ||
+        subPart.toLowerCase().includes(mainPart.toLowerCase())
+      ) {
+        return mainPart;
+      }
+    }
+    return clean;
+  };
+
+  const extractCleanIssueNote = (rep: DriverHelperReport): string => {
+    const raw = String(rep.notes || '').trim();
+    if (!raw) return '-';
+    // Legacy format: "[SALAH MUAT: ...] Barang: ... | GPS: ... — Keterangan aktual"
+    if (/^\[(?:RETUR BARANG|KURANG MUAT|LEBIH MUAT|SALAH MUAT)/i.test(raw)) {
+      const dashIdx = raw.lastIndexOf(' — ');
+      if (dashIdx >= 0) {
+        const tail = raw.slice(dashIdx + 3).trim();
+        return tail || '-';
+      }
+      const gpsStripped = raw
+        .replace(/^\[[^\]]+\]\s*/i, '')
+        .replace(/\bBarang:\s*[^|]+/i, '')
+        .replace(/\|\s*No\.?\s*Faktur\/SO:\s*[^|]+/gi, '')
+        .replace(/\|\s*GPS:\s*[^—|]+/gi, '')
+        .replace(/^[|\s—-]+/, '')
+        .trim();
+      return gpsStripped || '-';
+    }
+    return raw.replace(/\|\s*GPS:\s*-?\d+\.\d+,\s*-?\d+\.\d+/gi, '').trim() || '-';
+  };
 
   useEffect(() => {
     const syncUser = () => setCurrentUser({ ...logisticsStore.getCurrentUser() });
@@ -267,20 +330,24 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
         if (repDate !== selectedDate) return false;
       }
       if (q) {
-        const hay = [
-          rep.driverName,
-          rep.helperName,
-          rep.plateNumber,
-          rep.areaName,
-          rep.customerOutletName,
-          rep.issueItemName,
-          rep.issueItemCode,
-          rep.issueQty,
-          rep.invoiceNumber,
-          rep.notes,
-          rep.validationNote,
-          rep.validatedBy
-        ]
+        const hayFields = isWarehouseRole
+          ? [rep.issueItemName, rep.issueQty, getCategoryMeta(rep.category).label]
+          : [
+              rep.driverName,
+              rep.helperName,
+              resolveFleetInitial(rep),
+              rep.plateNumber,
+              formatCleanAreaName(rep.areaName),
+              rep.customerOutletName,
+              rep.issueItemName,
+              rep.issueItemCode,
+              rep.issueQty,
+              rep.invoiceNumber,
+              extractCleanIssueNote(rep),
+              rep.validationNote,
+              rep.validatedBy
+            ];
+        const hay = hayFields
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -288,7 +355,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
       }
       return true;
     });
-  }, [branchScopedReports, categoryFilter, statusFilter, selectedDate, searchQuery]);
+  }, [branchScopedReports, categoryFilter, statusFilter, selectedDate, searchQuery, fleets, isWarehouseRole]);
 
   const getResolvedReportGps = (rep: DriverHelperReport) => {
     return resolvePreciseCustomerGps({
@@ -326,7 +393,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
   ) => {
     if (!canViewGpsValidation) return;
     const validatorName =
-      currentUser?.fullName || (isSuperAdmin ? 'Super Admin' : 'SPV Logistik');
+      currentUser?.fullName || roleGpsBadgeLabel;
     const updated = driverReportService.validateReportGpsLocation({
       id: targetReport.id,
       gpsStatus: status,
@@ -349,10 +416,16 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
   };
 
   const handleConfirmValidation = () => {
-    if (!validateModalReport) return;
+    if (!validateModalReport || isWarehouseRole) return;
     const validatorName =
       currentUser?.fullName ||
-      (isSuperAdmin ? 'Super Admin' : isSpvLogistik ? 'SPV Logistik' : 'Admin Penjualan');
+      (isSuperAdmin
+        ? 'Super Admin'
+        : isSpvOperasional
+        ? 'SPV Operasional'
+        : isSpvLogistik
+        ? 'SPV Logistik'
+        : 'Admin Penjualan');
     const updated = driverReportService.validateItemIssueReport({
       id: validateModalReport.id,
       decision: decisionInput,
@@ -386,6 +459,35 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
 
   const handleExportExcel = () => {
     if (filteredReports.length === 0) return;
+    const esc = (v?: string) => `"${String(v || '-').replace(/"/g, '""')}"`;
+
+    if (isWarehouseRole) {
+      const headers = ['Tanggal', 'Kategori', 'Nama Item Barang', 'Kuantiti / Qty'];
+      const rows = filteredReports.map(r => {
+        const catMeta = getCategoryMeta(r.category);
+        const dStr = r.date || getLocalDateStr(r.timestamp);
+        const unitSuffix =
+          r.issueItemUnit && !String(r.issueQty || '').toLowerCase().includes(r.issueItemUnit.toLowerCase())
+            ? ` ${r.issueItemUnit}`
+            : '';
+        return [
+          esc(dStr),
+          esc(catMeta.label),
+          esc(r.issueItemName || '-'),
+          esc(`${r.issueQty || '-'}${unitSuffix}`)
+        ].join(',');
+      });
+      const csvContent =
+        'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
+      const link = document.createElement('a');
+      link.setAttribute('href', encodeURI(csvContent));
+      link.setAttribute('download', `Laporan_Item_Retur_Muat_Gudang_${getLocalDateStr()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     const headers = [
       'ID Laporan',
       'Tanggal',
@@ -401,7 +503,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
       'Nama Barang',
       'Jumlah / Qty',
       ...(canViewGpsValidation ? ['Koordinat GPS', 'Status Validasi GPS', 'Validator GPS'] : []),
-      'Keterangan Kru',
+      'Keterangan',
       'Status Validasi',
       'Divalidasi Oleh',
       'Catatan Validasi'
@@ -415,7 +517,6 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
         hour: '2-digit',
         minute: '2-digit'
       });
-      const esc = (v?: string) => `"${String(v || '-').replace(/"/g, '""')}"`;
       return [
         esc(r.id),
         esc(dStr),
@@ -423,8 +524,8 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
         esc(catMeta.label),
         esc(r.driverName),
         esc(r.userRole || 'Driver'),
-        esc(r.plateNumber),
-        esc(r.areaName),
+        esc(resolveFleetInitial(r)),
+        esc(formatCleanAreaName(r.areaName)),
         esc(r.customerOutletName),
         esc(r.invoiceNumber),
         esc(r.issueItemCode),
@@ -443,7 +544,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
               esc(r.gpsValidatedBy)
             ]
           : []),
-        esc(r.notes),
+        esc(extractCleanIssueNote(r)),
         esc(stMeta.label),
         esc(r.validatedBy),
         esc(r.validationNote)
@@ -488,12 +589,14 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                 {canViewGpsValidation && (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 inline-flex items-center gap-1">
                     <Navigation className="w-3 h-3" />
-                    <span>Validasi Titik GPS Aktif ({isSuperAdmin ? 'Super Admin' : 'SPV Logistik'})</span>
+                    <span>Validasi Titik GPS Aktif ({roleGpsBadgeLabel})</span>
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                Periksa foto bukti barang retur, salah muat, lebih muat, dan kurang muat{canViewGpsValidation ? ' beserta validasi titik koordinat GPS lapangan' : ''} yang diunggah Driver &amp; Helper ({activeBranchLabel}).
+                {isWarehouseRole
+                  ? `Ringkasan nama item barang & kuantiti retur, salah muat, lebih muat, dan kurang muat untuk tim Gudang (${activeBranchLabel}).`
+                  : `Periksa foto bukti barang retur, salah muat, lebih muat, dan kurang muat${canViewGpsValidation ? ' beserta validasi titik koordinat GPS lapangan' : ''} yang diunggah Driver & Helper (${activeBranchLabel}).`}
               </p>
             </div>
           </div>
@@ -636,7 +739,11 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari driver/helper, kode/nama barang, toko, no. faktur/SO, plat..."
+                placeholder={
+                  isWarehouseRole
+                    ? 'Cari nama item barang atau kuantiti...'
+                    : 'Cari driver/helper, kode/nama barang, toko, no. faktur/SO, inisial armada...'
+                }
                 className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -732,11 +839,56 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
             const stMeta = getValidationStatusMeta(rep);
             const photos = getReportPhotos(rep);
             const resolvedGps = getResolvedReportGps(rep);
+            const armadaInitial = resolveFleetInitial(rep);
+            const cleanAreaName = formatCleanAreaName(rep.areaName);
+            const cleanSubAreaLabel = formatCleanAreaName(resolvedGps.subAreaLabel);
+            const cleanNotes = extractCleanIssueNote(rep);
+            const unitSuffix =
+              rep.issueItemUnit &&
+              !String(rep.issueQty || '').toLowerCase().includes(rep.issueItemUnit.toLowerCase())
+                ? ` ${rep.issueItemUnit}`
+                : '';
             const timeFormatted = new Date(rep.timestamp).toLocaleTimeString('id-ID', {
               hour: '2-digit',
               minute: '2-digit'
             });
             const dateFormatted = rep.date || getLocalDateStr(rep.timestamp);
+
+            if (isWarehouseRole) {
+              return (
+                <div
+                  key={rep.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black border ${catMeta.badgeCls}`}
+                      >
+                        {catMeta.icon}
+                        <span>{catMeta.label}</span>
+                      </span>
+                      <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                        {dateFormatted}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white">
+                      <Package className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span className="truncate">{rep.issueItemName || '-'}</span>
+                    </div>
+                  </div>
+
+                  <div className="px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shrink-0 text-right">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Kuantiti / Qty
+                    </span>
+                    <span className="text-sm font-black font-mono tabular-nums text-indigo-600 dark:text-indigo-400">
+                      {rep.issueQty || '-'}{unitSuffix}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -805,8 +957,8 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                             {rep.driverName} ({rep.userRole || 'Driver'})
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                          Plat: {rep.plateNumber || '-'} • {rep.areaName}
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">
+                          Armada: <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{armadaInitial}</span> • {cleanAreaName}
                         </div>
                       </div>
 
@@ -826,7 +978,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold mt-0.5">
-                          Qty: {rep.issueQty || '-'} {rep.issueItemUnit && !String(rep.issueQty || '').toLowerCase().includes(rep.issueItemUnit.toLowerCase()) ? rep.issueItemUnit : ''}
+                          Qty: {rep.issueQty || '-'}{unitSuffix}
                         </div>
                       </div>
 
@@ -837,7 +989,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                         <div className="text-xs font-black text-slate-900 dark:text-white mt-0.5 flex items-center gap-1.5">
                           <Store className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                           <span className="truncate">
-                            {rep.customerOutletName || rep.areaName || '-'}
+                            {rep.customerOutletName || cleanAreaName || '-'}
                           </span>
                         </div>
                         {canViewGpsValidation ? (
@@ -846,13 +998,13 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                           </div>
                         ) : (
                           <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                            Area: {rep.areaName}
+                            Area: {cleanAreaName}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* 📍 PANEL VALIDASI TITIK GPS KHUSUS AKSES SUPER ADMIN & SPV LOGISTIK */}
+                    {/* 📍 PANEL VALIDASI TITIK GPS KHUSUS AKSES SUPER ADMIN, SPV OPERASIONAL & SPV LOGISTIK (SATU FITUR TERPADU) */}
                     {canViewGpsValidation && (
                       <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/35 border border-blue-200 dark:border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                         <div className="flex items-start gap-2.5 min-w-0">
@@ -868,7 +1020,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                                 {resolvedGps.coordsFormatted}
                               </span>
                               <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                                • {resolvedGps.subAreaLabel}
+                                • {cleanSubAreaLabel}
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
@@ -879,7 +1031,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                                 </span>
                               ) : (
                                 <span>
-                                  Akses Super Admin &amp; SPV Logistik: Periksa kesesuaian titik GPS pengiriman dengan lokasi toko/rute.
+                                  Akses {roleGpsBadgeLabel}: Klik Peta &amp; Validasi GPS untuk cek Google Maps dan konfirmasi lokasi.
                                 </span>
                               )}
                             </div>
@@ -890,42 +1042,20 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                           <button
                             type="button"
                             onClick={() => openGpsValidationModal(rep)}
-                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
+                            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
                           >
                             <Navigation className="w-3.5 h-3.5" />
                             <span>Peta &amp; Validasi GPS</span>
                           </button>
-
-                          {rep.gpsValidationStatus !== 'valid' && (
-                            <button
-                              type="button"
-                              onClick={() => handleConfirmGpsValidation(rep, 'valid')}
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
-                              title="Tandai titik koordinat GPS Valid / Sesuai Lokasi"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>GPS Valid</span>
-                            </button>
-                          )}
-
-                          <a
-                            href={resolvedGps.gmapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 text-[11px] font-bold inline-flex items-center gap-1"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>Google Maps</span>
-                          </a>
                         </div>
                       </div>
                     )}
 
                     <div className="text-xs text-slate-700 dark:text-slate-300 bg-slate-50/70 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2">
                       <span className="font-bold text-slate-500 dark:text-slate-400 mr-1.5">
-                        Keterangan Kru:
+                        Keterangan:
                       </span>
-                      <span>{rep.notes}</span>
+                      <span>{cleanNotes}</span>
                     </div>
 
                     {(rep.validationNote || rep.validatedBy) && (
@@ -961,6 +1091,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                           setPhotoModalReport(rep);
                           setPhotoModalIndex(0);
                         }}
+                        title="Klik untuk memperbesar foto bukti"
                         className="relative w-24 h-20 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 group cursor-pointer shadow-xs"
                       >
                         <img
@@ -981,20 +1112,6 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                     )}
 
                     <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                      {photos.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPhotoModalReport(rep);
-                            setPhotoModalIndex(0);
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Foto</span>
-                        </button>
-                      )}
-
                       <button
                         type="button"
                         onClick={() => openValidationModal(rep)}
@@ -1009,7 +1126,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                           type="button"
                           onClick={() => setDeleteTargetReport(rep)}
                           className="p-1.5 rounded-xl bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 cursor-pointer"
-                          title="Hapus Laporan"
+                          title="Hapus Laporan (Super Admin)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1039,7 +1156,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                   Bukti Foto • {getCategoryMeta(photoModalReport.category).label}
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  {photoModalReport.driverName} ({photoModalReport.plateNumber}) • {photoModalReport.issueItemName || '-'}
+                  {photoModalReport.driverName} (Armada: {resolveFleetInitial(photoModalReport)}) • {photoModalReport.issueItemName || '-'}
                 </p>
               </div>
               <button
@@ -1112,11 +1229,11 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                         Validasi Titik GPS Lapangan • {catMeta.label}
                       </h3>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
-                        Akses {isSuperAdmin ? 'Super Admin' : 'SPV Logistik'}
+                        Akses {roleGpsBadgeLabel}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {gpsModalReport.driverName} ({gpsModalReport.plateNumber}) • {gpsModalReport.issueItemName || catMeta.label}
+                      {gpsModalReport.driverName} (Armada: {resolveFleetInitial(gpsModalReport)}) • {gpsModalReport.issueItemName || catMeta.label}
                     </p>
                   </div>
                 </div>
@@ -1142,7 +1259,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                     <div className="text-xs">
                       <div className="font-black text-white flex items-center gap-1.5">
                         <MapPin className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                        <span>{gpsData.subAreaLabel}</span>
+                        <span>{formatCleanAreaName(gpsData.subAreaLabel)}</span>
                       </div>
                       <div className="text-[11px] font-mono tabular-nums text-blue-300">
                         Lat: {lat.toFixed(6)} • Lng: {lng.toFixed(6)}
@@ -1179,10 +1296,10 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                       Titik Pelanggan &amp; Rute Kirim
                     </span>
                     <div className="font-black text-slate-900 dark:text-white">
-                      {gpsModalReport.customerOutletName || gpsModalReport.areaName || '-'}
+                      {gpsModalReport.customerOutletName || formatCleanAreaName(gpsModalReport.areaName) || '-'}
                     </div>
                     <div className="text-slate-600 dark:text-slate-400">
-                      Area Surat Jalan: {gpsModalReport.areaName}
+                      Area Surat Jalan: {formatCleanAreaName(gpsModalReport.areaName)}
                     </div>
                   </div>
                 </div>
@@ -1300,7 +1417,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                   Pelanggan: {validateModalReport.customerOutletName || '-'} • No. Faktur/SO: {validateModalReport.invoiceNumber || '-'}
                 </div>
                 <div className="text-slate-600 dark:text-slate-300 italic">
-                  &quot;{validateModalReport.notes}&quot;
+                  &quot;{extractCleanIssueNote(validateModalReport)}&quot;
                 </div>
               </div>
 
@@ -1311,7 +1428,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 text-xs font-black text-blue-700 dark:text-blue-300">
                         <MapPin className="w-3.5 h-3.5" />
-                        <span>Validasi Titik GPS ({isSuperAdmin ? 'Super Admin' : 'SPV Logistik'})</span>
+                        <span>Validasi Titik GPS ({roleGpsBadgeLabel})</span>
                       </div>
                       <a
                         href={modalGps.gmapsUrl}

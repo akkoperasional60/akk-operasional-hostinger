@@ -207,6 +207,106 @@ export function computeWeeklyFleetSummaries(logs: FuelLog[]): WeeklyFleetFuelSum
 }
 
 /**
+ * Aggregate logs into summaries per fleet over any custom date range / month / year
+ */
+export function computeFleetRangeSummaries(
+  logs: FuelLog[],
+  periodLabel: string,
+  startDate = '',
+  endDate = ''
+): WeeklyFleetFuelSummary[] {
+  const grouped: Record<string, {
+    fleetId: string;
+    plateNumber: string;
+    initialCode: string;
+    vehicleType: VehicleType;
+    logs: FuelLog[];
+  }> = {};
+
+  logs.forEach(log => {
+    const cleanPlate = String(log.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const key = cleanPlate || log.fleetId || 'UNKNOWN';
+    if (!grouped[key]) {
+      grouped[key] = {
+        fleetId: log.fleetId || key,
+        plateNumber: log.plateNumber || '-',
+        initialCode: log.initialCode || '-',
+        vehicleType: log.vehicleType,
+        logs: []
+      };
+    }
+    if ((!grouped[key].initialCode || grouped[key].initialCode === '-') && log.initialCode) {
+      grouped[key].initialCode = log.initialCode;
+    }
+    grouped[key].logs.push(log);
+  });
+
+  const results: WeeklyFleetFuelSummary[] = Object.entries(grouped).map(([key, item]) => {
+    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(1));
+    const totalCost = item.logs.reduce((sum, l) => sum + (l.totalCost || 0), 0);
+    const totalDistanceKm = item.logs.reduce((sum, l) => sum + (l.distanceKm || 0), 0);
+    const refuelCount = item.logs.length;
+
+    const avgKmPerLiter = totalLiters > 0 && totalDistanceKm > 0
+      ? Number((totalDistanceKm / totalLiters).toFixed(2))
+      : 0;
+
+    const avgLiterPerKm = totalDistanceKm > 0
+      ? Number((totalLiters / totalDistanceKm).toFixed(4))
+      : 0;
+
+    const avgLiterPer100Km = Number((avgLiterPerKm * 100).toFixed(2));
+    const avgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
+
+    const targetRatio = FUEL_TARGET_RATIOS[item.vehicleType]?.target || 7.5;
+    const targetLiterPerKm = Number((1 / targetRatio).toFixed(4));
+    const variancePercent = targetRatio > 0
+      ? Number((((avgKmPerLiter - targetRatio) / targetRatio) * 100).toFixed(1))
+      : 0;
+
+    let status: EfficiencyStatus = 'Efisien / Normal';
+    if (avgKmPerLiter >= targetRatio * 1.05) {
+      status = 'Sangat Efisien';
+    } else if (avgKmPerLiter >= targetRatio * 0.90) {
+      status = 'Efisien / Normal';
+    } else if (avgKmPerLiter >= targetRatio * 0.75) {
+      status = 'Boros';
+    } else {
+      status = 'Kritis / Potensi Anomali';
+    }
+
+    const driverNames = Array.from(new Set(item.logs.map(l => l.driverName).filter(Boolean)));
+
+    return {
+      id: `range_${key}`,
+      weekKey: startDate && endDate ? `${startDate}_${endDate}` : 'custom',
+      weekLabel: periodLabel,
+      startDate,
+      endDate,
+      fleetId: item.fleetId,
+      plateNumber: item.plateNumber,
+      initialCode: item.initialCode,
+      vehicleType: item.vehicleType,
+      refuelCount,
+      totalLiters,
+      totalCost,
+      totalDistanceKm,
+      avgKmPerLiter,
+      avgLiterPerKm,
+      avgLiterPer100Km,
+      avgCostPerKm,
+      targetRatio,
+      targetLiterPerKm,
+      variancePercent,
+      status,
+      driverNames
+    };
+  });
+
+  return results.sort((a, b) => a.initialCode.localeCompare(b.initialCode) || a.plateNumber.localeCompare(b.plateNumber));
+}
+
+/**
  * Aggregate logs into weekly summaries per driver
  */
 export function computeWeeklyDriverSummaries(logs: FuelLog[]): WeeklyDriverFuelSummary[] {
@@ -306,19 +406,19 @@ export function formatRupiah(amount: number): string {
  */
 export function exportFuelReportToExcel(options: {
   fleetSummaries: WeeklyFleetFuelSummary[];
-  driverSummaries: WeeklyDriverFuelSummary[];
+  driverSummaries?: WeeklyDriverFuelSummary[];
   detailedLogs?: FuelLog[];
   filterWeekKey?: string;
   filterWeekLabel?: string;
 }): void {
-  const { fleetSummaries, driverSummaries, detailedLogs, filterWeekKey, filterWeekLabel } = options;
+  const { fleetSummaries, driverSummaries = [], detailedLogs, filterWeekKey } = options;
 
   const workbook = XLSX.utils.book_new();
 
-  // 1. Sheet 1: Ringkasan Mingguan Per Armada
+  // 1. Sheet 1: Rekapitulasi Per Armada
   const fleetData = fleetSummaries.map((f, index) => ({
     'No': index + 1,
-    'Minggu / Periode': f.weekLabel,
+    'Periode / Rentang': f.weekLabel,
     'Plat Nomor': f.plateNumber,
     'Inisial Armada': f.initialCode,
     'Tipe Kendaraan': f.vehicleType,
@@ -337,62 +437,53 @@ export function exportFuelReportToExcel(options: {
   }));
 
   const fleetWs = XLSX.utils.json_to_sheet(fleetData);
-  // Auto-width columns
   fleetWs['!cols'] = [
-    { wch: 5 },  // No
-    { wch: 32 }, // Minggu
-    { wch: 14 }, // Plat
-    { wch: 14 }, // Inisial
-    { wch: 16 }, // Tipe
-    { wch: 12 }, // Freq
-    { wch: 12 }, // Liter
-    { wch: 15 }, // Jarak
-    { wch: 18 }, // Biaya
-    { wch: 18 }, // Rasio
-    { wch: 18 }, // Liter/KM
-    { wch: 18 }, // L/100 KM
-    { wch: 16 }, // Target
-    { wch: 16 }, // Variansi
-    { wch: 14 }, // Biaya/KM
-    { wch: 22 }, // Status
-    { wch: 28 }  // Driver
+    { wch: 5 },
+    { wch: 32 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 15 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 14 },
+    { wch: 22 },
+    { wch: 28 }
   ];
-  XLSX.utils.book_append_sheet(workbook, fleetWs, 'Ringkasan_Mingguan_Armada');
+  XLSX.utils.book_append_sheet(workbook, fleetWs, 'Rekapitulasi_Armada');
 
-  // 2. Sheet 2: Ringkasan Mingguan Per Driver
-  const driverData = driverSummaries.map((d, index) => ({
-    'No': index + 1,
-    'Minggu / Periode': d.weekLabel,
-    'Nama Driver': d.driverName,
-    'Armada Dikemudikan': d.fleetPlates.join(', '),
-    'Frekuensi Isi BBM': d.refuelCount,
-    'Total Liter BBM': d.totalLiters,
-    'Total Jarak Tempuh (KM)': d.totalDistanceKm,
-    'Total Biaya BBM (Rp)': d.totalCost,
-    'Rasio Efisiensi (KM/L)': d.avgKmPerLiter,
-    'Konsumsi (Liter/KM)': d.avgLiterPerKm,
-    'Biaya BBM / KM (Rp)': d.avgCostPerKm,
-    'Skor Eco-Driving': d.ecoScore,
-    'Predikat': d.predicate
-  }));
+  // 2. Sheet 2 (Opsional): Ringkasan Per Driver
+  if (driverSummaries.length > 0) {
+    const driverData = driverSummaries.map((d, index) => ({
+      'No': index + 1,
+      'Periode': d.weekLabel,
+      'Nama Driver': d.driverName,
+      'Armada Dikemudikan': d.fleetPlates.join(', '),
+      'Frekuensi Isi BBM': d.refuelCount,
+      'Total Liter BBM': d.totalLiters,
+      'Total Jarak Tempuh (KM)': d.totalDistanceKm,
+      'Total Biaya BBM (Rp)': d.totalCost,
+      'Rasio Efisiensi (KM/L)': d.avgKmPerLiter,
+      'Konsumsi (Liter/KM)': d.avgLiterPerKm,
+      'Biaya BBM / KM (Rp)': d.avgCostPerKm,
+      'Skor Eco-Driving': d.ecoScore,
+      'Predikat': d.predicate
+    }));
 
-  const driverWs = XLSX.utils.json_to_sheet(driverData);
-  driverWs['!cols'] = [
-    { wch: 5 },  // No
-    { wch: 32 }, // Minggu
-    { wch: 22 }, // Nama
-    { wch: 22 }, // Plat
-    { wch: 16 }, // Freq
-    { wch: 14 }, // Liter
-    { wch: 22 }, // Jarak
-    { wch: 18 }, // Biaya
-    { wch: 20 }, // Rasio
-    { wch: 18 }, // Liter/KM
-    { wch: 18 }, // Biaya/KM
-    { wch: 16 }, // Skor
-    { wch: 20 }  // Predikat
-  ];
-  XLSX.utils.book_append_sheet(workbook, driverWs, 'Ringkasan_Mingguan_Driver');
+    const driverWs = XLSX.utils.json_to_sheet(driverData);
+    driverWs['!cols'] = [
+      { wch: 5 }, { wch: 32 }, { wch: 22 }, { wch: 22 }, { wch: 16 },
+      { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
+      { wch: 18 }, { wch: 16 }, { wch: 20 }
+    ];
+    XLSX.utils.book_append_sheet(workbook, driverWs, 'Ringkasan_Driver');
+  }
 
   // 3. Sheet 3: Detail Transaksi Log Pengisian BBM
   if (detailedLogs && detailedLogs.length > 0) {
@@ -452,12 +543,12 @@ export function exportFuelReportToExcel(options: {
  */
 export function exportFuelReportToPDF(options: {
   fleetSummaries: WeeklyFleetFuelSummary[];
-  driverSummaries: WeeklyDriverFuelSummary[];
+  driverSummaries?: WeeklyDriverFuelSummary[];
   filterWeekKey?: string;
   filterWeekLabel?: string;
   printedBy?: string;
 }): void {
-  const { fleetSummaries, driverSummaries, filterWeekKey, filterWeekLabel, printedBy } = options;
+  const { fleetSummaries, driverSummaries = [], filterWeekKey, filterWeekLabel, printedBy } = options;
 
   // Use landscape A4 (297 x 210 mm)
   const doc = new jsPDF({
@@ -707,6 +798,54 @@ export function exportFuelReportToPDF(options: {
   doc.text(`${avgKmPerL}`, margin + 186, yPos + 4.5, { align: 'right' });
   doc.text(`${avgLPerKm}`, margin + 202, yPos + 4.5, { align: 'right' });
 
+  if (driverSummaries.length === 0) {
+    const sigY = pageHeight - 48;
+    if (yPos > sigY - 8) {
+      renderFooter(currentPage, 2);
+      doc.addPage();
+      currentPage++;
+      renderHeader('LEMBAR PENGESAHAN REKAPITULASI KONSUMSI BBM ARMADA');
+    }
+    const colSigWidth = contentWidth / 3;
+    doc.setDrawColor(226, 232, 240);
+    doc.setFillColor(250, 250, 250);
+    doc.rect(margin, sigY, contentWidth, 32, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Dibuat & Dihitung Oleh:', margin + 10, sigY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text('Admin Logistik & Efisiensi Armada', margin + 10, sigY + 10);
+    const coordinatorName = logisticsStore.getLogisticsCoordinator();
+    doc.text(`( ${coordinatorName} )`, margin + 10, sigY + 27);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Diperiksa & Diaudit Oleh:', margin + colSigWidth + 10, sigY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text('Koordinator Lapangan & Transportasi', margin + colSigWidth + 10, sigY + 10);
+    doc.text('( Bayu Novianto D.P., S.Si )', margin + colSigWidth + 10, sigY + 27);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Disetujui Oleh:', margin + (colSigWidth * 2) + 10, sigY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text('Manajer Operasional & Distribusi', margin + (colSigWidth * 2) + 10, sigY + 10);
+    doc.text('( Ir. Hadi Suryanto, M.M. )', margin + (colSigWidth * 2) + 10, sigY + 27);
+
+    renderFooter(currentPage, currentPage);
+
+    const fileDate = new Date().toISOString().split('T')[0];
+    const periodSlug = filterWeekKey ? `_${filterWeekKey}` : '_Semua_Periode';
+    const fileName = `Laporan_Rekap_BBM_Armada_AKK${periodSlug}_${fileDate}.pdf`;
+    doc.save(fileName);
+    return;
+  }
+
   renderFooter(currentPage, 2);
 
   // ==========================================
@@ -714,7 +853,7 @@ export function exportFuelReportToPDF(options: {
   // ==========================================
   doc.addPage();
   currentPage++;
-  renderHeader('BAGIAN II: RINGKASAN KONSUMSI BBM MINGGUAN PER DRIVER / KRU PENGIRIMAN');
+  renderHeader('BAGIAN II: RINGKASAN KONSUMSI BBM PER DRIVER / KRU PENGIRIMAN');
 
   yPos = margin + 33;
 

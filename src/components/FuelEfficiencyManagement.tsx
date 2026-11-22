@@ -89,7 +89,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Liter per KM Unit Analysis Filter States
   const [lKmSortBy, setLKmSortBy] = useState<'canonical_order' | 'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'>('canonical_order');
-  const [lKmSearch, setLKmSearch] = useState<string>('');
+  const [lKmFilterFleetId, setLKmFilterFleetId] = useState<string>('all');
   const [comparisonSelectedFleetId, setComparisonSelectedFleetId] = useState<string>('all');
 
   // Interactive Converter Calculator
@@ -101,7 +101,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
-  const [logSortBy, setLogSortBy] = useState<'date_desc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
+  const [logSortBy, setLogSortBy] = useState<'date_asc' | 'date_desc' | 'efficient_asc' | 'wasteful_desc'>('date_asc');
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -145,12 +145,24 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     return resolved === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi';
   };
 
-  // Branch-scoped Fleets & Fuel Logs for Dashboard & Analytics
+  // Branch-scoped Fleets & Fuel Logs for Dashboard & Analytics (deduped & excluding phantom FLT-*)
+  const cleanCanonicalFleets = useMemo(() => {
+    const seenPlates = new Set<string>();
+    const valid = fleets.filter(f => {
+      const plate = String(f.plateNumber || '').trim();
+      const clean = plate.replace(/\s+/g, '').toUpperCase();
+      if (!clean || /^FLT-\d+$/i.test(plate) || clean.endsWith('AKK')) return false;
+      if (seenPlates.has(clean)) return false;
+      seenPlates.add(clean);
+      return true;
+    });
+    return sortFleetsByCanonicalOrder(valid);
+  }, [fleets]);
+
   const branchScopedFleets = useMemo(() => {
-    const ordered = sortFleetsByCanonicalOrder(fleets);
-    if (selectedBranchFilter === 'all') return ordered;
-    return ordered.filter(f => resolveFleetBranchId(f) === selectedBranchFilter);
-  }, [fleets, selectedBranchFilter]);
+    if (selectedBranchFilter === 'all') return cleanCanonicalFleets;
+    return cleanCanonicalFleets.filter(f => resolveFleetBranchId(f) === selectedBranchFilter);
+  }, [cleanCanonicalFleets, selectedBranchFilter]);
 
   const branchScopedLogs = useMemo(() => {
     if (selectedBranchFilter === 'all') return fuelLogs;
@@ -159,10 +171,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Modal Branch-scoped Fleets
   const modalBranchFleets = useMemo(() => {
-    return sortFleetsByCanonicalOrder(
-      fleets.filter(f => resolveFleetBranchId(f) === formBranchId)
-    );
-  }, [fleets, formBranchId]);
+    return cleanCanonicalFleets.filter(f => resolveFleetBranchId(f) === formBranchId);
+  }, [cleanCanonicalFleets, formBranchId]);
 
   const filteredModalFleets = useMemo(() => {
     const q = fleetSearchFilter.trim().toLowerCase();
@@ -727,15 +737,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     });
 
     const filtered = list.filter(item => {
-      if (!lKmSearch) return true;
-      const q = lKmSearch.toLowerCase();
-      return (
-        item.plateNumber.toLowerCase().includes(q) ||
-        (item.initialCode && item.initialCode.toLowerCase().includes(q)) ||
-        item.vehicleType.toLowerCase().includes(q) ||
-        item.driverName.toLowerCase().includes(q) ||
-        item.areaKirim.toLowerCase().includes(q)
-      );
+      if (lKmFilterFleetId === 'all') return true;
+      return item.fleetId === lKmFilterFleetId;
     });
 
     return filtered.sort((a, b) => {
@@ -748,7 +751,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       if (lKmSortBy === 'distance_desc') return b.totalDistanceKm - a.totalDistanceKm;
       return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
     });
-  }, [fleetSummaries, branchScopedLogs, lKmSearch, lKmSortBy]);
+  }, [fleetSummaries, branchScopedLogs, lKmFilterFleetId, lKmSortBy]);
 
   // Chart data for comparing Liter per KM vs Target L/KM
   const lKmComparisonChartData = useMemo(() => {
@@ -820,7 +823,10 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     if (logSortBy === 'wasteful_desc') {
       return [...list].sort((a, b) => a.ratioKmPerLiter - b.ratioKmPerLiter);
     }
-    return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+    if (logSortBy === 'date_desc') {
+      return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+    }
+    return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
   }, [branchScopedLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy]);
 
   // Route Preset Selection Handler for Calculator
@@ -965,6 +971,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     setSelectedBranchFilter(br.id);
                     setComparisonSelectedFleetId('all');
                     setFilterFleetId('all');
+                    setLKmFilterFleetId('all');
                   }}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
                     selectedBranchFilter === br.id
@@ -1146,7 +1153,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           }`}
         >
           <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Rekap Mingguan</span>
+          <span>Rekapitulasi Armada</span>
           <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
             PDF/Excel
           </span>
@@ -1355,8 +1362,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           }}
                           className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between transition cursor-pointer ${
                             comparisonSelectedFleetId === 'all'
-                              ? 'bg-amber-500/15 text-amber-300 font-bold'
-                              : 'text-slate-200 hover:bg-slate-800'
+                              ? 'bg-amber-500/15 text-amber-300 font-bold border-l-2 border-l-amber-500'
+                              : 'text-slate-200 hover:bg-amber-500/10'
                           }`}
                         >
                           <span>Semua Armada ({unitLKmAnalysis.length} Unit)</span>
@@ -1373,7 +1380,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 setActiveModalDropdown(null);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between border-t border-slate-800/60 transition cursor-pointer ${
-                                isSel ? 'bg-amber-500/15 text-amber-300 font-bold' : 'text-slate-200 hover:bg-slate-800'
+                                isSel ? 'bg-amber-500/15 text-amber-300 font-bold border-l-2 border-l-amber-500' : 'text-slate-200 hover:bg-amber-500/10'
                               }`}
                             >
                               <div className="min-w-0 pr-2">
@@ -1471,17 +1478,17 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="lg:col-span-7 bg-slate-950/50 rounded-xl border border-slate-800/80 overflow-hidden flex flex-col justify-between">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900/90 text-slate-400 text-[11px] uppercase border-b border-slate-800">
+                    <thead className="bg-slate-900/90 text-slate-400 text-[11px] uppercase border-b border-slate-800 whitespace-nowrap">
                       <tr>
-                        <th className="py-2.5 px-3">Unit Armada</th>
-                        <th className="py-2.5 px-3">Nama Driver</th>
-                        <th className="py-2.5 px-3">Area Kirim</th>
-                        <th className="py-2.5 px-3">Tipe Truk</th>
-                        <th className="py-2.5 px-3 text-right">Jarak (KM)</th>
-                        <th className="py-2.5 px-3 text-right font-bold text-amber-300">Rata-rata L/KM</th>
-                        <th className="py-2.5 px-3 text-right">L / 100 KM</th>
-                        <th className="py-2.5 px-3 text-center">Deviasi vs Target</th>
-                        <th className="py-2.5 px-3 text-center">Status</th>
+                        <th className="py-2 px-2.5">Unit Armada</th>
+                        <th className="py-2 px-2.5">Nama Driver</th>
+                        <th className="py-2 px-2.5">Area Kirim</th>
+                        <th className="py-2 px-2.5">Tipe Truk</th>
+                        <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
+                        <th className="py-2 px-2.5 text-right font-bold text-amber-300">Rata-rata L/KM</th>
+                        <th className="py-2 px-2.5 text-right">L / 100 KM</th>
+                        <th className="py-2 px-2.5 text-center">Deviasi vs Target</th>
+                        <th className="py-2 px-2.5 text-center">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -1493,45 +1500,47 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             comparisonSelectedFleetId === item.fleetId ? 'bg-amber-500/10' : ''
                           }`}
                         >
-                          <td className="py-2 px-3">
-                            <div className="font-bold text-white font-sans">{item.initialCode || '-'}</div>
-                            <div className="text-[10px] text-slate-400">{item.plateNumber}</div>
+                          <td className="py-1.5 px-2.5 whitespace-nowrap">
+                            <div className="flex items-baseline gap-1.5">
+                              <span className="font-extrabold text-white font-sans text-sm">{item.initialCode || '-'}</span>
+                              <span className="text-[11px] text-slate-400 font-medium">{item.plateNumber}</span>
+                            </div>
                           </td>
-                          <td className="py-2 px-3 font-sans text-slate-200 text-[11px]">
+                          <td className="py-1.5 px-2.5 font-sans text-slate-200 text-xs font-semibold whitespace-nowrap">
                             {item.driverName}
                           </td>
-                          <td className="py-2 px-3 font-sans text-slate-300 text-[11px]">
+                          <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs whitespace-nowrap">
                             {item.areaKirim}
                           </td>
-                          <td className="py-2 px-3 font-sans text-slate-300 text-[11px]">
+                          <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs whitespace-nowrap">
                             {item.vehicleType}
                           </td>
-                          <td className="py-2 px-3 text-right text-slate-300">
+                          <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-200 whitespace-nowrap">
                             {item.totalDistanceKm.toLocaleString('id-ID')}
                           </td>
-                          <td className="py-2 px-3 text-right font-bold text-amber-400">
-                            {item.avgLKm} <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                          <td className="py-1.5 px-2.5 text-right font-black text-base text-amber-400 whitespace-nowrap">
+                            {item.avgLKm} <span className="text-xs font-normal text-slate-400">L/KM</span>
                           </td>
-                          <td className="py-2 px-3 text-right text-slate-300">
-                            {item.avgL100Km} <span className="text-[10px] text-slate-500">L</span>
+                          <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-200 whitespace-nowrap">
+                            {item.avgL100Km} <span className="text-xs font-normal text-slate-500">L</span>
                           </td>
-                          <td className="py-2 px-3 text-center font-sans">
+                          <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
                             {!item.hasData ? (
-                              <span className="text-slate-500 text-[11px] font-semibold">0%</span>
+                              <span className="text-slate-500 text-xs font-semibold">0%</span>
                             ) : item.isSaving ? (
-                              <span className="text-emerald-400 text-[11px] font-bold flex items-center justify-center gap-0.5">
+                              <span className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-0.5">
                                 <ArrowDown className="w-3 h-3 text-emerald-400" />
                                 +{item.savingPct}% Irit
                               </span>
                             ) : (
-                              <span className="text-rose-400 text-[11px] font-bold flex items-center justify-center gap-0.5">
+                              <span className="text-rose-400 text-xs font-bold flex items-center justify-center gap-0.5">
                                 <ArrowUp className="w-3 h-3 text-rose-400" />
                                 {item.savingPct}% Boros
                               </span>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-center font-sans">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.statusColor}`}>
+                          <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
+                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${item.statusColor}`}>
                               {item.hasData ? item.status.split(' ')[0] : '-'}
                             </span>
                           </td>
@@ -1614,17 +1623,23 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               </div>
 
-              {/* SEARCH & SORT CONTROLS */}
+              {/* ARMADA FILTER & SORT CONTROLS */}
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Cari unit truk / plat nomor..."
-                    value={lKmSearch}
-                    onChange={(e) => setLKmSearch(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
-                  />
+                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+                  <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <select
+                    value={lKmFilterFleetId}
+                    onChange={(e) => setLKmFilterFleetId(e.target.value)}
+                    aria-label="Filter Armada"
+                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
+                  >
+                    <option value="all" className="bg-slate-900">Semua Armada ({branchScopedFleets.length})</option>
+                    {branchScopedFleets.map(f => (
+                      <option key={f.id} value={f.id} className="bg-slate-900">
+                        {f.initialCode || f.plateNumber} ({f.plateNumber})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
@@ -1737,30 +1752,30 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase border-b border-slate-800">
+                  <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase border-b border-slate-800 whitespace-nowrap">
                     <tr>
-                      <th className="py-3 px-3.5">Unit Armada</th>
-                      <th className="py-3 px-3.5">Nama Driver</th>
-                      <th className="py-3 px-3.5">Area Kirim</th>
-                      <th className="py-3 px-3.5">Tipe Kendaraan</th>
-                      <th className="py-3 px-3 text-right">Jarak (KM)</th>
-                      <th className="py-3 px-3 text-right">BBM (Liter)</th>
-                      <th className="py-3 px-3.5 text-right font-black text-amber-400 bg-amber-500/5">
+                      <th className="py-2 px-2.5">Unit Armada</th>
+                      <th className="py-2 px-2.5">Nama Driver</th>
+                      <th className="py-2 px-2.5">Area Kirim</th>
+                      <th className="py-2 px-2.5">Tipe Kendaraan</th>
+                      <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
+                      <th className="py-2 px-2.5 text-right">BBM (Liter)</th>
+                      <th className="py-2 px-3 text-right font-black text-amber-400 bg-amber-500/5">
                         Rata-rata L/KM
                       </th>
-                      <th className="py-3 px-3 text-right font-bold text-slate-300">
+                      <th className="py-2 px-2.5 text-right font-bold text-slate-300">
                         L / 100 KM
                       </th>
-                      <th className="py-3 px-3 text-right text-slate-400">
+                      <th className="py-2 px-2.5 text-right text-slate-400">
                         Target Pabrikan
                       </th>
-                      <th className="py-3 px-3.5 text-center">
+                      <th className="py-2 px-2.5 text-center">
                         Deviasi / Penghematan
                       </th>
-                      <th className="py-3 px-3 text-right text-slate-400">
+                      <th className="py-2 px-2.5 text-right text-slate-400">
                         Biaya / KM
                       </th>
-                      <th className="py-3 px-3.5 text-center">
+                      <th className="py-2 px-2.5 text-center">
                         Status Efisiensi
                       </th>
                     </tr>
@@ -1768,74 +1783,74 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <tbody className="divide-y divide-slate-800/60 font-mono">
                     {unitLKmAnalysis.map((item) => (
                       <tr key={item.fleetId} className="hover:bg-slate-900/50 transition">
-                        <td className="py-3 px-3.5">
-                          <div className="font-bold text-white font-sans text-sm flex items-center gap-1.5">
-                            <span>{item.initialCode || item.plateNumber}</span>
-                            <span className="text-[10px] text-slate-400 font-normal">({item.plateNumber})</span>
+                        <td className="py-1.5 px-2.5 whitespace-nowrap">
+                          <div className="font-sans flex items-baseline gap-1.5 leading-tight">
+                            <span className="font-extrabold text-white text-sm">{item.initialCode || item.plateNumber}</span>
+                            <span className="text-xs text-slate-400 font-semibold">({item.plateNumber})</span>
                           </div>
-                          <div className="text-[10px] text-slate-500 font-sans">{item.totalLogs} catatan pengisian</div>
+                          <div className="text-[11px] text-slate-500 font-sans leading-tight">{item.totalLogs}x isi BBM</div>
                         </td>
 
-                        <td className="py-3 px-3.5 font-sans text-slate-200 text-xs">
+                        <td className="py-1.5 px-2.5 font-sans text-slate-200 text-[13px] font-semibold whitespace-nowrap">
                           {item.driverName}
                         </td>
 
-                        <td className="py-3 px-3.5 font-sans text-slate-300 text-xs">
+                        <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs font-medium whitespace-nowrap">
                           {item.areaKirim}
                         </td>
 
-                        <td className="py-3 px-3.5 font-sans text-slate-300">
-                          <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[11px]">
+                        <td className="py-1.5 px-2.5 font-sans text-slate-300 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-xs font-semibold">
                             {item.vehicleType}
                           </span>
                         </td>
 
-                        <td className="py-3 px-3 text-right text-slate-300">
-                          {item.totalDistanceKm.toLocaleString('id-ID')} KM
+                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
+                          {item.totalDistanceKm.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">KM</span>
                         </td>
 
-                        <td className="py-3 px-3 text-right text-slate-300">
-                          {item.totalLiters.toLocaleString('id-ID')} L
+                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
+                          {item.totalLiters.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">L</span>
                         </td>
 
                         {/* RATA-RATA L/KM (PRIMARY REQUESTED METRIC) */}
-                        <td className="py-3 px-3.5 text-right font-black text-amber-400 bg-amber-500/5 text-sm">
+                        <td className="py-1.5 px-3 text-right font-black text-amber-400 bg-amber-500/5 text-base whitespace-nowrap">
                           {item.avgLKm}{' '}
-                          <span className="text-[10px] font-normal text-slate-400">L/KM</span>
+                          <span className="text-xs font-semibold text-slate-400">L/KM</span>
                         </td>
 
-                        <td className="py-3 px-3 text-right font-bold text-slate-200">
+                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
                           {item.avgL100Km}{' '}
-                          <span className="text-[10px] font-normal text-slate-500">L</span>
+                          <span className="text-xs font-normal text-slate-400">L</span>
                         </td>
 
-                        <td className="py-3 px-3 text-right text-slate-400">
-                          <div>{item.targetLKm} L/KM</div>
-                          <div className="text-[10px] text-slate-500 font-sans">({item.hasData ? item.targetRatio : 0} KM/L)</div>
+                        <td className="py-1.5 px-2.5 text-right text-slate-300 whitespace-nowrap leading-tight">
+                          <div className="text-xs font-bold">{item.targetLKm} L/KM</div>
+                          <div className="text-[11px] text-slate-500 font-sans">({item.hasData ? item.targetRatio : 0} KM/L)</div>
                         </td>
 
-                        <td className="py-3 px-3.5 text-center font-sans">
+                        <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
                           {!item.hasData ? (
-                            <span className="text-slate-500 text-xs font-semibold">0%</span>
+                            <span className="text-slate-500 text-sm font-bold">0%</span>
                           ) : item.isSaving ? (
-                            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
-                              <ArrowDown className="w-3 h-3" />
-                              <span>+{item.savingPct}% Lebih Irit</span>
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+                              <ArrowDown className="w-3.5 h-3.5" />
+                              <span>+{item.savingPct}% Irit</span>
                             </div>
                           ) : (
-                            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30 text-xs font-bold">
-                              <ArrowUp className="w-3 h-3" />
-                              <span>{item.savingPct}% Lebih Boros</span>
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30 text-xs font-bold">
+                              <ArrowUp className="w-3.5 h-3.5" />
+                              <span>{item.savingPct}% Boros</span>
                             </div>
                           )}
                         </td>
 
-                        <td className="py-3 px-3 text-right font-sans text-slate-300 text-xs">
+                        <td className="py-1.5 px-2.5 text-right font-bold text-slate-100 text-sm whitespace-nowrap">
                           Rp {item.avgCostPerKm.toLocaleString('id-ID')}
                         </td>
 
-                        <td className="py-3 px-3.5 text-center font-sans">
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${item.statusColor}`}>
+                        <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${item.statusColor}`}>
                             {item.hasData ? item.status : '-'}
                           </span>
                         </td>
@@ -2078,12 +2093,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 onChange={(e) => setLogSortBy(e.target.value as any)}
                 className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-amber-300 font-semibold focus:outline-none focus:border-amber-500"
               >
-                <option value="date_desc">Urut: Terbaru</option>
+                <option value="date_asc">Urut: Tanggal Termuda</option>
+                <option value="date_desc">Urut: Tanggal Terbaru</option>
                 <option value="efficient_asc">Terefisien &rarr; Paling Boros</option>
                 <option value="wasteful_desc">Paling Boros &rarr; Terefisien</option>
               </select>
 
-              {(searchQuery || filterFleetId !== 'all' || filterSpbu !== 'all' || filterStatus !== 'all' || filterFuelType !== 'all' || logSortBy !== 'date_desc') && (
+              {(searchQuery || filterFleetId !== 'all' || filterSpbu !== 'all' || filterStatus !== 'all' || filterFuelType !== 'all' || logSortBy !== 'date_asc') && (
                 <button
                   type="button"
                   onClick={() => {
@@ -2092,7 +2108,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     setFilterSpbu('all');
                     setFilterStatus('all');
                     setFilterFuelType('all');
-                    setLogSortBy('date_desc');
+                    setLogSortBy('date_asc');
                   }}
                   className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
                   title="Reset Filter"
@@ -2131,30 +2147,28 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       const isAnomaly = log.efficiencyStatus === 'Kritis / Potensi Anomali';
                       const isHighEfficient = log.efficiencyStatus === 'Sangat Efisien';
                       const isWaste = log.efficiencyStatus === 'Boros';
-                      const logBranchId = resolveLogBranchId(log);
+                      const logBranchId = selectedBranchFilter === 'all' ? resolveLogBranchId(log) : selectedBranchFilter;
 
                       return (
                         <tr key={log.id} className="hover:bg-slate-800/40 transition">
                           <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
                               <span className="font-semibold text-white">{log.date}</span>
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
-                                logBranchId === 'cab-sidoarjo'
-                                  ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
-                                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                              }`}>
-                                {logBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
-                              </span>
+                              {selectedBranchFilter === 'all' && (
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                  logBranchId === 'cab-sidoarjo'
+                                    ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                }`}>
+                                  {logBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
+                                </span>
+                              )}
                             </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="flex items-center gap-1.5 mt-1">
                               <span className="font-bold text-amber-400 font-mono">
-                                {log.initialCode || log.plateNumber}
+                                {log.initialCode || '-'}
                               </span>
-                              <span className="text-[10px] text-slate-400">({log.plateNumber})</span>
                             </div>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                              {log.vehicleType}
-                            </span>
                           </td>
 
                           <td className="px-4 py-3">
@@ -2607,7 +2621,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                   setActiveModalDropdown(null);
                                 }}
                                 className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isSelected ? 'bg-amber-500/15 text-amber-300' : 'hover:bg-slate-800/80 text-slate-200'
+                                  isSelected ? 'bg-amber-500/15 border-l-4 border-l-amber-500 text-amber-300 font-bold' : 'hover:bg-amber-500/10 text-slate-200'
                                 }`}
                               >
                                 <div className="min-w-0">
@@ -2699,7 +2713,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 setActiveModalDropdown(null);
                               }}
                               className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-sky-500/15 text-sky-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                                isSelected ? 'bg-sky-500/15 border-l-4 border-l-sky-500 text-sky-300 font-bold' : 'hover:bg-sky-500/10 text-slate-200'
                               }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
@@ -2800,7 +2814,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 setActiveModalDropdown(null);
                               }}
                               className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-violet-500/15 text-violet-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                                isSelected ? 'bg-violet-500/15 border-l-4 border-l-violet-500 text-violet-300 font-bold' : 'hover:bg-violet-500/10 text-slate-200'
                               }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
@@ -2890,7 +2904,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 setActiveModalDropdown(null);
                               }}
                               className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-emerald-500/15 text-emerald-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
+                                isSelected ? 'bg-emerald-500/15 border-l-4 border-l-emerald-500 text-emerald-300 font-bold' : 'hover:bg-emerald-500/10 text-slate-200'
                               }`}
                             >
                               <span className="text-xs truncate flex items-center gap-2">
@@ -3266,6 +3280,26 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         }
                       ].map(opt => {
                         const isSelected = formGasStation === opt.value;
+                        const isFarly = opt.value.includes('Farly');
+                        const isGajahMada = opt.value.includes('Gajah Mada');
+                        const rowCls = isSelected
+                          ? isFarly
+                            ? 'bg-amber-500/15 border-l-4 border-l-amber-500'
+                            : isGajahMada
+                            ? 'bg-blue-500/15 border-l-4 border-l-blue-500'
+                            : 'bg-rose-500/15 border-l-4 border-l-rose-500'
+                          : isFarly
+                          ? 'hover:bg-amber-500/10'
+                          : isGajahMada
+                          ? 'hover:bg-blue-500/10'
+                          : 'hover:bg-rose-500/10';
+                        const radioCls = isSelected
+                          ? isFarly
+                            ? 'bg-amber-500 border-amber-400 text-white'
+                            : isGajahMada
+                            ? 'bg-blue-500 border-blue-400 text-white'
+                            : 'bg-rose-500 border-rose-400 text-white'
+                          : 'border-slate-700 bg-slate-950 text-transparent';
                         return (
                           <button
                             key={opt.value}
@@ -3274,9 +3308,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                               setFormGasStation(opt.value);
                               setIsGasStationDropdownOpen(false);
                             }}
-                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                              isSelected ? 'bg-amber-500/10' : 'hover:bg-slate-800/80'
-                            }`}
+                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${rowCls}`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconCls}`}>
@@ -3294,13 +3326,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.desc}</div>
                               </div>
                             </div>
-                            <div
-                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
-                                isSelected
-                                  ? 'bg-amber-500 border-amber-400 text-slate-950'
-                                  : 'border-slate-700 bg-slate-950 text-transparent'
-                              }`}
-                            >
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${radioCls}`}>
                               <Check className="w-3 h-3 stroke-[3]" />
                             </div>
                           </button>

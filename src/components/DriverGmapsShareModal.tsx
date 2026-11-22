@@ -256,15 +256,30 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   }, [activeDelivery]);
 
   const currentAreaName = React.useMemo(() => {
+    const cleanPair = (rawArea?: string, rawCity?: string) => {
+      const a = String(rawArea || '').trim();
+      const c = String(rawCity || '').trim();
+      if (!a && !c) return '';
+      if (!c) return a;
+      if (!a) return c;
+      const aLow = a.toLowerCase();
+      const cLow = c.toLowerCase();
+      if (aLow === cLow || aLow.includes(`(${cLow})`) || cLow.includes(aLow)) {
+        return a.length >= c.length ? a : c;
+      }
+      return `${a} (${c})`;
+    };
     if (activeWaybill?.destination) {
-      const area = activeWaybill.destination.areaName || activeWaybill.destination.storeName;
-      const city = activeWaybill.destination.city ? ` (${activeWaybill.destination.city})` : '';
-      return `${area}${city}`;
+      return cleanPair(
+        activeWaybill.destination.areaName || activeWaybill.destination.storeName,
+        activeWaybill.destination.city
+      );
     }
     if (activeDelivery) {
-      const area = activeDelivery.areaName || activeDelivery.store?.storeName || 'Area Pengiriman';
-      const city = activeDelivery.store?.city ? ` (${activeDelivery.store.city})` : '';
-      return `${area}${city}`;
+      return cleanPair(
+        activeDelivery.areaName || activeDelivery.store?.storeName || 'Area Pengiriman',
+        activeDelivery.store?.city
+      );
     }
     return 'Sesuai Surat Jalan Keluar Aktif';
   }, [activeWaybill, activeDelivery]);
@@ -764,27 +779,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       }
     }
 
-    const issuePrefix =
-      category === 'retur'
-        ? `[RETUR BARANG${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
-        : category === 'kurang_muat'
-        ? `[KURANG MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
-        : category === 'lebih_muat'
-        ? `[LEBIH MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
-        : category === 'salah_muat'
-        ? `[SALAH MUAT${customerNameInput.trim() ? `: ${customerNameInput.trim()}` : ''}]`
-        : '';
-    const itemSummaryPart = isItemIssueCategory
-      ? `Barang: ${issueItemName.trim()}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}${invoiceNumber.trim() ? ` | No. Faktur/SO: ${invoiceNumber.trim()}` : ''} | GPS: ${effectivePreciseGps.coordsFormatted}`
-      : '';
-
     const submittedNotes =
       category === 'istirahat'
         ? `[ABSEN KIRIMAN PELANGGAN: ${customerNameInput.trim()}] ${notes.trim() || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}`
         : category === 'isi_bbm'
         ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}${photoList.length > 1 ? ` (${photoList.length} Foto Bukti)` : ''}`
         : isItemIssueCategory
-        ? `${issuePrefix} ${itemSummaryPart}${notes.trim() ? ` — ${notes.trim()}` : ''}`
+        ? notes.trim() || '-'
         : notes.trim() || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Laporan kendala pengiriman di jalan');
 
     const submittedPhoto = photoList[0] || null;

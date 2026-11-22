@@ -44,6 +44,7 @@ interface DriverVehicleChecklistModalProps {
   initialChecklist?: DriverVehicleChecklist | null;
   defaultInspectionType?: 'pre_trip' | 'post_trip';
   canSelectPostTrip?: boolean;
+  crewRole?: 'driver' | 'helper';
   onSaved?: (saved: DriverVehicleChecklist) => void;
   onOpenDeviceCamera?: () => void;
 }
@@ -59,6 +60,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   initialChecklist,
   defaultInspectionType,
   canSelectPostTrip = false,
+  crewRole = 'driver',
   onSaved,
   onOpenDeviceCamera
 }) => {
@@ -431,7 +433,18 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     } catch {}
   }, [isOpen, driverId, plateNumber, checklist, notes, odometerInput, fuelPercent, inspectionType, photoUrl]);
 
+  React.useEffect(() => {
+    if (isOpen && crewRole === 'helper') {
+      const t = setTimeout(() => {
+        odometerRef.current?.focus();
+      }, 90);
+      return () => clearTimeout(t);
+    }
+  }, [isOpen, crewRole, inspectionType]);
+
   if (!isOpen) return null;
+
+  const isHelperKmMode = crewRole === 'helper';
 
   const isPostTripUnlocked = Boolean(canSelectPostTrip || defaultInspectionType === 'post_trip');
 
@@ -471,22 +484,28 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
 
   const handleSave = () => {
     const parsedOdo = Number(odometerInput.trim());
-    if (!odometerInput.trim() || isNaN(parsedOdo) || parsedOdo <= 0) {
+    if (isHelperKmMode && (!odometerInput.trim() || isNaN(parsedOdo) || parsedOdo <= 0)) {
       addNotification(
         'sla_warning',
-        'Isian Odometer (KM) Wajib Diisi',
-        'Silakan ketik angka Odometer (KM) armada terlebih dahulu sebelum menyimpan checklist.'
+        inspectionType === 'post_trip' ? 'KM Akhir Wajib Diisi' : 'KM Awal Wajib Diisi',
+        `Silakan ketik angka ${inspectionType === 'post_trip' ? 'KM Akhir' : 'KM Awal'} armada terlebih dahulu sebelum menyimpan.`
       );
       odometerRef.current?.focus();
       return;
     }
 
+    const effectiveOdoKm = isHelperKmMode ? parsedOdo : 0;
+
     setIsSubmitting(true);
-    const { overallStatus, passedCount, issueCount } = driverChecklistService.calculateStatus(checklist.items);
-    
+    const itemsToSave = isHelperKmMode
+      ? checklist.items.map(item => ({ ...item, status: 'ok' as const }))
+      : checklist.items;
+    const { overallStatus, passedCount, issueCount } = driverChecklistService.calculateStatus(itemsToSave);
+
     const finalChecklist: DriverVehicleChecklist = {
       ...checklist,
-      odometerKm: parsedOdo,
+      items: itemsToSave,
+      odometerKm: effectiveOdoKm,
       fuelLevelPercent: fuelPercent,
       inspectionType,
       notes,
@@ -494,7 +513,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       overallStatus,
       passedCount,
       issueCount,
-      driverSignature: `${driverName} (Tervalidasi Digital)`,
+      driverSignature: `${driverName} (${isHelperKmMode ? 'Helper KM' : 'Driver Checklist'} Tervalidasi)`,
       synced: true
     };
 
@@ -502,17 +521,23 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     setIsSubmitting(false);
 
     if (success) {
-      formKirimStore.syncChecklistOdometer({
-        date: finalChecklist.date,
-        plateNumber: finalChecklist.plateNumber,
-        driverName: finalChecklist.driverName,
-        inspectionType: finalChecklist.inspectionType,
-        odometerKm: finalChecklist.odometerKm
-      });
+      if (isHelperKmMode && effectiveOdoKm > 0) {
+        formKirimStore.syncChecklistOdometer({
+          date: finalChecklist.date,
+          plateNumber: finalChecklist.plateNumber,
+          driverName: finalChecklist.driverName,
+          inspectionType: finalChecklist.inspectionType,
+          odometerKm: finalChecklist.odometerKm
+        });
+      }
       addNotification(
         'checker',
-        'Checklist Armada Tersimpan',
-        `Inspeksi ${inspectionType === 'pre_trip' ? 'Checklist Pagi' : 'Checklist Pulang'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
+        isHelperKmMode
+          ? `${inspectionType === 'pre_trip' ? 'KM Awal' : 'KM Akhir'} Armada Tersimpan`
+          : 'Checklist Armada Tersimpan',
+        isHelperKmMode
+          ? `${inspectionType === 'pre_trip' ? 'KM Awal' : 'KM Akhir'} (${effectiveOdoKm.toLocaleString('id-ID')} km) untuk ${plateNumber} berhasil dicatat dan tersinkron ke Form Kirim.`
+          : `Inspeksi ${inspectionType === 'pre_trip' ? 'Checklist Berangkat' : 'Checklist Pulang'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
       );
       setNotes('');
       setOdometerInput('');
@@ -636,12 +661,16 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
             </div>
             <div>
               <div className="text-xs font-black text-white uppercase tracking-wide">
-                Checklist Inspeksi Armada PT AKK
+                {isHelperKmMode
+                  ? inspectionType === 'post_trip'
+                    ? 'Input KM Akhir Armada (Helper)'
+                    : 'Input KM Awal Armada (Helper)'
+                  : 'Checklist Inspeksi Armada PT AKK'}
               </div>
               <div className="text-[10px] text-slate-400 flex items-center gap-2">
                 <span>{plateNumber} ({vehicleType})</span>
                 <span>·</span>
-                <span>Driver: {driverName}</span>
+                <span>{isHelperKmMode ? 'Helper' : 'Driver'}: {driverName}</span>
               </div>
             </div>
           </div>
@@ -660,7 +689,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
           {/* Header Summary & Pre-Trip/Post-Trip Switch */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              {/* Inspection Type Selector: Pra-Jalan Wajib Sebelum Jalan, Pasca-Jalan Tidak Bisa Diklik Sebelum Tiba di Gudang */}
+              {/* Inspection Type Selector */}
               <div className="flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-800">
                 <button
                   type="button"
@@ -669,7 +698,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                     inspectionType === 'pre_trip' ? 'bg-amber-500 text-slate-950 shadow font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Checklist Pagi
+                  {isHelperKmMode ? 'KM Awal' : 'Checklist Berangkat'}
                 </button>
                 <button
                   type="button"
@@ -680,8 +709,10 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                   }}
                   title={
                     isPostTripUnlocked
-                      ? 'Pilih Checklist Pulang'
-                      : 'Terkunci: Checklist Pulang baru dapat dipilih setelah klik Konfirmasi Tiba di Gudang'
+                      ? isHelperKmMode
+                        ? 'Pilih KM Akhir'
+                        : 'Pilih Checklist Pulang'
+                      : 'Terkunci: baru dapat dipilih setelah klik Konfirmasi Tiba di Gudang'
                   }
                   className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
                     inspectionType === 'post_trip'
@@ -691,91 +722,125 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                       : 'text-slate-600 opacity-50 cursor-not-allowed'
                   }`}
                 >
-                  Checklist Pulang {!isPostTripUnlocked ? '🔒' : ''}
+                  {isHelperKmMode ? 'KM Akhir' : 'Checklist Pulang'} {!isPostTripUnlocked ? '🔒' : ''}
                 </button>
               </div>
 
-              {/* Status Badge */}
-              <div className="flex items-center gap-2">
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg ${
-                  checklist.overallStatus === 'passed' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                  checklist.overallStatus === 'warning' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
-                  'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                }`}>
-                  {checklist.overallStatus === 'passed' ? 'SIAP JALAN' :
-                   checklist.overallStatus === 'warning' ? 'PERHATIAN' : 'TIDAK LAYAK'}
-                </span>
-              </div>
+              {/* Status Badge (Driver Checklist Mode Only) */}
+              {!isHelperKmMode && (
+                <div className="flex items-center gap-2">
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg ${
+                    checklist.overallStatus === 'passed' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                    checklist.overallStatus === 'warning' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                    'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                  }`}>
+                    {checklist.overallStatus === 'passed' ? 'SIAP JALAN' :
+                     checklist.overallStatus === 'warning' ? 'PERHATIAN' : 'TIDAK LAYAK'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {!isPostTripUnlocked && (
               <div className="text-[11px] text-amber-950 dark:text-amber-200 bg-amber-100/90 dark:bg-amber-950/40 border border-amber-400 dark:border-amber-500/40 rounded-xl px-3 py-2 flex items-center gap-2 shadow-2xs">
                 <Clock className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
                 <span className="leading-snug font-medium">
-                  <strong className="font-extrabold text-amber-950 dark:text-amber-100">Wajib Checklist Pagi</strong> sebelum berangkat. Opsi <strong className="font-extrabold text-amber-950 dark:text-amber-100">Checklist Pulang</strong> otomatis terbuka setelah klik <strong className="font-extrabold text-amber-950 dark:text-amber-100">Tiba di Gudang</strong>.
+                  {isHelperKmMode ? (
+                    <>
+                      Isi <strong className="font-extrabold text-amber-950 dark:text-amber-100">KM Awal</strong> saat berangkat. Pengisian <strong className="font-extrabold text-amber-950 dark:text-amber-100">KM Akhir</strong> otomatis terbuka setelah klik <strong className="font-extrabold text-amber-950 dark:text-amber-100">Tiba di Gudang</strong>.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="font-extrabold text-amber-950 dark:text-amber-100">Wajib Checklist Berangkat</strong> sebelum berangkat. Opsi <strong className="font-extrabold text-amber-950 dark:text-amber-100">Checklist Pulang</strong> otomatis terbuka setelah klik <strong className="font-extrabold text-amber-950 dark:text-amber-100">Tiba di Gudang</strong>.
+                    </>
+                  )}
                 </span>
               </div>
             )}
 
-            {/* Quick Metrics: Odometer dengan Bayangan (Placeholder, Tidak Langsung Terisi) */}
-            <div className="pt-2 border-t border-slate-800/80">
-              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
-                <div className="text-[10px] text-slate-400 flex items-center justify-between">
-                  <span className="flex items-center gap-1 font-semibold text-slate-300">
-                    <Gauge className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Odometer (KM) Wajib Diisi:</span>
-                  </span>
-                  <span className="text-[9px] text-amber-400">Ketik sesuai angka di dashboard</span>
+            {/* Quick Metrics: KM Awal / KM Akhir HANYA untuk Helper; Driver tidak mengisi odometer */}
+            {isHelperKmMode ? (
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="bg-slate-900/90 p-3.5 rounded-xl border border-cyan-500/40 space-y-2">
+                  <div className="text-xs text-slate-200 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 font-bold text-cyan-300">
+                      <Gauge className="w-4 h-4 text-cyan-400" />
+                      <span>
+                        {inspectionType === 'post_trip'
+                          ? 'KM Akhir Armada (Odometer Pulang) *'
+                          : 'KM Awal Armada (Odometer Berangkat) *'}
+                      </span>
+                    </span>
+                  </div>
+                  <input
+                    ref={odometerRef}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={odometerInput}
+                    onChange={(e) => setOdometerInput(e.target.value)}
+                    placeholder={
+                      inspectionType === 'post_trip'
+                        ? 'Contoh: 120185 (Masukkan KM Akhir di dashboard)'
+                        : 'Contoh: 120000 (Masukkan KM Awal di dashboard)'
+                    }
+                    className="w-full min-h-[46px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder:text-slate-500 font-mono font-black text-base focus:outline-none focus:border-cyan-400"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Data {inspectionType === 'post_trip' ? 'KM Akhir' : 'KM Awal'} akan otomatis muncul di <strong className="text-slate-200">Form Kirim</strong> akun Driver &amp; Helper.
+                  </p>
                 </div>
-                <input
-                  ref={odometerRef}
-                  type="number"
-                  min={1}
-                  value={odometerInput}
-                  onChange={(e) => setOdometerInput(e.target.value)}
-                  placeholder="Contoh: 120000 (Masukkan KM Odometer Armada)"
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-500 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
-                />
               </div>
-            </div>
+            ) : (
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
+                  <Gauge className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Pengisian KM Awal &amp; KM Akhir odometer armada dilakukan oleh <strong className="text-slate-200">Helper</strong> tim dan tampil otomatis di Form Kirim.</span>
+                </div>
+              </div>
+            )}
 
-            {/* Quick action: Tandai Semua Lolos OK */}
-            <div className="flex items-center justify-between pt-1">
-              <div className="text-[10px] text-slate-400">
-                Poin Lolos: <strong className="text-emerald-400">{checklist.passedCount}</strong> / {checklist.items.length} · 
-                Kendala: <strong className="text-rose-400">{checklist.issueCount}</strong>
+            {/* Quick action: Tandai Semua Lolos OK (Driver Checklist Mode Only) */}
+            {!isHelperKmMode && (
+              <div className="flex items-center justify-between pt-1">
+                <div className="text-[10px] text-slate-400">
+                  Poin Lolos: <strong className="text-emerald-400">{checklist.passedCount}</strong> / {checklist.items.length} · 
+                  Kendala: <strong className="text-rose-400">{checklist.issueCount}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleMarkAllOk}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Semua OK</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleMarkAllOk}
-                className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>Semua OK</span>
-              </button>
-            </div>
+            )}
           </div>
 
-          {/* Category Tabs (Segmented Buttons) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-            {categories.map(cat => (
-              <button
-                key={cat.key}
-                type="button"
-                onClick={() => setActiveCategory(cat.key)}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition cursor-pointer ${
-                  activeCategory === cat.key
-                    ? 'bg-amber-500 text-slate-950 font-bold'
-                    : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
+          {/* Category Tabs & Checklist Items List (Driver Mode Only; Helper focuses on KM Awal/Akhir) */}
+          {!isHelperKmMode && (
+            <>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {categories.map(cat => (
+                  <button
+                    key={cat.key}
+                    type="button"
+                    onClick={() => setActiveCategory(cat.key)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition cursor-pointer ${
+                      activeCategory === cat.key
+                        ? 'bg-amber-500 text-slate-950 font-bold'
+                        : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
 
-          {/* Checklist Items List */}
-          <div className="space-y-2">
+              {/* Checklist Items List */}
+              <div className="space-y-2">
             {filteredItems.map(item => {
               const isPhotoItem = item.name.toLowerCase().startsWith('foto ');
               return (
@@ -901,7 +966,9 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                 </div>
               );
             })}
-          </div>
+              </div>
+            </>
+          )}
 
           {/* General Notes */}
           <div className="space-y-1">
@@ -983,7 +1050,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
             className="w-full py-2.5 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
           >
             <Save className="w-4 h-4" />
-            <span>Simpan Checklist</span>
+            <span>
+              {isHelperKmMode
+                ? inspectionType === 'post_trip'
+                  ? 'Simpan KM Akhir'
+                  : 'Simpan KM Awal'
+                : 'Simpan Checklist'}
+            </span>
           </button>
         </div>
 

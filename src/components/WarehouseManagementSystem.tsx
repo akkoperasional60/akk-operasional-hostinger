@@ -32,6 +32,7 @@ import {
 } from './WarehouseCubicationModules';
 import { branchStore, BranchRecord } from '../services/branchStore';
 import { WarehouseDatabaseBarangView } from './WarehouseDatabaseBarangView';
+import { MuatReturValidationTab } from './sales/MuatReturValidationTab';
 import { databaseBarangService, isLegacySeededBarang } from '../services/databaseBarangService';
 
 export type WmsSubTab =
@@ -42,6 +43,7 @@ export type WmsSubTab =
   | 'scanner'
   | 'slotting'
   | 'opname'
+  | 'retur_muat'
   | 'purchasing_opname'
   | 'kartu_stok'
   | 'cubication'
@@ -1952,6 +1954,10 @@ export const WarehouseManagementSystem: React.FC<{
       {/* ===================================================================== */}
       {activeTab === 'fleet_cubication' && (
         <WarehouseFleetCubicationSimulator skuItems={skuItems} />
+      )}
+
+      {activeTab === 'retur_muat' && (
+        <MuatReturValidationTab warehouseOnlyMode />
       )}
 
       {/* ===================================================================== */}

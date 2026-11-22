@@ -134,6 +134,11 @@ class DriverShiftService {
       });
       if (!res.ok) return;
       const data = await res.json();
+      const prevSig = JSON.stringify(
+        (this.memoryShifts || []).map(
+          s => `${s.id}:${s.status}:${s.checkinRole}:${s.driverName}:${s.pairedDriverName || ''}:${s.helper1Name || ''}:${s.helper2Name || ''}:${s.selectedArea || ''}:${s.plateNumber || ''}:${s.checklistCompletedAt || ''}:${s.gateOutAt || ''}:${s.arrivedAtWarehouseAt || ''}`
+        )
+      );
       if (Array.isArray(data?.shifts)) {
         const mergedMap = new Map<string, DriverShiftCheckin>();
         for (const s of [...data.shifts, ...(this.memoryShifts || [])]) {
@@ -141,13 +146,20 @@ class DriverShiftService {
             mergedMap.set(String(s.id), s);
           }
         }
-        this.memoryShifts = Array.from(mergedMap.values()).slice(0, 150);
+        this.memoryShifts = Array.from(mergedMap.values())
+          .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+          .slice(0, 150);
       }
       if (data?.pins && typeof data.pins === 'object') {
         this.memoryPins = { ...(this.memoryPins || {}), ...data.pins };
       }
+      const nextSig = JSON.stringify(
+        (this.memoryShifts || []).map(
+          s => `${s.id}:${s.status}:${s.checkinRole}:${s.driverName}:${s.pairedDriverName || ''}:${s.helper1Name || ''}:${s.helper2Name || ''}:${s.selectedArea || ''}:${s.plateNumber || ''}:${s.checklistCompletedAt || ''}:${s.gateOutAt || ''}:${s.arrivedAtWarehouseAt || ''}`
+        )
+      );
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('driver-shift-updated'));
+        window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: { changed: prevSig !== nextSig } }));
       }
     } catch {} finally {
       this.isSyncing = false;
@@ -274,7 +286,9 @@ class DriverShiftService {
       if (!isPrimary) {
         return {
           ...active,
-          checkinRole: 'helper'
+          checkinRole: 'helper',
+          pairedDriverId: active.pairedDriverId || active.driverId,
+          pairedDriverName: active.pairedDriverName || active.driverName
         };
       }
       return active;
@@ -452,6 +466,67 @@ class DriverShiftService {
     return updated;
   }
 
+  public findActivePartnerDriverShift(params: {
+    date?: string;
+    fleetId?: string;
+    plateNumber?: string;
+    selectedArea?: string;
+    helperId?: string;
+    helperName?: string;
+  }): DriverShiftCheckin | null {
+    const todayLocal = params.date || getLocalDateStr();
+    const todayUtc = new Date().toISOString().split('T')[0];
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const normArea = (v?: string) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const targetPlate = normPlate(params.plateNumber);
+    const targetArea = normArea(params.selectedArea);
+
+    const activeDrivers = this.getShifts().filter(s => {
+      if (!s || s.status === 'checked_out') return false;
+      if (s.checkinRole === 'helper') return false;
+      const shiftLocalDate = s.checkinTime ? getLocalDateStr(new Date(s.checkinTime)) : s.date;
+      return s.date === todayLocal || s.date === todayUtc || shiftLocalDate === todayLocal;
+    });
+
+    if (activeDrivers.length === 0) return null;
+
+    // 1. Cocok langsung berdasarkan nama/ID Helper yang didaftarkan oleh Driver
+    if (params.helperName || params.helperId) {
+      const explicitMatch = activeDrivers.find(
+        s =>
+          (Boolean(s.helper1Name || s.helper1Id) &&
+            isSameDriverIdentity(s.helper1Id, s.helper1Name, params.helperId, params.helperName)) ||
+          (Boolean(s.helper2Name || s.helper2Id) &&
+            isSameDriverIdentity(s.helper2Id, s.helper2Name, params.helperId, params.helperName))
+      );
+      if (explicitMatch) {
+        const sPlate = normPlate(explicitMatch.plateNumber);
+        const plateConflict = Boolean(targetPlate && targetPlate !== '-' && sPlate && sPlate !== '-' && targetPlate !== sPlate);
+        if (!plateConflict) return explicitMatch;
+      }
+    }
+
+    // 2. Cocok berdasarkan armada (fleetId / plat nomor yang sama)
+    const fleetMatch = activeDrivers.find(s => {
+      if (params.fleetId && s.fleetId && params.fleetId === s.fleetId) return true;
+      const sPlate = normPlate(s.plateNumber);
+      return Boolean(targetPlate && targetPlate !== '-' && sPlate && sPlate !== '-' && sPlate === targetPlate);
+    });
+    if (fleetMatch) return fleetMatch;
+
+    // 3. Cocok berdasarkan area yang sama apabila plat nomor tidak bertentangan
+    if (targetArea) {
+      const areaMatch = activeDrivers.find(s => {
+        if (normArea(s.selectedArea) !== targetArea) return false;
+        const sPlate = normPlate(s.plateNumber);
+        return !targetPlate || targetPlate === '-' || !sPlate || sPlate === '-' || targetPlate === sPlate;
+      });
+      if (areaMatch) return areaMatch;
+    }
+
+    return null;
+  }
+
   /**
    * Check in driver/helper with Role, Area, Armada & optional Helper 1 / Helper 2 selection + PIN verification and log entry to Hostinger MySQL & Laporan Kiriman Kru
    */
@@ -483,6 +558,11 @@ class DriverShiftService {
       };
     }
 
+    // Pastikan data shift lintas perangkat tersinkron dari server sebelum verifikasi & penautan tim
+    try {
+      await this.syncFromServer();
+    } catch {}
+
     const hadPinBefore = this.hasCustomPin(params.driverId, params.driverName);
     if (!this.verifyPin(params.driverId, cleanPin, params.driverName)) {
       return {
@@ -512,6 +592,24 @@ class DriverShiftService {
         ? 'Helper'
         : params.userRole || (currentUser?.role ? getUserRoleDisplayTitle(currentUser.role) : 'Driver');
     const chosenArea = (params.areaName || '').trim();
+
+    const matchedPartnerDriver =
+      resolvedCheckinRole === 'helper'
+        ? this.findActivePartnerDriverShift({
+            fleetId: params.fleetId,
+            plateNumber: params.plateNumber,
+            selectedArea: chosenArea,
+            helperId: params.driverId,
+            helperName: params.driverName
+          })
+        : null;
+
+    const effectiveArea = chosenArea || matchedPartnerDriver?.selectedArea || '';
+    const effectiveFleetId = params.fleetId || matchedPartnerDriver?.fleetId;
+    const effectiveInitialCode = params.fleetInitialCode || matchedPartnerDriver?.fleetInitialCode;
+    const effectivePlate = (params.plateNumber && params.plateNumber !== '-' ? params.plateNumber : matchedPartnerDriver?.plateNumber) || '-';
+    const effectiveVehicleType = (params.vehicleType && params.vehicleType !== '-' ? params.vehicleType : matchedPartnerDriver?.vehicleType) || '-';
+
     const cleanH1Name =
       resolvedCheckinRole === 'driver'
         ? (params.helper1Name || '').trim()
@@ -524,17 +622,98 @@ class DriverShiftService {
     const cleanH2Name = resolvedCheckinRole === 'driver' ? (params.helper2Name || '').trim() : '';
     const cleanH2Id = cleanH2Name ? (params.helper2Id || `hlp2-${cleanH2Name.toLowerCase().replace(/\s+/g, '-')}`) : undefined;
 
+    const normPlateVal = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const normAreaVal = (v?: string) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
     const buildLinkedHelperShifts = (
       primaryShift: DriverShiftCheckin,
       existingList: DriverShiftCheckin[]
     ): DriverShiftCheckin[] => {
-      const cleanedList = existingList.filter(
-        s => !s.id.startsWith(`SHIFT-LINK-${primaryShift.id}`)
-      );
       if (primaryShift.checkinRole === 'helper') {
-        return [...cleanedList.filter(s => s.id !== primaryShift.id), primaryShift]
+        // Apabila Driver sudah Check-In lebih dulu di armada/area yang sama, pastikan shift Driver ikut terhubung & tahu nama Helper
+        const updatedList = existingList.map(s => {
+          if (matchedPartnerDriver && s.id === matchedPartnerDriver.id && s.status !== 'checked_out') {
+            const h1OccupiedByOther =
+              Boolean(s.helper1Name) && !isSameDriverIdentity(s.helper1Id, s.helper1Name, primaryShift.driverId, primaryShift.driverName);
+            return {
+              ...s,
+              ...(h1OccupiedByOther
+                ? {
+                    helper2Id: s.helper2Id || primaryShift.driverId,
+                    helper2Name: s.helper2Name || primaryShift.driverName
+                  }
+                : {
+                    helper1Id: primaryShift.driverId,
+                    helper1Name: primaryShift.driverName
+                  }),
+              synced: true
+            };
+          }
+          return s;
+        });
+
+        // Hapus shift link sintetik milik helper yang sama jika sudah digantikan Check-In PIN asli
+        const deduped = updatedList.filter(s => {
+          if (s.id === primaryShift.id) return false;
+          if (
+            s.id.startsWith('SHIFT-LINK-') &&
+            s.status !== 'checked_out' &&
+            s.date === primaryShift.date &&
+            isSameDriverIdentity(s.driverId, s.driverName, primaryShift.driverId, primaryShift.driverName)
+          ) {
+            return false;
+          }
+          return true;
+        });
+
+        return [...deduped, primaryShift]
           .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       }
+
+      // Role DRIVER: Tautkan Helper 1 & Helper 2 yang dipilih Driver, DAN perbarui shift Helper jika Helper sudah Check-In lebih dulu
+      const updatedExistingList = existingList
+        .filter(s => !s.id.startsWith(`SHIFT-LINK-${primaryShift.id}`))
+        .map(s => {
+          if (s.id === primaryShift.id || s.status === 'checked_out' || s.checkinRole !== 'helper' || s.date !== primaryShift.date) {
+            return s;
+          }
+          const matchesChosenHelper =
+            (cleanH1Name && isSameDriverIdentity(s.driverId, s.driverName, cleanH1Id, cleanH1Name)) ||
+            (cleanH2Name && isSameDriverIdentity(s.driverId, s.driverName, cleanH2Id, cleanH2Name));
+          const samePlate =
+            normPlateVal(primaryShift.plateNumber) !== '' &&
+            normPlateVal(primaryShift.plateNumber) !== '-' &&
+            normPlateVal(s.plateNumber) === normPlateVal(primaryShift.plateNumber);
+          const sameFleet = Boolean(primaryShift.fleetId && s.fleetId === primaryShift.fleetId);
+          const sameArea = Boolean(primaryShift.selectedArea && normAreaVal(s.selectedArea) === normAreaVal(primaryShift.selectedArea));
+          if (matchesChosenHelper || samePlate || sameFleet || sameArea) {
+            return {
+              ...s,
+              pairedDriverId: primaryShift.driverId,
+              pairedDriverName: primaryShift.driverName,
+              selectedArea: s.selectedArea || primaryShift.selectedArea,
+              fleetId: s.fleetId || primaryShift.fleetId,
+              fleetInitialCode: s.fleetInitialCode || primaryShift.fleetInitialCode,
+              plateNumber: s.plateNumber && s.plateNumber !== '-' ? s.plateNumber : primaryShift.plateNumber,
+              synced: true
+            };
+          }
+          return s;
+        });
+
+      const hasStandaloneHelperShift = (hId?: string, hName?: string) =>
+        Boolean(
+          hName &&
+            updatedExistingList.some(
+              s =>
+                s.status !== 'checked_out' &&
+                s.checkinRole === 'helper' &&
+                s.date === primaryShift.date &&
+                !s.id.startsWith('SHIFT-LINK-') &&
+                isSameDriverIdentity(s.driverId, s.driverName, hId, hName)
+            )
+        );
+
       const linked: DriverShiftCheckin[] = [];
       const crewSummary = [
         `Driver: ${primaryShift.driverName}`,
@@ -542,13 +721,15 @@ class DriverShiftService {
         cleanH2Name ? `H2: ${cleanH2Name}` : ''
       ].filter(Boolean).join(' · ');
 
-      if (cleanH1Name) {
+      if (cleanH1Name && !hasStandaloneHelperShift(cleanH1Id, cleanH1Name)) {
         linked.push({
           ...primaryShift,
           id: `SHIFT-LINK-${primaryShift.id}-H1`,
           driverId: cleanH1Id || `hlp1-${Date.now()}`,
           driverName: cleanH1Name,
           checkinRole: 'helper',
+          pairedDriverId: primaryShift.driverId,
+          pairedDriverName: primaryShift.driverName,
           helper1Id: cleanH1Id,
           helper1Name: cleanH1Name,
           helper2Id: cleanH2Id,
@@ -556,13 +737,19 @@ class DriverShiftService {
           notes: `Terhubung Otomatis Check-In Driver (${crewSummary})`
         });
       }
-      if (cleanH2Name && !isSameDriverIdentity(cleanH1Id, cleanH1Name, cleanH2Id, cleanH2Name)) {
+      if (
+        cleanH2Name &&
+        !isSameDriverIdentity(cleanH1Id, cleanH1Name, cleanH2Id, cleanH2Name) &&
+        !hasStandaloneHelperShift(cleanH2Id, cleanH2Name)
+      ) {
         linked.push({
           ...primaryShift,
           id: `SHIFT-LINK-${primaryShift.id}-H2`,
           driverId: cleanH2Id || `hlp2-${Date.now()}`,
           driverName: cleanH2Name,
           checkinRole: 'helper',
+          pairedDriverId: primaryShift.driverId,
+          pairedDriverName: primaryShift.driverName,
           helper1Id: cleanH1Id,
           helper1Name: cleanH1Name || undefined,
           helper2Id: cleanH2Id,
@@ -570,28 +757,54 @@ class DriverShiftService {
           notes: `Terhubung Otomatis Check-In Driver (${crewSummary})`
         });
       }
-      return [...cleanedList.filter(s => s.id !== primaryShift.id), primaryShift, ...linked]
+      return [...updatedExistingList.filter(s => s.id !== primaryShift.id), primaryShift, ...linked]
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     };
 
-    // Jika sudah ada shift aktif hari ini untuk kru yang sama, perbarui Peran, Area, Armada & Kru Helper sesuai pilihan check-in terbaru
+    // Jika sudah ada shift aktif hari ini untuk kru yang sama (termasuk dari partner driver), perbarui Peran, Area, Armada & Partner sesuai check-in terbaru
     const existingActive = this.getActiveShift(params.driverId, params.driverName);
-    if (existingActive && isSameDriverIdentity(existingActive.driverId, existingActive.driverName, params.driverId, params.driverName)) {
+    const isReplacingPartnerLinkAsHelper =
+      resolvedCheckinRole === 'helper' &&
+      Boolean(existingActive) &&
+      !isSameDriverIdentity(existingActive?.driverId, existingActive?.driverName, params.driverId, params.driverName);
+
+    if (
+      existingActive &&
+      (isSameDriverIdentity(existingActive.driverId, existingActive.driverName, params.driverId, params.driverName) ||
+        isReplacingPartnerLinkAsHelper)
+    ) {
       const updatedExisting: DriverShiftCheckin = {
         ...existingActive,
+        id: isReplacingPartnerLinkAsHelper && existingActive.id.startsWith('SHIFT-LINK-')
+          ? `SHIFT-${Date.now()}-${Math.floor(Math.random() * 899 + 100)}`
+          : existingActive.id.startsWith('SHIFT-LINK-') && resolvedCheckinRole === 'helper'
+          ? `SHIFT-${Date.now()}-${Math.floor(Math.random() * 899 + 100)}`
+          : existingActive.id,
         driverId: params.driverId || existingActive.driverId,
         driverName: params.driverName || existingActive.driverName,
         checkinRole: resolvedCheckinRole,
-        selectedArea: chosenArea || existingActive.selectedArea,
-        fleetId: params.fleetId || existingActive.fleetId,
-        fleetInitialCode: params.fleetInitialCode || existingActive.fleetInitialCode,
-        plateNumber: params.plateNumber || existingActive.plateNumber || '-',
-        vehicleType: params.vehicleType || existingActive.vehicleType || '-',
+        pairedDriverId:
+          resolvedCheckinRole === 'helper'
+            ? (matchedPartnerDriver?.driverId || existingActive.pairedDriverId || (!isSameDriverIdentity(existingActive.driverId, existingActive.driverName, params.driverId, params.driverName) ? existingActive.driverId : undefined))
+            : undefined,
+        pairedDriverName:
+          resolvedCheckinRole === 'helper'
+            ? (matchedPartnerDriver?.driverName || existingActive.pairedDriverName || (!isSameDriverIdentity(existingActive.driverId, existingActive.driverName, params.driverId, params.driverName) ? existingActive.driverName : undefined))
+            : undefined,
+        selectedArea: effectiveArea || existingActive.selectedArea,
+        fleetId: effectiveFleetId || existingActive.fleetId,
+        fleetInitialCode: effectiveInitialCode || existingActive.fleetInitialCode,
+        plateNumber: effectivePlate !== '-' ? effectivePlate : existingActive.plateNumber || '-',
+        vehicleType: effectiveVehicleType !== '-' ? effectiveVehicleType : existingActive.vehicleType || '-',
         helper1Id: cleanH1Id,
         helper1Name: cleanH1Name || undefined,
         helper2Id: cleanH2Id,
         helper2Name: cleanH2Name || undefined,
-        locationName: chosenArea || existingActive.locationName,
+        checklistCompletedAt: matchedPartnerDriver?.checklistCompletedAt || existingActive.checklistCompletedAt,
+        securityValidatedAt: matchedPartnerDriver?.securityValidatedAt || existingActive.securityValidatedAt,
+        securityValidatedBy: matchedPartnerDriver?.securityValidatedBy || existingActive.securityValidatedBy,
+        gateOutAt: matchedPartnerDriver?.gateOutAt || existingActive.gateOutAt,
+        locationName: effectiveArea || existingActive.locationName,
         notes: params.notes || existingActive.notes,
         synced: true
       };
@@ -605,7 +818,7 @@ class DriverShiftService {
         userRole: roleLabel,
         helperName: [cleanH1Name, cleanH2Name].filter(Boolean).join(', ') || undefined,
         plateNumber: updatedExisting.plateNumber || '-',
-        areaName: chosenArea || updatedExisting.locationName || 'Presensi Masuk Shift DC',
+        areaName: effectiveArea || updatedExisting.locationName || 'Presensi Masuk Shift DC',
         checkinTimeFormatted: updatedExisting.checkinTimeFormatted,
         securityPin: '****'
       });
@@ -616,7 +829,7 @@ class DriverShiftService {
       return {
         success: true,
         shift: updatedExisting,
-        message: `Check-In ${roleLabel} diperbarui! Area: ${chosenArea || '-'} • Armada: ${updatedExisting.plateNumber}.`
+        message: `Check-In ${roleLabel} diperbarui! Area: ${effectiveArea || '-'} • Armada: ${updatedExisting.plateNumber}.`
       };
     }
 
@@ -631,26 +844,32 @@ class DriverShiftService {
       driverId: params.driverId,
       driverName: params.driverName,
       checkinRole: resolvedCheckinRole,
-      selectedArea: chosenArea || undefined,
-      fleetId: params.fleetId,
-      fleetInitialCode: params.fleetInitialCode,
-      plateNumber: params.plateNumber || '-',
-      vehicleType: params.vehicleType || '-',
+      pairedDriverId: resolvedCheckinRole === 'helper' ? matchedPartnerDriver?.driverId : undefined,
+      pairedDriverName: resolvedCheckinRole === 'helper' ? matchedPartnerDriver?.driverName : undefined,
+      selectedArea: effectiveArea || undefined,
+      fleetId: effectiveFleetId,
+      fleetInitialCode: effectiveInitialCode,
+      plateNumber: effectivePlate,
+      vehicleType: effectiveVehicleType,
       helper1Id: cleanH1Id,
       helper1Name: cleanH1Name || undefined,
       helper2Id: cleanH2Id,
       helper2Name: cleanH2Name || undefined,
+      checklistCompletedAt: matchedPartnerDriver?.checklistCompletedAt,
+      securityValidatedAt: matchedPartnerDriver?.securityValidatedAt,
+      securityValidatedBy: matchedPartnerDriver?.securityValidatedBy,
+      gateOutAt: matchedPartnerDriver?.gateOutAt,
       date: dateStr,
       checkinTime: now.toISOString(),
       checkinTimeFormatted: timeFormatted,
       verificationMethod: 'pin',
-      locationName: chosenArea || 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
+      locationName: effectiveArea || 'DC PT. Anugrah Kemasan Kreatif - Sukowidi Banyuwangi',
       latitude: -8.1906,
       longitude: 114.3708,
       status: 'checked_in',
       shiftName: params.shiftName || 'Shift Operasional Harian',
       odometerStartKm: 0,
-      notes: params.notes || `Check-In sebagai ${roleLabel} • Area: ${chosenArea || '-'} • Armada: ${params.plateNumber || '-'}${cleanH1Name ? ` • Helper 1: ${cleanH1Name}` : ''}${cleanH2Name ? ` • Helper 2: ${cleanH2Name}` : ''}`,
+      notes: params.notes || `Check-In sebagai ${roleLabel} • Area: ${effectiveArea || '-'} • Armada: ${effectivePlate}${cleanH1Name ? ` • Helper 1: ${cleanH1Name}` : ''}${cleanH2Name ? ` • Helper 2: ${cleanH2Name}` : ''}`,
       synced: false,
       createdAt: now.toISOString()
     };
@@ -670,7 +889,7 @@ class DriverShiftService {
       userRole: roleLabel,
       helperName: [cleanH1Name, cleanH2Name].filter(Boolean).join(', ') || undefined,
       plateNumber: newShift.plateNumber || '-',
-      areaName: chosenArea || 'Presensi Masuk Shift DC',
+      areaName: effectiveArea || 'Presensi Masuk Shift DC',
       checkinTimeFormatted: timeFormatted,
       securityPin: '****'
     });
@@ -685,7 +904,7 @@ class DriverShiftService {
           crewId: params.driverId,
           date: dateStr,
           status: 'present',
-          reason: `Check-in ${roleLabel} • ${chosenArea || 'DC'} • ${newShift.plateNumber} (${timeFormatted})`
+          reason: `Check-in ${roleLabel} • ${effectiveArea || 'DC'} • ${newShift.plateNumber} (${timeFormatted})`
         })
       });
       if (response.ok) {
@@ -703,7 +922,7 @@ class DriverShiftService {
     return {
       success: true,
       shift: newShift,
-      message: `Check-In ${roleLabel} berhasil pukul ${timeFormatted}! Area: ${chosenArea || '-'} • Armada: ${newShift.plateNumber}.`
+      message: `Check-In ${roleLabel} berhasil pukul ${timeFormatted}! Area: ${effectiveArea || '-'} • Armada: ${newShift.plateNumber}.`
     };
   }
 

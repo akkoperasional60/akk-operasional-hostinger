@@ -977,10 +977,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       } catch {}
     }
 
-    const onShiftUpdated = () => {
+    const onShiftUpdated = (ev?: Event) => {
+      const detail = (ev as CustomEvent<{ changed?: boolean } | undefined> | undefined)?.detail;
       const nextActive = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
       syncShiftState(nextActive);
-      if (!nextActive) {
+      if (!nextActive || !detail || detail.changed !== false) {
         loadDeliveriesRef.current(true);
       }
     };
@@ -989,15 +990,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       setWaybillRefreshTick(t => t + 1);
     };
 
-    // Sinkronisasi berkala status shift Driver <-> Helper agar saat salah satu klik "Tiba di Gudang",
-    // aplikasi pasangan (Driver/Helper) otomatis mengikuti status Selesai / Tiba di Gudang & langsung membuka Checklist Pulang
+    // Sinkronisasi berkala status shift & KM/Checklist Driver <-> Helper lintas perangkat:
+    // Berjalan bahkan sebelum Check-In agar Helper/Driver langsung melihat data partner, serta memicu pop-up Pulang / KM Akhir saat partner Tiba di Gudang
     const crewArrivalSyncTimer = setInterval(async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const prevActiveShift = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
-      if (!prevActiveShift) return;
       try {
         await driverShiftService.syncFromServer();
       } catch {}
+      try {
+        const syncedChk = await driverChecklistService.syncFromServer();
+        setChecklists(syncedChk);
+      } catch {}
+
       const latestAfterSync = driverShiftService.getActiveShift(selectedDriverId, portalDisplayName);
       if (prevActiveShift && !latestAfterSync) {
         const todayStr = getLocalDateStr();
@@ -1027,18 +1032,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         await loadDeliveriesRef.current(true);
         setWaybillRefreshTick(t => t + 1);
 
-        // Cek apakah Checklist Pulang hari ini sudah pernah diisi untuk armada/kru ini
         let freshChecklists = driverChecklistService.getChecklists();
         try {
-          freshChecklists = await driverChecklistService.syncFromServer();
+          freshChecklists = await driverChecklistService.syncFromServer(true);
           setChecklists(freshChecklists);
         } catch {}
         const normPlate = resolvedPlate.replace(/\s+/g, '').toLowerCase();
+        const isHelperNow =
+          prevActiveShift.checkinRole === 'helper' ||
+          effectiveJobdeskRoleRef.current === 'helper';
+        const myNameLower = (portalDisplayName || '').trim().toLowerCase();
         const alreadySubmittedPostTrip = freshChecklists.some(c => {
           const cDate = String(c.date || c.createdAt || '').slice(0, 10);
           if (cDate !== todayStr || c.inspectionType !== 'post_trip') return false;
           const cPlate = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
-          return (normPlate && normPlate !== '-' && cPlate === normPlate) || c.driverId === selectedDriverId;
+          const cNameLower = String(c.driverName || '').trim().toLowerCase();
+          const sameCrewOrPlate =
+            (normPlate && normPlate !== '-' && cPlate === normPlate) ||
+            c.driverId === selectedDriverId ||
+            (myNameLower && cNameLower && cNameLower === myNameLower);
+          if (!sameCrewOrPlate) return false;
+          return isHelperNow ? Number(c.odometerKm) > 0 : Number(c.odometerKm) <= 0;
         });
 
         if (!alreadySubmittedPostTrip) {
@@ -1058,8 +1072,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
         addNotification(
           'delivery',
-          'Tiba di Gudang Tersinkronisasi • Checklist Pulang',
-          `Rekan kru telah mengonfirmasi Tiba di Gudang untuk armada ${resolvedPlate}. Status Anda otomatis selesai — silakan lanjutkan Checklist Pulang.`
+          isHelperNow
+            ? 'Tiba di Gudang Tersinkronisasi • Input KM Akhir'
+            : 'Tiba di Gudang Tersinkronisasi • Checklist Pulang',
+          isHelperNow
+            ? `Rekan kru mengonfirmasi Tiba di Gudang (${resolvedPlate}). Silakan isi KM Akhir armada agar tercatat di Form Kirim.`
+            : `Rekan kru telah mengonfirmasi Tiba di Gudang untuk armada ${resolvedPlate}. Status Anda otomatis selesai — silakan lanjutkan Checklist Pulang.`
         );
       } else if (latestAfterSync) {
         syncShiftState(latestAfterSync);
@@ -2218,7 +2236,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           s.date === todayStrForShifts &&
           Boolean(s.selectedArea) &&
           (s.driverId === selectedDriverId ||
+            s.pairedDriverId === selectedDriverId ||
             doesCrewNameMatch(s.driverName || '', portalDisplayName) ||
+            doesCrewNameMatch(s.pairedDriverName || '', portalDisplayName) ||
             doesCrewNameMatch(s.helper1Name || '', portalDisplayName) ||
             doesCrewNameMatch(s.helper2Name || '', portalDisplayName))
       );
@@ -2413,38 +2433,95 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               )
             : undefined);
 
-        const sameDayShifts = driverShiftService.getShifts().filter(s => s.date === shiftItem.date);
+        const normPlateStr = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+        const shiftPlateNorm = normPlateStr(shiftFleetObj?.plateNumber || shiftItem.plateNumber);
+        const sameDayShifts = driverShiftService
+          .getShifts()
+          .filter(s => s.date === shiftItem.date && (shiftItem.status === 'checked_out' || s.status !== 'checked_out'));
+
         const primaryDriverShift =
           shiftItem.checkinRole === 'driver'
             ? shiftItem
-            : sameDayShifts.find(
-                s =>
-                  s.checkinRole === 'driver' &&
-                  ((shiftItem.fleetId && s.fleetId === shiftItem.fleetId) ||
-                    (shiftItem.plateNumber && s.plateNumber === shiftItem.plateNumber) ||
-                    standardizeAreaName(s.selectedArea || '') === shiftAreaStd)
-              );
+            : sameDayShifts.find(s => {
+                if (s.checkinRole === 'helper') return false;
+                if (shiftItem.pairedDriverId && s.driverId === shiftItem.pairedDriverId) return true;
+                if (shiftItem.pairedDriverName && doesCrewNameMatch(s.driverName || '', shiftItem.pairedDriverName)) return true;
+                if (shiftItem.fleetId && s.fleetId && s.fleetId === shiftItem.fleetId) return true;
+                const sPlateNorm = normPlateStr(s.plateNumber);
+                if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm === shiftPlateNorm) return true;
+                if (
+                  doesCrewNameMatch(s.helper1Name || '', shiftItem.driverName || '') ||
+                  doesCrewNameMatch(s.helper2Name || '', shiftItem.driverName || '')
+                ) {
+                  return true;
+                }
+                const sAreaStd = standardizeAreaName(s.selectedArea || '');
+                return Boolean(
+                  shiftAreaStd &&
+                    sAreaStd === shiftAreaStd &&
+                    (!shiftPlateNorm || shiftPlateNorm === '-' || !sPlateNorm || sPlateNorm === '-' || shiftPlateNorm === sPlateNorm)
+                );
+              });
+
+        const sameDayHelperShifts = sameDayShifts.filter(s => {
+          if (s.checkinRole !== 'helper') return false;
+          if (primaryDriverShift && s.pairedDriverId && s.pairedDriverId === primaryDriverShift.driverId) return true;
+          if (primaryDriverShift && s.pairedDriverName && doesCrewNameMatch(s.pairedDriverName, primaryDriverShift.driverName)) return true;
+          if (shiftItem.fleetId && s.fleetId && s.fleetId === shiftItem.fleetId) return true;
+          const sPlateNorm = normPlateStr(s.plateNumber);
+          if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm === shiftPlateNorm) return true;
+          return Boolean(shiftAreaStd && standardizeAreaName(s.selectedArea || '') === shiftAreaStd);
+        });
 
         const isHelperCheckin = shiftItem.checkinRole === 'helper';
         const resolvedDriverName =
           primaryDriverShift?.driverName ||
+          (isHelperCheckin && shiftItem.pairedDriverName ? shiftItem.pairedDriverName : '') ||
           (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || portalDisplayName);
-        const resolvedHelper1Name = isHelperCheckin
-          ? (shiftItem.driverName || shiftItem.helper1Name || portalDisplayName)
-          : (primaryDriverShift?.helper1Name || shiftItem.helper1Name || '');
-        const resolvedHelper2Name =
-          primaryDriverShift?.helper2Name || shiftItem.helper2Name || '';
 
-        const existingMatchIdx = sorted.findIndex(
-          s =>
-            (shiftItem.status === 'checked_out' || s.status !== 'delivered') &&
-            standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd &&
-            ((s.departureDate || s.createdAt || '').slice(0, 10) === (shiftItem.date || todayIsoLocal)) &&
-            (!isManagerPortal ||
-              doesCrewNameMatch(s.crew?.name || '', resolvedDriverName) ||
-              doesCrewNameMatch(s.crewHelper?.name || '', resolvedHelper1Name) ||
-              doesCrewNameMatch(s.crew?.name || '', shiftItem.driverName || ''))
-        );
+        const helperNamesPool: string[] = [];
+        const pushHelperName = (n?: string) => {
+          const clean = String(n || '').trim();
+          if (!clean || clean === '-' || clean.toLowerCase() === 'tanpa helper') return;
+          if (resolvedDriverName && resolvedDriverName !== 'Driver Armada Terkait' && doesCrewNameMatch(clean, resolvedDriverName)) return;
+          if (!helperNamesPool.some(existingH => doesCrewNameMatch(existingH, clean))) {
+            helperNamesPool.push(clean);
+          }
+        };
+        pushHelperName(primaryDriverShift?.helper1Name);
+        pushHelperName(primaryDriverShift?.helper2Name);
+        if (isHelperCheckin) {
+          pushHelperName(shiftItem.driverName);
+          pushHelperName(shiftItem.helper1Name);
+          pushHelperName(portalDisplayName);
+        } else {
+          pushHelperName(shiftItem.helper1Name);
+          pushHelperName(shiftItem.helper2Name);
+        }
+        sameDayHelperShifts.forEach(hs => pushHelperName(hs.driverName));
+
+        const resolvedHelper1Name = helperNamesPool[0] || '';
+        const resolvedHelper2Name = helperNamesPool[1] || '';
+
+        const existingMatchIdx = sorted.findIndex(s => {
+          if (!(shiftItem.status === 'checked_out' || s.status !== 'delivered')) return false;
+          if ((s.departureDate || s.createdAt || '').slice(0, 10) !== (shiftItem.date || todayIsoLocal)) return false;
+          const areaMatch = standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd;
+          const sPlateNorm = normPlateStr(s.fleet?.plateNumber);
+          const samePortalFleet = Boolean(
+            s.id.startsWith('PORTAL-') &&
+              shiftPlateNorm &&
+              shiftPlateNorm !== '-' &&
+              sPlateNorm === shiftPlateNorm
+          );
+          if (!areaMatch && !samePortalFleet) return false;
+          if (!isManagerPortal) return true;
+          return (
+            doesCrewNameMatch(s.crew?.name || '', resolvedDriverName) ||
+            doesCrewNameMatch(s.crewHelper?.name || '', resolvedHelper1Name) ||
+            doesCrewNameMatch(s.crew?.name || '', shiftItem.driverName || '')
+          );
+        });
 
         if (existingMatchIdx >= 0) {
           const existing = sorted[existingMatchIdx];
@@ -2452,7 +2529,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           if (resolvedDriverName && resolvedDriverName !== 'Driver Armada Terkait') {
             nextDriverCrew = {
               ...(existing.crew || {
-                id: primaryDriverShift?.driverId || existing.crewId,
+                id: primaryDriverShift?.driverId || shiftItem.pairedDriverId || existing.crewId,
                 phone: '-',
                 role: 'Driver Utama',
                 licenseNumber: '-',
@@ -2463,26 +2540,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               }),
               name: resolvedDriverName
             };
-          } else if (isHelperCheckin && existing.crew?.name && doesCrewNameMatch(existing.crew.name, shiftItem.driverName)) {
+          } else if (
+            isHelperCheckin &&
+            existing.crew?.name &&
+            existing.crew.name !== '-' &&
+            doesCrewNameMatch(existing.crew.name, shiftItem.driverName)
+          ) {
             const partnerFromHelperSlot =
               existing.crewHelper?.name && !doesCrewNameMatch(existing.crewHelper.name, shiftItem.driverName)
                 ? existing.crewHelper
                 : undefined;
-            nextDriverCrew = partnerFromHelperSlot
-              ? { ...partnerFromHelperSlot, role: 'Driver Utama' }
-              : {
-                  ...(existing.crew || {
-                    id: 'drv-pending',
-                    phone: '-',
-                    role: 'Driver Utama',
-                    licenseNumber: '-',
-                    licenseType: 'SIM B1 Umum',
-                    status: 'on-duty',
-                    tripsCompleted: 0,
-                    rating: 5
-                  }),
-                  name: '-'
-                };
+            if (partnerFromHelperSlot) {
+              nextDriverCrew = { ...partnerFromHelperSlot, role: 'Driver Utama' };
+            }
           }
 
           const nextHelper1Crew = resolvedHelper1Name
@@ -3082,21 +3152,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     isUserHelperRole
   ]);
 
+  const effectiveJobdeskRoleRef = useRef<'driver' | 'helper'>('driver');
+  effectiveJobdeskRoleRef.current = effectiveJobdeskRole;
+
   // 📋 Integrasi Form Kirim dengan Isolasi Area Ketat:
-  // Form Kirim HANYA muncul apabila kru sudah Check-In dan memiliki jadwal pengiriman aktif hari ini,
-  // serta hanya menampilkan Form Kirim yang sesuai dengan area pengiriman aktif tersebut.
+  // Form Kirim tampil apabila kru sudah Check-In dan memiliki jadwal pengiriman aktif ATAU sudah selesai Tiba di Gudang hari ini,
+  // serta hanya menampilkan Form Kirim yang sesuai dengan area pengiriman hari ini.
   const todayFormKirimIntegration = useMemo<{
     record: FormKirimRecord | null;
     matchedArea: string;
+    hasTodayTrip: boolean;
   }>(() => {
-    // Jika belum Check-In atau belum ada jadwal pengiriman aktif, Form Kirim WAJIB kosong
-    if (!activeShift || activeDeliveries.length === 0) {
-      return {
-        record: null,
-        matchedArea: ''
-      };
-    }
-
     const todayWibIso = getPortalTodayWibIso();
     const todayLocalIso = getLocalDateStr();
     const isTodayDate = (iso?: string) => {
@@ -3104,17 +3170,50 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       return Boolean(clean && (clean === todayWibIso || clean === todayLocalIso));
     };
 
-    const primarySch = activeDeliveries[0] || null;
+    const todayCompletedDeliveries = deliveredDeliveries.filter(d =>
+      isTodayDate(d.actualArrival || d.departureDate || d.createdAt)
+    );
+    const todayShiftsForUser = driverShiftService.getShifts().filter(
+      s =>
+        isTodayDate(s.date || s.checkinTime) &&
+        Boolean(s.selectedArea) &&
+        (s.driverId === selectedDriverId ||
+          s.pairedDriverId === selectedDriverId ||
+          doesCrewNameMatch(s.driverName || '', portalDisplayName) ||
+          doesCrewNameMatch(s.pairedDriverName || '', portalDisplayName) ||
+          doesCrewNameMatch(s.helper1Name || '', portalDisplayName) ||
+          doesCrewNameMatch(s.helper2Name || '', portalDisplayName))
+    );
+
+    const tripDeliveriesToday =
+      activeDeliveries.length > 0 ? activeDeliveries : todayCompletedDeliveries;
+    const hasTodayTrip = Boolean(
+      (activeShift && activeDeliveries.length > 0) ||
+        todayCompletedDeliveries.length > 0 ||
+        todayShiftsForUser.length > 0
+    );
+
+    if (!hasTodayTrip) {
+      return {
+        record: null,
+        matchedArea: '',
+        hasTodayTrip: false
+      };
+    }
+
+    const primarySch = tripDeliveriesToday[0] || null;
+    const latestShiftForArea = activeShift || todayShiftsForUser[0] || null;
     const expectedAreaSet = new Set<string>(
       [
-        activeShift?.selectedArea || '',
-        ...activeDeliveries.map(d => d.areaName || d.store?.city || '')
+        latestShiftForArea?.selectedArea || '',
+        ...todayShiftsForUser.map(s => s.selectedArea || ''),
+        ...tripDeliveriesToday.map(d => d.areaName || d.store?.city || '')
       ]
         .map(a => standardizeAreaName(a))
         .filter(Boolean)
     );
     const primaryAreaStd = standardizeAreaName(
-      activeShift?.selectedArea || primarySch?.areaName || primarySch?.store?.city || ''
+      latestShiftForArea?.selectedArea || primarySch?.areaName || primarySch?.store?.city || ''
     );
     const activeCrewName = currentDriver?.name || portalDisplayName || '';
 
@@ -3127,11 +3226,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (expectedAreaSet.size === 0) {
       return {
         record: null,
-        matchedArea: ''
+        matchedArea: '',
+        hasTodayTrip: false
       };
     }
 
-    // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim — WAJIB cocok dengan area aktif kru!
+    // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim — WAJIB cocok dengan area aktif/hari ini kru!
     let preferredId = '';
     try {
       preferredId = localStorage.getItem('akk_active_form_kirim_id') || '';
@@ -3143,12 +3243,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       if (explicitRecord && areaMatchesUserScope(explicitRecord.areaKirim)) {
         return {
           record: explicitRecord,
-          matchedArea: explicitRecord.areaKirim || activeShift?.selectedArea || primarySch?.areaName || ''
+          matchedArea: explicitRecord.areaKirim || latestShiftForArea?.selectedArea || primarySch?.areaName || '',
+          hasTodayTrip: true
         };
       }
     }
 
-    // Filter Form Kirim tanggal hari ini yang cocok dengan area pengiriman aktif kru ini
+    // Filter Form Kirim tanggal hari ini yang cocok dengan area pengiriman hari ini kru ini
     const todayForms = formKirimList.filter(
       fk =>
         isTodayDate(fk.tanggalKirim) &&
@@ -3165,7 +3266,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (candidateForms.length === 0) {
       return {
         record: null,
-        matchedArea: activeShift?.selectedArea || primarySch?.areaName || ''
+        matchedArea: latestShiftForArea?.selectedArea || primarySch?.areaName || '',
+        hasTodayTrip: true
       };
     }
 
@@ -3198,12 +3300,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     return {
       record: chosen,
-      matchedArea: chosen?.areaKirim || activeShift?.selectedArea || primarySch?.areaName || ''
+      matchedArea: chosen?.areaKirim || latestShiftForArea?.selectedArea || primarySch?.areaName || '',
+      hasTodayTrip: true
     };
   }, [
     formKirimList,
     activeDeliveries,
+    deliveredDeliveries,
     activeShift,
+    selectedDriverId,
     currentDriver?.name,
     portalDisplayName
   ]);
@@ -3288,9 +3393,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         },
         fleetId: fallbackFleet.id,
         fleet: fallbackFleet,
-        crewId: isHelperCheckin ? 'crew-driver-tbd' : fallbackCrew.id,
+        crewId: isHelperCheckin ? (activeShift.pairedDriverId || 'crew-driver-tbd') : fallbackCrew.id,
         crew: isHelperCheckin
-          ? { ...fallbackCrew, id: 'crew-driver-tbd', name: 'Driver Armada Terkait', role: 'Driver Utama' }
+          ? {
+              ...fallbackCrew,
+              id: activeShift.pairedDriverId || 'crew-driver-tbd',
+              name: activeShift.pairedDriverName || 'Driver Armada Terkait',
+              role: 'Driver Utama'
+            }
           : fallbackCrew,
         crewHelperId: isHelperCheckin ? fallbackCrew.id : undefined,
         crewHelper: isHelperCheckin ? fallbackCrew : undefined,
@@ -4739,8 +4849,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     addNotification(
       'delivery',
-      'Tiba di Gudang • Masuk Tab Selesai & Isi Checklist Pulang',
-      `Konfirmasi tiba di gudang oleh Helper (${portalDisplayName}) berhasil. Seluruh kru otomatis selesai dan silakan lanjutkan Checklist Pulang.`
+      'Tiba di Gudang • Masuk Tab Selesai & Input KM Akhir',
+      `Konfirmasi tiba di gudang oleh Helper (${portalDisplayName}) berhasil. Seluruh kru otomatis selesai — silakan masukkan KM Akhir armada.`
     );
   };
 
@@ -5826,10 +5936,57 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         <span>{hasChecklistToday ? 'Checklist ✓' : 'Checklist'}</span>
                       </button>
                     ) : (
-                      <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                        <ShieldCheck className="w-4 h-4 shrink-0" />
-                        <span>Aktif {activeShift.checkinTimeFormatted}</span>
-                      </span>
+                      (() => {
+                        const todayStrKm = getLocalDateStr();
+                        const activePlateCleanKm = (assignedFleet?.plateNumber || activeShift.plateNumber || '')
+                          .replace(/\s+/g, '')
+                          .toLowerCase();
+                        const hasKmAwalToday = checklists.some(c => {
+                          const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+                          if (cDate !== todayStrKm || c.inspectionType !== 'pre_trip' || Number(c.odometerKm) <= 0) return false;
+                          const cPlate = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+                          return (
+                            (activePlateCleanKm && activePlateCleanKm !== '-' && cPlate === activePlateCleanKm) ||
+                            c.driverId === selectedDriverId ||
+                            doesCrewNameMatch(c.driverName || '', portalDisplayName)
+                          );
+                        });
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetFleet = assignedFleet || activeDeliveries[0]?.fleet || deliveries[0]?.fleet || fleets[0];
+                              const nextType: 'pre_trip' | 'post_trip' = hasConfirmedArrivalToday ? 'post_trip' : 'pre_trip';
+                              const fresh = driverChecklistService.createNewChecklistTemplate(
+                                selectedDriverId,
+                                currentDriver?.name || portalDisplayName || 'Helper',
+                                targetFleet?.id || activeShift.fleetId || 'fl-01',
+                                targetFleet?.plateNumber || activeShift.plateNumber || '-',
+                                targetFleet?.vehicleType || activeShift.vehicleType || 'Engkel Long Box',
+                                0
+                              );
+                              fresh.inspectionType = nextType;
+                              setActiveChecklistToEdit(fresh);
+                              setChecklistInspectionType(nextType);
+                              setIsChecklistModalOpen(true);
+                            }}
+                            className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+                              hasKmAwalToday
+                                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30'
+                                : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                            }`}
+                          >
+                            <Gauge className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {hasConfirmedArrivalToday
+                                ? 'Input KM Akhir'
+                                : hasKmAwalToday
+                                ? 'KM Awal ✓'
+                                : 'Input KM Awal'}
+                            </span>
+                          </button>
+                        );
+                      })()
                     )}
                   </div>
                 )}
@@ -6903,8 +7060,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 );
 
                                 // ALUR KHUSUS HELPER PADA STATUS SCHEDULED:
-                                // Helper = Check-In -> Validasi SJ -> Gate-Out (Tanpa mengisi Checklist Armada)
+                                // Helper = Check-In -> Input KM Awal -> Validasi SJ -> Gate-Out
                                 if (cardJobdeskRole === 'helper') {
+                                  const plateCardNorm = (assignedFleet?.plateNumber || delivery.fleet?.plateNumber || activeShift?.plateNumber || '')
+                                    .replace(/\s+/g, '')
+                                    .toLowerCase();
+                                  const kmAwalRec = checklists.find(c => {
+                                    const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+                                    if (cDate !== todayStr || c.inspectionType !== 'pre_trip' || Number(c.odometerKm) <= 0) return false;
+                                    const cPlate = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+                                    return (
+                                      (plateCardNorm && plateCardNorm !== '-' && cPlate === plateCardNorm) ||
+                                      c.driverId === selectedDriverId ||
+                                      doesCrewNameMatch(c.driverName || '', portalDisplayName)
+                                    );
+                                  });
                                   return (
                                     <div className="space-y-2">
                                       {!activeShift && !isSuperAdminUser ? (
@@ -6920,30 +7090,63 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                           <span>Check-In Helper Dulu Untuk Validasi SJ &amp; Gate-Out</span>
                                         </button>
                                       ) : (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <>
                                           <button
                                             type="button"
-                                            onClick={() => handleHelperValidateSJ(delivery)}
-                                            className={`py-2.5 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer ${
-                                              isSjValidated
-                                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                                                : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                                            onClick={() => {
+                                              const targetFleet = assignedFleet || delivery.fleet || fleets[0];
+                                              const fresh = driverChecklistService.createNewChecklistTemplate(
+                                                selectedDriverId,
+                                                currentDriver?.name || portalDisplayName || 'Helper',
+                                                targetFleet?.id || activeShift?.fleetId || 'fl-01',
+                                                targetFleet?.plateNumber || activeShift?.plateNumber || '-',
+                                                targetFleet?.vehicleType || activeShift?.vehicleType || 'Engkel Long Box',
+                                                kmAwalRec?.odometerKm || 0
+                                              );
+                                              fresh.inspectionType = 'pre_trip';
+                                              setActiveChecklistToEdit(fresh);
+                                              setChecklistInspectionType('pre_trip');
+                                              setIsChecklistModalOpen(true);
+                                            }}
+                                            className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                                              kmAwalRec
+                                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                                : 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/25'
                                             }`}
                                           >
-                                            <FileText className="w-4 h-4" />
-                                            <span>{isSjValidated ? '✓ SJ Tervalidasi (Lihat)' : 'Validasi SJ'}</span>
+                                            <Gauge className="w-3.5 h-3.5 shrink-0" />
+                                            <span>
+                                              {kmAwalRec
+                                                ? `KM Awal Tercatat: ${Number(kmAwalRec.odometerKm).toLocaleString('id-ID')} km (Ubah)`
+                                                : 'Input KM Awal Armada (Wajib Helper)'}
+                                            </span>
                                           </button>
 
-                                          <button
-                                            type="button"
-                                            disabled={gateOutBusyId !== null}
-                                            onClick={() => handleConfirmSharedGateOut(delivery)}
-                                            className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer disabled:cursor-wait"
-                                          >
-                                            {gateOutBusyId === delivery.id && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                                            <span>{gateOutBusyId === delivery.id ? 'Memproses...' : 'Gate-Out'}</span>
-                                          </button>
-                                        </div>
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleHelperValidateSJ(delivery)}
+                                              className={`py-2.5 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer ${
+                                                isSjValidated
+                                                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                                  : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                                              }`}
+                                            >
+                                              <FileText className="w-4 h-4" />
+                                              <span>{isSjValidated ? '✓ SJ Tervalidasi (Lihat)' : 'Validasi SJ'}</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              disabled={gateOutBusyId !== null}
+                                              onClick={() => handleConfirmSharedGateOut(delivery)}
+                                              className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer disabled:cursor-wait"
+                                            >
+                                              {gateOutBusyId === delivery.id && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                                              <span>{gateOutBusyId === delivery.id ? 'Memproses...' : 'Gate-Out'}</span>
+                                            </button>
+                                          </div>
+                                        </>
                                       )}
 
                                       {isSuperAdminUser && (
@@ -7343,7 +7546,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition cursor-pointer active:scale-95 shrink-0"
                 >
                   <PlusCircle className="w-4 h-4" />
-                  <span>Inspeksi Baru</span>
+                  <span>{effectiveJobdeskRole === 'helper' ? (hasConfirmedArrivalToday ? 'Input KM Akhir' : 'Input KM Awal') : 'Inspeksi Baru'}</span>
                 </button>
               </div>
 
@@ -7973,29 +8176,73 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         )}
 
-        {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD + KM PAGI/PULANG) */}
+        {/* TAB 4 (OPSI 2): FORM KIRIM HARI INI (TERINTEGRASI JADWAL + INPUT SETORAN COD/TEMPO & TTD + KM AWAL/AKHIR) */}
         {bottomNav === 'form_kirim' && (() => {
-          const hasActiveScheduleForForm = Boolean(activeShift && activeDeliveries.length > 0);
+          const todayWibStr = getPortalTodayWibIso();
+          const hasActiveScheduleForForm = Boolean(
+            todayFormKirimIntegration.hasTodayTrip || (activeShift && activeDeliveries.length > 0)
+          );
+          const todayCrewShiftFallback = driverShiftService.getShifts().find(
+            s =>
+              (s.date === todayLocalStr || s.date === todayWibStr) &&
+              (s.driverId === selectedDriverId ||
+                s.pairedDriverId === selectedDriverId ||
+                doesCrewNameMatch(s.driverName || '', portalDisplayName) ||
+                doesCrewNameMatch(s.pairedDriverName || '', portalDisplayName) ||
+                doesCrewNameMatch(s.helper1Name || '', portalDisplayName))
+          );
+          const todayScheduleFallback =
+            activeDeliveries[0] ||
+            deliveredDeliveries.find(d => {
+              const ds = String(d.actualArrival || d.departureDate || d.createdAt || '').slice(0, 10);
+              return ds === todayLocalStr || ds === todayWibStr;
+            });
+
           const activePlateClean = hasActiveScheduleForForm
             ? (
                 todayFormKirimIntegration.record?.plateNumber ||
                 assignedFleet?.plateNumber ||
                 activeShift?.plateNumber ||
+                todayCrewShiftFallback?.plateNumber ||
+                todayScheduleFallback?.fleet?.plateNumber ||
                 ''
               )
                 .replace(/\s+/g, '')
                 .toLowerCase()
             : '';
-          const currentDriverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
+
+          const teamNameCandidates = new Set<string>(
+            [
+              currentDriver?.name,
+              portalDisplayName,
+              activeShift?.driverName,
+              activeShift?.pairedDriverName,
+              activeShift?.helper1Name,
+              activeShift?.helper2Name,
+              todayCrewShiftFallback?.driverName,
+              todayCrewShiftFallback?.pairedDriverName,
+              todayCrewShiftFallback?.helper1Name,
+              todayCrewShiftFallback?.helper2Name,
+              todayScheduleFallback?.crew?.name,
+              todayScheduleFallback?.crewHelper?.name,
+              todayScheduleFallback?.crewHelper2?.name,
+              todayFormKirimIntegration.record?.driverName,
+              todayFormKirimIntegration.record?.helperName
+            ]
+              .map(n => String(n || '').trim())
+              .filter(n => n && n !== '-' && n !== 'Driver Armada Terkait' && n !== 'Tanpa Helper')
+          );
+
           const todayMatchingChecklists = hasActiveScheduleForForm
             ? checklists.filter(c => {
                 const cDate = String(c.date || c.createdAt || '').slice(0, 10);
-                if (cDate && cDate !== todayLocalStr) return false;
+                if (cDate && cDate !== todayLocalStr && cDate !== todayWibStr) return false;
                 const cPlateClean = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
-                const cDriverLower = String(c.driverName || '').trim().toLowerCase();
                 if (activePlateClean && activePlateClean !== '-' && cPlateClean === activePlateClean) return true;
                 if (c.driverId && c.driverId === selectedDriverId) return true;
-                if (currentDriverNameLower && cDriverLower && (cDriverLower.includes(currentDriverNameLower) || currentDriverNameLower.includes(cDriverLower))) return true;
+                for (const tn of teamNameCandidates) {
+                  if (doesCrewNameMatch(c.driverName || '', tn)) return true;
+                }
                 return false;
               })
             : [];
@@ -8009,15 +8256,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               matchedScheduleArea={hasActiveScheduleForForm ? todayFormKirimIntegration.matchedArea : ''}
               hasActiveSchedule={hasActiveScheduleForForm}
               portalDisplayName={portalDisplayName}
-              userRole={isUserHelperRole ? 'Helper' : 'Driver'}
+              userRole={effectiveJobdeskRole === 'helper' ? 'Helper' : 'Driver'}
               deviceGps={deviceGps}
               checklistKmPagi={hasActiveScheduleForForm ? (latestPreTrip?.odometerKm ?? null) : null}
               checklistKmPulang={hasActiveScheduleForForm ? (latestPostTrip?.odometerKm ?? null) : null}
               onRefresh={() => {
                 void formKirimStore.hydrateFromServer(true);
-                void driverChecklistService.syncFromServer().then(setChecklists);
+                void driverChecklistService.syncFromServer(true).then(setChecklists);
                 loadDeliveries(true);
-                addNotification('delivery', 'Form Kirim Diperbarui', 'Data Form Kirim & KM Checklist hari ini telah disinkronkan.');
+                addNotification('delivery', 'Form Kirim Diperbarui', 'Data Form Kirim & KM Awal/Akhir hari ini telah disinkronkan.');
               }}
               onNotify={(title, message) => {
                 addNotification('delivery', title, message);
@@ -9410,7 +9657,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         }}
       />
 
-      {/* MODAL 7: Checklist Kendaraan (Inspeksi Fisik Armada) */}
+      {/* MODAL 7: Checklist Kendaraan (Driver) / Input KM Awal & KM Akhir (Helper) */}
       <DriverVehicleChecklistModal
         isOpen={isChecklistModalOpen}
         onClose={() => {
@@ -9425,11 +9672,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialChecklist={activeChecklistToEdit}
         defaultInspectionType={checklistInspectionType}
         canSelectPostTrip={hasConfirmedArrivalToday}
+        crewRole={effectiveJobdeskRole}
         onSaved={async (saved) => {
           const todayStr = getLocalDateStr();
           const completedAtIso = new Date().toISOString();
+          const savedByHelperKm = effectiveJobdeskRole === 'helper' || saved.odometerKm > 0;
           setIsFleetLockedAfterCheckin(true);
-          if (saved.inspectionType === 'pre_trip') {
+          if (saved.inspectionType === 'pre_trip' && effectiveJobdeskRole !== 'helper') {
             setIsChecklistCompletedAfterCheckin(true);
             writeDriverScopedValue('akk_fleet_locked_flag_', 'true');
             writeDriverScopedValue('akk_checklist_done_', todayStr);
@@ -9553,15 +9802,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               setActiveShift(null);
             }
           }
-          formKirimStore.syncChecklistOdometer({
-            date: todayStr,
-            plateNumber: saved.plateNumber,
-            driverName: saved.driverName,
-            areaName: activeShift?.selectedArea || activeDeliveries[0]?.areaName || '',
-            inspectionType: saved.inspectionType,
-            odometerKm: saved.odometerKm,
-            recordedAt: completedAtIso
-          });
+          if (saved.odometerKm > 0) {
+            formKirimStore.syncChecklistOdometer({
+              date: todayStr,
+              plateNumber: saved.plateNumber,
+              driverName: saved.driverName,
+              areaName: activeShift?.selectedArea || activeDeliveries[0]?.areaName || '',
+              inspectionType: saved.inspectionType,
+              odometerKm: saved.odometerKm,
+              recordedAt: completedAtIso
+            });
+          }
           setChecklists(prev => {
             const idx = prev.findIndex(c => c.id === saved.id);
             if (idx >= 0) {
@@ -9572,17 +9823,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             return [saved, ...prev];
           });
           setWaybillRefreshTick(t => t + 1);
-          setBottomNav('deliveries');
+          setBottomNav(
+            saved.inspectionType === 'pre_trip' && savedByHelperKm && effectiveJobdeskRole === 'helper'
+              ? 'surat_jalan'
+              : 'deliveries'
+          );
           setActiveTab(saved.inspectionType === 'post_trip' ? 'delivered' : 'active');
           setTimeout(() => {
             loadDeliveriesRef.current(true);
           }, 50);
           addNotification(
             'delivery',
-            saved.inspectionType === 'post_trip'
+            savedByHelperKm && effectiveJobdeskRole === 'helper'
+              ? saved.inspectionType === 'post_trip'
+                ? 'KM Akhir Tersimpan ke Form Kirim'
+                : 'KM Awal Tersimpan • Surat Jalan Siap'
+              : saved.inspectionType === 'post_trip'
               ? 'Checklist Pasca-Jalan Tersimpan'
               : 'Checklist & Foto Armada Tersimpan • Jadwal Aktif Siap',
-            saved.inspectionType === 'post_trip'
+            savedByHelperKm && effectiveJobdeskRole === 'helper'
+              ? `${saved.inspectionType === 'post_trip' ? 'KM Akhir' : 'KM Awal'} (${saved.odometerKm.toLocaleString('id-ID')} km) armada ${saved.plateNumber} telah tersimpan di Form Kirim.`
+              : saved.inspectionType === 'post_trip'
               ? `Checklist Pasca-Jalan (Pulang) armada ${saved.plateNumber} telah tersimpan.`
               : `Checklist & Foto armada ${saved.plateNumber} tersimpan. Jadwal aktif area ${activeShift?.selectedArea || '-'} siap untuk Gate-Out.`
           );
@@ -9679,26 +9940,29 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   tripsCompleted: 0,
                   rating: 5
                 };
-                if (matchedSchedule.crew?.name && doesCrewNameMatch(matchedSchedule.crew.name, helperName)) {
+                if (shift.pairedDriverName) {
+                  patch.crewId = shift.pairedDriverId || matchedSchedule.crewId;
+                  patch.crew = {
+                    ...(matchedSchedule.crew || {
+                      id: shift.pairedDriverId || 'drv-paired',
+                      phone: '-',
+                      role: 'Driver Utama',
+                      licenseNumber: '-',
+                      licenseType: 'SIM B1 Umum',
+                      status: 'on-duty',
+                      tripsCompleted: 0,
+                      rating: 5
+                    }),
+                    name: shift.pairedDriverName
+                  };
+                } else if (matchedSchedule.crew?.name && doesCrewNameMatch(matchedSchedule.crew.name, helperName)) {
                   const prevHelperNotMe =
                     matchedSchedule.crewHelper?.name && !doesCrewNameMatch(matchedSchedule.crewHelper.name, helperName)
                       ? matchedSchedule.crewHelper
                       : undefined;
-                  patch.crew = prevHelperNotMe
-                    ? { ...prevHelperNotMe, role: 'Driver Utama' }
-                    : {
-                        ...(matchedSchedule.crew || {
-                          id: 'drv-pending',
-                          phone: '-',
-                          role: 'Driver Utama',
-                          licenseNumber: '-',
-                          licenseType: 'SIM B1 Umum',
-                          status: 'on-duty',
-                          tripsCompleted: 0,
-                          rating: 5
-                        }),
-                        name: '-'
-                      };
+                  if (prevHelperNotMe) {
+                    patch.crew = { ...prevHelperNotMe, role: 'Driver Utama' };
+                  }
                 }
               } else {
                 const driverName = shift.driverName || currentDriver?.name || portalDisplayName;
@@ -9743,17 +10007,49 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           }, 20);
 
           // 1. Jika kru Check-In sebagai HELPER:
-          // Langsung dialihkan ke Surat Jalan Keluar untuk divalidasi oleh Pos Security dan Gate-Out
+          // Arahkan ke Surat Jalan Keluar dan buka pop-up Input KM Awal bila belum diisi hari ini
           if (chosenRole === 'helper') {
             setIsHelperPositionSkipped(true);
             writeDriverScopedValue('akk_helper_skipped_', 'true');
             setBottomNav('surat_jalan');
             setWaybillStatusFilter('all');
             setWaybillRefreshTick(t => t + 1);
+
+            const todayChkStr = getLocalDateStr();
+            const plateNormCheck = (chosenFleet?.plateNumber || shift.plateNumber || '')
+              .replace(/\s+/g, '')
+              .toLowerCase();
+            const hasKmAwalDone = checklists.some(c => {
+              const cDate = String(c.date || c.createdAt || '').slice(0, 10);
+              if (cDate !== todayChkStr || c.inspectionType !== 'pre_trip' || Number(c.odometerKm) <= 0) return false;
+              const cPlate = String(c.plateNumber || '').replace(/\s+/g, '').toLowerCase();
+              return (
+                (plateNormCheck && plateNormCheck !== '-' && cPlate === plateNormCheck) ||
+                c.driverId === selectedDriverId ||
+                doesCrewNameMatch(c.driverName || '', portalDisplayName)
+              );
+            });
+            if (!hasKmAwalDone) {
+              const freshKmAwal = driverChecklistService.createNewChecklistTemplate(
+                selectedDriverId,
+                currentDriver?.name || portalDisplayName || 'Helper',
+                chosenFleet?.id || shift.fleetId || 'fl-01',
+                chosenFleet?.plateNumber || shift.plateNumber || '-',
+                chosenFleet?.vehicleType || shift.vehicleType || 'Engkel Long Box',
+                0
+              );
+              freshKmAwal.inspectionType = 'pre_trip';
+              setActiveChecklistToEdit(freshKmAwal);
+              setChecklistInspectionType('pre_trip');
+              setIsChecklistModalOpen(true);
+            }
+
             addNotification(
               'delivery',
-              'Check-In Helper Berhasil • Surat Jalan Keluar Siap',
-              `Peran: Helper · Area: ${shift.selectedArea || '-'} · Armada: ${chosenFleet?.initialCode ? `${chosenFleet.initialCode} (${chosenFleet.plateNumber})` : shift.plateNumber || '-'}. Silakan lakukan Validasi Security dan Gate-Out.`
+              hasKmAwalDone
+                ? 'Check-In Helper Berhasil • Surat Jalan Keluar Siap'
+                : 'Check-In Helper Berhasil • Silakan Isi KM Awal',
+              `Peran: Helper · Area: ${shift.selectedArea || '-'} · Armada: ${chosenFleet?.initialCode ? `${chosenFleet.initialCode} (${chosenFleet.plateNumber})` : shift.plateNumber || '-'}${shift.pairedDriverName ? ` · Driver: ${shift.pairedDriverName}` : ''}.${hasKmAwalDone ? ' Silakan lakukan Validasi SJ & Gate-Out.' : ' Silakan isi KM Awal armada sebelum keluar gudang.'}`
             );
             return;
           }

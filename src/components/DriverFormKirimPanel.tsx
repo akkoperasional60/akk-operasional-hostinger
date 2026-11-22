@@ -996,13 +996,13 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
-                <div className="text-[9px] font-bold uppercase text-amber-300">KM Pagi</div>
+                <div className="text-[9px] font-bold uppercase text-amber-300">KM Awal</div>
                 <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
                   {effectiveKmPagi !== null ? `${effectiveKmPagi.toLocaleString('id-ID')} km` : '-'}
                 </div>
               </div>
               <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
-                <div className="text-[9px] font-bold uppercase text-cyan-300">KM Pulang</div>
+                <div className="text-[9px] font-bold uppercase text-cyan-300">KM Akhir</div>
                 <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
                   {effectiveKmPulang !== null ? `${effectiveKmPulang.toLocaleString('id-ID')} km` : '-'}
                 </div>
@@ -1888,12 +1888,12 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           <span className="font-black text-amber-400 shrink-0 tabular-nums">{totalColyDisplay} COLY</span>
         </div>
 
-        {/* KM Pagi & KM Pulang (Terintegrasi Otomatis dari Checklist Pagi & Checklist Pulang) */}
+        {/* KM Awal & KM Akhir (Terintegrasi Otomatis dari Input Helper) */}
         <div className="grid grid-cols-3 gap-2">
           <div className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800">
             <div className="flex items-center gap-1 text-[9px] font-bold uppercase text-amber-300">
               <Gauge className="w-3 h-3 shrink-0" />
-              <span>KM Pagi</span>
+              <span>KM Awal</span>
             </div>
             <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
               {effectiveKmPagi !== null ? `${effectiveKmPagi.toLocaleString('id-ID')} km` : '-'}
@@ -1902,7 +1902,7 @@ export const DriverFormKirimPanel: React.FC<DriverFormKirimPanelProps> = ({
           <div className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800">
             <div className="flex items-center gap-1 text-[9px] font-bold uppercase text-cyan-300">
               <Gauge className="w-3 h-3 shrink-0" />
-              <span>KM Pulang</span>
+              <span>KM Akhir</span>
             </div>
             <div className="text-xs font-mono font-black text-white mt-0.5 tabular-nums">
               {effectiveKmPulang !== null ? `${effectiveKmPulang.toLocaleString('id-ID')} km` : '-'}

@@ -221,6 +221,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         warehouse_inbound: isAll || isWarehouse ? 'full_access' : 'none',
         warehouse_outbound: isAll || isWarehouse ? 'full_access' : 'none',
         warehouse_opname: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
+        warehouse_retur_muat: isAll || isWarehouse ? 'read_only' : 'none',
         // Legacy keys
         stok_barang: isAll || isWarehouse ? 'full_access' : isSpvPurchasing ? 'read_only' : 'none',
         permintaan_barang: isAll || isWarehouse ? 'full_access' : 'none',
@@ -405,6 +406,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   warehouse_scanner: { moduleId: 'warehouse', subMenuId: 'warehouse_scanner' },
   warehouse_slotting: { moduleId: 'warehouse', subMenuId: 'warehouse_slotting' },
   warehouse_opname: { moduleId: 'warehouse', subMenuId: 'warehouse_opname' },
+  warehouse_retur_muat: { moduleId: 'warehouse', subMenuId: 'warehouse_retur_muat' },
   warehouse_cubication: { moduleId: 'warehouse', subMenuId: 'warehouse_scanner' },
   warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'warehouse_fleet_cubication' },
   marketing_online: { moduleId: 'marketing', subMenuId: 'marketing_online' },
@@ -458,6 +460,7 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   warehouse_inbound: ['permintaan_barang'],
   warehouse_outbound: ['ceklis_muat'],
   warehouse_opname: ['opname_stok'],
+  warehouse_retur_muat: ['ceklis_muat', 'stok_barang'],
   operational_dashboard: ['dashboard_logistik'],
   schedules: ['rencana_rute'],
   driver_portal: ['portal_driver'],
@@ -551,7 +554,8 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
       { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
       { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
-      { id: 'warehouse_opname', name: 'Opname Gudang' }
+      { id: 'warehouse_opname', name: 'Opname Gudang' },
+      { id: 'warehouse_retur_muat', name: 'Laporan Retur & Selisih Muat (Barang & Qty)' }
     ]
   },
   {

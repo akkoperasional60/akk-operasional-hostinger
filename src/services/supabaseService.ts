@@ -209,14 +209,24 @@ export async function fetchFleetsFromSupabase(): Promise<{ success: boolean; dat
   try {
     const data = await apiJson('/api/fleets');
     const localFleets = logisticsStore.getFleets();
-    return {
-      success: true,
-      data: (data?.data || []).map((row: any) => {
+    const seenPlates = new Set<string>();
+    const mapped = (data?.data || [])
+      .map((row: any) => {
         const fb = localFleets.find(
           f => f.id === row?.id || (row?.plateNumber && f.plateNumber === row.plateNumber)
         );
         return mapSupabaseRowToFleet(row, fb);
       })
+      .filter((f: Fleet) => {
+        const clean = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        if (!clean || /^FLT-\d+$/i.test(String(f.plateNumber || '').trim())) return false;
+        if (seenPlates.has(clean)) return false;
+        seenPlates.add(clean);
+        return true;
+      });
+    return {
+      success: true,
+      data: mapped
     };
   } catch (err: any) {
     return { success: false, data: logisticsStore.getFleets(), error: err?.message || 'Gagal membaca armada Hostinger MySQL' };

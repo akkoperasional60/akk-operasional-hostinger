@@ -893,22 +893,43 @@ class LogisticsStore {
 
     let updatedFleets = false;
 
-    // Purge any fleet whose plate number ends with 'AKK'
-    const hasAkkFleets = this.fleets.some(f => (f.plateNumber || '').trim().toUpperCase().endsWith('AKK'));
-    if (hasAkkFleets) {
-      this.fleets = this.fleets.filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'));
+    // Purge any fleet whose plate number ends with 'AKK' or is a phantom FLT-* placeholder
+    const isPhantomFleet = (plate?: string): boolean => {
+      const p = String(plate || '').trim().toUpperCase();
+      return !p || p.endsWith('AKK') || /^FLT-\d+$/i.test(p);
+    };
+    const filteredFleets = this.fleets.filter(f => !isPhantomFleet(f.plateNumber));
+    if (filteredFleets.length !== this.fleets.length) {
+      this.fleets = filteredFleets;
       updatedFleets = true;
     }
 
     // Merge initial fleets only in development/preview mode
     if (this.isPreviewEnvironment()) {
       INITIAL_FLEETS.forEach(initF => {
-        const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
-        if (!exists && !(initF.plateNumber || '').toUpperCase().endsWith('AKK')) {
+        const cleanInitPlate = String(initF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        const exists = this.fleets.some(
+          f => f.id === initF.id || String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanInitPlate
+        );
+        if (!exists && !isPhantomFleet(initF.plateNumber)) {
           this.fleets.push({ ...initF });
           updatedFleets = true;
         }
       });
+    }
+
+    // Deduplicate fleets by normalized plateNumber so no doubles remain
+    const seenInitPlates = new Set<string>();
+    const dedupedInitFleets = this.fleets.filter(f => {
+      const cleanP = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      if (!cleanP || isPhantomFleet(f.plateNumber)) return false;
+      if (seenInitPlates.has(cleanP)) return false;
+      seenInitPlates.add(cleanP);
+      return true;
+    });
+    if (dedupedInitFleets.length !== this.fleets.length) {
+      this.fleets = dedupedInitFleets;
+      updatedFleets = true;
     }
 
     this.fleets = this.fleets.map((f, idx) => {
@@ -3811,26 +3832,26 @@ class LogisticsStore {
               ? fleetPayload.deletedPlates.map((x: any) => String(x).replace(/\s+/g, '').toUpperCase())
               : []
           );
+          const isPhantomPlate = (plate?: string): boolean =>
+            /^FLT-\d+$/i.test(String(plate || '').trim()) || String(plate || '').trim().toUpperCase().endsWith('AKK');
           const baseFleets = (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS).filter(bf => {
             const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-            return !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
+            return cleanP && !isPhantomPlate(bf.plateNumber) && !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
           });
 
           if (fleetPayload.data.length > 0) {
             const mergedMap = new Map<string, Fleet>();
             baseFleets.forEach(bf => {
-              mergedMap.set(bf.id, bf);
+              const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+              if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
             });
             fleetPayload.data.forEach((remoteF: Fleet) => {
               const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+              if (!cleanRemotePlate || isPhantomPlate(remoteF.plateNumber)) return;
               if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
-              const matchExisting = Array.from(mergedMap.values()).find(
-                ef =>
-                  ef.id === remoteF.id ||
-                  String(ef.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanRemotePlate
-              );
-              const targetKey = matchExisting ? matchExisting.id : remoteF.id;
-              mergedMap.set(targetKey, this.enrichFleetItem({ ...remoteF, id: targetKey }, matchExisting));
+              const matchExisting = mergedMap.get(cleanRemotePlate);
+              const canonicalId = matchExisting ? matchExisting.id : remoteF.id;
+              mergedMap.set(cleanRemotePlate, this.enrichFleetItem({ ...remoteF, id: canonicalId }, matchExisting));
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
@@ -5303,7 +5324,7 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
       if (persistChanges) {
         fleetsNeedingSync.forEach(uf => {
-          updateFleetInSupabase(uf.id, { status: uf.status }).catch(() => {});
+          updateFleetInSupabase(uf.id, { status: uf.status, plateNumber: uf.plateNumber }).catch(() => {});
         });
       }
     }
@@ -5316,8 +5337,9 @@ class LogisticsStore {
     options?: { syncTodaySchedule?: boolean }
   ) {
     const cleanTarget = (idOrPlate || '').trim().toUpperCase();
-    let matchedFleet: Fleet | null = null;
+    let matchedFleet = null as Fleet | null;
     let matchedId = idOrPlate;
+    let matchedPlateNumber: string | undefined;
     this.fleets = this.fleets.map(f => {
       if (
         f.id === idOrPlate ||
@@ -5325,6 +5347,7 @@ class LogisticsStore {
         (f.initialCode && f.initialCode.trim().toUpperCase() === cleanTarget)
       ) {
         matchedId = f.id;
+        matchedPlateNumber = f.plateNumber;
         matchedFleet = {
           ...f,
           status,
@@ -5371,7 +5394,7 @@ class LogisticsStore {
     }
 
     // Asynchronous backend integration with Supabase / Hostinger MySQL
-    updateFleetInSupabase(matchedId, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
+    updateFleetInSupabase(matchedId, { status, currentTonnage: tonnage, plateNumber: matchedPlateNumber }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'fleet',
@@ -5644,7 +5667,7 @@ class LogisticsStore {
         'ubah'
       );
       // Asynchronous backend integration with Supabase
-      updateFleetInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
+      updateFleetInSupabase(id, { ...updatedFields, plateNumber: fObj.plateNumber }).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
 
       this.dispatchMiddleware({
         entityType: 'fleet',
@@ -6579,7 +6602,7 @@ class LogisticsStore {
       this.fleets = this.fleets.map(f =>
         f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
       );
-      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm }).catch(() => {});
+      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm, plateNumber: fleet.plateNumber }).catch(() => {});
     }
 
     this.logActivity(

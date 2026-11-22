@@ -180,6 +180,24 @@ const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
             ) : (
               filtered.map(opt => {
                 const isSelected = opt.value === value;
+                const activeRowCls =
+                  accentColor === 'emerald'
+                    ? 'bg-emerald-500/15 border-l-4 border-l-emerald-500 text-emerald-300 font-bold cursor-pointer'
+                    : accentColor === 'cyan'
+                    ? 'bg-cyan-500/15 border-l-4 border-l-cyan-500 text-cyan-300 font-bold cursor-pointer'
+                    : 'bg-amber-500/15 border-l-4 border-l-amber-500 text-amber-300 font-bold cursor-pointer';
+                const hoverRowCls =
+                  accentColor === 'emerald'
+                    ? 'hover:bg-emerald-500/10 text-slate-200 cursor-pointer'
+                    : accentColor === 'cyan'
+                    ? 'hover:bg-cyan-500/10 text-slate-200 cursor-pointer'
+                    : 'hover:bg-amber-500/10 text-slate-200 cursor-pointer';
+                const checkIconCls =
+                  accentColor === 'emerald'
+                    ? 'text-emerald-400'
+                    : accentColor === 'cyan'
+                    ? 'text-cyan-400'
+                    : 'text-amber-400';
                 return (
                   <button
                     key={opt.value || '__empty__'}
@@ -192,10 +210,10 @@ const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
                     }}
                     className={`w-full min-h-[44px] px-3 py-2 text-left flex items-center justify-between gap-2 transition ${
                       opt.disabled
-                        ? 'opacity-45 bg-rose-950/15 cursor-not-allowed'
+                        ? 'opacity-45 bg-rose-500/10 cursor-not-allowed text-slate-400'
                         : isSelected
-                        ? 'bg-amber-500/15 text-white cursor-pointer'
-                        : 'hover:bg-slate-800/80 text-slate-200 cursor-pointer'
+                        ? activeRowCls
+                        : hoverRowCls
                     }`}
                   >
                     <div className="min-w-0 flex-1">
@@ -211,7 +229,7 @@ const SearchableCombobox: React.FC<SearchableComboboxProps> = ({
                         <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.sublabel}</div>
                       )}
                     </div>
-                    {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                    {isSelected && <Check className={`w-4 h-4 ${checkIconCls} shrink-0`} />}
                   </button>
                 );
               })
@@ -445,6 +463,27 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     return () => clearInterval(timer);
   }, []);
 
+  const [shiftSyncTick, setShiftSyncTick] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void driverShiftService.syncFromServer();
+    const onShiftUpdate = () => setShiftSyncTick(t => t + 1);
+    window.addEventListener('driver-shift-updated', onShiftUpdate);
+    return () => window.removeEventListener('driver-shift-updated', onShiftUpdate);
+  }, [isOpen]);
+
+  const detectedTeamDriverShift = useMemo(() => {
+    if (selectedRole !== 'helper') return null;
+    return driverShiftService.findActivePartnerDriverShift({
+      fleetId: selectedFleetId || chosenFleet?.id || fleetId,
+      plateNumber: chosenFleet?.plateNumber || (plateNumber !== '-' ? plateNumber : ''),
+      selectedArea,
+      helperId: driverId,
+      helperName: driverName
+    });
+  }, [selectedRole, selectedFleetId, chosenFleet?.id, chosenFleet?.plateNumber, fleetId, plateNumber, selectedArea, driverId, driverName, shiftSyncTick]);
+
   // Hanya inisialisasi field saat modal baru dibuka (transisi false -> true), sehingga salah PIN / refresh background tidak mereset isian di atas
   const wasOpenRef = useRef<boolean>(false);
   useEffect(() => {
@@ -463,15 +502,52 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     setSelectedHelper1Id('');
     setSelectedHelper2Id('');
 
-    const cleanInitArea = String(areaName || '').trim();
+    const partnerDriver =
+      resolvedDefaultRole === 'helper'
+        ? driverShiftService.findActivePartnerDriverShift({
+            helperId: driverId,
+            helperName: driverName
+          })
+        : null;
+
+    const cleanInitArea = String(areaName || partnerDriver?.selectedArea || '').trim();
     const matchedArea = areaOptions.find(a => a.value.toLowerCase() === cleanInitArea.toLowerCase())?.value || '';
     setSelectedArea(matchedArea);
 
-    const validFleet = fleetId
-      ? fleetOptions.find(f => f.id === fleetId && f.status !== 'maintenance')
+    const targetFleetId = fleetId || partnerDriver?.fleetId;
+    const validFleet = targetFleetId
+      ? fleetOptions.find(f => f.id === targetFleetId && f.status !== 'maintenance')
+      : partnerDriver?.plateNumber
+      ? fleetOptions.find(
+          f =>
+            f.status !== 'maintenance' &&
+            f.plateNumber.replace(/\s+/g, '').toLowerCase() === partnerDriver.plateNumber!.replace(/\s+/g, '').toLowerCase()
+        )
       : undefined;
     setSelectedFleetId(validFleet?.id || '');
-  }, [isOpen, initialMode, resolvedDefaultRole, areaName, fleetId, areaOptions, fleetOptions]);
+  }, [isOpen, initialMode, resolvedDefaultRole, areaName, fleetId, areaOptions, fleetOptions, driverId, driverName]);
+
+  // Jika Helper membuka modal sebelum data shift Driver selesai sync, isi otomatis area & armada begitu partner terdeteksi
+  useEffect(() => {
+    if (!isOpen || selectedRole !== 'helper' || !detectedTeamDriverShift) return;
+    if (!selectedArea && detectedTeamDriverShift.selectedArea) {
+      const matched = areaOptions.find(
+        a => a.value.toLowerCase() === detectedTeamDriverShift.selectedArea!.trim().toLowerCase()
+      )?.value;
+      if (matched) setSelectedArea(matched);
+    }
+    if (!selectedFleetId && (detectedTeamDriverShift.fleetId || detectedTeamDriverShift.plateNumber)) {
+      const matchedF = fleetOptions.find(
+        f =>
+          f.status !== 'maintenance' &&
+          ((detectedTeamDriverShift.fleetId && f.id === detectedTeamDriverShift.fleetId) ||
+            (detectedTeamDriverShift.plateNumber &&
+              f.plateNumber.replace(/\s+/g, '').toLowerCase() ===
+                detectedTeamDriverShift.plateNumber.replace(/\s+/g, '').toLowerCase()))
+      );
+      if (matchedF) setSelectedFleetId(matchedF.id);
+    }
+  }, [isOpen, selectedRole, detectedTeamDriverShift, selectedArea, selectedFleetId, areaOptions, fleetOptions]);
 
   if (!isOpen) return null;
 
@@ -815,8 +891,8 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
                 )}
               </div>
 
-              {/* 4. Pilih Helper 1 & Helper 2 (Khusus saat Check-In sebagai Driver) */}
-              {selectedRole === 'driver' && (
+              {/* 4. Pilih Helper 1 & Helper 2 (Khusus saat Check-In sebagai Driver) vs Info Driver Terhubung (Khusus Helper) */}
+              {selectedRole === 'driver' ? (
                 <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
                   <div className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -861,7 +937,19 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
                     />
                   </div>
                 </div>
-              )}
+              ) : detectedTeamDriverShift ? (
+                <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/35 text-[11px] text-cyan-200 flex items-start gap-2">
+                  <Users className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-cyan-300">
+                      Terhubung Otomatis dengan Driver: {detectedTeamDriverShift.driverName}
+                    </div>
+                    <div className="text-[10px] text-slate-300 mt-0.5">
+                      Area: {detectedTeamDriverShift.selectedArea || '-'} · Armada: {detectedTeamDriverShift.fleetInitialCode || detectedTeamDriverShift.plateNumber || '-'}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 

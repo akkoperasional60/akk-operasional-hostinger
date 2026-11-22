@@ -237,6 +237,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'warehouse_scanner':
     case 'warehouse_slotting':
     case 'warehouse_opname':
+    case 'warehouse_retur_muat':
     case 'warehouse_cubication':
     case 'warehouse_fleet_cubication':
     case 'purchasing_stok_opname':

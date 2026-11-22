@@ -686,6 +686,7 @@ export default function App() {
       case 'warehouse_scanner': return 'WMS: Database Barang (Nomor Barang, Keterangan, Satuan & Dokumentasi)';
       case 'warehouse_slotting': return 'WMS: Denah Rak & Kapasitas Zona Gudang';
       case 'warehouse_opname': return 'WMS: Stok Opname & Kartu Stok Digital';
+      case 'warehouse_retur_muat': return 'WMS Gudang: Daftar Item Barang & Kuantiti Retur / Selisih Muat';
       case 'warehouse_cubication': return 'WMS: Kubikasi Barang & Berat Barang';
       case 'warehouse_fleet_cubication': return 'WMS: Simulasi Kubikasi Box Armada & Item Barang';
       case 'purchasing_dashboard': return 'Dashboard Departemen Adm. Pembelian';
@@ -1192,6 +1193,7 @@ export default function App() {
             currentTab === 'warehouse_scanner' ||
             currentTab === 'warehouse_slotting' ||
             currentTab === 'warehouse_opname' ||
+            currentTab === 'warehouse_retur_muat' ||
             currentTab === 'warehouse_cubication' ||
             currentTab === 'warehouse_fleet_cubication') && (
             <WarehouseManagementSystem
@@ -1208,6 +1210,8 @@ export default function App() {
                   ? 'slotting'
                   : currentTab === 'warehouse_opname'
                   ? 'opname'
+                  : currentTab === 'warehouse_retur_muat'
+                  ? 'retur_muat'
                   : currentTab === 'warehouse_cubication'
                   ? 'cubication'
                   : currentTab === 'warehouse_fleet_cubication'
@@ -1223,6 +1227,7 @@ export default function App() {
                   scanner: 'warehouse_scanner',
                   slotting: 'warehouse_slotting',
                   opname: 'warehouse_opname',
+                  retur_muat: 'warehouse_retur_muat',
                   purchasing_opname: 'purchasing_stok_opname',
                   kartu_stok: 'purchasing_kartu_stok',
                   cubication: 'warehouse_cubication',

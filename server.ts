@@ -3825,15 +3825,37 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     } catch {}
   };
 
+  const isPhantomFltPlate = (plate?: string): boolean =>
+    /^FLT-\d+$/i.test(String(plate || '').trim());
+
+  let phantomFltPurged = false;
+  const purgePhantomFltFleets = async (): Promise<void> => {
+    Object.keys(inMemoryFleetsFallback).forEach(k => {
+      const f = inMemoryFleetsFallback[k];
+      if (isPhantomFltPlate(f?.plateNumber) || isPhantomFltPlate(k)) {
+        delete inMemoryFleetsFallback[k];
+      }
+    });
+    if (phantomFltPurged) return;
+    phantomFltPurged = true;
+    try {
+      await mysqlQuery(
+        "DELETE FROM fleets WHERE UPPER(TRIM(plate_number)) REGEXP '^FLT-[0-9]+$' OR TRIM(plate_number) = ''"
+      );
+    } catch {}
+  };
+
   // REST API for Fleets - Hostinger MySQL is the single source of truth
   app.get("/api/fleets", requireAuth, async (_req, res) => {
     try {
+      await purgePhantomFltFleets();
       const [mysqlFleets, deletedState] = await Promise.all([
         mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC"),
         getDeletedFleetsState()
       ]);
       const deletedIdSet = new Set((deletedState.ids || []).map(x => String(x).trim()));
       const deletedPlateSet = new Set((deletedState.plates || []).map(x => String(x).replace(/\s+/g, '').toUpperCase()));
+      const seenPlateSet = new Set<string>();
       const mapped = mysqlFleets
         .map(f => {
           const parsedJson = parseJsonColumn(f.payload_json) || {};
@@ -3859,7 +3881,11 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         })
         .filter(f => {
           const cleanPlate = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-          return !deletedIdSet.has(String(f.id)) && !deletedPlateSet.has(cleanPlate);
+          if (!cleanPlate || isPhantomFltPlate(f.plateNumber)) return false;
+          if (deletedIdSet.has(String(f.id)) || deletedPlateSet.has(cleanPlate)) return false;
+          if (seenPlateSet.has(cleanPlate)) return false;
+          seenPlateSet.add(cleanPlate);
+          return true;
         });
       return res.json({
         success: true,
@@ -3888,6 +3914,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
     const id = String(f.id || `flt-${Date.now()}`).trim();
     const plateNumber = String(f.plateNumber).trim().toUpperCase();
+    if (isPhantomFltPlate(plateNumber)) {
+      return res.status(400).json({ success: false, error: "Nomor plat sementara FLT-* tidak diizinkan" });
+    }
     const cleanPlate = plateNumber.replace(/\s+/g, '').toUpperCase();
     const lastMaintDate = toMysqlDateOnly(f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate);
     const fullPayload = {
@@ -3952,14 +3981,17 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const id = String(req.params.id || '').trim();
     const f = req.body || {};
     try {
+      let canonicalId = id;
       let existingPayload: Record<string, any> = { ...(inMemoryFleetsFallback[id] || {}) };
       try {
+        const cleanQueryPlate = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
         const existingRows = await mysqlQuery<any[]>(
-          "SELECT * FROM fleets WHERE id = ? OR UPPER(plate_number) = UPPER(?) LIMIT 1",
-          [id, String(f.plateNumber || '').trim()]
+          "SELECT * FROM fleets WHERE (id = ? OR (? <> '' AND UPPER(REPLACE(plate_number, ' ', '')) = ?)) AND UPPER(TRIM(plate_number)) NOT REGEXP '^FLT-[0-9]+$' LIMIT 1",
+          [id, cleanQueryPlate, cleanQueryPlate]
         );
         if (existingRows.length > 0) {
           const row = existingRows[0];
+          canonicalId = String(row.id || id).trim();
           const parsedJson = typeof row.payload_json === 'string'
             ? JSON.parse(row.payload_json || '{}')
             : (row.payload_json || {});
@@ -3967,7 +3999,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             ? row.last_maintenance.toISOString().slice(0, 10)
             : (row.last_maintenance ? String(row.last_maintenance).slice(0, 10) : '');
           existingPayload = {
-            id: row.id,
+            id: canonicalId,
             plateNumber: row.plate_number,
             vehicleType: row.vehicle_type,
             tonnageCapacity: Number(row.tonnage_capacity || 0),
@@ -3987,9 +4019,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const merged = {
         ...existingPayload,
         ...f,
-        id
+        id: canonicalId
       };
-      const plateNumber = String(merged.plateNumber || existingPayload.plateNumber || id).trim().toUpperCase();
+      const plateNumber = String(merged.plateNumber || existingPayload.plateNumber || '').trim().toUpperCase();
+      if (!plateNumber || isPhantomFltPlate(plateNumber)) {
+        return res.status(404).json({ success: false, error: 'Data armada tidak ditemukan di database' });
+      }
       merged.plateNumber = plateNumber;
 
       const hasExplicitLastMaint = Object.prototype.hasOwnProperty.call(f, 'lastMaintenance');
@@ -4002,7 +4037,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       merged.lastMaintenance = lastMaintDate || '';
       merged.kirExpiryDate = lastMaintDate || '';
 
-      inMemoryFleetsFallback[id] = merged;
+      inMemoryFleetsFallback[canonicalId] = merged;
 
       await mysqlQuery(
         `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year, last_maintenance, payload_json)
@@ -4020,7 +4055,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
            last_maintenance=VALUES(last_maintenance),
            payload_json=VALUES(payload_json)`,
         [
-          id,
+          canonicalId,
           plateNumber,
           merged.vehicleType || 'Engkel STD',
           Number(merged.tonnageCapacity ?? 0) || 0,

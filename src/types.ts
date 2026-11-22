@@ -759,6 +759,8 @@ export interface DriverShiftCheckin {
   driverId: string;
   driverName: string;
   checkinRole?: 'driver' | 'helper';
+  pairedDriverId?: string;
+  pairedDriverName?: string;
   selectedArea?: string;
   fleetId?: string;
   fleetInitialCode?: string;

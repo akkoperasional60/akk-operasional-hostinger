@@ -1,9 +1,9 @@
 {
-  "versionCode": 10044,
-  "versionName": "1.0.44",
-  "updatedAt": "2026-11-21T16:10:00.000000",
+  "versionCode": 10045,
+  "versionName": "1.0.45",
+  "updatedAt": "2026-11-22T15:10:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V56: Sinkronisasi Langsung Jadwal Admin Penjualan ke MySQL Tanpa Cache Lokal, Evaluasi Ketepatan Waktu Check-In/Check-Out Kru vs Target Jadwal & Penutupan Presensi Tim Otomatis, Laporan Mingguan BBM Berbasis Minggu Kalender per Bulan (Minggu 1-5) + Filter SPBU & Cabang, serta Safety Timeout GPS Lock 3.5 Detik di Portal Driver."
+  "releaseNotes": "Update V57: Sub-Menu WMS Gudang Retur & Selisih Muat (/gudang-retur-muat), Pemisahan Tugas Checklist Fisik Armada (Driver) vs Input KM Awal & KM Akhir (Helper) + Deteksi Otomatis Shift Pasangan Driver-Helper, Pembersihan Permanen Armada Phantom FLT-* & Deduplikasi Plat Nomor di MySQL, serta Filter Kalender Rentang Tanggal Custom pada Laporan BBM."
 }

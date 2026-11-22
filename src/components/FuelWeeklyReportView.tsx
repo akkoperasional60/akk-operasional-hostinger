@@ -4,22 +4,20 @@ import {
   Download,
   Calendar,
   Truck,
-  User,
-  CheckCircle2,
-  Search,
   Printer,
   ChevronDown,
-  ArrowUpDown,
-  MapPin
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  X,
+  RotateCcw
 } from 'lucide-react';
 import { FuelLog } from '../types';
 import {
-  computeWeeklyFleetSummaries,
-  computeWeeklyDriverSummaries,
+  computeFleetRangeSummaries,
   exportFuelReportToExcel,
   exportFuelReportToPDF,
-  formatRupiah,
-  getWeekBounds
+  formatRupiah
 } from '../utils/fuelReportGenerator';
 
 interface FuelWeeklyReportViewProps {
@@ -27,126 +25,144 @@ interface FuelWeeklyReportViewProps {
   onOpenExportModal?: () => void;
 }
 
+const MONTH_OPTIONS = [
+  { value: 'all', label: 'Semua Bulan' },
+  { value: '01', label: 'Januari' },
+  { value: '02', label: 'Februari' },
+  { value: '03', label: 'Maret' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'Mei' },
+  { value: '06', label: 'Juni' },
+  { value: '07', label: 'Juli' },
+  { value: '08', label: 'Agustus' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'Oktober' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'Desember' }
+];
+
+const MONTHS_SHORT_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const MONTHS_FULL_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+const normalizeLogIsoDate = (raw?: string): string => {
+  if (!raw) return '';
+  return raw.includes('T') ? raw.split('T')[0] : raw.slice(0, 10);
+};
+
+const formatDisplayDate = (iso: string): string => {
+  if (!iso || iso.length < 10) return iso;
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return `${d} ${MONTHS_SHORT_ID[m - 1] || ''} ${y}`;
+};
+
 export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   fuelLogs
 }) => {
-  const [reportTab, setReportTab] = useState<'fleet' | 'driver'>('fleet');
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
-  const [selectedWeek, setSelectedWeek] = useState<string>('all');
+  const [selectedYear, setSelectedYear] = useState<string>('all');
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const [isCalendarOpen, setIsCalendarOpen] = useState<boolean>(false);
+  const [calendarMonthDate, setCalendarMonthDate] = useState<Date>(() => {
+    const latestDate = fuelLogs
+      .map(l => normalizeLogIsoDate(l.date))
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0];
+    if (latestDate) {
+      const [y, m] = latestDate.split('-').map(Number);
+      if (y && m) return new Date(y, m - 1, 1);
+    }
+    return new Date();
+  });
   const [selectedSpbu, setSelectedSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
-  const [sortBy, setSortBy] = useState<'period' | 'efficient_asc' | 'wasteful_desc'>('period');
-  const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
-  // Filter logs by SPBU first so weekly summaries accurately reflect the selected SPBU
-  const spbuFilteredLogs = useMemo(() => {
-    if (selectedSpbu === 'all') return fuelLogs;
-    return fuelLogs.filter(log => {
-      const gs = (log.gasStation || '').toLowerCase();
-      if (selectedSpbu === 'Farly') return gs.includes('farly');
-      if (selectedSpbu === 'Gajah Mada') return gs.includes('gajah mada');
-      return !gs.includes('farly') && !gs.includes('gajah mada');
+  // Extract distinct years present in logs merged with current/surrounding operational years
+  const availableYears = useMemo(() => {
+    const set = new Set<string>(['2025', '2026', String(new Date().getFullYear())]);
+    fuelLogs.forEach(l => {
+      const iso = normalizeLogIsoDate(l.date);
+      if (iso.length >= 4) set.add(iso.slice(0, 4));
     });
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [fuelLogs]);
+
+  // Dates with logs (for subtle indicator dots in calendar)
+  const logDatesSet = useMemo(() => {
+    const set = new Set<string>();
+    fuelLogs.forEach(l => {
+      if (selectedSpbu !== 'all') {
+        const gs = (l.gasStation || '').toLowerCase();
+        if (selectedSpbu === 'Farly' && !gs.includes('farly')) return;
+        if (selectedSpbu === 'Gajah Mada' && !gs.includes('gajah mada')) return;
+        if (selectedSpbu === 'SPBU Lain' && (gs.includes('farly') || gs.includes('gajah mada'))) return;
+      }
+      const iso = normalizeLogIsoDate(l.date);
+      if (iso) set.add(iso);
+    });
+    return set;
   }, [fuelLogs, selectedSpbu]);
 
-  // Compute all weekly summaries from SPBU-filtered logs
-  const allFleetSummaries = useMemo(() => computeWeeklyFleetSummaries(spbuFilteredLogs), [spbuFilteredLogs]);
-  const allDriverSummaries = useMemo(() => computeWeeklyDriverSummaries(spbuFilteredLogs), [spbuFilteredLogs]);
+  // Filter logs cleanly by SPBU, Year, Month, and Custom Calendar Day Range
+  const filteredLogs = useMemo(() => {
+    return fuelLogs.filter(log => {
+      const iso = normalizeLogIsoDate(log.date);
+      if (!iso) return false;
 
-  // Extract distinct calendar months
-  const availableMonths = useMemo(() => {
-    const map = new Map<string, string>();
-    spbuFilteredLogs.forEach(l => {
-      const b = getWeekBounds(l.date);
-      if (!map.has(b.monthKey)) {
-        map.set(b.monthKey, b.monthLabel);
+      if (selectedSpbu !== 'all') {
+        const gs = (log.gasStation || '').toLowerCase();
+        if (selectedSpbu === 'Farly' && !gs.includes('farly')) return false;
+        if (selectedSpbu === 'Gajah Mada' && !gs.includes('gajah mada')) return false;
+        if (selectedSpbu === 'SPBU Lain' && (gs.includes('farly') || gs.includes('gajah mada'))) return false;
       }
-    });
-    return Array.from(map.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, label]) => ({ key, label }));
-  }, [spbuFilteredLogs]);
 
-  // Extract distinct weeks for filter dropdown (scoped to selectedMonth if chosen)
-  const availableWeeks = useMemo(() => {
-    const map = new Map<string, string>();
-    allFleetSummaries.forEach(f => {
-      if (selectedMonth !== 'all' && !f.weekKey.startsWith(`${selectedMonth}-`)) return;
-      if (!map.has(f.weekKey)) {
-        map.set(f.weekKey, f.weekLabel);
+      if (rangeStart) {
+        const effectiveEnd = rangeEnd || rangeStart;
+        const low = rangeStart <= effectiveEnd ? rangeStart : effectiveEnd;
+        const high = rangeStart <= effectiveEnd ? effectiveEnd : rangeStart;
+        if (iso < low || iso > high) return false;
+      } else {
+        const [y, m] = iso.split('-');
+        if (selectedYear !== 'all' && y !== selectedYear) return false;
+        if (selectedMonth !== 'all' && m !== selectedMonth) return false;
       }
+
+      return true;
     });
-    return Array.from(map.entries()).map(([key, label]) => ({ key, label }));
-  }, [allFleetSummaries, selectedMonth]);
+  }, [fuelLogs, selectedSpbu, rangeStart, rangeEnd, selectedYear, selectedMonth]);
 
-  // Filtered and sorted summaries
-  const filteredFleetSummaries = useMemo(() => {
-    const list = allFleetSummaries.filter(f => {
-      const matchMonth = selectedMonth === 'all' || f.weekKey.startsWith(`${selectedMonth}-`);
-      const matchWeek = selectedWeek === 'all' || f.weekKey === selectedWeek;
-      const q = searchQuery.toLowerCase();
-      const matchQuery = !q ||
-        f.plateNumber.toLowerCase().includes(q) ||
-        f.initialCode.toLowerCase().includes(q) ||
-        f.vehicleType.toLowerCase().includes(q) ||
-        f.driverNames.some(d => d.toLowerCase().includes(q));
-
-      return matchMonth && matchWeek && matchQuery;
-    });
-
-    if (sortBy === 'efficient_asc') {
-      return [...list].sort((a, b) => {
-        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : -1;
-        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : -1;
-        return bVal - aVal;
-      });
+  const activePeriodLabel = useMemo(() => {
+    const spbuTag = selectedSpbu !== 'all' ? ` • ${selectedSpbu}` : '';
+    if (rangeStart) {
+      const effectiveEnd = rangeEnd || rangeStart;
+      const low = rangeStart <= effectiveEnd ? rangeStart : effectiveEnd;
+      const high = rangeStart <= effectiveEnd ? effectiveEnd : rangeStart;
+      if (low === high) {
+        return `${formatDisplayDate(low)}${spbuTag}`;
+      }
+      return `${formatDisplayDate(low)} – ${formatDisplayDate(high)}${spbuTag}`;
     }
-    if (sortBy === 'wasteful_desc') {
-      return [...list].sort((a, b) => {
-        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : 9999;
-        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : 9999;
-        return aVal - bVal;
-      });
-    }
-    return list;
-  }, [allFleetSummaries, selectedMonth, selectedWeek, searchQuery, sortBy]);
+    const monthName = selectedMonth !== 'all'
+      ? MONTH_OPTIONS.find(m => m.value === selectedMonth)?.label || selectedMonth
+      : '';
+    if (monthName && selectedYear !== 'all') return `${monthName} ${selectedYear}${spbuTag}`;
+    if (monthName) return `Bulan ${monthName}${spbuTag}`;
+    if (selectedYear !== 'all') return `Tahun ${selectedYear}${spbuTag}`;
+    return `Seluruh Periode Terdata${spbuTag}`;
+  }, [rangeStart, rangeEnd, selectedMonth, selectedYear, selectedSpbu]);
 
-  const filteredDriverSummaries = useMemo(() => {
-    const list = allDriverSummaries.filter(d => {
-      const matchMonth = selectedMonth === 'all' || d.weekKey.startsWith(`${selectedMonth}-`);
-      const matchWeek = selectedWeek === 'all' || d.weekKey === selectedWeek;
-      const q = searchQuery.toLowerCase();
-      const matchQuery = !q ||
-        d.driverName.toLowerCase().includes(q) ||
-        d.fleetPlates.some(p => p.toLowerCase().includes(q)) ||
-        d.predicate.toLowerCase().includes(q);
-
-      return matchMonth && matchWeek && matchQuery;
-    });
-
-    if (sortBy === 'efficient_asc') {
-      return [...list].sort((a, b) => {
-        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : -1;
-        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : -1;
-        return bVal - aVal;
-      });
-    }
-    if (sortBy === 'wasteful_desc') {
-      return [...list].sort((a, b) => {
-        const aVal = a.avgKmPerLiter > 0 ? a.avgKmPerLiter : 9999;
-        const bVal = b.avgKmPerLiter > 0 ? b.avgKmPerLiter : 9999;
-        return aVal - bVal;
-      });
-    }
-    return list;
-  }, [allDriverSummaries, selectedMonth, selectedWeek, searchQuery, sortBy]);
+  const fleetSummaries = useMemo(
+    () => computeFleetRangeSummaries(filteredLogs, activePeriodLabel, rangeStart, rangeEnd || rangeStart),
+    [filteredLogs, activePeriodLabel, rangeStart, rangeEnd]
+  );
 
   // Aggregate Metrics for Active Filter
   const activeMetrics = useMemo(() => {
-    const totalLiters = Number(filteredFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
-    const totalCost = filteredFleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
-    const totalDistance = filteredFleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
-    const totalRefuels = filteredFleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
+    const totalLiters = Number(fleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
+    const totalCost = fleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
+    const totalDistance = fleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
+    const totalRefuels = fleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
     const avgKmPerLiter = totalLiters > 0 && totalDistance > 0
       ? Number((totalDistance / totalLiters).toFixed(2))
       : 0;
@@ -155,9 +171,6 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       : 0;
     const avgCostPerKm = totalDistance > 0 ? Math.round(totalCost / totalDistance) : 0;
 
-    const bestFleet = [...filteredFleetSummaries].sort((a, b) => b.avgKmPerLiter - a.avgKmPerLiter)[0];
-    const bestDriver = [...filteredDriverSummaries].sort((a, b) => b.ecoScore - a.ecoScore)[0];
-
     return {
       totalLiters,
       totalCost,
@@ -165,33 +178,68 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       totalRefuels,
       avgKmPerLiter,
       avgLiterPerKm,
-      avgCostPerKm,
-      bestFleet,
-      bestDriver
+      avgCostPerKm
     };
-  }, [filteredFleetSummaries, filteredDriverSummaries]);
+  }, [fleetSummaries]);
 
-  const selectedWeekLabel = useMemo(() => {
-    const spbuTag = selectedSpbu !== 'all' ? ` • ${selectedSpbu}` : '';
-    if (selectedWeek !== 'all') {
-      const found = availableWeeks.find(w => w.key === selectedWeek);
-      return `${found ? found.label : selectedWeek}${spbuTag}`;
+  const handleDayClick = (iso: string) => {
+    if (!rangeStart || (rangeStart && rangeEnd)) {
+      setRangeStart(iso);
+      setRangeEnd('');
+      return;
     }
-    if (selectedMonth !== 'all') {
-      const foundM = availableMonths.find(m => m.key === selectedMonth);
-      return `Bulan ${foundM ? foundM.label : selectedMonth}${spbuTag}`;
+    if (iso === rangeStart) {
+      setRangeEnd(iso);
+    } else if (iso < rangeStart) {
+      setRangeEnd(rangeStart);
+      setRangeStart(iso);
+    } else {
+      setRangeEnd(iso);
     }
-    return `Seluruh Periode Terdata${spbuTag}`;
-  }, [selectedMonth, selectedWeek, selectedSpbu, availableWeeks, availableMonths]);
+  };
+
+  const applyMonthDropdown = (nextMonth: string) => {
+    setSelectedMonth(nextMonth);
+    setRangeStart('');
+    setRangeEnd('');
+    if (nextMonth !== 'all') {
+      const targetYear = selectedYear !== 'all' ? Number(selectedYear) : calendarMonthDate.getFullYear();
+      setCalendarMonthDate(new Date(targetYear, Number(nextMonth) - 1, 1));
+    }
+  };
+
+  const applyYearDropdown = (nextYear: string) => {
+    setSelectedYear(nextYear);
+    setRangeStart('');
+    setRangeEnd('');
+    if (nextYear !== 'all') {
+      const targetMonth = selectedMonth !== 'all' ? Number(selectedMonth) - 1 : calendarMonthDate.getMonth();
+      setCalendarMonthDate(new Date(Number(nextYear), targetMonth, 1));
+    }
+  };
+
+  const resetAllFilters = () => {
+    setSelectedMonth('all');
+    setSelectedYear('all');
+    setRangeStart('');
+    setRangeEnd('');
+    setSelectedSpbu('all');
+  };
+
+  const hasActiveFilter = selectedMonth !== 'all' || selectedYear !== 'all' || Boolean(rangeStart) || selectedSpbu !== 'all';
+
+  const periodSlug = rangeStart
+    ? `${rangeStart}_${rangeEnd || rangeStart}`
+    : `${selectedYear}_${selectedMonth}`;
 
   const handleExportPDF = () => {
     setIsExporting(true);
     try {
       exportFuelReportToPDF({
-        fleetSummaries: filteredFleetSummaries,
-        driverSummaries: filteredDriverSummaries,
-        filterWeekKey: selectedWeek !== 'all' ? selectedWeek : selectedMonth !== 'all' ? selectedMonth : undefined,
-        filterWeekLabel: selectedWeekLabel,
+        fleetSummaries,
+        driverSummaries: [],
+        filterWeekKey: periodSlug,
+        filterWeekLabel: activePeriodLabel,
         printedBy: 'Super Admin Logistik PT AKK'
       });
     } catch (err) {
@@ -204,19 +252,12 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   const handleExportExcel = () => {
     setIsExporting(true);
     try {
-      const matchingLogs = spbuFilteredLogs.filter(l => {
-        const b = getWeekBounds(l.date);
-        if (selectedMonth !== 'all' && b.monthKey !== selectedMonth) return false;
-        if (selectedWeek !== 'all' && b.weekKey !== selectedWeek) return false;
-        return true;
-      });
-
       exportFuelReportToExcel({
-        fleetSummaries: filteredFleetSummaries,
-        driverSummaries: filteredDriverSummaries,
-        detailedLogs: matchingLogs,
-        filterWeekKey: selectedWeek !== 'all' ? selectedWeek : selectedMonth !== 'all' ? selectedMonth : undefined,
-        filterWeekLabel: selectedWeekLabel
+        fleetSummaries,
+        driverSummaries: [],
+        detailedLogs: filteredLogs,
+        filterWeekKey: periodSlug,
+        filterWeekLabel: activePeriodLabel
       });
     } catch (err) {
       console.error(err);
@@ -225,54 +266,63 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     }
   };
 
+  const calendarYear = calendarMonthDate.getFullYear();
+  const calendarMonthIdx = calendarMonthDate.getMonth();
+  const firstDayOffset = new Date(calendarYear, calendarMonthIdx, 1).getDay();
+  const daysInCalMonth = new Date(calendarYear, calendarMonthIdx + 1, 0).getDate();
+  const calendarCells: (number | null)[] = [];
+  for (let i = 0; i < firstDayOffset; i++) calendarCells.push(null);
+  for (let d = 1; d <= daysInCalMonth; d++) calendarCells.push(d);
+
+  const normalizedLow = rangeStart ? (rangeEnd && rangeEnd < rangeStart ? rangeEnd : rangeStart) : '';
+  const normalizedHigh = rangeStart ? (rangeEnd ? (rangeEnd > rangeStart ? rangeEnd : rangeStart) : rangeStart) : '';
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* SECTION HEADER & QUICK EXPORT ACTIONS */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
                 <FileSpreadsheet className="w-5 h-5" />
               </span>
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <span>Rekapitulasi Mingguan Konsumsi BBM (Per Armada & Driver)</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase">
-                    Otomasi Mingguan
-                  </span>
+                <h3 className="text-base font-bold text-white">
+                  Rekapitulasi Konsumsi BBM Armada
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Laporan berkala otomatis yang mengkalkulasi efisiensi konsumsi bahan bakar, rasio KM/L, biaya operasional, dan skor eco-driving driver per minggu pengiriman.
+                  Pilih bulan, tahun, dan rentang hari pada kalender untuk merekap konsumsi BBM serta biaya operasional tiap armada.
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
+              type="button"
               onClick={handleExportPDF}
               disabled={isExporting}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
-              title="Ekspor Laporan Resmi Format PDF Siap Cetak"
             >
               <Download className="w-4 h-4" />
-              <span>Export PDF (.pdf)</span>
+              <span>Export PDF</span>
             </button>
 
             <button
+              type="button"
               onClick={handleExportExcel}
               disabled={isExporting}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
-              title="Ekspor Laporan Multi-Sheet Format Excel (.xlsx)"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Export Excel (.xlsx)</span>
+              <span>Export Excel</span>
             </button>
 
             <button
+              type="button"
               onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition cursor-pointer"
             >
               <Printer className="w-4 h-4 text-slate-400" />
               <span>Print</span>
@@ -280,26 +330,20 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
           </div>
         </div>
 
-        {/* Filter Controls Bar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-3 border-t border-slate-800/80">
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-            {/* Month Selector */}
-            <div className="relative min-w-[165px]">
+        {/* SIMPLIFIED FILTER BAR: BULAN + TAHUN + KALENDER RENTANG HARI + SPBU */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 1. Dropdown Filter Bulan */}
+            <div className="relative min-w-[155px]">
               <Calendar className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedMonth}
-                onChange={(e) => {
-                  const nextMonth = e.target.value;
-                  setSelectedMonth(nextMonth);
-                  if (nextMonth !== 'all' && selectedWeek !== 'all' && !selectedWeek.startsWith(`${nextMonth}-`)) {
-                    setSelectedWeek('all');
-                  }
-                }}
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                onChange={(e) => applyMonthDropdown(e.target.value)}
+                aria-label="Filter Bulan"
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
               >
-                <option value="all">Semua Bulan ({availableMonths.length})</option>
-                {availableMonths.map(m => (
-                  <option key={m.key} value={m.key}>
+                {MONTH_OPTIONS.map(m => (
+                  <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
                 ))}
@@ -307,31 +351,178 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* Week Selector (Minggu 1 - Minggu 5) */}
-            <div className="relative min-w-[215px]">
-              <Calendar className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-2.5 pointer-events-none" />
+            {/* 2. Dropdown Filter Tahun */}
+            <div className="relative min-w-[130px]">
+              <Calendar className="w-3.5 h-3.5 text-cyan-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
-                value={selectedWeek}
-                onChange={(e) => setSelectedWeek(e.target.value)}
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                value={selectedYear}
+                onChange={(e) => applyYearDropdown(e.target.value)}
+                aria-label="Filter Tahun"
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
               >
-                <option value="all">Semua Minggu ({availableWeeks.length} Minggu)</option>
-                {availableWeeks.map(w => (
-                  <option key={w.key} value={w.key}>
-                    {w.label}
+                <option value="all">Semua Tahun</option>
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr}>
+                    Tahun {yr}
                   </option>
                 ))}
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* SPBU Filter */}
+            {/* 3. Custom Calendar & Date Range Picker */}
+            <div className="relative">
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => setIsCalendarOpen(prev => !prev)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                    rangeStart
+                      ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-200 hover:border-amber-500/50'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>
+                    {rangeStart
+                      ? (normalizedLow === normalizedHigh
+                        ? formatDisplayDate(normalizedLow)
+                        : `${formatDisplayDate(normalizedLow)} – ${formatDisplayDate(normalizedHigh)}`)
+                      : 'Pilih Kalender (Rentang Hari)'}
+                  </span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isCalendarOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                </button>
+                {rangeStart && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRangeStart('');
+                      setRangeEnd('');
+                    }}
+                    title="Hapus rentang kalender"
+                    className="ml-1 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {isCalendarOpen && (
+                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3.5 space-y-3">
+                  {/* Calendar Month & Year Navigation */}
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonthDate(new Date(calendarYear, calendarMonthIdx - 1, 1))}
+                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500 cursor-pointer"
+                      aria-label="Bulan sebelumnya"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div className="text-xs font-black text-white">
+                      {MONTHS_FULL_ID[calendarMonthIdx]} {calendarYear}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonthDate(new Date(calendarYear, calendarMonthIdx + 1, 1))}
+                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500 cursor-pointer"
+                      aria-label="Bulan berikutnya"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Helper Text */}
+                  <div className="text-[10px] text-slate-400 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                    <span>
+                      {!rangeStart
+                        ? 'Klik tanggal awal, lalu klik tanggal akhir'
+                        : !rangeEnd
+                        ? `Awal: ${formatDisplayDate(rangeStart)} • Pilih tanggal akhir`
+                        : `${formatDisplayDate(normalizedLow)} – ${formatDisplayDate(normalizedHigh)}`}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" /> Ada BBM
+                    </span>
+                  </div>
+
+                  {/* Weekday Headers */}
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(d => (
+                      <div key={d} className="text-[10px] font-bold text-slate-500 py-0.5">
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Calendar Grid */}
+                  <div className="grid grid-cols-7 gap-1">
+                    {calendarCells.map((day, idx) => {
+                      if (day === null) return <div key={`empty-${idx}`} className="h-8" />;
+                      const iso = `${calendarYear}-${String(calendarMonthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isStart = normalizedLow === iso;
+                      const isEnd = normalizedHigh === iso;
+                      const inRange = Boolean(normalizedLow && normalizedHigh && iso >= normalizedLow && iso <= normalizedHigh);
+                      const hasLogs = logDatesSet.has(iso);
+
+                      return (
+                        <button
+                          key={iso}
+                          type="button"
+                          onClick={() => handleDayClick(iso)}
+                          className={`relative h-8 rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center transition cursor-pointer ${
+                            isStart || isEnd
+                              ? 'bg-amber-500 text-slate-950 shadow-sm'
+                              : inRange
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : 'text-slate-200 hover:bg-amber-500/10'
+                          }`}
+                        >
+                          <span>{day}</span>
+                          {hasLogs && (
+                            <span
+                              className={`w-1 h-1 rounded-full absolute bottom-0.5 ${
+                                isStart || isEnd ? 'bg-slate-950' : 'bg-emerald-400'
+                              }`}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Quick Footer Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRangeStart('');
+                        setRangeEnd('');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-semibold text-slate-300 hover:border-slate-600 cursor-pointer"
+                    >
+                      Reset Hari
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsCalendarOpen(false)}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold cursor-pointer"
+                    >
+                      Terapkan
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 4. Filter SPBU */}
             <div className="relative min-w-[155px]">
               <MapPin className="w-3.5 h-3.5 text-blue-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedSpbu}
                 onChange={(e) => setSelectedSpbu(e.target.value as any)}
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                aria-label="Filter SPBU"
+                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
               >
                 <option value="all">Semua SPBU</option>
                 <option value="Farly">SPBU Farly</option>
@@ -341,41 +532,26 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* Sort Terefisien - Boros */}
-            <div className="relative min-w-[195px]">
-              <ArrowUpDown className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={resetAllFilters}
+                className="flex items-center gap-1 px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+                title="Reset semua filter"
               >
-                <option value="period">Urutkan: Periode Terbaru</option>
-                <option value="efficient_asc">Terefisien &rarr; Paling Boros</option>
-                <option value="wasteful_desc">Paling Boros &rarr; Terefisien</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
-            </div>
-
-            {/* Search Input */}
-            <div className="relative flex-1 sm:w-48">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Cari plat, inisial, supir..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-              />
-            </div>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
           </div>
 
           <div className="text-xs text-slate-400 font-medium shrink-0">
-            Periode: <span className="font-bold text-amber-400">{selectedWeekLabel}</span>
+            Periode: <span className="font-bold text-amber-400">{activePeriodLabel}</span>
           </div>
         </div>
 
-        {/* 6 Executive Summary Mini Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2">
+        {/* 5 FLEET SUMMARY KPI CARDS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-2">
           <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block font-semibold">Total Konsumsi</span>
             <span className="text-lg font-black text-white font-mono">{activeMetrics.totalLiters.toLocaleString('id-ID')} L</span>
@@ -405,210 +581,85 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             <span className="text-lg font-black text-white font-mono">{activeMetrics.avgLiterPerKm}</span>
             <span className="text-[10px] text-slate-500 block">{(activeMetrics.avgLiterPerKm * 100).toFixed(2)} L/100KM</span>
           </div>
-
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Driver Terhemat</span>
-            <span className="text-xs font-bold text-emerald-300 truncate block mt-0.5" title={activeMetrics.bestDriver?.driverName}>
-              {activeMetrics.bestDriver?.driverName || '-'}
-            </span>
-            <span className="text-[10px] text-emerald-400 block">
-              {activeMetrics.bestDriver ? `${activeMetrics.bestDriver.avgKmPerLiter} KM/L (Skor ${activeMetrics.bestDriver.ecoScore})` : '-'}
-            </span>
-          </div>
         </div>
       </div>
 
-      {/* SUB-TABS: PER ARMADA vs PER DRIVER */}
-      <div className="border-b border-slate-800 flex items-center justify-between pb-1">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setReportTab('fleet')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-              reportTab === 'fleet'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Truck className="w-4 h-4" />
-            <span>1. Ringkasan Mingguan Per Armada ({filteredFleetSummaries.length} Baris)</span>
-          </button>
-
-          <button
-            onClick={() => setReportTab('driver')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-              reportTab === 'driver'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>2. Ringkasan Mingguan Per Driver ({filteredDriverSummaries.length} Baris)</span>
-          </button>
+      {/* TABLE: REKAPITULASI PER ARMADA */}
+      <div className="overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-sm">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold text-white">
+            <Truck className="w-4 h-4 text-amber-400" />
+            <span>Rekapitulasi Per Armada ({fleetSummaries.length} Unit)</span>
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Menampilkan {filteredLogs.length} transaksi BBM
+          </span>
         </div>
 
-        <div className="text-xs text-slate-400 hidden sm:flex items-center gap-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Otomatis dihitung dari {fuelLogs.length} transaksi BBM</span>
-        </div>
+        <table className="w-full text-left text-xs text-slate-300">
+          <thead className="bg-slate-950 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-800 whitespace-nowrap">
+            <tr>
+              <th className="py-2 px-2.5">No</th>
+              <th className="py-2 px-2.5">Armada &amp; Plat</th>
+              <th className="py-2 px-2.5">Tipe Kendaraan</th>
+              <th className="py-2 px-2.5 text-right">Isi</th>
+              <th className="py-2 px-2.5 text-right">Total Liter</th>
+              <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
+              <th className="py-2 px-2.5 text-right">Biaya BBM (Rp)</th>
+              <th className="py-2 px-2.5 text-right">Rasio (KM/L)</th>
+              <th className="py-2 px-2.5 text-right">Liter / KM</th>
+              <th className="py-2 px-2.5 text-right">Target</th>
+              <th className="py-2 px-2.5 text-center">Status Evaluasi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/60 font-mono">
+            {fleetSummaries.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="py-10 text-center text-slate-500 font-sans text-sm">
+                  Tidak ada data konsumsi BBM armada untuk periode yang dipilih.
+                </td>
+              </tr>
+            ) : (
+              fleetSummaries.map((f, i) => (
+                <tr key={f.id} className="hover:bg-slate-800/40 transition">
+                  <td className="py-1.5 px-2.5 text-slate-400 font-sans text-xs whitespace-nowrap">{i + 1}</td>
+                  <td className="py-1.5 px-2.5 whitespace-nowrap">
+                    <div className="flex items-baseline gap-1.5 leading-tight">
+                      <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0 self-center" />
+                      <span className="font-extrabold text-white text-sm font-sans">{f.initialCode || f.plateNumber}</span>
+                      <span className="text-xs text-slate-400 font-medium">({f.plateNumber})</span>
+                    </div>
+                  </td>
+                  <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs font-medium whitespace-nowrap">{f.vehicleType}</td>
+                  <td className="py-1.5 px-2.5 text-right text-slate-200 text-sm font-semibold whitespace-nowrap">{f.refuelCount}x</td>
+                  <td className="py-1.5 px-2.5 text-right font-bold text-white text-sm whitespace-nowrap">{f.totalLiters} L</td>
+                  <td className="py-1.5 px-2.5 text-right text-cyan-300 font-bold text-sm whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
+                  <td className="py-1.5 px-2.5 text-right text-emerald-400 font-bold text-sm whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
+                  <td className="py-1.5 px-2.5 text-right font-black text-amber-400 text-base whitespace-nowrap">{f.avgKmPerLiter}</td>
+                  <td className="py-1.5 px-2.5 text-right text-slate-200 whitespace-nowrap leading-tight">
+                    <div className="text-sm font-bold">{f.avgLiterPerKm}</div>
+                    <div className="text-[11px] text-slate-500">({f.avgLiterPer100Km} L/100KM)</div>
+                  </td>
+                  <td className="py-1.5 px-2.5 text-right text-slate-400 text-xs font-semibold whitespace-nowrap">{f.targetRatio}</td>
+                  <td className="py-1.5 px-2.5 font-sans text-center whitespace-nowrap">
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border inline-block text-center ${
+                      f.status === 'Sangat Efisien'
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : f.status === 'Efisien / Normal'
+                        ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                        : f.status === 'Boros'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                        : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                    }`}>
+                      {f.status}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
-
-      {/* TAB CONTENT: PER ARMADA */}
-      {reportTab === 'fleet' && (
-        <div className="space-y-4">
-          <div className="overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-sm">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-800">
-                <tr>
-                  <th className="py-3.5 px-3">No</th>
-                  <th className="py-3.5 px-3">Periode Minggu</th>
-                  <th className="py-3.5 px-3">Armada & Plat</th>
-                  <th className="py-3.5 px-3">Tipe Kendaraan</th>
-                  <th className="py-3.5 px-3 text-right">Rit/Isi</th>
-                  <th className="py-3.5 px-3 text-right">Total Liter</th>
-                  <th className="py-3.5 px-3 text-right">Jarak (KM)</th>
-                  <th className="py-3.5 px-3 text-right">Biaya BBM (Rp)</th>
-                  <th className="py-3.5 px-3 text-right">Rasio (KM/L)</th>
-                  <th className="py-3.5 px-3 text-right">Liter / KM</th>
-                  <th className="py-3.5 px-3 text-right">Target</th>
-                  <th className="py-3.5 px-3">Status Evaluasi</th>
-                  <th className="py-3.5 px-3">Driver Bertugas</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
-                {filteredFleetSummaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={13} className="py-12 text-center text-slate-500 font-sans">
-                      Tidak ada data ringkasan armada untuk periode minggu yang dipilih.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredFleetSummaries.map((f, i) => (
-                    <tr key={f.id} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-3 text-slate-400 font-sans">{i + 1}</td>
-                      <td className="py-3 px-3 font-sans text-slate-300 text-[11px] whitespace-nowrap">
-                        <div className="font-semibold text-white">{f.weekLabel.split('(')[0].trim()}</div>
-                        <div className="text-[10px] text-slate-400">({f.weekLabel.split('(')[1] || ''}</div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <div className="font-bold text-white flex items-center gap-1.5">
-                          <Truck className="w-3.5 h-3.5 text-blue-400" />
-                          <span>{f.plateNumber}</span>
-                        </div>
-                        {f.initialCode && (
-                          <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded font-sans border border-amber-500/20">
-                            {f.initialCode}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 font-sans text-slate-300 text-[11px]">{f.vehicleType}</td>
-                      <td className="py-3 px-3 text-right text-slate-200">{f.refuelCount}x</td>
-                      <td className="py-3 px-3 text-right font-bold text-white">{f.totalLiters} L</td>
-                      <td className="py-3 px-3 text-right text-cyan-300 font-semibold">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
-                      <td className="py-3 px-3 text-right text-emerald-400 font-semibold">{formatRupiah(f.totalCost)}</td>
-                      <td className="py-3 px-3 text-right font-black text-amber-400 text-sm">{f.avgKmPerLiter}</td>
-                      <td className="py-3 px-3 text-right text-slate-300 text-[11px]">
-                        <div>{f.avgLiterPerKm}</div>
-                        <div className="text-[9px] text-slate-500">({f.avgLiterPer100Km} L/100KM)</div>
-                      </td>
-                      <td className="py-3 px-3 text-right text-slate-400 text-[11px]">{f.targetRatio}</td>
-                      <td className="py-3 px-3 font-sans">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border block text-center truncate ${
-                          f.status === 'Sangat Efisien'
-                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            : f.status === 'Efisien / Normal'
-                            ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                            : f.status === 'Boros'
-                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                            : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                        }`}>
-                          {f.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 font-sans text-slate-300 text-[11px] max-w-xs truncate" title={f.driverNames.join(', ')}>
-                        {f.driverNames.join(', ') || '-'}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB CONTENT: PER DRIVER */}
-      {reportTab === 'driver' && (
-        <div className="space-y-4">
-          <div className="overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-sm">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-800">
-                <tr>
-                  <th className="py-3.5 px-3">No</th>
-                  <th className="py-3.5 px-3">Periode Minggu</th>
-                  <th className="py-3.5 px-3">Nama Driver / Kru</th>
-                  <th className="py-3.5 px-3">Unit Armada</th>
-                  <th className="py-3.5 px-3 text-right">Rit</th>
-                  <th className="py-3.5 px-3 text-right">Total Liter</th>
-                  <th className="py-3.5 px-3 text-right">Jarak Tempuh (KM)</th>
-                  <th className="py-3.5 px-3 text-right">Biaya BBM (Rp)</th>
-                  <th className="py-3.5 px-3 text-right">Rasio (KM/L)</th>
-                  <th className="py-3.5 px-3 text-right">Liter / KM</th>
-                  <th className="py-3.5 px-3 text-center">Skor Eco</th>
-                  <th className="py-3.5 px-3">Predikat Eco</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
-                {filteredDriverSummaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={12} className="py-12 text-center text-slate-500 font-sans">
-                      Tidak ada data ringkasan driver untuk periode minggu yang dipilih.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredDriverSummaries.map((d, i) => (
-                    <tr key={d.id} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-3 text-slate-400 font-sans">{i + 1}</td>
-                      <td className="py-3 px-3 font-sans text-slate-300 text-[11px] whitespace-nowrap">
-                        <div className="font-semibold text-white">{d.weekLabel.split('(')[0].trim()}</div>
-                        <div className="text-[10px] text-slate-400">({d.weekLabel.split('(')[1] || ''}</div>
-                      </td>
-                      <td className="py-3 px-3 font-sans font-bold text-white">
-                        <div className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-blue-400" />
-                          <span>{d.driverName}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-slate-300 text-[11px]">{d.fleetPlates.join(', ') || '-'}</td>
-                      <td className="py-3 px-3 text-right text-slate-200">{d.refuelCount}x</td>
-                      <td className="py-3 px-3 text-right font-bold text-white">{d.totalLiters} L</td>
-                      <td className="py-3 px-3 text-right text-cyan-300 font-semibold">{d.totalDistanceKm.toLocaleString('id-ID')}</td>
-                      <td className="py-3 px-3 text-right text-emerald-400 font-semibold">{formatRupiah(d.totalCost)}</td>
-                      <td className="py-3 px-3 text-right font-black text-amber-400 text-sm">{d.avgKmPerLiter}</td>
-                      <td className="py-3 px-3 text-right text-slate-300 text-[11px]">{d.avgLiterPerKm}</td>
-                      <td className="py-3 px-3 text-center">
-                        <span className="px-2.5 py-0.5 rounded-full font-bold text-xs bg-slate-800 text-white border border-slate-700">
-                          {d.ecoScore}/100
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 font-sans">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border block text-center truncate ${
-                          d.predicate === 'Master Eco-Driver'
-                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            : d.predicate === 'Driver Efisien'
-                            ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                            : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                        }`}>
-                          {d.predicate}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
