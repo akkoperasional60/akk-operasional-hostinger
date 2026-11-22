@@ -4341,23 +4341,106 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // REST API for Fuel Logs (Efisiensi Bahan Bakar Armada -> Hostinger MySQL + Disk Persistence Fallback)
+  // REST API for Fuel Logs (Efisiensi Bahan Bakar Armada -> Hostinger MySQL Direct Persistence)
   let inMemoryFuelLogs: any[] = (() => {
+    if (isDatabaseConfigured()) return [];
     const saved = readPersistentAppState('fuel_logs_v1');
     return Array.isArray(saved) ? saved : [];
   })();
 
+  const safeFuelNum = (val: any, fallback = 0): number => {
+    const n = Number(val);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const resolveOrEnsureMysqlFleetId = async (item: any): Promise<string> => {
+    const requestedFleetId = String(item?.fleetId || '').trim().slice(0, 64);
+    const cleanPlate = String(item?.plateNumber || '').trim().toUpperCase();
+    const compactPlate = cleanPlate.replace(/\s+/g, '');
+    const initialCode = String(item?.initialCode || '').trim();
+
+    if (requestedFleetId) {
+      const exactRows = await mysqlQuery<any[]>("SELECT id FROM fleets WHERE id = ? LIMIT 1", [requestedFleetId]);
+      if (Array.isArray(exactRows) && exactRows.length > 0 && exactRows[0]?.id) {
+        return String(exactRows[0].id).trim();
+      }
+    }
+
+    if (compactPlate && !isPhantomFltPlate(cleanPlate)) {
+      const byPlate = await mysqlQuery<any[]>(
+        "SELECT id FROM fleets WHERE UPPER(REPLACE(plate_number, ' ', '')) = ? LIMIT 1",
+        [compactPlate]
+      );
+      if (Array.isArray(byPlate) && byPlate.length > 0 && byPlate[0]?.id) {
+        return String(byPlate[0].id).trim();
+      }
+    }
+
+    if (initialCode) {
+      const allFleets = await mysqlQuery<any[]>("SELECT id, plate_number, payload_json FROM fleets");
+      const normCode = (v: string) => String(v || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const targetTokens = [initialCode, ...initialCode.split('/')].map(normCode).filter(Boolean);
+      const matched = (allFleets || []).find((row: any) => {
+        const extra = parseJsonColumn(row.payload_json) || {};
+        const rowInit = String(extra.initialCode || '').trim();
+        if (!rowInit) return false;
+        const rowTokens = [rowInit, ...rowInit.split('/')].map(normCode).filter(Boolean);
+        return targetTokens.some(t => rowTokens.includes(t));
+      });
+      if (matched?.id) {
+        return String(matched.id).trim();
+      }
+    }
+
+    if (cleanPlate && !isPhantomFltPlate(cleanPlate)) {
+      const newFleetId = requestedFleetId || `flt-${Date.now().toString(36)}`;
+      const fallbackFleetPayload = {
+        id: newFleetId,
+        plateNumber: cleanPlate,
+        initialCode: initialCode || cleanPlate,
+        vehicleType: String(item?.vehicleType || 'Engkel STD'),
+        branchId: item?.branchId || 'cab-banyuwangi',
+        status: 'available',
+        odometerKm: Math.round(safeFuelNum(item?.endOdometerKm ?? item?.startOdometerKm, 0))
+      };
+      await mysqlQuery(
+        `INSERT IGNORE INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, odometer_km, year, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          newFleetId,
+          cleanPlate,
+          String(item?.vehicleType || 'Engkel STD'),
+          3.5,
+          0,
+          'available',
+          Math.round(safeFuelNum(item?.endOdometerKm ?? item?.startOdometerKm, 0)),
+          new Date().getFullYear(),
+          JSON.stringify(fallbackFleetPayload)
+        ]
+      );
+      const verifyRows = await mysqlQuery<any[]>(
+        "SELECT id FROM fleets WHERE id = ? OR UPPER(REPLACE(plate_number, ' ', '')) = ? LIMIT 1",
+        [newFleetId, compactPlate]
+      );
+      if (Array.isArray(verifyRows) && verifyRows.length > 0 && verifyRows[0]?.id) {
+        return String(verifyRows[0].id).trim();
+      }
+    }
+
+    return requestedFleetId;
+  };
+
   app.get("/api/fuel-logs", requireAuth, async (_req, res) => {
     try {
-      const rows = await mysqlQuery<any[]>("SELECT * FROM fuel_logs ORDER BY logged_at DESC");
-      if (Array.isArray(rows)) {
-        const mapped = rows.map((r) => {
+      if (isDatabaseConfigured()) {
+        const rows = await mysqlQuery<any[]>("SELECT * FROM fuel_logs ORDER BY logged_at DESC");
+        const mapped = (Array.isArray(rows) ? rows : []).map((r) => {
           const extra = parseJsonColumn(r.payload_json) || {};
           const loggedIso = r.logged_at instanceof Date ? r.logged_at.toISOString() : String(r.logged_at || '');
           return {
             ...extra,
             id: r.id,
-            fleetId: extra.fleetId || r.fleet_id,
+            fleetId: r.fleet_id || extra.fleetId,
             driverName: extra.driverName || r.driver_name,
             liters: Number(extra.liters ?? r.fuel_liters ?? 0),
             totalCost: Number(extra.totalCost ?? r.cost_rupiah ?? 0),
@@ -4368,8 +4451,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           };
         });
         inMemoryFuelLogs = mapped;
-        writePersistentAppState('fuel_logs_v1', mapped);
-        return res.json({ success: true, source: 'hostinger_mysql', data: mapped });
+        return res.json({ success: true, source: 'hostinger_mysql', count: mapped.length, data: mapped });
       }
       const diskSaved = readPersistentAppState('fuel_logs_v1');
       if (inMemoryFuelLogs.length === 0 && Array.isArray(diskSaved)) {
@@ -4377,6 +4459,12 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
       return res.json({ success: true, source: 'disk_fallback', data: inMemoryFuelLogs });
     } catch (err: any) {
+      if (isDatabaseConfigured()) {
+        return res.status(503).json({
+          success: false,
+          error: err?.message || 'Gagal membaca data BBM dari Hostinger MySQL'
+        });
+      }
       const diskSaved = readPersistentAppState('fuel_logs_v1');
       if (inMemoryFuelLogs.length === 0 && Array.isArray(diskSaved)) {
         inMemoryFuelLogs = diskSaved;
@@ -4387,21 +4475,40 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   app.post("/api/fuel-logs", requireLogisticsWrite, express.json({ limit: '10mb' }), async (req, res) => {
     const item = req.body || {};
-    if (!item.fleetId) {
-      return res.status(400).json({ success: false, error: 'ID armada wajib diisi' });
+    if (!item.fleetId && !item.plateNumber) {
+      return res.status(400).json({ success: false, error: 'ID armada atau plat nomor wajib diisi' });
     }
-    const id = String(item.id || `fuel-${Date.now()}`).trim().slice(0, 64);
-    const fullRecord = {
+    const id = String(item.id || `fuel-${Date.now().toString(36)}`).trim().slice(0, 64);
+    const fullRecord: any = {
       ...item,
       id,
+      liters: safeFuelNum(item.liters, 0),
+      costPerLiter: safeFuelNum(item.costPerLiter, 6800),
+      totalCost: safeFuelNum(item.totalCost, 0),
+      startOdometerKm: safeFuelNum(item.startOdometerKm, 0),
+      endOdometerKm: safeFuelNum(item.endOdometerKm, 0),
+      distanceKm: safeFuelNum(item.distanceKm, 0),
+      ratioKmPerLiter: safeFuelNum(item.ratioKmPerLiter, 0),
       createdAt: item.createdAt || new Date().toISOString()
     };
     const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
 
-    inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
-    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+    if (!isDatabaseConfigured()) {
+      inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
+      writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+      return res.json({ success: true, source: 'disk_fallback', data: fullRecord });
+    }
 
     try {
+      const resolvedFleetId = await resolveOrEnsureMysqlFleetId(fullRecord);
+      if (!resolvedFleetId) {
+        return res.status(400).json({
+          success: false,
+          error: `Armada (${fullRecord.plateNumber || fullRecord.fleetId || '-'}) tidak ditemukan pada tabel fleets MySQL.`
+        });
+      }
+      fullRecord.fleetId = resolvedFleetId;
+
       await mysqlQuery(
         `INSERT INTO fuel_logs (id, fleet_id, driver_name, fuel_liters, cost_rupiah, odometer_km, spbu_location, payload_json, logged_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4416,37 +4523,59 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
            logged_at=VALUES(logged_at)`,
         [
           id,
-          String(fullRecord.fleetId).slice(0, 64),
+          resolvedFleetId,
           String(fullRecord.driverName || '-').slice(0, 191),
-          Number(fullRecord.liters || 0),
-          Number(fullRecord.totalCost || 0),
-          Math.round(Number(fullRecord.endOdometerKm || fullRecord.startOdometerKm || 0)),
+          safeFuelNum(fullRecord.liters, 0),
+          safeFuelNum(fullRecord.totalCost, 0),
+          Math.round(safeFuelNum(fullRecord.endOdometerKm || fullRecord.startOdometerKm, 0)),
           String(fullRecord.gasStation || '-').slice(0, 191),
           JSON.stringify(fullRecord),
           loggedAt
         ]
       );
+      inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
       return res.json({ success: true, source: 'hostinger_mysql', data: fullRecord });
     } catch (err: any) {
-      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
-        return res.json({ success: true, source: 'disk_fallback', data: fullRecord, warning: err?.message });
-      }
+      console.error('[MySQL fuel_logs POST error]:', err?.message || err);
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan log BBM ke MySQL' });
     }
   });
 
   app.put("/api/fuel-logs/:id", requireLogisticsWrite, express.json({ limit: '10mb' }), async (req, res) => {
     const id = String(req.params.id || '').trim().slice(0, 64);
-    const item = { ...(req.body || {}), id };
+    const body = req.body || {};
+    const item: any = {
+      ...body,
+      id,
+      liters: safeFuelNum(body.liters, 0),
+      costPerLiter: safeFuelNum(body.costPerLiter, 6800),
+      totalCost: safeFuelNum(body.totalCost, 0),
+      startOdometerKm: safeFuelNum(body.startOdometerKm, 0),
+      endOdometerKm: safeFuelNum(body.endOdometerKm, 0),
+      distanceKm: safeFuelNum(body.distanceKm, 0),
+      ratioKmPerLiter: safeFuelNum(body.ratioKmPerLiter, 0)
+    };
     const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
 
-    const existsInMem = inMemoryFuelLogs.some((x) => x.id === id);
-    inMemoryFuelLogs = existsInMem
-      ? inMemoryFuelLogs.map((x) => (x.id === id ? item : x))
-      : [item, ...inMemoryFuelLogs];
-    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+    if (!isDatabaseConfigured()) {
+      const existsInMem = inMemoryFuelLogs.some((x) => x.id === id);
+      inMemoryFuelLogs = existsInMem
+        ? inMemoryFuelLogs.map((x) => (x.id === id ? item : x))
+        : [item, ...inMemoryFuelLogs];
+      writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+      return res.json({ success: true, source: 'disk_fallback', data: item });
+    }
 
     try {
+      const resolvedFleetId = await resolveOrEnsureMysqlFleetId(item);
+      if (!resolvedFleetId) {
+        return res.status(400).json({
+          success: false,
+          error: `Armada (${item.plateNumber || item.fleetId || '-'}) tidak ditemukan pada tabel fleets MySQL.`
+        });
+      }
+      item.fleetId = resolvedFleetId;
+
       await mysqlQuery(
         `INSERT INTO fuel_logs (id, fleet_id, driver_name, fuel_liters, cost_rupiah, odometer_km, spbu_location, payload_json, logged_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4461,37 +4590,42 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
            logged_at=VALUES(logged_at)`,
         [
           id,
-          String(item.fleetId || '').slice(0, 64),
+          resolvedFleetId,
           String(item.driverName || '-').slice(0, 191),
-          Number(item.liters || 0),
-          Number(item.totalCost || 0),
-          Math.round(Number(item.endOdometerKm || item.startOdometerKm || 0)),
+          safeFuelNum(item.liters, 0),
+          safeFuelNum(item.totalCost, 0),
+          Math.round(safeFuelNum(item.endOdometerKm || item.startOdometerKm, 0)),
           String(item.gasStation || '-').slice(0, 191),
           JSON.stringify(item),
           loggedAt
         ]
       );
+      const existsInMem = inMemoryFuelLogs.some((x) => x.id === id);
+      inMemoryFuelLogs = existsInMem
+        ? inMemoryFuelLogs.map((x) => (x.id === id ? item : x))
+        : [item, ...inMemoryFuelLogs];
       return res.json({ success: true, source: 'hostinger_mysql', data: item });
     } catch (err: any) {
-      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
-        return res.json({ success: true, source: 'disk_fallback', data: item, warning: err?.message });
-      }
+      console.error('[MySQL fuel_logs PUT error]:', err?.message || err);
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui log BBM di MySQL' });
     }
   });
 
   app.delete("/api/fuel-logs/:id", requireLogisticsWrite, async (req, res) => {
     const id = String(req.params.id || '').trim();
-    inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
-    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+
+    if (!isDatabaseConfigured()) {
+      inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
+      writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+      return res.json({ success: true, source: 'disk_fallback' });
+    }
 
     try {
       await mysqlQuery("DELETE FROM fuel_logs WHERE id = ?", [id]);
+      inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
       return res.json({ success: true, source: 'hostinger_mysql' });
     } catch (err: any) {
-      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
-        return res.json({ success: true, source: 'disk_fallback', warning: err?.message });
-      }
+      console.error('[MySQL fuel_logs DELETE error]:', err?.message || err);
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
     }
   });
@@ -4720,9 +4854,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   // REST API for Crews - Hostinger MySQL is the single source of truth (merged with approved accounts that have Portal Driver Mobile access)
   app.get("/api/crews", requireAuth, async (_req, res) => {
     try {
-      const [mysqlCrews, mysqlApprovedUsers] = await Promise.all([
+      const [mysqlCrews, mysqlApprovedUsers, mysqlNonApprovedUsers] = await Promise.all([
         mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC"),
-        mysqlQuery<any[]>("SELECT id, full_name, phone, role, status, permissions_json FROM users WHERE status = 'approved' ORDER BY full_name ASC").catch(() => [])
+        mysqlQuery<any[]>("SELECT id, full_name, phone, role, status, permissions_json FROM users WHERE LOWER(TRIM(status)) = 'approved' ORDER BY full_name ASC").catch(() => []),
+        mysqlQuery<any[]>("SELECT id, full_name, status FROM users WHERE LOWER(TRIM(status)) <> 'approved'").catch(() => [])
       ]);
       const isUserCrewActive = (u: any): boolean => {
         const r = String(u.role || '');
@@ -4749,18 +4884,48 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         return r === 'driver' || r === 'crew_helper';
       };
 
-      const mapped = mysqlCrews.map(c => mergePayload(c.payload_json, {
-        id: c.id, name: c.name, phone: c.phone, role: c.role, licenseNumber: c.license_number,
-        licenseType: c.license_type, status: c.status, tripsCompleted: Number(c.trips_completed || 0), rating: Number(c.rating || 5)
-      }));
-      const seenNames = new Set(mapped.map((c: any) => String(c.name || '').trim().toLowerCase()).filter(Boolean));
-      for (const u of mysqlApprovedUsers) {
-        if (!isUserCrewActive(u)) continue;
+      const activeApprovedCrewUsers = mysqlApprovedUsers.filter(isUserCrewActive);
+      const hasUsersInDb = mysqlApprovedUsers.length > 0 || mysqlNonApprovedUsers.length > 0;
+      const compactPersonKeyServer = (raw: string) =>
+        String(raw || '')
+          .trim()
+          .toLowerCase()
+          .replace(/\bulloh\b/g, 'ullah')
+          .replace(/\bsaifur\b/g, 'saiful')
+          .replace(/\bmoh\.?\b/g, 'muhammad')
+          .replace(/\bmohammad\b/g, 'muhammad')
+          .replace(/\bach\.?\b/g, 'achmad')
+          .replace(/[^a-z0-9]/g, '');
+
+      const inactiveUserIds = new Set(mysqlNonApprovedUsers.map((u: any) => String(u.id || '').trim()).filter(Boolean));
+      const inactiveUserKeys = new Set(mysqlNonApprovedUsers.map((u: any) => compactPersonKeyServer(u.full_name || '')).filter(Boolean));
+
+      const mapped = mysqlCrews
+        .map(c => mergePayload(c.payload_json, {
+          id: c.id, name: c.name, phone: c.phone, role: c.role, licenseNumber: c.license_number,
+          licenseType: c.license_type, status: c.status, tripsCompleted: Number(c.trips_completed || 0), rating: Number(c.rating || 5)
+        }))
+        .filter((c: any) => {
+          const cKey = compactPersonKeyServer(c.name || '');
+          const rawUid = String(c.id || '').replace(/^crw-/, '');
+          if ((rawUid && inactiveUserIds.has(rawUid)) || (cKey && inactiveUserKeys.has(cKey))) {
+            return false;
+          }
+          if (!hasUsersInDb) return true;
+          return activeApprovedCrewUsers.some(u => {
+            if (rawUid && String(u.id) === rawUid) return true;
+            const uKey = compactPersonKeyServer(u.full_name || '');
+            return Boolean(cKey && uKey && (cKey === uKey || (cKey.length >= 6 && uKey.length >= 6 && (cKey.includes(uKey) || uKey.includes(cKey)))));
+          });
+        });
+
+      const seenCompact = new Set(mapped.map((c: any) => compactPersonKeyServer(c.name || '')).filter(Boolean));
+      for (const u of activeApprovedCrewUsers) {
         const cleanName = String(u.full_name || '').trim();
         if (!cleanName) continue;
-        const lower = cleanName.toLowerCase();
-        if (seenNames.has(lower)) continue;
-        seenNames.add(lower);
+        const cKey = compactPersonKeyServer(cleanName);
+        if (!cKey || seenCompact.has(cKey)) continue;
+        seenCompact.add(cKey);
         mapped.push({
           id: `crw-${u.id}`,
           name: cleanName,

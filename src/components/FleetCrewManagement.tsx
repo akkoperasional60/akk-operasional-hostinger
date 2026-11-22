@@ -1273,6 +1273,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         matchedUserId: matchedUser.id
       };
     }
+    if (allUsers.length > 0) {
+      return { isActive: false };
+    }
     return {
       isActive: crew.status !== 'off'
     };
@@ -1394,7 +1397,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     );
     const matchesBranch = matchedUser
       ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveBranch)
-      : branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch;
+      : (allUsers.length === 0 && branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch);
     const { isActive } = getCrewIntegratedStatus(c);
     const matchesStatus =
       crewFilter === 'all' ||
@@ -1461,6 +1464,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         if (matchedUser) {
           return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveBranch);
         }
+        if (allUsers.length > 0) return false;
         const { isActive } = getCrewIntegratedStatus(c);
         if (!isActive) return false;
         return branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch;

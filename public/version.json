@@ -1,9 +1,9 @@
 {
-  "versionCode": 10046,
-  "versionName": "1.0.46",
-  "updatedAt": "2026-11-22T16:30:00.000000",
+  "versionCode": 10047,
+  "versionName": "1.0.47",
+  "updatedAt": "2026-11-22T18:10:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V58: Penguatan Persistensi Log BBM (MySQL Upsert, Sanitasi Kolom INT/VARCHAR & Disk Fallback), Antrean Sinkronisasi Otomatis & Auto-Retry Log BBM di Store, serta Pesan Validasi Form Input Log BBM."
+  "releaseNotes": "Update V59: Resolusi Otomatis Foreign Key Armada (resolveOrEnsureMysqlFleetId) & Simpan/Edit/Hapus Async Langsung Log BBM ke MySQL, Sinkronisasi Ketat Daftar Driver/Helper dengan Status Akun User Aktif (Otomatis Hilang Saat Dinonaktifkan), serta Paginasi 10 Baris, Custom Popover Filter & Navigasi Keyboard Panah/Enter pada Modul Efisiensi BBM."
 }

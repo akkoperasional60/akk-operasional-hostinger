@@ -1771,10 +1771,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (matchedUser) {
         if (!logisticsStore.isActiveDeliveryCrewUser(matchedUser, branchFilter)) return;
       } else {
+        if (allUsers.length > 0) return;
         if (branchStore.getCrewBranchId(c.id, c.name) !== branchFilter) return;
       }
       names.add(lower);
-      result.push({ id: c.id, name: clean, hasAccount: true });
+      result.push({ id: c.id, name: clean, hasAccount: Boolean(matchedUser) });
     });
     return result;
   };
@@ -1823,10 +1824,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (matchedUser) {
         if (!logisticsStore.isActiveDeliveryCrewUser(matchedUser, branchFilter)) return;
       } else {
+        if (allUsers.length > 0) return;
         if (branchStore.getCrewBranchId(c.id, c.name) !== branchFilter) return;
       }
       names.add(lower);
-      result.push({ id: c.id, name: clean, hasAccount: true });
+      result.push({ id: c.id, name: clean, hasAccount: Boolean(matchedUser) });
     });
     return result;
   };
@@ -2124,6 +2126,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         if (matchedUser) {
           return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveActiveBranchId);
         }
+        if (allUsers.length > 0) return false;
         return branchStore.getCrewBranchId(c.id, c.name) === effectiveActiveBranchId;
       })
       .forEach(c => {
@@ -2209,6 +2212,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       if (matchedUser) {
         return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveActiveBranchId);
       }
+      if (allUsers.length > 0) return false;
       return branchStore.getCrewBranchId(clean, clean) === effectiveActiveBranchId;
     };
 

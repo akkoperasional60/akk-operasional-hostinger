@@ -1936,7 +1936,8 @@ class LogisticsStore {
    */
   public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
     if (!u) return false;
-    if (u.status !== 'approved') return false;
+    const normalizedStatus = String(u.status || '').trim().toLowerCase();
+    if (normalizedStatus !== 'approved' || (u as any).isActive === false) return false;
     const cleanEmail = (u.email || '').trim().toLowerCase();
     const cleanName = (u.fullName || '').trim().toLowerCase();
     // Kecualikan akun sistem/manajemen/non-lapangan
@@ -2073,28 +2074,21 @@ class LogisticsStore {
       syncedCrews.push(crewItem);
     }
 
-    // Hanya pertahankan kru dari this.crews yang BELUM memiliki akun di this.users.
-    // Jika kru memiliki akun di this.users namun akun tersebut tidak lagi memiliki akses Portal Driver Mobile,
-    // maka JANGAN pernah dimasukkan kembali ke syncedCrews!
-    for (const c of (this.crews || [])) {
-      if (!c || !c.name) continue;
-      const cleanName = c.name.trim();
-      if (!cleanName) continue;
-      const lowerName = cleanName.toLowerCase();
-      if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
-      if (c.status === 'off') continue;
-      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
+    // Jika daftar akun user belum dimuat (users kosong), pertahankan sementara entri non-off dari this.crews.
+    // Begitu akun user sudah tersedia (users.length > 0), JANGAN pernah meloloskan nama kru yang belum terdaftar sebagai user akun!
+    if ((this.users || []).length === 0) {
+      for (const c of (this.crews || [])) {
+        if (!c || !c.name) continue;
+        const cleanName = c.name.trim();
+        if (!cleanName) continue;
+        const lowerName = cleanName.toLowerCase();
+        if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
+        if (c.status === 'off') continue;
+        if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
 
-      const matchedUserInStore = this.users.find(
-        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, cleanName)
-      );
-      if (matchedUserInStore) {
-        // Sudah diproses di loop pertama jika aktif, atau sengaja dikecualikan karena tidak punya akses Portal Driver Mobile
-        continue;
+        seenNames.add(lowerName);
+        syncedCrews.push(c);
       }
-
-      seenNames.add(lowerName);
-      syncedCrews.push(c);
     }
 
     return syncedCrews;
@@ -2124,6 +2118,7 @@ class LogisticsStore {
 
   public getDriverCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
+    const hasRegisteredUsers = (this.users || []).length > 0;
     const drivers = all.filter(c => {
       const linkedUser = this.users.find(
         u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
@@ -2131,6 +2126,7 @@ class LogisticsStore {
       if (linkedUser) {
         return this.isActiveDeliveryCrewUser(linkedUser, branchId) && linkedUser.role !== 'crew_helper';
       }
+      if (hasRegisteredUsers) return false;
       if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
         return false;
       }
@@ -2141,6 +2137,7 @@ class LogisticsStore {
 
   public getHelperCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
+    const hasRegisteredUsers = (this.users || []).length > 0;
     const helpers = all.filter(c => {
       const linkedUser = this.users.find(
         u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
@@ -2148,6 +2145,7 @@ class LogisticsStore {
       if (linkedUser) {
         return this.isActiveDeliveryCrewUser(linkedUser, branchId);
       }
+      if (hasRegisteredUsers) return false;
       if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
         return false;
       }
@@ -2950,7 +2948,7 @@ class LogisticsStore {
 
   // User Management & Authentication
   public getUsers(): UserProfile[] {
-    return this.users;
+    return [...this.users];
   }
 
   public buildSessionAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
@@ -2990,6 +2988,7 @@ class LogisticsStore {
         const resolvedFullName = (cleanEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
           ? 'Hendri'
           : (rawRemoteName || local?.fullName || r.email || 'User');
+        const normalizedStatus = String(r.status || local?.status || 'pending').trim().toLowerCase() as UserProfile['status'];
         return {
           ...(local || {} as UserProfile),
           id: r.id,
@@ -2998,7 +2997,7 @@ class LogisticsStore {
           role,
           department: r.department || local?.department || 'Logistics Operations',
           phone: r.phone || local?.phone || '',
-          status: r.status || local?.status || 'pending',
+          status: normalizedStatus,
           createdAt: r.createdAt || local?.createdAt,
           approvedAt: r.approvedAt || local?.approvedAt,
           approvedBy: r.approvedBy || local?.approvedBy,
@@ -3008,17 +3007,20 @@ class LogisticsStore {
         } as UserProfile;
       });
 
-      // Pertahankan akun lokal yang belum ada di respons server (misal di mode preview atau baru diedit secara lokal)
-      for (const localU of this.users) {
-        const localEmail = (localU.email || '').trim().toLowerCase();
-        const alreadyInMapped = mappedUsers.some(
-          mu =>
-            mu.id === localU.id ||
-            (localEmail && (mu.email || '').trim().toLowerCase() === localEmail) ||
-            this.isSameCrewPersonName(mu.fullName, localU.fullName)
-        );
-        if (!alreadyInMapped) {
-          mappedUsers.push(localU);
+      // Jika data berasal langsung dari Hostinger MySQL, jadikan server sebagai single source of truth
+      // agar akun yang dinonaktifkan/dihapus atau template demo lama tidak muncul kembali di daftar.
+      if (payload?.source !== 'hostinger_mysql') {
+        for (const localU of this.users) {
+          const localEmail = (localU.email || '').trim().toLowerCase();
+          const alreadyInMapped = mappedUsers.some(
+            mu =>
+              mu.id === localU.id ||
+              (localEmail && (mu.email || '').trim().toLowerCase() === localEmail) ||
+              this.isSameCrewPersonName(mu.fullName, localU.fullName)
+          );
+          if (!alreadyInMapped) {
+            mappedUsers.push(localU);
+          }
         }
       }
 
@@ -3046,15 +3048,35 @@ class LogisticsStore {
     }
   }
 
-  private syncUserToHostinger(userId: string, data: Partial<UserProfile>): void {
+  private async syncUserToHostinger(userId: string, data: Partial<UserProfile>, attempt = 0): Promise<void> {
     const payload: Record<string, any> = { ...data };
     delete payload.password;
-    fetch(`/api/users/${encodeURIComponent(userId)}`, {
-      method: 'PUT',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      credentials: 'same-origin',
-      body: JSON.stringify(payload)
-    }).catch(err => console.warn('[Hostinger Users] Sync update gagal:', err));
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+        method: 'PUT',
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        if (attempt < 2 && (res.status === 429 || res.status >= 500)) {
+          setTimeout(() => {
+            void this.syncUserToHostinger(userId, data, attempt + 1);
+          }, 1200 * (attempt + 1));
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          console.warn('[Hostinger Users] Sync update ditolak server:', res.status, errJson?.error || '');
+        }
+      }
+    } catch (err) {
+      if (attempt < 2) {
+        setTimeout(() => {
+          void this.syncUserToHostinger(userId, data, attempt + 1);
+        }, 1200 * (attempt + 1));
+      } else {
+        console.warn('[Hostinger Users] Sync update gagal:', err);
+      }
+    }
   }
 
   public getPendingUsersCount(): number {
@@ -3135,16 +3157,18 @@ class LogisticsStore {
 
   public deactivateUser(userId: string, reason?: string): boolean {
     this.verifyDriverAccess('user_management');
-    const userIndex = this.users.findIndex(u => u.id === userId);
-    if (userIndex === -1) return false;
+    const user = this.users.find(u => u.id === userId);
+    if (!user) return false;
 
-    const user = this.users[userIndex];
     const adminName = this.currentUser.fullName || 'Super Admin';
-    this.users[userIndex] = {
+    const updatedUser: UserProfile = {
       ...user,
       status: 'inactive',
       notes: reason || `Akun dinonaktifkan oleh ${adminName} (Data histori tetap tersimpan)`
     };
+
+    // Immutable replacement so React subscribers always re-render driver/helper options immediately
+    this.users = this.users.map(u => (u.id === userId ? updatedUser : u));
 
     if (this.currentUser.id === userId) {
       this.currentUser = {
@@ -3154,28 +3178,45 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
 
+    // Bersihkan entri kru terkait agar user nonaktif langsung hilang dari semua daftar driver/helper & pool kru
+    const crewsToRemove = (this.crews || []).filter(
+      c => c && (c.id === `crw-${userId}` || this.isSameCrewPersonName(c.name, user.fullName))
+    );
+    if (crewsToRemove.length > 0) {
+      const removeIds = new Set(crewsToRemove.map(c => c.id));
+      this.crews = (this.crews || []).filter(c => !removeIds.has(c.id));
+      crewsToRemove.forEach(c => {
+        fetch(`/api/crews/${encodeURIComponent(c.id)}`, {
+          method: 'DELETE',
+          headers: this.buildSessionAuthHeaders(),
+          credentials: 'same-origin'
+        }).catch(() => {});
+      });
+    }
+
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.logActivity('Nonaktifkan User', user.fullName, `Akun ${user.fullName} dinonaktifkan. Hak akses ditutup, histori data tetap tersimpan.`);
-    this.syncUserToHostinger(userId, this.users[userIndex]);
+    void this.syncUserToHostinger(userId, updatedUser);
     this.notify();
     return true;
   }
 
   public activateUser(userId: string, notes?: string): boolean {
     this.verifyDriverAccess('user_management');
-    const userIndex = this.users.findIndex(u => u.id === userId);
-    if (userIndex === -1) return false;
+    const user = this.users.find(u => u.id === userId);
+    if (!user) return false;
 
-    const user = this.users[userIndex];
     const approverName = this.currentUser.fullName || 'Super Admin';
-    this.users[userIndex] = {
+    const updatedUser: UserProfile = {
       ...user,
       status: 'approved',
       approvedAt: new Date().toISOString(),
       approvedBy: approverName,
       notes: notes || `Akun diaktifkan kembali oleh ${approverName}`
     };
+
+    this.users = this.users.map(u => (u.id === userId ? updatedUser : u));
 
     if (this.currentUser.id === userId) {
       this.currentUser = {
@@ -3190,7 +3231,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.logActivity('Aktifkan User', user.fullName, `Akun ${user.fullName} diaktifkan kembali dan hak akses dipulihkan.`);
-    this.syncUserToHostinger(userId, this.users[userIndex]);
+    void this.syncUserToHostinger(userId, updatedUser);
     this.notify();
     return true;
   }
@@ -3278,7 +3319,7 @@ class LogisticsStore {
       id: userId
     };
 
-    this.users[userIndex] = updatedUser;
+    this.users = this.users.map(u => (u.id === userId ? updatedUser : u));
 
     if (this.currentUser.id === userId) {
       this.currentUser = { ...updatedUser };
@@ -3703,8 +3744,11 @@ class LogisticsStore {
         u.id === user.id ||
         (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
       );
-      if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
-      else this.users = [{ ...user, password: undefined } as UserProfile, ...this.users];
+      if (idx >= 0) {
+        this.users = this.users.map((u, i) => (i === idx ? ({ ...u, ...user, password: undefined } as UserProfile) : u));
+      } else {
+        this.users = [{ ...user, password: undefined } as UserProfile, ...this.users];
+      }
       this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser({ ...user, password: undefined } as UserProfile);
@@ -3883,13 +3927,17 @@ class LogisticsStore {
               if (!cleanRemotePlate || isPhantomPlate(remoteF.plateNumber)) return;
               if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
               const matchExisting = mergedMap.get(cleanRemotePlate);
-              const canonicalId = matchExisting ? matchExisting.id : remoteF.id;
+              // WAJIB pertahankan remoteF.id asli dari Hostinger MySQL (mis. flt-r2kmuc, flt-catnp6)
+              // agar relasi FOREIGN KEY (fleet_id -> fleets.id) di tabel fuel_logs MySQL selalu cocok!
+              const canonicalId = (remoteF.id && String(remoteF.id).trim()) || matchExisting?.id || remoteF.id;
               mergedMap.set(cleanRemotePlate, this.enrichFleetItem({ ...remoteF, id: canonicalId }, matchExisting));
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
+            this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
           } else {
             this.fleets = sortFleetsByCanonicalOrder(baseFleets);
+            this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
           }
         }
@@ -4087,8 +4135,11 @@ class LogisticsStore {
         u.id === user.id ||
         (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
       );
-      if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
-      else this.users = [user, ...this.users];
+      if (idx >= 0) {
+        this.users = this.users.map((u, i) => (i === idx ? ({ ...u, ...user, password: undefined } as UserProfile) : u));
+      } else {
+        this.users = [user, ...this.users];
+      }
       this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser(user);
@@ -6572,7 +6623,7 @@ class LogisticsStore {
   }
 
   // ==========================================
-  // MANAJEMEN EFISIENSI BBM ARMADA (FUEL STORE)
+  // MANAJEMEN EFISIENSI BBM ARMADA (FUEL STORE - LANGSUNG MYSQL HOSTINGER)
   // ==========================================
   public getFuelLogs(): FuelLog[] {
     return [...this.fuelLogs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -6582,8 +6633,50 @@ class LogisticsStore {
     return this.fuelLogs.find(log => log.id === id);
   }
 
-  public addFuelLog(data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>): FuelLog {
-    const fleet = this.fleets.find(f => f.id === data.fleetId);
+  public async refreshFuelLogsFromServer(): Promise<{ success: boolean; source?: string; count?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/fuel-logs', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.success === false) {
+        return {
+          success: false,
+          error: payload?.error || `Gagal memuat data BBM dari server (${res.status})`
+        };
+      }
+      if (Array.isArray(payload?.data)) {
+        const serverLogs = (payload.data as FuelLog[]).filter(
+          l => l && l.id && !this.pendingFuelLogDeletes.has(l.id)
+        );
+        this.fuelLogs = serverLogs;
+        this.notify();
+        return {
+          success: true,
+          source: payload.source,
+          count: serverLogs.length
+        };
+      }
+      return { success: true, source: payload?.source, count: this.fuelLogs.length };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.message || 'Tidak dapat terhubung ke server database BBM'
+      };
+    }
+  }
+
+  private buildComputedNewFuelLog(
+    data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>
+  ): { newLog: FuelLog; fleet?: Fleet } {
+    const cleanTargetPlate = String(data.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const fleet =
+      this.fleets.find(f => f.id === data.fleetId) ||
+      (cleanTargetPlate
+        ? this.fleets.find(f => String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanTargetPlate)
+        : undefined);
     const vehicleType = data.vehicleType || fleet?.vehicleType || 'Engkel Long';
     const targetConfig = FUEL_TARGET_RATIOS[vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
     const targetRatio = targetConfig.target;
@@ -6606,8 +6699,10 @@ class LogisticsStore {
       efficiencyStatus = 'Kritis / Potensi Anomali';
     }
 
+    const resolvedFleetId = fleet?.id || data.fleetId;
     const newLog: FuelLog = {
       ...data,
+      fleetId: resolvedFleetId,
       id: `fuel-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
       vehicleType,
       targetRatio,
@@ -6621,36 +6716,20 @@ class LogisticsStore {
       createdAt: new Date().toISOString(),
       verifiedBy: data.verifiedBy || this.currentUser.fullName
     };
-
-    this.fuelLogs = [newLog, ...this.fuelLogs];
-    this.pendingFuelLogDeletes.delete(newLog.id);
-    this.pendingFuelLogUpserts.set(newLog.id, newLog);
-    void this.syncFuelLogToServer('POST', '/api/fuel-logs', newLog);
-
-    if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
-      this.fleets = this.fleets.map(f =>
-        f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
-      );
-      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm, plateNumber: fleet.plateNumber }).catch(() => {});
-    }
-
-    this.logActivity(
-      'Pencatatan BBM Armada',
-      `${newLog.plateNumber} (${newLog.initialCode || 'Armada'})`,
-      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${totalCost.toLocaleString('id-ID')}) - Rasio: ${ratioKmPerLiter} KM/L [${efficiencyStatus}]`,
-      'tambah'
-    );
-
-    this.notify();
-    return newLog;
+    return { newLog, fleet };
   }
 
-  public updateFuelLog(id: string, updates: Partial<FuelLog>) {
+  private buildComputedUpdatedFuelLog(id: string, updates: Partial<FuelLog>): FuelLog | null {
     const existing = this.fuelLogs.find(l => l.id === id);
-    if (!existing) return;
+    if (!existing) return null;
 
     const merged = { ...existing, ...updates };
-    const fleet = this.fleets.find(f => f.id === merged.fleetId);
+    const cleanTargetPlate = String(merged.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const fleet =
+      this.fleets.find(f => f.id === merged.fleetId) ||
+      (cleanTargetPlate
+        ? this.fleets.find(f => String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanTargetPlate)
+        : undefined);
     const vehicleType = merged.vehicleType || fleet?.vehicleType || 'Engkel Long';
     const targetConfig = FUEL_TARGET_RATIOS[vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
     const targetRatio = targetConfig.target;
@@ -6673,8 +6752,9 @@ class LogisticsStore {
       efficiencyStatus = 'Kritis / Potensi Anomali';
     }
 
-    const updatedLog: FuelLog = {
+    return {
       ...merged,
+      fleetId: fleet?.id || merged.fleetId,
       targetRatio,
       distanceKm,
       totalCost,
@@ -6684,6 +6764,137 @@ class LogisticsStore {
       costPerKm,
       efficiencyStatus
     };
+  }
+
+  public async addFuelLogAsync(
+    data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>
+  ): Promise<FuelLog> {
+    const { newLog, fleet } = this.buildComputedNewFuelLog(data);
+    const res = await fetch('/api/fuel-logs', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newLog)
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.success === false) {
+      throw new Error(json?.error || `Gagal menyimpan catatan BBM ke MySQL (${res.status})`);
+    }
+
+    const savedLog: FuelLog = json?.data ? ({ ...newLog, ...json.data } as FuelLog) : newLog;
+    this.pendingFuelLogDeletes.delete(savedLog.id);
+    this.pendingFuelLogUpserts.delete(savedLog.id);
+    this.fuelLogs = [savedLog, ...this.fuelLogs.filter(l => l.id !== savedLog.id)];
+
+    if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
+      this.fleets = this.fleets.map(f =>
+        f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
+      );
+      this.cachedFleets = null;
+      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm, plateNumber: fleet.plateNumber }).catch(() => {});
+    }
+
+    this.logActivity(
+      'Pencatatan BBM Armada',
+      `${savedLog.plateNumber} (${savedLog.initialCode || 'Armada'})`,
+      `Pengisian ${savedLog.liters} L ${savedLog.fuelType} (Rp ${savedLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${savedLog.ratioKmPerLiter} KM/L [${savedLog.efficiencyStatus}]`,
+      'tambah'
+    );
+
+    this.notify();
+    return savedLog;
+  }
+
+  public async updateFuelLogAsync(id: string, updates: Partial<FuelLog>): Promise<FuelLog> {
+    const updatedLog = this.buildComputedUpdatedFuelLog(id, updates);
+    if (!updatedLog) {
+      throw new Error('Data catatan BBM tidak ditemukan.');
+    }
+
+    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updatedLog)
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.success === false) {
+      throw new Error(json?.error || `Gagal memperbarui catatan BBM di MySQL (${res.status})`);
+    }
+
+    const savedLog: FuelLog = json?.data ? ({ ...updatedLog, ...json.data } as FuelLog) : updatedLog;
+    this.pendingFuelLogDeletes.delete(id);
+    this.pendingFuelLogUpserts.delete(id);
+    this.fuelLogs = this.fuelLogs.map(l => (l.id === id ? savedLog : l));
+
+    this.logActivity(
+      'Edit Log Pengisian BBM',
+      savedLog.plateNumber,
+      `Pembaruan catatan BBM ID: ${id}`,
+      'ubah'
+    );
+
+    this.notify();
+    return savedLog;
+  }
+
+  public async deleteFuelLogAsync(id: string): Promise<void> {
+    const item = this.fuelLogs.find(l => l.id === id);
+    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.success === false) {
+      throw new Error(json?.error || `Gagal menghapus catatan BBM dari MySQL (${res.status})`);
+    }
+
+    this.fuelLogs = this.fuelLogs.filter(l => l.id !== id);
+    this.pendingFuelLogUpserts.delete(id);
+    this.pendingFuelLogDeletes.delete(id);
+
+    if (item) {
+      this.logActivity(
+        'Hapus Log Pengisian BBM',
+        item.plateNumber,
+        `Catatan pengisian BBM ${item.liters} L pada tanggal ${item.date} dihapus`,
+        'kurangi'
+      );
+    }
+    this.notify();
+  }
+
+  public addFuelLog(data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>): FuelLog {
+    const { newLog, fleet } = this.buildComputedNewFuelLog(data);
+
+    this.fuelLogs = [newLog, ...this.fuelLogs];
+    this.pendingFuelLogDeletes.delete(newLog.id);
+    this.pendingFuelLogUpserts.set(newLog.id, newLog);
+    void this.syncFuelLogToServer('POST', '/api/fuel-logs', newLog);
+
+    if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
+      this.fleets = this.fleets.map(f =>
+        f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
+      );
+      this.cachedFleets = null;
+      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm, plateNumber: fleet.plateNumber }).catch(() => {});
+    }
+
+    this.logActivity(
+      'Pencatatan BBM Armada',
+      `${newLog.plateNumber} (${newLog.initialCode || 'Armada'})`,
+      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${newLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${newLog.ratioKmPerLiter} KM/L [${newLog.efficiencyStatus}]`,
+      'tambah'
+    );
+
+    this.notify();
+    return newLog;
+  }
+
+  public updateFuelLog(id: string, updates: Partial<FuelLog>) {
+    const updatedLog = this.buildComputedUpdatedFuelLog(id, updates);
+    if (!updatedLog) return;
 
     this.fuelLogs = this.fuelLogs.map(l => l.id === id ? updatedLog : l);
     this.pendingFuelLogDeletes.delete(id);

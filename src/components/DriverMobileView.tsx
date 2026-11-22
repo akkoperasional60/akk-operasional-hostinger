@@ -3711,6 +3711,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         if (matchedU) {
           return logisticsStore.isActiveDeliveryCrewUser(matchedU, effectivePortalBranchId);
         }
+        if (allPortalUsers.length > 0) return false;
         return branchStore.getCrewBranchId(c.id, c.name) === effectivePortalBranchId;
       })
       .forEach(c => {
@@ -9870,10 +9871,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === effectivePortalBranchId
         )}
         availableCrews={crews.filter(c => {
-          const matchedU = logisticsStore.getUsers().find(
+          const allPortalUsers = logisticsStore.getUsers();
+          const matchedU = allPortalUsers.find(
             u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName || '', c.name || '')
           );
           if (matchedU) return logisticsStore.isActiveDeliveryCrewUser(matchedU, effectivePortalBranchId);
+          if (allPortalUsers.length > 0) return false;
           return branchStore.getCrewBranchId(c.id, c.name) === effectivePortalBranchId;
         })}
         fleetId={activeShift?.fleetId || ''}

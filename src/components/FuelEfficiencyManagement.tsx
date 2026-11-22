@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Fuel,
   TrendingUp,
@@ -55,7 +55,8 @@ import {
   Crew,
   VehicleType,
   FleetFuelSummary,
-  DriverFuelScore
+  DriverFuelScore,
+  UserProfile
 } from '../types';
 import { logisticsStore } from '../services/store';
 import { branchStore } from '../services/branchStore';
@@ -82,6 +83,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(logisticsStore.getFuelLogs());
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
+  const [users, setUsers] = useState<UserProfile[]>(logisticsStore.getUsers());
   const [activeTab, setActiveTab] = useState<'overview' | 'liter_km' | 'weekly_report' | 'leaderboard' | 'logs'>('overview');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<'all' | 'cab-banyuwangi' | 'cab-sidoarjo'>('all');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -102,6 +104,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
   const [logSortBy, setLogSortBy] = useState<'date_asc' | 'date_desc' | 'efficient_asc' | 'wasteful_desc'>('date_asc');
+  const [logsCurrentPage, setLogsCurrentPage] = useState<number>(1);
+  const LOGS_PER_PAGE = 10;
+
+  // Custom Filter Dropdowns for Audit Riwayat BBM
+  const [activeAuditFilterDropdown, setActiveAuditFilterDropdown] = useState<'fleet' | 'spbu' | 'status' | 'fuel' | 'sort' | null>(null);
+  const [auditFleetSearchFilter, setAuditFleetSearchFilter] = useState<string>('');
+  const auditFilterContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -127,14 +136,21 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
   const [formError, setFormError] = useState<string>('');
+  const [isSavingFuelLog, setIsSavingFuelLog] = useState<boolean>(false);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [fuelActionError, setFuelActionError] = useState<string>('');
 
   // Modern Custom Popover Dropdown & Calendar States
   const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'helper' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
+  const [dropdownHighlightIdx, setDropdownHighlightIdx] = useState<number>(0);
   const [fleetSearchFilter, setFleetSearchFilter] = useState<string>('');
   const [driverSearchFilter, setDriverSearchFilter] = useState<string>('');
   const [helperSearchFilter, setHelperSearchFilter] = useState<string>('');
   const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
   const [calendarViewMonth, setCalendarViewMonth] = useState<Date>(() => new Date());
+
+  const normalizePlateKey = (raw?: string) => String(raw || '').replace(/\s+/g, '').toUpperCase();
+  const normalizeCodeKey = (raw?: string) => String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
   const resolveFleetBranchId = (fleet: Fleet): 'cab-banyuwangi' | 'cab-sidoarjo' => {
     const resolved = branchStore.getFleetBranchId(fleet.id, fleet.plateNumber, fleet.initialCode);
@@ -159,6 +175,69 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     });
     return sortFleetsByCanonicalOrder(valid);
   }, [fleets]);
+
+  const resolveFleetForLog = (
+    log: Partial<FuelLog> & { fleetId?: string; plateNumber?: string; initialCode?: string }
+  ): Fleet | undefined => {
+    const pool = cleanCanonicalFleets.length > 0 ? cleanCanonicalFleets : fleets;
+    // 1. Exact ID match in canonical/active fleets (re-mapped by plate if duplicate ID)
+    if (log.fleetId) {
+      const byId = pool.find(fl => fl.id === log.fleetId) || fleets.find(fl => fl.id === log.fleetId);
+      if (byId) {
+        const byIdPlate = normalizePlateKey(byId.plateNumber);
+        const canonicalByPlate = byIdPlate ? pool.find(fl => normalizePlateKey(fl.plateNumber) === byIdPlate) : undefined;
+        return canonicalByPlate || byId;
+      }
+    }
+    // 2. Normalized plateNumber match
+    const targetPlate = normalizePlateKey(log.plateNumber);
+    if (targetPlate && !/^FLT\d+$/i.test(targetPlate)) {
+      const byPlate = pool.find(fl => normalizePlateKey(fl.plateNumber) === targetPlate);
+      if (byPlate) return byPlate;
+    }
+    // 3. InitialCode / slash-token match (e.g. "S5 / DS3", "S5", "DS3")
+    const candidates = [log.initialCode, log.fleetId]
+      .filter(Boolean)
+      .flatMap(val => [String(val), ...String(val).split('/')])
+      .map(v => normalizeCodeKey(v))
+      .filter(Boolean);
+    if (candidates.length > 0) {
+      const byCode = pool.find(fl => {
+        const flFull = normalizeCodeKey(fl.initialCode);
+        const flTokens = String(fl.initialCode || '').split('/').map(t => normalizeCodeKey(t)).filter(Boolean);
+        return candidates.some(c => c === flFull || flTokens.includes(c));
+      });
+      if (byCode) return byCode;
+    }
+    // 4. Fallback via store resolver
+    return logisticsStore.findFleetByCodeOrPlate(log.initialCode || log.plateNumber || log.fleetId);
+  };
+
+  const editingLogObj = useMemo(
+    () => (editingLogId ? fuelLogs.find(l => l.id === editingLogId) || null : null),
+    [editingLogId, fuelLogs]
+  );
+
+  const selectedFormFleet = useMemo(() => {
+    if (!formFleetId && !editingLogObj) return undefined;
+    const direct =
+      cleanCanonicalFleets.find(fl => fl.id === formFleetId) ||
+      fleets.find(fl => fl.id === formFleetId);
+    if (direct) return direct;
+    if (editingLogObj) {
+      const resolved = resolveFleetForLog(editingLogObj);
+      if (resolved) return resolved;
+      if (editingLogObj.plateNumber || editingLogObj.initialCode) {
+        return {
+          id: editingLogObj.fleetId || formFleetId || 'legacy-fleet',
+          plateNumber: editingLogObj.plateNumber || '-',
+          initialCode: editingLogObj.initialCode || editingLogObj.plateNumber || 'Armada',
+          vehicleType: editingLogObj.vehicleType || 'Double STD'
+        } as Fleet;
+      }
+    }
+    return undefined;
+  }, [formFleetId, cleanCanonicalFleets, fleets, editingLogObj]);
 
   const branchScopedFleets = useMemo(() => {
     if (selectedBranchFilter === 'all') return cleanCanonicalFleets;
@@ -208,77 +287,36 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     return deliveryAreaOptions.filter(a => a.toLowerCase().includes(q));
   }, [deliveryAreaOptions, areaSearchFilter]);
 
-  // Daftar Kru (Driver & Helper) terscoping Cabang + Deduplikasi Spasi (mengatasi Arif Bagus Muhammadiqbal vs Arif Bagus Muhammad Iqbal)
+  // Daftar Kru (Driver & Helper) HANYA diambil dari akun user yang sudah terdaftar & disetujui sesuai cabang
   const crewOptionsForModal = useMemo(() => {
     const map = new Map<string, { id: string; name: string; role: string }>();
+    const registeredUsers = users && users.length > 0
+      ? users
+      : (logisticsStore.getUsers ? logisticsStore.getUsers() : []);
 
-    // 1. User Management aktif sesuai cabang terpilih
-    try {
-      const activeUsers = logisticsStore.getUsers ? logisticsStore.getUsers() : [];
-      activeUsers.forEach(u => {
-        if (logisticsStore.isActiveDeliveryCrewUser(u, formBranchId) && u.fullName?.trim()) {
-          const cleanName = u.fullName.trim();
-          const cKey = compactPersonKey(cleanName);
-          if (cKey && !map.has(cKey)) {
-            map.set(cKey, {
-              id: u.id,
-              name: cleanName,
-              role: u.role === 'crew_helper' ? 'Helper' : 'Driver'
-            });
-          }
+    registeredUsers.forEach(u => {
+      const normalizedStatus = String(u?.status || '').trim().toLowerCase();
+      if (
+        u &&
+        normalizedStatus === 'approved' &&
+        (u as any).isActive !== false &&
+        logisticsStore.isActiveDeliveryCrewUser(u, formBranchId) &&
+        u.fullName?.trim()
+      ) {
+        const cleanName = u.fullName.trim();
+        const cKey = compactPersonKey(cleanName);
+        if (cKey && !map.has(cKey)) {
+          map.set(cKey, {
+            id: u.id,
+            name: cleanName,
+            role: u.role === 'crew_helper' ? 'Helper' : 'Driver'
+          });
         }
-      });
-    } catch {
-      // ignore
-    }
-
-    // 2. Data master kru cabang terpilih
-    crews.forEach(c => {
-      if (!c.name || !c.name.trim()) return;
-      const cBranch = branchStore.getCrewBranchId(c.id, c.name);
-      if (cBranch !== formBranchId) return;
-      const cleanName = c.name.trim();
-      const cKey = compactPersonKey(cleanName);
-      if (cKey && !map.has(cKey)) {
-        map.set(cKey, {
-          id: c.id,
-          name: cleanName,
-          role: c.role || 'Driver'
-        });
       }
     });
 
-    // 3. Fallback default khusus Nusantara bila belum ada di user/crew
-    if (formBranchId === 'cab-banyuwangi') {
-      const defaultDrivers = [
-        'Zainul Agustiar',
-        'Ach Taufiq',
-        'Faisol Arifin',
-        'Aldi Wahyu Pradana',
-        'Arif Bagus Muhammad Iqbal',
-        'Budiono',
-        'Suwarno',
-        'Rudin Slamet',
-        'Supriyanto',
-        'Nanda Tegar Hadi Saputra',
-        'Adit',
-        'Aan Adi Saputra',
-        'Bintang Wahyu Pratama',
-        'Alphian Bayu Nugraha',
-        'Mohamad Rohman',
-        'Riki Novandito Ardiansyah',
-        'Saifur Rizal'
-      ];
-      defaultDrivers.forEach((name, idx) => {
-        const cKey = compactPersonKey(name);
-        if (cKey && !map.has(cKey)) {
-          map.set(cKey, { id: `drv-${idx + 1}`, name, role: 'Driver' });
-        }
-      });
-    }
-
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [crews, formBranchId]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }, [users, formBranchId]);
 
   const filteredDriverOptions = useMemo(() => {
     const q = driverSearchFilter.trim().toLowerCase();
@@ -313,15 +351,52 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [calcCargoBoxes, setCalcCargoBoxes] = useState<number>(12000);
 
   useEffect(() => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
+    logisticsStore.refreshFuelLogsFromServer?.().catch(() => {});
     return logisticsStore.subscribe(() => {
-      setFuelLogs(logisticsStore.getFuelLogs());
-      setFleets(logisticsStore.getFleets());
-      setCrews(logisticsStore.getCrews());
+      setFuelLogs([...logisticsStore.getFuelLogs()]);
+      setFleets([...logisticsStore.getFleets()]);
+      setCrews([...logisticsStore.getCrews()]);
+      setUsers([...logisticsStore.getUsers()]);
     });
   }, []);
 
+  // Reset logs pagination to page 1 when filters or branch change
+  useEffect(() => {
+    setLogsCurrentPage(1);
+  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, logSortBy, selectedBranchFilter]);
+
+  // Close custom Audit Filter dropdown popover on outside click or Escape
+  useEffect(() => {
+    if (!activeAuditFilterDropdown) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (auditFilterContainerRef.current && !auditFilterContainerRef.current.contains(e.target as Node)) {
+        setActiveAuditFilterDropdown(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveAuditFilterDropdown(null);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [activeAuditFilterDropdown]);
+
+  // Auto-scroll highlighted keyboard option inside active modal dropdown
+  useEffect(() => {
+    if (!activeModalDropdown) return;
+    const el = document.querySelector('[data-modal-dropdown-active="true"]');
+    if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
+      (el as HTMLElement).scrollIntoView({ block: 'nearest' });
+    }
+  }, [dropdownHighlightIdx, activeModalDropdown]);
+
   // Reset all fields cleanly before opening Add Fuel modal
   const openAddFuelModal = () => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
     const todayIso = new Date().toISOString().split('T')[0];
     setEditingLogId(null);
     setFormBranchId(selectedBranchFilter === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi');
@@ -352,9 +427,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Populate modal fields for Editing an existing FuelLog
   const openEditFuelModal = (log: FuelLog) => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
+    const matchedFleet = resolveFleetForLog(log);
     setEditingLogId(log.id);
-    setFormBranchId(resolveLogBranchId(log));
-    setFormFleetId(log.fleetId || '');
+    setFormBranchId(matchedFleet ? resolveFleetBranchId(matchedFleet) : resolveLogBranchId(log));
+    setFormFleetId(matchedFleet?.id || log.fleetId || log.plateNumber || log.initialCode || '');
     setFormDriverId(log.driverId || '');
     setFormDriverName(log.driverName || '');
     setFormHelperId(log.helperId || '');
@@ -413,8 +490,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           c => c.currentFleetId === flt.id && branchStore.getCrewBranchId(c.id, c.name) === formBranchId
         );
         if (assignedCrew) {
-          setFormDriverName(assignedCrew.name);
-          setFormDriverId(assignedCrew.id);
+          const activeValidCrew = crewOptionsForModal.find(
+            opt => compactPersonKey(opt.name) === compactPersonKey(assignedCrew.name)
+          );
+          if (activeValidCrew) {
+            setFormDriverName(activeValidCrew.name);
+            setFormDriverId(activeValidCrew.id);
+          }
         }
       }
     }
@@ -448,7 +530,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   }, [formLiters, liveFormDistance]);
 
   const liveFormEfficiency = useMemo(() => {
-    const flt = fleets.find(f => f.id === formFleetId);
+    const flt = selectedFormFleet;
     const target = flt ? (FUEL_TARGET_RATIOS[flt.vehicleType]?.target || 7.5) : 7.5;
     if (liveFormRatio <= 0) return { status: 'Menunggu input' as const, color: 'text-slate-400' };
     if (liveFormRatio >= target * 1.05) {
@@ -461,18 +543,38 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return { status: 'Boros (Perlu Evaluasi)', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' };
     }
     return { status: 'Kritis / Potensi Anomali', color: 'text-rose-400 bg-rose-500/10 border-rose-500/30' };
-  }, [liveFormRatio, formFleetId, fleets]);
+  }, [liveFormRatio, selectedFormFleet]);
 
-  const handleSaveFuelLog = (e: React.FormEvent) => {
+  const handleSaveFuelLog = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingFuelLog) return;
     setFormError('');
-    if (!formFleetId) {
+    setFuelActionError('');
+    if (!formFleetId && !selectedFormFleet) {
       setFormError('Silakan pilih Armada Truk terlebih dahulu.');
       return;
     }
     if (!formDriverName) {
       setFormError('Silakan pilih Nama Driver terlebih dahulu.');
       return;
+    }
+    if (!editingLogId) {
+      const driverActive = crewOptionsForModal.some(
+        opt => compactPersonKey(opt.name) === compactPersonKey(formDriverName)
+      );
+      if (!driverActive) {
+        setFormError('Akun driver yang dipilih sudah nonaktif atau tidak aktif di cabang ini. Silakan pilih driver aktif.');
+        return;
+      }
+      if (formHelperName) {
+        const helperActive = crewOptionsForModal.some(
+          opt => compactPersonKey(opt.name) === compactPersonKey(formHelperName)
+        );
+        if (!helperActive) {
+          setFormError('Akun helper yang dipilih sudah nonaktif atau tidak aktif di cabang ini. Silakan pilih helper aktif.');
+          return;
+        }
+      }
     }
     if (!formLiters || Number(formLiters) <= 0) {
       setFormError('Volume BBM (Liter) harus lebih dari 0.');
@@ -483,7 +585,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return;
     }
 
-    const flt = fleets.find(f => f.id === formFleetId);
+    const flt = selectedFormFleet;
     if (!flt) {
       setFormError('Data armada tidak ditemukan.');
       return;
@@ -518,26 +620,33 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       notes: formNotes || undefined
     };
 
-    if (editingLogId) {
-      logisticsStore.updateFuelLog(editingLogId, payload);
-    } else {
-      logisticsStore.addFuelLog(payload);
-    }
+    setIsSavingFuelLog(true);
+    try {
+      if (editingLogId) {
+        await logisticsStore.updateFuelLogAsync(editingLogId, payload);
+      } else {
+        await logisticsStore.addFuelLogAsync(payload);
+      }
 
-    setIsAddModalOpen(false);
-    setEditingLogId(null);
-    setFormError('');
-    setFormLiters('');
-    setFormCostPerLiter('6800');
-    setFormStartOdo('');
-    setFormEndOdo('');
-    setFormDriverId('');
-    setFormDriverName('');
-    setFormHelperId('');
-    setFormHelperName('');
-    setFormNotes('');
-    setFormRouteTrip('');
-    setFormCargoLoadTon('');
+      setIsAddModalOpen(false);
+      setEditingLogId(null);
+      setFormError('');
+      setFormLiters('');
+      setFormCostPerLiter('6800');
+      setFormStartOdo('');
+      setFormEndOdo('');
+      setFormDriverId('');
+      setFormDriverName('');
+      setFormHelperId('');
+      setFormHelperName('');
+      setFormNotes('');
+      setFormRouteTrip('');
+      setFormCargoLoadTon('');
+    } catch (err: any) {
+      setFormError(err?.message || 'Gagal menyimpan catatan BBM ke database MySQL. Periksa koneksi atau data armada.');
+    } finally {
+      setIsSavingFuelLog(false);
+    }
   };
 
   // Branch-scoped Fleet Summaries
@@ -822,7 +931,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         log.gasStation.toLowerCase().includes(q) ||
         (log.routeTrip && log.routeTrip.toLowerCase().includes(q));
 
-      const matchFleet = filterFleetId === 'all' || log.fleetId === filterFleetId;
+      const resolvedLogFleet = resolveFleetForLog(log);
+      const matchFleet =
+        filterFleetId === 'all' ||
+        log.fleetId === filterFleetId ||
+        resolvedLogFleet?.id === filterFleetId;
       const matchStatus = filterStatus === 'all' || log.efficiencyStatus === filterStatus;
       const matchFuel = filterFuelType === 'all' || log.fuelType === filterFuelType;
 
@@ -850,6 +963,28 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     }
     return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
   }, [branchScopedLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy]);
+
+  const totalLogsPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE)),
+    [filteredLogs.length]
+  );
+
+  const safeLogsPage = Math.min(logsCurrentPage, totalLogsPages);
+
+  const paginatedLogs = useMemo(() => {
+    const start = (safeLogsPage - 1) * LOGS_PER_PAGE;
+    return filteredLogs.slice(start, start + LOGS_PER_PAGE);
+  }, [filteredLogs, safeLogsPage]);
+
+  const filteredAuditFleetOptions = useMemo(() => {
+    const q = auditFleetSearchFilter.trim().toLowerCase();
+    if (!q) return branchScopedFleets;
+    return branchScopedFleets.filter(f =>
+      (f.initialCode || '').toLowerCase().includes(q) ||
+      (f.plateNumber || '').toLowerCase().includes(q) ||
+      (f.vehicleType || '').toLowerCase().includes(q)
+    );
+  }, [branchScopedFleets, auditFleetSearchFilter]);
 
   // Route Preset Selection Handler for Calculator
   const handlePresetRouteChange = (routeKey: string) => {
@@ -1131,6 +1266,22 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           </div>
         </div>
       </div>
+
+      {fuelActionError && (
+        <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>{fuelActionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFuelActionError('')}
+            className="p-1 text-rose-300 hover:text-white rounded cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* 2. TAB CONTROLS (WRAP RINGKAS, TANPA DAILY & CALCULATOR TAB)              */}
@@ -2049,123 +2200,463 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       {/* 5. TAB: AUDIT LOGS & TABLE (FILTER SPBU, SORT TEREFISIEN-BOROS, EDIT)     */}
       {/* ========================================================================= */}
       {activeTab === 'logs' && (
-        <div className="space-y-4">
-          {/* FILTER AND SEARCH CONTROLS */}
-          <div className="bg-slate-900/80 p-3.5 rounded-2xl border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-            <div className="relative w-full lg:w-72">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Cari plat, inisial, driver, helper, SPBU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-              />
-            </div>
+        <div className="space-y-3">
+          {/* FILTER AND SEARCH CONTROLS - LOCKED GRID AT ALL ZOOM LEVELS + CUSTOM POPOVER DROPDOWNS */}
+          <div
+            ref={auditFilterContainerRef}
+            className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800 shadow-sm relative z-20"
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[minmax(170px,1.35fr)_repeat(5,minmax(0,1fr))_36px] gap-2 items-center">
+              {/* Search Box */}
+              <div className="relative col-span-2 sm:col-span-3 lg:col-span-1 min-w-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari inisial, driver, helper, SPBU..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-9 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl pl-8 pr-7 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-              <select
-                value={filterFleetId}
-                onChange={(e) => setFilterFleetId(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Semua Armada ({branchScopedFleets.length})</option>
-                {branchScopedFleets.map(f => (
-                  <option key={f.id} value={f.id}>{f.initialCode || f.plateNumber} ({f.plateNumber})</option>
-                ))}
-              </select>
+              {/* 1. Custom Filter Dropdown: Armada */}
+              <div className="relative min-w-0">
+                {(() => {
+                  const selectedFleet = filterFleetId !== 'all' ? branchScopedFleets.find(f => f.id === filterFleetId) : undefined;
+                  const isActive = filterFleetId !== 'all';
+                  const isOpen = activeAuditFilterDropdown === 'fleet';
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuditFleetSearchFilter('');
+                          setActiveAuditFilterDropdown(isOpen ? null : 'fleet');
+                        }}
+                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
+                          isOpen
+                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
+                            : isActive
+                            ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 font-semibold'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <Truck className={`w-3.5 h-3.5 shrink-0 ${isActive || isOpen ? 'text-amber-400' : 'text-slate-400'}`} />
+                          <span className="truncate">
+                            {selectedFleet ? (selectedFleet.initialCode || selectedFleet.plateNumber) : `Semua Armada (${branchScopedFleets.length})`}
+                          </span>
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
 
-              <select
-                value={filterSpbu}
-                onChange={(e) => setFilterSpbu(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Semua SPBU</option>
-                <option value="Farly">SPBU Farly</option>
-                <option value="Gajah Mada">SPBU Gajah Mada</option>
-                <option value="SPBU Lain">SPBU Lain (Urgent)</option>
-              </select>
+                      {isOpen && (
+                        <div className="absolute left-0 top-full mt-1.5 z-50 w-64 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                          <div className="p-2 bg-slate-950/90 border-b border-slate-800">
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                autoFocus
+                                value={auditFleetSearchFilter}
+                                onChange={(e) => setAuditFleetSearchFilter(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && filteredAuditFleetOptions.length > 0) {
+                                    e.preventDefault();
+                                    setFilterFleetId(filteredAuditFleetOptions[0].id);
+                                    setActiveAuditFilterDropdown(null);
+                                  } else if (e.key === 'Escape') {
+                                    setActiveAuditFilterDropdown(null);
+                                  }
+                                }}
+                                placeholder="Cari armada..."
+                                className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilterFleetId('all');
+                                setActiveAuditFilterDropdown(null);
+                              }}
+                              className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                filterFleetId === 'all'
+                                  ? 'bg-amber-500/20 text-amber-300 font-bold'
+                                  : 'hover:bg-slate-800/70 text-slate-200'
+                              }`}
+                            >
+                              <span>Semua Armada ({branchScopedFleets.length})</span>
+                              {filterFleetId === 'all' && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                            </button>
+                            {filteredAuditFleetOptions.map(f => {
+                              const selected = filterFleetId === f.id;
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setFilterFleetId(f.id);
+                                    setActiveAuditFilterDropdown(null);
+                                  }}
+                                  className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    selected
+                                      ? 'bg-amber-500/20 text-amber-300 font-bold'
+                                      : 'hover:bg-slate-800/70 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex items-center gap-2">
+                                    <span className="font-mono font-bold text-amber-400 shrink-0">
+                                      {f.initialCode || f.plateNumber}
+                                    </span>
+                                    <span className="text-[11px] text-slate-400 truncate">
+                                      {f.vehicleType}
+                                    </span>
+                                  </div>
+                                  {selected && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                            {filteredAuditFleetOptions.length === 0 && (
+                              <div className="py-3 text-center text-[11px] text-slate-400">Armada tidak ditemukan</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
 
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Semua Status</option>
-                <option value="Sangat Efisien">Sangat Efisien</option>
-                <option value="Efisien / Normal">Efisien / Normal</option>
-                <option value="Boros">Boros</option>
-                <option value="Kritis / Potensi Anomali">Kritis / Potensi Anomali</option>
-              </select>
+              {/* 2. Custom Filter Dropdown: SPBU */}
+              <div className="relative min-w-0">
+                {(() => {
+                  const spbuOptions: Array<{ value: 'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'; label: string; desc: string }> = [
+                    { value: 'all', label: 'Semua SPBU', desc: 'Tampilkan seluruh lokasi pengisian' },
+                    { value: 'Farly', label: 'SPBU Farly', desc: 'Pengisian reguler di SPBU Farly' },
+                    { value: 'Gajah Mada', label: 'SPBU Gajah Mada', desc: 'Pengisian di SPBU Gajah Mada' },
+                    { value: 'SPBU Lain', label: 'SPBU Lain (Urgent)', desc: 'Pengisian darurat di luar SPBU rekanan' }
+                  ];
+                  const activeOpt = spbuOptions.find(o => o.value === filterSpbu) || spbuOptions[0];
+                  const isActive = filterSpbu !== 'all';
+                  const isOpen = activeAuditFilterDropdown === 'spbu';
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'spbu')}
+                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
+                          isOpen
+                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
+                            : isActive
+                            ? 'bg-blue-500/10 border-blue-500/40 text-blue-300 font-semibold'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <MapPin className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
+                          <span className="truncate">{activeOpt.label}</span>
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="absolute left-0 top-full mt-1.5 z-50 w-60 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                          {spbuOptions.map(opt => {
+                            const selected = filterSpbu === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => {
+                                  setFilterSpbu(opt.value);
+                                  setActiveAuditFilterDropdown(null);
+                                }}
+                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  selected
+                                    ? 'bg-blue-500/20 text-blue-300 font-bold'
+                                    : 'hover:bg-slate-800/70 text-slate-200'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs truncate">{opt.label}</div>
+                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.desc}</div>
+                                </div>
+                                {selected && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
 
-              <select
-                value={filterFuelType}
-                onChange={(e) => setFilterFuelType(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Semua BBM</option>
-                <option value="BioSolar">BioSolar</option>
-                <option value="Dexlite">Dexlite</option>
-                <option value="Pertamina Dex">Pertamina Dex</option>
-                <option value="Pertalite">Pertalite</option>
-              </select>
+              {/* 3. Custom Filter Dropdown: Status Efisiensi */}
+              <div className="relative min-w-0">
+                {(() => {
+                  const statusOptions = [
+                    { value: 'all', label: 'Semua Status', dot: 'bg-slate-400' },
+                    { value: 'Sangat Efisien', label: 'Sangat Efisien', dot: 'bg-emerald-400' },
+                    { value: 'Efisien / Normal', label: 'Efisien / Normal', dot: 'bg-blue-400' },
+                    { value: 'Boros', label: 'Boros', dot: 'bg-amber-400' },
+                    { value: 'Kritis / Potensi Anomali', label: 'Kritis / Potensi Anomali', dot: 'bg-rose-400' }
+                  ];
+                  const activeOpt = statusOptions.find(o => o.value === filterStatus) || statusOptions[0];
+                  const isActive = filterStatus !== 'all';
+                  const isOpen = activeAuditFilterDropdown === 'status';
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'status')}
+                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
+                          isOpen
+                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
+                            : isActive
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-semibold'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${activeOpt.dot}`} />
+                          <span className="truncate">{activeOpt.label}</span>
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="absolute left-0 top-full mt-1.5 z-50 w-56 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                          {statusOptions.map(opt => {
+                            const selected = filterStatus === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => {
+                                  setFilterStatus(opt.value);
+                                  setActiveAuditFilterDropdown(null);
+                                }}
+                                className={`w-full px-2.5 py-2 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  selected
+                                    ? 'bg-emerald-500/20 text-emerald-300 font-bold'
+                                    : 'hover:bg-slate-800/70 text-slate-200'
+                                }`}
+                              >
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
+                                  <span className="truncate">{opt.label}</span>
+                                </span>
+                                {selected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
 
-              <select
-                value={logSortBy}
-                onChange={(e) => setLogSortBy(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-amber-300 font-semibold focus:outline-none focus:border-amber-500"
-              >
-                <option value="date_asc">Urut: Tanggal Termuda</option>
-                <option value="date_desc">Urut: Tanggal Terbaru</option>
-                <option value="efficient_asc">Terefisien &rarr; Paling Boros</option>
-                <option value="wasteful_desc">Paling Boros &rarr; Terefisien</option>
-              </select>
+              {/* 4. Custom Filter Dropdown: Jenis BBM */}
+              <div className="relative min-w-0">
+                {(() => {
+                  const fuelOptions = [
+                    { value: 'all', label: 'Semua BBM', sub: 'Seluruh jenis bahan bakar' },
+                    { value: 'BioSolar', label: 'BioSolar', sub: 'Solar subsidi armada niaga' },
+                    { value: 'Dexlite', label: 'Dexlite', sub: 'Cetane 51 diesel menengah' },
+                    { value: 'Pertamina Dex', label: 'Pertamina Dex', sub: 'Cetane 53 diesel premium' },
+                    { value: 'Pertalite', label: 'Pertalite', sub: 'Bensin RON 90' }
+                  ];
+                  const activeOpt = fuelOptions.find(o => o.value === filterFuelType) || fuelOptions[0];
+                  const isActive = filterFuelType !== 'all';
+                  const isOpen = activeAuditFilterDropdown === 'fuel';
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'fuel')}
+                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
+                          isOpen
+                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
+                            : isActive
+                            ? 'bg-purple-500/10 border-purple-500/40 text-purple-300 font-semibold'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <Fuel className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-purple-400' : 'text-slate-400'}`} />
+                          <span className="truncate">{activeOpt.label}</span>
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="absolute right-0 lg:left-0 top-full mt-1.5 z-50 w-52 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                          {fuelOptions.map(opt => {
+                            const selected = filterFuelType === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => {
+                                  setFilterFuelType(opt.value);
+                                  setActiveAuditFilterDropdown(null);
+                                }}
+                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  selected
+                                    ? 'bg-purple-500/20 text-purple-300 font-bold'
+                                    : 'hover:bg-slate-800/70 text-slate-200'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs truncate">{opt.label}</div>
+                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.sub}</div>
+                                </div>
+                                {selected && <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
 
-              {(searchQuery || filterFleetId !== 'all' || filterSpbu !== 'all' || filterStatus !== 'all' || filterFuelType !== 'all' || logSortBy !== 'date_asc') && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setFilterFleetId('all');
-                    setFilterSpbu('all');
-                    setFilterStatus('all');
-                    setFilterFuelType('all');
-                    setLogSortBy('date_asc');
-                  }}
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
-                  title="Reset Filter"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
-              )}
+              {/* 5. Custom Filter Dropdown: Urutkan */}
+              <div className="relative min-w-0">
+                {(() => {
+                  const sortOptions: Array<{ value: 'date_asc' | 'date_desc' | 'efficient_asc' | 'wasteful_desc'; label: string; desc: string }> = [
+                    { value: 'date_asc', label: 'Tanggal Termuda', desc: 'Urut dari tanggal paling awal' },
+                    { value: 'date_desc', label: 'Tanggal Terbaru', desc: 'Urut dari pengisian terakhir' },
+                    { value: 'efficient_asc', label: 'Terefisien → Boros', desc: 'Rasio KM/L tertinggi lebih dulu' },
+                    { value: 'wasteful_desc', label: 'Boros → Terefisien', desc: 'Prioritaskan log paling boros' }
+                  ];
+                  const activeOpt = sortOptions.find(o => o.value === logSortBy) || sortOptions[0];
+                  const isOpen = activeAuditFilterDropdown === 'sort';
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'sort')}
+                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer font-semibold ${
+                          isOpen
+                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-amber-300'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-amber-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <ArrowUpDown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span className="truncate">{activeOpt.label}</span>
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-amber-400 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="absolute right-0 top-full mt-1.5 z-50 w-56 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                          {sortOptions.map(opt => {
+                            const selected = logSortBy === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => {
+                                  setLogSortBy(opt.value);
+                                  setActiveAuditFilterDropdown(null);
+                                }}
+                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  selected
+                                    ? 'bg-amber-500/20 text-amber-300 font-bold'
+                                    : 'hover:bg-slate-800/70 text-slate-200'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs truncate">{opt.label}</div>
+                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.desc}</div>
+                                </div>
+                                {selected && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* 6. Reserved Fixed Reset Slot (prevents bar wrap/shift at any zoom) */}
+              <div className="flex justify-end">
+                {(() => {
+                  const hasCustomFilter =
+                    Boolean(searchQuery) ||
+                    filterFleetId !== 'all' ||
+                    filterSpbu !== 'all' ||
+                    filterStatus !== 'all' ||
+                    filterFuelType !== 'all' ||
+                    logSortBy !== 'date_asc';
+                  return (
+                    <button
+                      type="button"
+                      disabled={!hasCustomFilter}
+                      onClick={() => {
+                        setSearchQuery('');
+                        setFilterFleetId('all');
+                        setFilterSpbu('all');
+                        setFilterStatus('all');
+                        setFilterFuelType('all');
+                        setLogSortBy('date_asc');
+                        setActiveAuditFilterDropdown(null);
+                      }}
+                      className={`w-9 h-9 rounded-xl border flex items-center justify-center transition ${
+                        hasCustomFilter
+                          ? 'bg-amber-500/15 border-amber-500/40 hover:bg-amber-500 hover:text-slate-950 text-amber-300 cursor-pointer'
+                          : 'bg-slate-950/60 border-slate-800/70 text-slate-500 opacity-50 cursor-default'
+                      }`}
+                      title="Reset Filter"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  );
+                })()}
+              </div>
             </div>
           </div>
 
-          {/* FUEL LOGS TABLE */}
+          {/* FUEL LOGS TABLE (COMPACT ROW HEIGHT + MAX 10 ROWS PER PAGE) */}
           <div className="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                   <tr>
-                    <th className="px-4 py-3">Tanggal &amp; Armada</th>
-                    <th className="px-4 py-3">Kru (Driver / Helper) &amp; Rute</th>
-                    <th className="px-4 py-3">BBM &amp; Biaya</th>
-                    <th className="px-4 py-3">KM Awal / Isi</th>
-                    <th className="px-4 py-3 text-center">Jarak</th>
-                    <th className="px-4 py-3 text-center">Rasio (KM/L)</th>
-                    <th className="px-4 py-3 text-center">Status Efisiensi</th>
-                    <th className="px-4 py-3 text-right">Aksi</th>
+                    <th className="px-3 py-2">Tanggal &amp; Armada</th>
+                    <th className="px-3 py-2">Kru (Driver / Helper) &amp; Rute</th>
+                    <th className="px-3 py-2">BBM &amp; Biaya</th>
+                    <th className="px-3 py-2">KM Awal / Isi</th>
+                    <th className="px-3 py-2 text-center">Jarak</th>
+                    <th className="px-3 py-2 text-center">Rasio (KM/L)</th>
+                    <th className="px-3 py-2 text-center">Status Efisiensi</th>
+                    <th className="px-3 py-2 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {filteredLogs.length === 0 ? (
+                  {paginatedLogs.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                         Tidak ada catatan pengisian BBM yang sesuai filter.
                       </td>
                     </tr>
                   ) : (
-                    filteredLogs.map(log => {
+                    paginatedLogs.map(log => {
                       const isAnomaly = log.efficiencyStatus === 'Kritis / Potensi Anomali';
                       const isHighEfficient = log.efficiencyStatus === 'Sangat Efisien';
                       const isWaste = log.efficiencyStatus === 'Boros';
@@ -2173,11 +2664,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
                       return (
                         <tr key={log.id} className="hover:bg-slate-800/40 transition">
-                          <td className="px-4 py-3 whitespace-nowrap">
+                          <td className="px-3 py-1.5 whitespace-nowrap leading-tight">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-white">{log.date}</span>
+                              <span className="font-semibold text-white text-xs">{log.date}</span>
                               {selectedBranchFilter === 'all' && (
-                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                <span className={`text-[9px] px-1 py-0 rounded font-bold border ${
                                   logBranchId === 'cab-sidoarjo'
                                     ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
                                     : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
@@ -2186,71 +2677,67 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="font-bold text-amber-400 font-mono">
-                                {log.initialCode || '-'}
+                            <div className="font-bold text-amber-400 font-mono text-xs mt-0.5">
+                              {log.initialCode || '-'}
+                            </div>
+                          </td>
+
+                          <td className="px-3 py-1.5 leading-tight max-w-[260px]">
+                            <div className="font-semibold text-slate-200 flex items-center gap-1 truncate">
+                              <User className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{log.driverName}</span>
+                              {log.helperName && (
+                                <span className="text-[10px] font-medium text-amber-300 truncate shrink-0">
+                                  &bull; {log.helperName}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1" title={`${log.routeTrip || 'Rute lokal AKK'} • ${log.gasStation}`}>
+                              <span className="truncate">{log.routeTrip || 'Rute lokal AKK'}</span>
+                              <span className="text-slate-500">&bull;</span>
+                              <MapPin className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+                              <span className="truncate">{log.gasStation}</span>
+                            </div>
+                          </td>
+
+                          <td className="px-3 py-1.5 whitespace-nowrap leading-tight">
+                            <div className="font-bold text-slate-200">
+                              {log.liters} L <span className="text-slate-400 font-normal text-[11px]">({log.fuelType})</span>
+                            </div>
+                            <div className="text-[11px] mt-0.5 flex items-center gap-1.5">
+                              <span className="text-amber-400 font-mono font-semibold">
+                                Rp {log.totalCost.toLocaleString('id-ID')}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                ({log.costPerKm.toLocaleString('id-ID')}/KM)
                               </span>
                             </div>
                           </td>
 
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-slate-200 flex items-center gap-1">
-                              <User className="w-3 h-3 text-slate-400" />
-                              <span>{log.driverName}</span>
-                            </div>
-                            {log.helperName && (
-                              <div className="text-[10px] text-amber-300 mt-0.5">
-                                Helper: {log.helperName}
-                              </div>
-                            )}
-                            <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5" title={log.routeTrip}>
-                              {log.routeTrip || 'Rute lokal AKK'}
-                            </div>
-                            <div className="text-[10px] text-slate-400 truncate max-w-xs flex items-center gap-1">
-                              <MapPin className="w-2.5 h-2.5 text-blue-400" />
-                              <span>{log.gasStation}</span>
-                            </div>
+                          <td className="px-3 py-1.5 whitespace-nowrap font-mono text-[11px] text-slate-300 leading-tight">
+                            <div>Awal: {log.startOdometerKm.toLocaleString('id-ID')}</div>
+                            <div className="text-amber-300 mt-0.5">Isi: {log.endOdometerKm.toLocaleString('id-ID')}</div>
                           </td>
 
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <div className="font-bold text-slate-200">
-                              {log.liters} L <span className="text-slate-400 font-normal">({log.fuelType})</span>
-                            </div>
-                            <div className="text-amber-400 font-mono font-semibold">
-                              Rp {log.totalCost.toLocaleString('id-ID')}
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              Rp {log.costPerKm.toLocaleString('id-ID')} / KM
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-3 whitespace-nowrap font-mono text-[11px] text-slate-300">
-                            <div>Awal: {log.startOdometerKm.toLocaleString('id-ID')} KM</div>
-                            <div className="text-amber-300">Isi: {log.endOdometerKm.toLocaleString('id-ID')} KM</div>
-                          </td>
-
-                          <td className="px-4 py-3 text-center whitespace-nowrap font-mono font-bold text-white">
+                          <td className="px-3 py-1.5 text-center whitespace-nowrap font-mono font-bold text-white leading-tight">
                             {log.distanceKm.toLocaleString('id-ID')} KM
                           </td>
 
-                          <td className="px-4 py-3 text-center whitespace-nowrap">
-                            <div className="font-black text-sm font-mono text-white">
-                              {log.ratioKmPerLiter}
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              Target: {log.targetRatio} KM/L
+                          <td className="px-3 py-1.5 text-center whitespace-nowrap leading-tight">
+                            <div className="font-black text-xs font-mono text-white">
+                              {log.ratioKmPerLiter} <span className="text-[10px] font-normal text-slate-400">/ {log.targetRatio}</span>
                             </div>
                           </td>
 
-                          <td className="px-4 py-3 text-center whitespace-nowrap">
+                          <td className="px-3 py-1.5 text-center whitespace-nowrap leading-tight">
                             <span
-                              className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                              className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                                 isHighEfficient
                                   ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                                   : isWaste
                                   ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                                   : isAnomaly
-                                  ? 'bg-rose-500/15 text-rose-400 border-rose-500/30 animate-pulse'
+                                  ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                                   : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                               }`}
                             >
@@ -2258,7 +2745,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             </span>
                           </td>
 
-                          <td className="px-4 py-3 text-right whitespace-nowrap space-x-1.5">
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap space-x-1">
                             <button
                               type="button"
                               onClick={() => openEditFuelModal(log)}
@@ -2270,18 +2757,28 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             <button
                               type="button"
                               onClick={() => setSelectedLogForDetail(log)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] transition cursor-pointer"
+                              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] transition cursor-pointer"
                             >
                               Detail
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                logisticsStore.deleteFuelLog(log.id);
+                              disabled={deletingLogId === log.id}
+                              onClick={async () => {
+                                if (deletingLogId) return;
+                                setFuelActionError('');
+                                setDeletingLogId(log.id);
+                                try {
+                                  await logisticsStore.deleteFuelLogAsync(log.id);
+                                } catch (err: any) {
+                                  setFuelActionError(err?.message || 'Gagal menghapus catatan BBM dari database MySQL.');
+                                } finally {
+                                  setDeletingLogId(null);
+                                }
                               }}
-                              className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-semibold text-[11px] transition cursor-pointer"
+                              className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 disabled:opacity-50 text-rose-400 hover:text-white font-semibold text-[11px] transition cursor-pointer"
                             >
-                              Hapus
+                              {deletingLogId === log.id ? '...' : 'Hapus'}
                             </button>
                           </td>
                         </tr>
@@ -2291,6 +2788,78 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </tbody>
               </table>
             </div>
+
+            {/* PAGINATION FOOTER BAR */}
+            {filteredLogs.length > 0 && (
+              <div className="px-3.5 py-2 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+                <div className="text-slate-400">
+                  Menampilkan{' '}
+                  <span className="font-bold text-slate-200">
+                    {(safeLogsPage - 1) * LOGS_PER_PAGE + 1}&ndash;{Math.min(safeLogsPage * LOGS_PER_PAGE, filteredLogs.length)}
+                  </span>{' '}
+                  dari <span className="font-bold text-slate-200">{filteredLogs.length}</span> catatan BBM
+                  <span className="text-slate-500 ml-1.5">(Halaman {safeLogsPage} / {totalLogsPages})</span>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safeLogsPage <= 1}
+                    onClick={() => setLogsCurrentPage(p => Math.max(1, p - 1))}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition ${
+                      safeLogsPage <= 1
+                        ? 'bg-slate-900/50 border-slate-800/70 text-slate-500 opacity-50 cursor-not-allowed'
+                        : 'bg-slate-900 border-slate-700 hover:border-amber-500/50 hover:text-amber-300 text-slate-200 cursor-pointer'
+                    }`}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sebelumnya</span>
+                  </button>
+
+                  {Array.from({ length: totalLogsPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalLogsPages || Math.abs(p - safeLogsPage) <= 1)
+                    .reduce<Array<number | 'ellipsis'>>((acc, p, idx, arr) => {
+                      if (idx > 0 && p - arr[idx - 1] > 1) acc.push('ellipsis');
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((item, idx) =>
+                      item === 'ellipsis' ? (
+                        <span key={`el-${idx}`} className="px-1.5 text-slate-500 select-none">
+                          &hellip;
+                        </span>
+                      ) : (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setLogsCurrentPage(item)}
+                          className={`min-w-[28px] h-7 px-2 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+                            safeLogsPage === item
+                              ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
+                              : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      )
+                    )}
+
+                  <button
+                    type="button"
+                    disabled={safeLogsPage >= totalLogsPages}
+                    onClick={() => setLogsCurrentPage(p => Math.min(totalLogsPages, p + 1))}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition ${
+                      safeLogsPage >= totalLogsPages
+                        ? 'bg-slate-900/50 border-slate-800/70 text-slate-500 opacity-50 cursor-not-allowed'
+                        : 'bg-slate-900 border-slate-700 hover:border-amber-500/50 hover:text-amber-300 text-slate-200 cursor-pointer'
+                    }`}
+                  >
+                    <span>Berikutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2497,8 +3066,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       {/* ========================================================================= */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-6">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/70">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-4">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-950/70">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400">
                   <Fuel className="w-5 h-5" />
@@ -2521,7 +3090,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               </button>
             </div>
 
-            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-3.5 max-h-[85vh] overflow-y-auto overflow-x-hidden">
               {/* Filter Cabang Modal */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
                 <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
@@ -2564,46 +3133,41 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {/* 1. Custom Searchable Dropdown: Armada Truk (Ketik + Enter) */}
-                <div className="relative">
+                {/* 1. Custom Searchable Dropdown: Armada Truk (Ketik + Panah Atas/Bawah + Enter) */}
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Armada Truk <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => {
+                      setIsGasStationDropdownOpen(false);
                       setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet');
                       setFleetSearchFilter('');
+                      setDropdownHighlightIdx(0);
                     }}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'fleet' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <span className="flex items-center gap-2 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0 flex-1">
                       <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                         <Truck className="w-3.5 h-3.5" />
                       </span>
-                      {formFleetId ? (
-                        (() => {
-                          const f = fleets.find(fl => fl.id === formFleetId);
-                          return f ? (
-                            <span className="truncate font-bold text-white">
-                              {f.initialCode || f.plateNumber}{' '}
-                              <span className="text-slate-400 font-normal">({f.plateNumber})</span>
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">Pilih Armada...</span>
-                          );
-                        })()
+                      {selectedFormFleet ? (
+                        <span className="truncate font-bold text-white">
+                          {selectedFormFleet.initialCode || selectedFormFleet.plateNumber}{' '}
+                          <span className="text-slate-400 font-normal">({selectedFormFleet.plateNumber})</span>
+                        </span>
                       ) : (
-                        <span className="text-slate-400">-- Pilih Armada --</span>
+                        <span className="truncate text-slate-400">-- Pilih Armada --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'fleet' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[230px]">
+                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -2611,39 +3175,60 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             type="text"
                             autoFocus
                             value={fleetSearchFilter}
-                            onChange={(e) => setFleetSearchFilter(e.target.value)}
+                            onChange={(e) => {
+                              setFleetSearchFilter(e.target.value);
+                              setDropdownHighlightIdx(0);
+                            }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'ArrowDown') {
                                 e.preventDefault();
                                 if (filteredModalFleets.length > 0) {
-                                  handleFleetSelection(filteredModalFleets[0].id);
+                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredModalFleets.length);
+                                }
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                if (filteredModalFleets.length > 0) {
+                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredModalFleets.length) % filteredModalFleets.length);
+                                }
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredModalFleets[Math.min(dropdownHighlightIdx, Math.max(0, filteredModalFleets.length - 1))];
+                                if (target) {
+                                  handleFleetSelection(target.id);
                                   setActiveModalDropdown(null);
                                 }
                               } else if (e.key === 'Escape') {
                                 setActiveModalDropdown(null);
                               }
                             }}
-                            placeholder="Ketik inisial / plat lalu Enter..."
+                            placeholder="Ketik, panah ↑↓, lalu Enter..."
                             className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                           />
                         </div>
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
                         {filteredModalFleets.length === 0 ? (
                           <div className="p-3 text-center text-[11px] text-slate-400">Armada cabang tidak ditemukan</div>
                         ) : (
-                          filteredModalFleets.map(f => {
-                            const isSelected = formFleetId === f.id;
+                          filteredModalFleets.map((f, idx) => {
+                            const isSelected = selectedFormFleet?.id === f.id || formFleetId === f.id;
+                            const isHighlighted = dropdownHighlightIdx === idx;
                             return (
                               <button
                                 key={f.id}
                                 type="button"
+                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
+                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
                                 onClick={() => {
                                   handleFleetSelection(f.id);
                                   setActiveModalDropdown(null);
                                 }}
-                                className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isSelected ? 'bg-amber-500/15 border-l-4 border-l-amber-500 text-amber-300 font-bold' : 'hover:bg-amber-500/10 text-slate-200'
+                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isHighlighted
+                                    ? 'bg-amber-500/20 text-amber-300 font-bold ring-1 ring-inset ring-amber-500/40'
+                                    : isSelected
+                                    ? 'bg-amber-500/10 text-amber-300 font-bold'
+                                    : 'text-slate-200 hover:bg-slate-800/60'
                                 }`}
                               >
                                 <div className="min-w-0">
@@ -2667,36 +3252,38 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   )}
                 </div>
 
-                {/* 2. Custom Dropdown: Nama Driver (Ketik + Enter) */}
-                <div className="relative">
+                {/* 2. Custom Dropdown: Nama Driver (Ketik + Panah Atas/Bawah + Enter) */}
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Nama Driver <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => {
+                      setIsGasStationDropdownOpen(false);
                       setActiveModalDropdown(activeModalDropdown === 'driver' ? null : 'driver');
                       setDriverSearchFilter('');
+                      setDropdownHighlightIdx(0);
                     }}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'driver' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                    <span className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="w-6 h-6 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
                         <User className="w-3.5 h-3.5" />
                       </span>
                       {formDriverName ? (
                         <span className="truncate font-bold text-white">{formDriverName}</span>
                       ) : (
-                        <span className="text-slate-400">-- Pilih Driver --</span>
+                        <span className="truncate text-slate-400">-- Pilih Driver --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'driver' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
+                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -2704,87 +3291,116 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             type="text"
                             autoFocus
                             value={driverSearchFilter}
-                            onChange={(e) => setDriverSearchFilter(e.target.value)}
+                            onChange={(e) => {
+                              setDriverSearchFilter(e.target.value);
+                              setDropdownHighlightIdx(0);
+                            }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'ArrowDown') {
                                 e.preventDefault();
                                 if (filteredDriverOptions.length > 0) {
-                                  setFormDriverName(filteredDriverOptions[0].name);
-                                  setFormDriverId(filteredDriverOptions[0].id);
+                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredDriverOptions.length);
+                                }
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                if (filteredDriverOptions.length > 0) {
+                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredDriverOptions.length) % filteredDriverOptions.length);
+                                }
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredDriverOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredDriverOptions.length - 1))];
+                                if (target) {
+                                  setFormDriverName(target.name);
+                                  setFormDriverId(target.id);
                                   setActiveModalDropdown(null);
                                 }
                               } else if (e.key === 'Escape') {
                                 setActiveModalDropdown(null);
                               }
                             }}
-                            placeholder="Ketik nama lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                            placeholder="Ketik, panah ↑↓, lalu Enter..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                           />
                         </div>
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        {filteredDriverOptions.map(d => {
-                          const isSelected = formDriverName === d.name;
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => {
-                                setFormDriverName(d.name);
-                                setFormDriverId(d.id);
-                                setActiveModalDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-sky-500/15 border-l-4 border-l-sky-500 text-sky-300 font-bold' : 'hover:bg-sky-500/10 text-slate-200'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-sky-400 shrink-0">
-                                  {d.name.charAt(0).toUpperCase()}
-                                </span>
-                                <span className="text-xs truncate">{d.name}</span>
-                              </div>
-                              {isSelected && (
-                                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
+                        {filteredDriverOptions.length === 0 ? (
+                          <div className="p-3 text-center text-[11px] text-slate-400">
+                            Tidak ada akun driver terdaftar yang cocok
+                          </div>
+                        ) : (
+                          filteredDriverOptions.map((d, idx) => {
+                            const isSelected = formDriverName === d.name;
+                            const isHighlighted = dropdownHighlightIdx === idx;
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
+                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
+                                onClick={() => {
+                                  setFormDriverName(d.name);
+                                  setFormDriverId(d.id);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isHighlighted
+                                    ? 'bg-blue-500/20 text-blue-300 font-bold ring-1 ring-inset ring-blue-500/40'
+                                    : isSelected
+                                    ? 'bg-blue-500/10 text-blue-300 font-bold'
+                                    : 'text-slate-200 hover:bg-slate-800/60'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-blue-400 shrink-0">
+                                    {d.name.charAt(0).toUpperCase()}
+                                  </span>
+                                  <span className="text-xs truncate">{d.name}</span>
+                                </div>
+                                {isSelected && (
+                                  <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* 3. Custom Dropdown: Nama Helper (Ketik + Enter) */}
-                <div className="relative">
+                {/* 3. Custom Dropdown: Nama Helper (Ketik + Panah Atas/Bawah + Enter) */}
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Nama Helper
                   </label>
                   <button
                     type="button"
                     onClick={() => {
+                      setIsGasStationDropdownOpen(false);
                       setActiveModalDropdown(activeModalDropdown === 'helper' ? null : 'helper');
                       setHelperSearchFilter('');
+                      setDropdownHighlightIdx(0);
                     }}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'helper' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="w-6 h-6 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+                    <span className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="w-6 h-6 rounded-lg bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
                         <User className="w-3.5 h-3.5" />
                       </span>
                       {formHelperName ? (
                         <span className="truncate font-bold text-white">{formHelperName}</span>
                       ) : (
-                        <span className="text-slate-400">-- Opsional Helper --</span>
+                        <span className="truncate text-slate-400">-- Pilih Helper --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'helper' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'helper' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
+                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -2792,21 +3408,35 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             type="text"
                             autoFocus
                             value={helperSearchFilter}
-                            onChange={(e) => setHelperSearchFilter(e.target.value)}
+                            onChange={(e) => {
+                              setHelperSearchFilter(e.target.value);
+                              setDropdownHighlightIdx(0);
+                            }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'ArrowDown') {
                                 e.preventDefault();
                                 if (filteredHelperOptions.length > 0) {
-                                  setFormHelperName(filteredHelperOptions[0].name);
-                                  setFormHelperId(filteredHelperOptions[0].id);
+                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredHelperOptions.length);
+                                }
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                if (filteredHelperOptions.length > 0) {
+                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredHelperOptions.length) % filteredHelperOptions.length);
+                                }
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredHelperOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredHelperOptions.length - 1))];
+                                if (target) {
+                                  setFormHelperName(target.name);
+                                  setFormHelperId(target.id);
                                   setActiveModalDropdown(null);
                                 }
                               } else if (e.key === 'Escape') {
                                 setActiveModalDropdown(null);
                               }
                             }}
-                            placeholder="Ketik helper lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500"
+                            placeholder="Ketik, panah ↑↓, lalu Enter..."
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
                           />
                         </div>
                         {formHelperName && (
@@ -2823,69 +3453,84 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </button>
                         )}
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        {filteredHelperOptions.map(d => {
-                          const isSelected = formHelperName === d.name;
-                          return (
-                            <button
-                              key={`hlp-${d.id}`}
-                              type="button"
-                              onClick={() => {
-                                setFormHelperName(d.name);
-                                setFormHelperId(d.id);
-                                setActiveModalDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-violet-500/15 border-l-4 border-l-violet-500 text-violet-300 font-bold' : 'hover:bg-violet-500/10 text-slate-200'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-violet-400 shrink-0">
-                                  {d.name.charAt(0).toUpperCase()}
-                                </span>
-                                <span className="text-xs truncate">{d.name}</span>
-                              </div>
-                              {isSelected && (
-                                <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
+                        {filteredHelperOptions.length === 0 ? (
+                          <div className="p-3 text-center text-[11px] text-slate-400">
+                            Tidak ada akun kru terdaftar yang cocok
+                          </div>
+                        ) : (
+                          filteredHelperOptions.map((d, idx) => {
+                            const isSelected = formHelperName === d.name;
+                            const isHighlighted = dropdownHighlightIdx === idx;
+                            return (
+                              <button
+                                key={`hlp-${d.id}`}
+                                type="button"
+                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
+                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
+                                onClick={() => {
+                                  setFormHelperName(d.name);
+                                  setFormHelperId(d.id);
+                                  setActiveModalDropdown(null);
+                                }}
+                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                  isHighlighted
+                                    ? 'bg-purple-500/20 text-purple-300 font-bold ring-1 ring-inset ring-purple-500/40'
+                                    : isSelected
+                                    ? 'bg-purple-500/10 text-purple-300 font-bold'
+                                    : 'text-slate-200 hover:bg-slate-800/60'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-purple-400 shrink-0">
+                                    {d.name.charAt(0).toUpperCase()}
+                                  </span>
+                                  <span className="text-xs truncate">{d.name}</span>
+                                </div>
+                                {isSelected && (
+                                  <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* 4. Custom Dropdown: Area Kirim (Ketik + Enter) */}
-                <div className="relative">
+                {/* 4. Custom Dropdown: Area Kirim (Ketik + Panah Atas/Bawah + Enter - opens inward from right edge) */}
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Area Kirim <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => {
+                      setIsGasStationDropdownOpen(false);
                       setActiveModalDropdown(activeModalDropdown === 'area' ? null : 'area');
                       setAreaSearchFilter('');
+                      setDropdownHighlightIdx(0);
                     }}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'area' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
-                    <span className="flex items-center gap-2 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0 flex-1">
                       <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
                         <MapPin className="w-3.5 h-3.5" />
                       </span>
                       {formRouteTrip ? (
                         <span className="truncate font-bold text-white">{formRouteTrip}</span>
                       ) : (
-                        <span className="text-slate-400">-- Pilih Area --</span>
+                        <span className="truncate text-slate-400">-- Pilih Area --</span>
                       )}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'area' ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
                   {activeModalDropdown === 'area' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 min-w-[220px]">
+                    <div className="absolute right-0 left-auto top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                       <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -2895,12 +3540,24 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                             value={areaSearchFilter}
                             onChange={(e) => {
                               setAreaSearchFilter(e.target.value);
+                              setDropdownHighlightIdx(0);
                             }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'ArrowDown') {
                                 e.preventDefault();
                                 if (filteredAreaOptions.length > 0) {
-                                  setFormRouteTrip(filteredAreaOptions[0]);
+                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredAreaOptions.length);
+                                }
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                if (filteredAreaOptions.length > 0) {
+                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredAreaOptions.length) % filteredAreaOptions.length);
+                                }
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredAreaOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredAreaOptions.length - 1))];
+                                if (target) {
+                                  setFormRouteTrip(target);
                                 } else if (areaSearchFilter.trim()) {
                                   setFormRouteTrip(areaSearchFilter.trim());
                                 }
@@ -2909,24 +3566,31 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                                 setActiveModalDropdown(null);
                               }
                             }}
-                            placeholder="Ketik area lalu Enter..."
+                            placeholder="Ketik, panah ↑↓, lalu Enter..."
                             className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
-                        {filteredAreaOptions.map(area => {
+                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
+                        {filteredAreaOptions.map((area, idx) => {
                           const isSelected = formRouteTrip.toLowerCase() === area.toLowerCase();
+                          const isHighlighted = dropdownHighlightIdx === idx;
                           return (
                             <button
                               key={area}
                               type="button"
+                              data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
+                              onMouseEnter={() => setDropdownHighlightIdx(idx)}
                               onClick={() => {
                                 setFormRouteTrip(area);
                                 setActiveModalDropdown(null);
                               }}
-                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isSelected ? 'bg-emerald-500/15 border-l-4 border-l-emerald-500 text-emerald-300 font-bold' : 'hover:bg-emerald-500/10 text-slate-200'
+                              className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isHighlighted
+                                  ? 'bg-emerald-500/20 text-emerald-300 font-bold ring-1 ring-inset ring-emerald-500/40'
+                                  : isSelected
+                                  ? 'bg-emerald-500/10 text-emerald-300 font-bold'
+                                  : 'text-slate-200 hover:bg-slate-800/60'
                               }`}
                             >
                               <span className="text-xs truncate flex items-center gap-2">
@@ -2943,24 +3607,25 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* 4. Modern Interactive Calendar Date Picker: Tanggal Isi */}
-                <div className="relative">
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Tanggal Isi <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => {
+                      setIsGasStationDropdownOpen(false);
                       if (activeModalDropdown !== 'date') {
                         const parsed = formDate ? new Date(`${formDate}T00:00:00`) : new Date();
                         if (!isNaN(parsed.getTime())) setCalendarViewMonth(parsed);
                       }
                       setActiveModalDropdown(activeModalDropdown === 'date' ? null : 'date');
                     }}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'date' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
@@ -3017,7 +3682,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </button>
                         </div>
 
-                        {/* Quick Select Pills */}
+                        {/* Quick Select Buttons */}
                         <div className="flex items-center gap-1.5 mb-2.5">
                           <button
                             type="button"
@@ -3094,16 +3759,19 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
 
                 {/* 5. Custom Dropdown: Jenis Bahan Bakar */}
-                <div className="relative">
+                <div className="relative min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Jenis Bahan Bakar <span className="text-rose-400">*</span>
                   </label>
                   <button
                     type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'fuel' ? null : 'fuel')}
-                    className={`w-full bg-slate-950/90 hover:bg-slate-900 border ${
+                    onClick={() => {
+                      setIsGasStationDropdownOpen(false);
+                      setActiveModalDropdown(activeModalDropdown === 'fuel' ? null : 'fuel');
+                    }}
+                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
                       activeModalDropdown === 'fuel' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-3 py-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
@@ -3132,7 +3800,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                               handleFuelTypeChange(opt.value);
                               setActiveModalDropdown(null);
                             }}
-                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-800/60 transition cursor-pointer ${
+                            className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-800/60 transition cursor-pointer ${
                               isSelected ? 'bg-amber-500/15 text-amber-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
                             }`}
                           >
@@ -3148,7 +3816,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   )}
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Harga per Liter (Rp)
                   </label>
@@ -3158,14 +3826,14 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     value={formCostPerLiter}
                     onChange={(e) => setFormCostPerLiter(e.target.value)}
                     required
-                    className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                    className="w-full h-10 bg-slate-950/90 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="min-w-0">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Volume BBM (Liter) <span className="text-rose-400">*</span>
                   </label>
                   <input
@@ -3175,12 +3843,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     value={formLiters}
                     onChange={(e) => setFormLiters(e.target.value)}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <div className="min-w-0">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Kilometer Awal (KM) <span className="text-rose-400">*</span>
                   </label>
                   <input
@@ -3189,12 +3857,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     value={formStartOdo}
                     onChange={(e) => setFormStartOdo(e.target.value)}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <div className="min-w-0">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Kilometer Isi (KM) <span className="text-rose-400">*</span>
                   </label>
                   <input
@@ -3203,13 +3871,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     value={formEndOdo}
                     onChange={(e) => setFormEndOdo(e.target.value)}
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
+                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
 
               {/* LIVE CALCULATION BAR */}
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
                 <div className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
                   <span>Kalkulasi Otomatis Sistem:</span>
                   <span className={`px-2 py-0.5 rounded-md border text-[10px] ${liveFormEfficiency.color}`}>
@@ -3232,16 +3900,19 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="relative min-w-0">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Lokasi SPBU <span className="text-rose-400">*</span>
                   </label>
 
                   <button
                     type="button"
-                    onClick={() => setIsGasStationDropdownOpen(prev => !prev)}
-                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-xs text-white flex items-center justify-between gap-2 transition cursor-pointer ${
+                    onClick={() => {
+                      setActiveModalDropdown(null);
+                      setIsGasStationDropdownOpen(prev => !prev);
+                    }}
+                    className={`w-full h-10 bg-slate-950 border rounded-xl px-3 text-xs text-white flex items-center justify-between gap-2 transition cursor-pointer ${
                       isGasStationDropdownOpen
                         ? 'border-amber-400 ring-2 ring-amber-500/20'
                         : 'border-slate-800 hover:border-amber-500/60'
@@ -3274,13 +3945,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {isGasStationDropdownOpen && (
-                    <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden divide-y divide-slate-800/80 animate-in fade-in zoom-in-95 duration-150 z-30 relative">
+                    <div className="absolute left-0 right-0 bottom-full mb-1.5 z-50 rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-150">
                       {[
                         {
                           value: 'SPBU Farly',
                           label: 'Farly',
                           badge: '',
-                          desc: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
+                          desc: 'Pos Pengisian Solar Reguler Farly',
                           badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
                           iconCls: 'text-amber-400 bg-amber-500/15 border-amber-500/30'
                         },
@@ -3288,15 +3959,15 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           value: 'SPBU Gajah Mada',
                           label: 'Gajah Mada',
                           badge: '',
-                          desc: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
+                          desc: 'Pos Pengisian Solar Gajah Mada',
                           badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
                           iconCls: 'text-blue-400 bg-blue-500/15 border-blue-500/30'
                         },
                         {
                           value: 'SPBU Lain (Urgent)',
                           label: 'SPBU Lain (Urgent)',
-                          badge: 'Darurat / Urgent',
-                          desc: 'Pengisian Darurat Rute Luar Kota / Lintas Pulau',
+                          badge: 'Urgent',
+                          desc: 'Pengisian darurat rute luar kota / lintas pulau',
                           badgeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
                           iconCls: 'text-rose-400 bg-rose-500/15 border-rose-500/30'
                         }
@@ -3306,22 +3977,15 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         const isGajahMada = opt.value.includes('Gajah Mada');
                         const rowCls = isSelected
                           ? isFarly
-                            ? 'bg-amber-500/15 border-l-4 border-l-amber-500'
+                            ? 'bg-amber-500/20 text-amber-300 ring-1 ring-inset ring-amber-500/40'
                             : isGajahMada
-                            ? 'bg-blue-500/15 border-l-4 border-l-blue-500'
-                            : 'bg-rose-500/15 border-l-4 border-l-rose-500'
+                            ? 'bg-blue-500/20 text-blue-300 ring-1 ring-inset ring-blue-500/40'
+                            : 'bg-rose-500/20 text-rose-300 ring-1 ring-inset ring-rose-500/40'
                           : isFarly
                           ? 'hover:bg-amber-500/10'
                           : isGajahMada
                           ? 'hover:bg-blue-500/10'
                           : 'hover:bg-rose-500/10';
-                        const radioCls = isSelected
-                          ? isFarly
-                            ? 'bg-amber-500 border-amber-400 text-white'
-                            : isGajahMada
-                            ? 'bg-blue-500 border-blue-400 text-white'
-                            : 'bg-rose-500 border-rose-400 text-white'
-                          : 'border-slate-700 bg-slate-950 text-transparent';
                         return (
                           <button
                             key={opt.value}
@@ -3330,27 +3994,25 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                               setFormGasStation(opt.value);
                               setIsGasStationDropdownOpen(false);
                             }}
-                            className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${rowCls}`}
+                            className={`w-full px-2.5 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${rowCls}`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconCls}`}>
+                              <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconCls}`}>
                                 <Fuel className="w-3.5 h-3.5" />
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-black text-white">{opt.label}</span>
+                                  <span className="text-xs font-bold text-white truncate">{opt.label}</span>
                                   {opt.badge && (
                                     <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
                                       {opt.badge}
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.desc}</div>
+                                <div className="text-[10px] text-slate-400 truncate">{opt.desc}</div>
                               </div>
                             </div>
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${radioCls}`}>
-                              <Check className="w-3 h-3 stroke-[3]" />
-                            </div>
+                            {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
                           </button>
                         );
                       })}
@@ -3358,8 +4020,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <div className="min-w-0">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Catatan (Opsional)
                   </label>
                   <input
@@ -3367,7 +4029,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     placeholder="Catatan tambahan pengiriman..."
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -3379,19 +4041,25 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
                 <button
                   type="button"
+                  disabled={isSavingFuelLog}
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs font-semibold transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+                  disabled={isSavingFuelLog}
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
                 >
-                  {editingLogId ? 'Simpan Perubahan BBM' : 'Simpan Catatan BBM'}
+                  {isSavingFuelLog
+                    ? 'Menyimpan ke Database...'
+                    : editingLogId
+                    ? 'Simpan Perubahan BBM'
+                    : 'Simpan Catatan BBM'}
                 </button>
               </div>
             </form>

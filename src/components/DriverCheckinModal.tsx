@@ -374,15 +374,14 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
 
     (availableCrews && availableCrews.length > 0 ? availableCrews : logisticsStore.getCrews()).forEach(c => {
       if (!c || c.status === 'off') return;
-      if (branchId) {
-        const matchedU = allUsers.find(
-          u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName || '', c.name || '')
-        );
-        if (matchedU) {
-          if (!logisticsStore.isActiveDeliveryCrewUser(matchedU, branchId)) return;
-        } else if (branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
-          return;
-        }
+      const matchedU = allUsers.find(
+        u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName || '', c.name || '')
+      );
+      if (allUsers.length > 0 && !matchedU) return;
+      if (matchedU) {
+        if (!logisticsStore.isActiveDeliveryCrewUser(matchedU, branchId)) return;
+      } else if (branchId && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+        return;
       }
       pushMember(c.id, c.name, c.role || 'Helper', c.phone || '');
     });
