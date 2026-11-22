@@ -4341,8 +4341,11 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // REST API for Fuel Logs (Efisiensi Bahan Bakar Armada -> Hostinger MySQL)
-  let inMemoryFuelLogs: any[] = [];
+  // REST API for Fuel Logs (Efisiensi Bahan Bakar Armada -> Hostinger MySQL + Disk Persistence Fallback)
+  let inMemoryFuelLogs: any[] = (() => {
+    const saved = readPersistentAppState('fuel_logs_v1');
+    return Array.isArray(saved) ? saved : [];
+  })();
 
   app.get("/api/fuel-logs", requireAuth, async (_req, res) => {
     try {
@@ -4365,11 +4368,20 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           };
         });
         inMemoryFuelLogs = mapped;
+        writePersistentAppState('fuel_logs_v1', mapped);
         return res.json({ success: true, source: 'hostinger_mysql', data: mapped });
       }
-      return res.json({ success: true, source: 'memory', data: inMemoryFuelLogs });
+      const diskSaved = readPersistentAppState('fuel_logs_v1');
+      if (inMemoryFuelLogs.length === 0 && Array.isArray(diskSaved)) {
+        inMemoryFuelLogs = diskSaved;
+      }
+      return res.json({ success: true, source: 'disk_fallback', data: inMemoryFuelLogs });
     } catch (err: any) {
-      return res.json({ success: true, source: 'memory_fallback', data: inMemoryFuelLogs, warning: err?.message });
+      const diskSaved = readPersistentAppState('fuel_logs_v1');
+      if (inMemoryFuelLogs.length === 0 && Array.isArray(diskSaved)) {
+        inMemoryFuelLogs = diskSaved;
+      }
+      return res.json({ success: true, source: 'disk_fallback', data: inMemoryFuelLogs, warning: err?.message });
     }
   });
 
@@ -4378,13 +4390,17 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     if (!item.fleetId) {
       return res.status(400).json({ success: false, error: 'ID armada wajib diisi' });
     }
-    const id = String(item.id || `fuel-${Date.now()}`).trim();
+    const id = String(item.id || `fuel-${Date.now()}`).trim().slice(0, 64);
     const fullRecord = {
       ...item,
       id,
       createdAt: item.createdAt || new Date().toISOString()
     };
     const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
+
+    inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
+    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+
     try {
       await mysqlQuery(
         `INSERT INTO fuel_logs (id, fleet_id, driver_name, fuel_liters, cost_rupiah, odometer_km, spbu_location, payload_json, logged_at)
@@ -4400,59 +4416,83 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
            logged_at=VALUES(logged_at)`,
         [
           id,
-          String(fullRecord.fleetId),
-          String(fullRecord.driverName || '-'),
+          String(fullRecord.fleetId).slice(0, 64),
+          String(fullRecord.driverName || '-').slice(0, 191),
           Number(fullRecord.liters || 0),
           Number(fullRecord.totalCost || 0),
-          Number(fullRecord.endOdometerKm || fullRecord.startOdometerKm || 0),
-          String(fullRecord.gasStation || '-'),
+          Math.round(Number(fullRecord.endOdometerKm || fullRecord.startOdometerKm || 0)),
+          String(fullRecord.gasStation || '-').slice(0, 191),
           JSON.stringify(fullRecord),
           loggedAt
         ]
       );
-      inMemoryFuelLogs = [fullRecord, ...inMemoryFuelLogs.filter((x) => x.id !== id)];
       return res.json({ success: true, source: 'hostinger_mysql', data: fullRecord });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan log BBM ke MySQL' });
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'disk_fallback', data: fullRecord, warning: err?.message });
+      }
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan log BBM ke MySQL' });
     }
   });
 
   app.put("/api/fuel-logs/:id", requireLogisticsWrite, express.json({ limit: '10mb' }), async (req, res) => {
-    const id = String(req.params.id || '').trim();
+    const id = String(req.params.id || '').trim().slice(0, 64);
     const item = { ...(req.body || {}), id };
     const loggedAt = toMysqlDateTime(item.date || item.createdAt) || toMysqlDateTime(new Date().toISOString());
+
+    const existsInMem = inMemoryFuelLogs.some((x) => x.id === id);
+    inMemoryFuelLogs = existsInMem
+      ? inMemoryFuelLogs.map((x) => (x.id === id ? item : x))
+      : [item, ...inMemoryFuelLogs];
+    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+
     try {
       await mysqlQuery(
-        `UPDATE fuel_logs
-         SET fleet_id=?, driver_name=?, fuel_liters=?, cost_rupiah=?, odometer_km=?, spbu_location=?, payload_json=?, logged_at=?
-         WHERE id=?`,
+        `INSERT INTO fuel_logs (id, fleet_id, driver_name, fuel_liters, cost_rupiah, odometer_km, spbu_location, payload_json, logged_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           fleet_id=VALUES(fleet_id),
+           driver_name=VALUES(driver_name),
+           fuel_liters=VALUES(fuel_liters),
+           cost_rupiah=VALUES(cost_rupiah),
+           odometer_km=VALUES(odometer_km),
+           spbu_location=VALUES(spbu_location),
+           payload_json=VALUES(payload_json),
+           logged_at=VALUES(logged_at)`,
         [
-          String(item.fleetId || ''),
-          String(item.driverName || '-'),
+          id,
+          String(item.fleetId || '').slice(0, 64),
+          String(item.driverName || '-').slice(0, 191),
           Number(item.liters || 0),
           Number(item.totalCost || 0),
-          Number(item.endOdometerKm || item.startOdometerKm || 0),
-          String(item.gasStation || '-'),
+          Math.round(Number(item.endOdometerKm || item.startOdometerKm || 0)),
+          String(item.gasStation || '-').slice(0, 191),
           JSON.stringify(item),
-          loggedAt,
-          id
+          loggedAt
         ]
       );
-      inMemoryFuelLogs = inMemoryFuelLogs.map((x) => (x.id === id ? item : x));
       return res.json({ success: true, source: 'hostinger_mysql', data: item });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui log BBM di MySQL' });
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'disk_fallback', data: item, warning: err?.message });
+      }
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui log BBM di MySQL' });
     }
   });
 
   app.delete("/api/fuel-logs/:id", requireLogisticsWrite, async (req, res) => {
     const id = String(req.params.id || '').trim();
+    inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
+    writePersistentAppState('fuel_logs_v1', inMemoryFuelLogs);
+
     try {
       await mysqlQuery("DELETE FROM fuel_logs WHERE id = ?", [id]);
-      inMemoryFuelLogs = inMemoryFuelLogs.filter((x) => x.id !== id);
       return res.json({ success: true, source: 'hostinger_mysql' });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
+      if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
+        return res.json({ success: true, source: 'disk_fallback', warning: err?.message });
+      }
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
     }
   });
 
