@@ -1,9 +1,9 @@
 {
-  "versionCode": 10045,
-  "versionName": "1.0.45",
-  "updatedAt": "2026-11-22T15:10:00.000000",
+  "versionCode": 10046,
+  "versionName": "1.0.46",
+  "updatedAt": "2026-11-22T16:30:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V57: Sub-Menu WMS Gudang Retur & Selisih Muat (/gudang-retur-muat), Pemisahan Tugas Checklist Fisik Armada (Driver) vs Input KM Awal & KM Akhir (Helper) + Deteksi Otomatis Shift Pasangan Driver-Helper, Pembersihan Permanen Armada Phantom FLT-* & Deduplikasi Plat Nomor di MySQL, serta Filter Kalender Rentang Tanggal Custom pada Laporan BBM."
+  "releaseNotes": "Update V58: Penguatan Persistensi Log BBM (MySQL Upsert, Sanitasi Kolom INT/VARCHAR & Disk Fallback), Antrean Sinkronisasi Otomatis & Auto-Retry Log BBM di Store, serta Pesan Validasi Form Input Log BBM."
 }
