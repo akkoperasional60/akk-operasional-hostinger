@@ -1,5 +1,5 @@
 import { UserPermissions, UserRole } from '../types';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { getDefaultPermissionsForRole, MODERN_SUBMENU_KEYS_BY_MODULE, LEGACY_SUBMENU_KEY_MAP } from '../utils/rbac';
 
 export interface BranchRecord {
   id: string;
@@ -70,7 +70,7 @@ const DEFAULT_BRANCHES: BranchRecord[] = [
 
 class BranchStoreService {
   private branches: BranchRecord[] = [];
-  private activeBranchId: string = 'ALL'; // 'ALL' or branch.id
+  private activeBranchId: string = 'cab-banyuwangi'; // Always separate Nusantara ('cab-banyuwangi') & Sidoarjo ('cab-sidoarjo')
   private userBranchPerms: UserBranchPermissionsMap = {};
   private entityBranches: EntityBranchAssignments = {
     schedules: {},
@@ -95,14 +95,28 @@ class BranchStoreService {
             .filter(
               (b: BranchRecord) =>
                 b &&
+                typeof b === 'object' &&
+                typeof b.id === 'string' &&
+                typeof b.name === 'string' &&
                 b.id !== 'cab-jember' &&
                 b.slug !== 'nx-jember' &&
                 (b.name || '').trim().toUpperCase() !== 'NX'
             )
-            .map((b: BranchRecord) => ({
+            .map((b: BranchRecord, idx: number) => ({
               ...b,
+              slug: b.slug || b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+              city: b.city || b.name,
+              sortOrder: typeof b.sortOrder === 'number' ? b.sortOrder : idx + 1,
+              isActive: b.isActive !== undefined ? Boolean(b.isActive) : true,
+              isFrontlineActive: b.isFrontlineActive !== undefined ? Boolean(b.isFrontlineActive) : true,
               warehouseName: (b.warehouseName || `Gudang ${b.name}`).replace(/Gudang Pusat\s*/gi, 'Gudang ')
             }));
+          // Always guarantee cab-sidoarjo and cab-banyuwangi exist
+          DEFAULT_BRANCHES.forEach(defBr => {
+            if (!cleaned.some(c => c.id === defBr.id)) {
+              cleaned.push({ ...defBr });
+            }
+          });
           this.branches = cleaned.length > 0 ? cleaned : [...DEFAULT_BRANCHES];
         } else {
           this.branches = [...DEFAULT_BRANCHES];
@@ -116,19 +130,20 @@ class BranchStoreService {
 
     try {
       const savedActive = localStorage.getItem(LS_ACTIVE_BRANCH_KEY);
-      if (savedActive && (savedActive === 'ALL' || this.branches.some(b => b.id === savedActive))) {
+      if (savedActive && savedActive !== 'ALL' && this.branches.some(b => b.id === savedActive)) {
         this.activeBranchId = savedActive;
       } else {
-        this.activeBranchId = 'ALL';
+        this.activeBranchId = 'cab-banyuwangi';
       }
     } catch {
-      this.activeBranchId = 'ALL';
+      this.activeBranchId = 'cab-banyuwangi';
     }
 
     try {
       const rawPerms = localStorage.getItem(LS_USER_BRANCH_PERMS_KEY);
       if (rawPerms) {
-        this.userBranchPerms = JSON.parse(rawPerms) || {};
+        const parsedPerms = JSON.parse(rawPerms);
+        this.userBranchPerms = parsedPerms && typeof parsedPerms === 'object' && !Array.isArray(parsedPerms) ? parsedPerms : {};
       }
     } catch {
       this.userBranchPerms = {};
@@ -139,10 +154,10 @@ class BranchStoreService {
       if (rawEntities) {
         const parsed = JSON.parse(rawEntities);
         this.entityBranches = {
-          schedules: parsed?.schedules || {},
-          fleets: parsed?.fleets || {},
-          crews: parsed?.crews || {},
-          inventory: parsed?.inventory || {}
+          schedules: parsed?.schedules && typeof parsed.schedules === 'object' ? parsed.schedules : {},
+          fleets: parsed?.fleets && typeof parsed.fleets === 'object' ? parsed.fleets : {},
+          crews: parsed?.crews && typeof parsed.crews === 'object' ? parsed.crews : {},
+          inventory: parsed?.inventory && typeof parsed.inventory === 'object' ? parsed.inventory : {}
         };
       }
     } catch {}
@@ -193,15 +208,15 @@ class BranchStoreService {
   }
 
   public getSelectedOriginBranchId(): string {
-    if (this.activeBranchId !== 'ALL' && !this.branches.some(b => b.id === this.activeBranchId)) {
-      this.activeBranchId = 'ALL';
+    if (!this.activeBranchId || this.activeBranchId === 'ALL' || !this.branches.some(b => b.id === this.activeBranchId)) {
+      this.activeBranchId = 'cab-banyuwangi';
     }
     return this.activeBranchId;
   }
 
   public getSelectedOriginBranch(): BranchRecord | null {
-    if (this.activeBranchId === 'ALL') return null;
-    return this.branches.find(b => b.id === this.activeBranchId) || null;
+    const id = this.getSelectedOriginBranchId();
+    return this.branches.find(b => b.id === id) || null;
   }
 
   public setSelectedOriginBranchId(branchId: string) {
@@ -277,16 +292,69 @@ class BranchStoreService {
   // ============================================================
   // ENTITY <-> ORIGIN WAREHOUSE (CABANG) ASSIGNMENT & RESOLUTION
   // ============================================================
-  public getFleetBranchId(fleetId: string, plateNumber?: string, initialCode?: string): string {
+  public getFleetBranchId(
+    fleetId: string,
+    plateNumber?: string,
+    initialCode?: string,
+    explicitBranchId?: string
+  ): string {
+    if (explicitBranchId && this.branches.some(b => b.id === explicitBranchId)) {
+      this.entityBranches.fleets[fleetId] = explicitBranchId;
+      return explicitBranchId;
+    }
+
+    const cleanPlate = (plateNumber || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const compactPlate = cleanPlate.replace(/\s+/g, '');
+    const cleanInit = (initialCode || '').trim().toUpperCase();
+    const initTokens = cleanInit
+      .split(/[\s/\-_]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    // Known Nusantara (Banyuwangi) fleets (12 canonical units including NMR DS4 & DS5)
+    const nusantaraSpecificTokens = new Set([
+      'NP1', 'NP3', 'NS1', 'NS2', 'NS3', 'NL1', 'NL2', 'DS1', 'DS2', 'DS3', 'DS4', 'DS5',
+      'N1', 'A3', 'N3', 'N4', 'N5', 'N20', 'N21', 'N22', 'N23', 'S5'
+    ]);
+    const nusantaraWPlates = new Set(['W8229US', 'W8603PG']);
+
+    // Known Sidoarjo fleets by initial code (A1, A2, A4, S1, S2, S3, S4, SDA) or L/W plate prefix (excluding Nusantara DS4/DS5)
+    const sidoarjoSpecificTokens = new Set(['A1', 'A2', 'A4', 'A5', 'A6', 'S1', 'S2', 'S3', 'S4', 'SDA']);
+    const hasNusantaraToken = initTokens.some(t => nusantaraSpecificTokens.has(t));
+    const hasSidoarjoToken = initTokens.some(t => sidoarjoSpecificTokens.has(t));
+
+    if (hasSidoarjoToken && !hasNusantaraToken) {
+      return 'cab-sidoarjo';
+    }
+    if (
+      compactPlate &&
+      !nusantaraWPlates.has(compactPlate) &&
+      !hasNusantaraToken &&
+      (cleanPlate.startsWith('L ') ||
+        /^L\d/.test(compactPlate) ||
+        cleanPlate.startsWith('W ') ||
+        /^W\d/.test(compactPlate))
+    ) {
+      return 'cab-sidoarjo';
+    }
+    if (hasNusantaraToken || cleanPlate.startsWith('P ') || /^P\d/.test(compactPlate) || nusantaraWPlates.has(compactPlate)) {
+      const mapped = this.entityBranches.fleets[fleetId];
+      if (mapped && this.branches.some(b => b.id === mapped) && !hasNusantaraToken) {
+        return mapped;
+      }
+      return 'cab-banyuwangi';
+    }
+
     const mapped = this.entityBranches.fleets[fleetId];
     if (mapped && this.branches.some(b => b.id === mapped)) {
       return mapped;
     }
-    const code = `${initialCode || ''} ${plateNumber || ''}`.toUpperCase();
-    if (code.includes('W ') || code.includes('L ') || code.includes('SDA')) {
-      return 'cab-sidoarjo';
-    }
     return 'cab-banyuwangi';
+  }
+
+  public syncFleetBranchIdSilent(fleetId: string, branchId?: string) {
+    if (!fleetId || !branchId || !this.branches.some(b => b.id === branchId)) return;
+    this.entityBranches.fleets[fleetId] = branchId;
   }
 
   public setFleetBranchId(fleetId: string, branchId: string) {
@@ -295,7 +363,15 @@ class BranchStoreService {
   }
 
   public getCrewBranchId(crewId: string, crewName?: string): string {
-    const mapped = this.entityBranches.crews[crewId];
+    const rawUserId = (crewId || '').replace(/^crw-/, '');
+    const userMap = this.userBranchPerms[rawUserId] || this.userBranchPerms[crewId];
+    if (userMap && Object.keys(userMap).length > 0) {
+      const sdaEnabled = Boolean(userMap['cab-sidoarjo']?.enabled);
+      const bwiEnabled = Boolean(userMap['cab-banyuwangi']?.enabled);
+      if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
+      if (bwiEnabled && !sdaEnabled) return 'cab-banyuwangi';
+    }
+    const mapped = this.entityBranches.crews[crewId] || (rawUserId ? this.entityBranches.crews[rawUserId] : undefined);
     if (mapped && this.branches.some(b => b.id === mapped)) {
       return mapped;
     }
@@ -306,11 +382,20 @@ class BranchStoreService {
     return 'cab-banyuwangi';
   }
 
-  public setCrewBranchId(crewId: string, branchId: string, crewName?: string) {
+  public syncCrewBranchIdSilent(crewId: string, branchId: string, crewName?: string) {
+    if (!branchId || !this.branches.some(b => b.id === branchId)) return;
     this.entityBranches.crews[crewId] = branchId;
+    const rawUserId = crewId.replace(/^crw-/, '');
+    if (rawUserId) {
+      this.entityBranches.crews[rawUserId] = branchId;
+    }
     if (crewName) {
       this.entityBranches.crews[crewName.toLowerCase()] = branchId;
     }
+  }
+
+  public setCrewBranchId(crewId: string, branchId: string, crewName?: string) {
+    this.syncCrewBranchIdSilent(crewId, branchId, crewName);
     this.notify();
   }
 
@@ -323,7 +408,18 @@ class BranchStoreService {
     }
     if (originName) {
       const lower = originName.toLowerCase();
-      if (lower.includes('sidoarjo') || lower.includes('surabaya')) return 'cab-sidoarjo';
+      if (
+        lower.includes('sidoarjo') ||
+        lower.includes('surabaya') ||
+        lower.includes('bliketut') ||
+        lower.includes('ponomadi') ||
+        lower.includes('latubo') ||
+        lower.includes('prolujem') ||
+        lower.includes('madura') ||
+        lower === 'malang'
+      ) {
+        return 'cab-sidoarjo';
+      }
       if (lower.includes('nusantara') || lower.includes('banyuwangi')) return 'cab-banyuwangi';
       const customMatch = this.branches.find(
         b => lower.includes(b.name.toLowerCase()) || lower.includes(b.slug.toLowerCase())
@@ -364,8 +460,13 @@ class BranchStoreService {
     this.notify();
   }
 
-  public getFleetBranch(fleetId: string, plateNumber?: string, initialCode?: string): BranchRecord {
-    const id = this.getFleetBranchId(fleetId, plateNumber, initialCode);
+  public getFleetBranch(
+    fleetId: string,
+    plateNumber?: string,
+    initialCode?: string,
+    explicitBranchId?: string
+  ): BranchRecord {
+    const id = this.getFleetBranchId(fleetId, plateNumber, initialCode, explicitBranchId);
     return this.getBranchById(id) || this.branches[0] || DEFAULT_BRANCHES[1];
   }
 
@@ -406,28 +507,106 @@ class BranchStoreService {
   public getUserBranchPermissions(
     userId: string,
     role: UserRole,
-    existingUserModules?: UserPermissions['modules']
+    existingUserModules?: UserPermissions['modules'],
+    serverBranchPerms?: UserPermissions['branchPermissions']
   ): Record<string, UserBranchPermissionEntry> {
-    const savedForUser = this.userBranchPerms[userId] || {};
+    const hasServerBranchPerms = Boolean(
+      serverBranchPerms && typeof serverBranchPerms === 'object' && Object.keys(serverBranchPerms).length > 0
+    );
+    const rawSaved = hasServerBranchPerms
+      ? serverBranchPerms!
+      : (this.userBranchPerms?.[userId] || {});
+    const savedForUser = rawSaved && typeof rawSaved === 'object' ? rawSaved : {};
     const result: Record<string, UserBranchPermissionEntry> = {};
     const roleDefaults = getDefaultPermissionsForRole(role);
 
     this.getBranches().forEach(branch => {
-      if (savedForUser[branch.id]) {
-        result[branch.id] = JSON.parse(JSON.stringify(savedForUser[branch.id]));
+      if (savedForUser[branch.id] && typeof savedForUser[branch.id] === 'object') {
+        const cloned = JSON.parse(JSON.stringify(savedForUser[branch.id])) as UserBranchPermissionEntry;
+        if (!cloned.modules || typeof cloned.modules !== 'object') {
+          cloned.modules = {};
+        }
+        const isBranchEnabled = Boolean(cloned.enabled);
+        Object.keys(roleDefaults).forEach(modId => {
+          const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
+          if (!cloned.modules[modId] || typeof cloned.modules[modId] !== 'object') {
+            const sourceMod = isBranchEnabled ? (existingUserModules?.[modId] || roleDefaults[modId]) : undefined;
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              cleanSubs[subId] = (isBranchEnabled && sourceMod?.enabled) ? (sourceMod?.subMenus?.[subId] || 'none') : 'none';
+            });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            cloned.modules[modId] = {
+              enabled: Boolean(isBranchEnabled && sourceMod?.enabled && hasActive),
+              subMenus: cleanSubs
+            };
+          } else {
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              let val = cloned.modules[modId].subMenus?.[subId];
+              if (val === undefined && cloned.modules[modId].subMenus) {
+                const legacyKeys = LEGACY_SUBMENU_KEY_MAP[subId];
+                if (legacyKeys) {
+                  for (const lk of legacyKeys) {
+                    if (cloned.modules[modId].subMenus[lk] !== undefined) {
+                      val = cloned.modules[modId].subMenus[lk];
+                      break;
+                    }
+                  }
+                }
+              }
+              if (val === undefined) {
+                val = cloned.modules[modId].enabled ? (roleDefaults[modId]?.subMenus?.[subId] || 'none') : 'none';
+              }
+              cleanSubs[subId] = cloned.modules[modId].enabled ? val : 'none';
+            });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            cloned.modules[modId] = {
+              enabled: Boolean(cloned.modules[modId].enabled && hasActive),
+              subMenus: cleanSubs
+            };
+          }
+        });
+        const activeCountInBranch = this.countActiveModulesInBranch(cloned.modules);
+        cloned.enabled = Boolean(isBranchEnabled && activeCountInBranch > 0);
+        result[branch.id] = cloned;
       } else {
-        // Default: Nusantara (Banyuwangi) is enabled by default for existing AKK staff,
-        // Super Admin gets all branches enabled
-        const isDefaultEnabled = role === 'super_admin' || branch.id === 'cab-banyuwangi';
+        // Default: Nusantara (Banyuwangi) is enabled by default only if no other branch is explicitly enabled
+        const anyOtherBranchExplicitlyEnabled = Object.entries(savedForUser).some(
+          ([bId, bVal]) => bId !== branch.id && Boolean(bVal?.enabled)
+        );
+        const isDefaultEnabled =
+          role === 'super_admin' || (branch.id === 'cab-banyuwangi' && !anyOtherBranchExplicitlyEnabled);
         const baseModules: UserPermissions['modules'] = {};
 
         Object.keys(roleDefaults).forEach(modId => {
+          const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId] || Object.keys(roleDefaults[modId]?.subMenus || {});
           if (isDefaultEnabled) {
-            const sourceMod = existingUserModules?.[modId] || roleDefaults[modId];
-            baseModules[modId] = JSON.parse(JSON.stringify(sourceMod));
+            const sourceMod = existingUserModules?.[modId] !== undefined ? existingUserModules[modId] : roleDefaults[modId];
+            const cleanSubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+            modernKeys.forEach(subId => {
+              let savedVal = sourceMod?.subMenus?.[subId];
+              if (savedVal === undefined && sourceMod?.subMenus) {
+                const legacyKeys = LEGACY_SUBMENU_KEY_MAP[subId];
+                if (legacyKeys) {
+                  for (const lk of legacyKeys) {
+                    if (sourceMod.subMenus[lk] !== undefined) {
+                      savedVal = sourceMod.subMenus[lk];
+                      break;
+                    }
+                  }
+                }
+              }
+              cleanSubs[subId] = sourceMod?.enabled ? (savedVal || 'none') : 'none';
+            });
+            const hasActive = modernKeys.some(k => cleanSubs[k] === 'full_access' || cleanSubs[k] === 'read_only');
+            baseModules[modId] = {
+              enabled: Boolean(sourceMod?.enabled && hasActive),
+              subMenus: cleanSubs
+            };
           } else {
             const emptySubs: Record<string, 'none' | 'read_only' | 'full_access'> = {};
-            Object.keys(roleDefaults[modId]?.subMenus || {}).forEach(subId => {
+            modernKeys.forEach(subId => {
               emptySubs[subId] = 'none';
             });
             baseModules[modId] = {
@@ -449,6 +628,10 @@ class BranchStoreService {
       }
     });
 
+    if (hasServerBranchPerms) {
+      this.userBranchPerms[userId] = JSON.parse(JSON.stringify(result));
+    }
+
     return result;
   }
 
@@ -457,6 +640,11 @@ class BranchStoreService {
     branchPerms: Record<string, UserBranchPermissionEntry>
   ) {
     this.userBranchPerms[userId] = JSON.parse(JSON.stringify(branchPerms));
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_USER_BRANCH_PERMS_KEY, JSON.stringify(this.userBranchPerms));
+      }
+    } catch {}
     this.notify();
   }
 
@@ -466,7 +654,12 @@ class BranchStoreService {
   ): boolean {
     if (!user) return true;
     if (user.role === 'super_admin') return true;
-    const perms = this.getUserBranchPermissions(user.id, user.role, user.permissions?.modules);
+    const perms = this.getUserBranchPermissions(
+      user.id,
+      user.role,
+      user.permissions?.modules,
+      user.permissions?.branchPermissions
+    );
     return Boolean(perms[branchId]?.enabled);
   }
 
@@ -481,9 +674,12 @@ class BranchStoreService {
 
   public countActiveModulesInBranch(modules: UserPermissions['modules']): number {
     if (!modules) return 0;
-    return Object.values(modules).filter(m => {
+    return Object.entries(modules).filter(([modId, m]) => {
       if (!m || !m.enabled) return false;
-      return Object.values(m.subMenus || {}).some(v => v === 'full_access' || v === 'read_only');
+      const modernKeys = MODERN_SUBMENU_KEYS_BY_MODULE[modId];
+      const entries = Object.entries(m.subMenus || {});
+      const filtered = modernKeys ? entries.filter(([k]) => modernKeys.includes(k)) : entries;
+      return filtered.some(([, v]) => v === 'full_access' || v === 'read_only');
     }).length;
   }
 
@@ -492,7 +688,10 @@ class BranchStoreService {
     subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
   }): number {
     if (!mod || !mod.enabled) return 0;
-    return Object.values(mod.subMenus || {}).filter(v => v === 'full_access' || v === 'read_only').length;
+    const allModernKeys = new Set(Object.values(MODERN_SUBMENU_KEYS_BY_MODULE).flat());
+    return Object.entries(mod.subMenus || {}).filter(
+      ([k, v]) => allModernKeys.has(k) && (v === 'full_access' || v === 'read_only')
+    ).length;
   }
 
   public getUsersCountForBranch(

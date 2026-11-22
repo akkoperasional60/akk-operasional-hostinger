@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Truck,
   Users,
@@ -38,8 +39,13 @@ import {
   Cloud,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
+  Building2,
   Info,
-  MapPin
+  MapPin,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { Fleet, Crew, VehicleType, FleetStatus, CrewStatus } from '../types';
 import { logisticsStore } from '../services/store';
@@ -49,6 +55,7 @@ import { FleetMiniMapPreview } from './FleetMiniMapPreview';
 import { FuelEfficiencyManagement } from './FuelEfficiencyManagement';
 import { SparePartManagement } from './SparePartManagement';
 import { FleetFormCenter } from './FleetFormCenter';
+import { Fleet3DShowcase } from './Fleet3DShowcase';
 import { branchStore, BranchRecord } from '../services/branchStore';
 import {
   updateFleetInSupabase,
@@ -59,6 +66,7 @@ import {
   deleteCrewInSupabase,
   syncFleetsAndCrewsWithSupabase
 } from '../services/supabaseService';
+import { resolveCanonicalFleetMeta, sortFleetsByCanonicalOrder } from '../data/mockData';
 
 // Helper for default box cubic capacity (m3 / CBM) and dimensions
 export const getDefaultBoxCapacityM3 = (vehicleType: VehicleType | string, brand?: string): number => {
@@ -110,10 +118,351 @@ export const getDefaultBoxDimensions = (vehicleType: VehicleType | string, brand
   return '3.5 x 1.8 x 1.8 m';
 };
 
+export const calculateOuterCubicationFromDimensions = (dimStr?: string | null): number | null => {
+  if (!dimStr || typeof dimStr !== 'string') return null;
+  const matches = dimStr.match(/\d+(?:[.,]\d+)?/g);
+  if (!matches || matches.length < 3) return null;
+  const nums = matches.slice(0, 3).map(v => parseFloat(v.replace(',', '.')));
+  if (nums.some(n => !Number.isFinite(n) || n <= 0)) return null;
+  // Jika diinput dalam satuan sentimeter (misal 420 x 180 x 180), konversi ke meter
+  const [p, l, t] = nums.every(n => n >= 50) ? nums.map(n => n / 100) : nums;
+  const gross = p * l * t;
+  if (!Number.isFinite(gross) || gross <= 0) return null;
+  return Number(gross.toFixed(2));
+};
+
 export const getFleetBoxCapacity = (fleet: Fleet): number => {
+  const fromDim = calculateOuterCubicationFromDimensions(fleet.boxDimensions);
+  if (fromDim !== null) return fromDim;
   if (fleet.boxCapacityM3 && fleet.boxCapacityM3 > 0) return fleet.boxCapacityM3;
   return getDefaultBoxCapacityM3(fleet.vehicleType, fleet.brand);
 };
+
+interface FleetPortalPosition {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+}
+
+function computeFleetPortalPosition(triggerEl: HTMLElement, minWidth = 220, desiredMaxHeight = 270): FleetPortalPosition {
+  const rect = triggerEl.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const margin = 12;
+  const gap = 6;
+  const width = Math.min(Math.max(rect.width, minWidth), vw - margin * 2);
+  let left = rect.left;
+  if (left + width > vw - margin) {
+    left = Math.max(margin, vw - margin - width);
+  }
+  const spaceBelow = vh - rect.bottom - margin - gap;
+  const spaceAbove = rect.top - margin - gap;
+  const openUp = spaceBelow < Math.min(210, desiredMaxHeight) && spaceAbove > spaceBelow;
+  const maxHeight = Math.max(140, Math.min(desiredMaxHeight, openUp ? spaceAbove : spaceBelow));
+
+  if (openUp) {
+    return {
+      bottom: vh - rect.top + gap,
+      left,
+      width,
+      maxHeight,
+      openUp: true
+    };
+  }
+  return {
+    top: rect.bottom + gap,
+    left,
+    width,
+    maxHeight,
+    openUp: false
+  };
+}
+
+interface FleetDropdownOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+  badge?: string;
+  badgeTone?: string;
+  dotClass?: string;
+  Icon?: React.ComponentType<{ className?: string }>;
+  iconTone?: string;
+}
+
+const FleetFormDropdown: React.FC<{
+  value: string;
+  onChange: (val: string) => void;
+  options: FleetDropdownOption[];
+  placeholder?: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  emptyText?: string;
+  accent?: 'blue' | 'emerald';
+  hasError?: boolean;
+  minMenuWidth?: number;
+}> = ({
+  value,
+  onChange,
+  options,
+  placeholder = 'Pilih opsi...',
+  searchable = false,
+  searchPlaceholder = 'Cari...',
+  emptyText = 'Data tidak ditemukan.',
+  accent = 'blue',
+  hasError = false,
+  minMenuWidth = 220
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<FleetPortalPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const selected = options.find(opt => opt.value === value) || null;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = normalizedQuery
+    ? options.filter(
+        opt =>
+          opt.label.toLowerCase().includes(normalizedQuery) ||
+          (opt.sublabel || '').toLowerCase().includes(normalizedQuery) ||
+          (opt.badge || '').toLowerCase().includes(normalizedQuery)
+      )
+    : options;
+
+  const updatePos = () => {
+    if (!triggerRef.current) return;
+    setMenuPos(computeFleetPortalPosition(triggerRef.current, minMenuWidth, 276));
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    const t = searchable ? setTimeout(() => searchRef.current?.focus(), 40) : null;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setIsOpen(false);
+      }
+    };
+    const handleReposition = () => updatePos();
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      if (t) clearTimeout(t);
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isOpen, searchable]);
+
+  const SelectedIcon = selected?.Icon;
+  const openRingClass =
+    accent === 'emerald'
+      ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm shadow-emerald-500/10'
+      : 'border-blue-500 ring-2 ring-blue-500/20 shadow-sm shadow-blue-500/10';
+  const activeOptionClass =
+    accent === 'emerald'
+      ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
+      : 'bg-blue-500/15 border border-blue-500/40 text-blue-400';
+  const checkTone = accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400';
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+          hasError
+            ? 'border-rose-500 ring-1 ring-rose-500'
+            : isOpen
+            ? openRingClass
+            : 'border-slate-800 hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {selected?.dotClass && (
+            <span className={`w-2 h-2 rounded-full shrink-0 ${selected.dotClass}`} />
+          )}
+          {SelectedIcon && (
+            <span
+              className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                selected?.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+              }`}
+            >
+              <SelectedIcon className="w-3 h-3" />
+            </span>
+          )}
+          <span
+            className={`text-xs truncate ${
+              selected
+                ? accent === 'emerald'
+                  ? 'text-emerald-400 font-bold'
+                  : 'text-white font-semibold'
+                : 'text-slate-500 font-normal'
+            }`}
+          >
+            {selected ? selected.label : placeholder}
+          </span>
+        </div>
+        <ChevronDown
+          className={`w-4 h-4 shrink-0 transition-transform duration-150 ${
+            isOpen
+              ? `rotate-180 ${accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400'}`
+              : 'text-slate-400'
+          }`}
+        />
+      </button>
+
+      {isOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              bottom: menuPos.bottom,
+              left: menuPos.left,
+              width: menuPos.width,
+              zIndex: 9999
+            }}
+            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in duration-150"
+          >
+            {searchable && (
+              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={searchPlaceholder}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{ maxHeight: Math.max(120, menuPos.maxHeight - (searchable ? 50 : 8)) }}
+              className="overflow-y-auto p-1.5 space-y-0.5 overscroll-contain"
+            >
+              {filtered.length === 0 ? (
+                <div className="py-5 px-3 text-center text-xs text-slate-400">{emptyText}</div>
+              ) : (
+                filtered.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? activeOptionClass
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {opt.dotClass && (
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dotClass}`} />
+                        )}
+                        {OptIcon && (
+                          <span
+                            className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${
+                              opt.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            <OptIcon className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <div
+                            className={`text-xs truncate ${
+                              active
+                                ? accent === 'emerald'
+                                  ? 'text-emerald-400 font-bold'
+                                  : 'text-blue-400 font-bold'
+                                : 'text-white font-semibold'
+                            }`}
+                          >
+                            {opt.label}
+                          </div>
+                          {opt.sublabel && (
+                            <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.sublabel}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {opt.badge && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border ${
+                              opt.badgeTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            {opt.badge}
+                          </span>
+                        )}
+                        {active && <Check className={`w-3.5 h-3.5 shrink-0 ${checkTone}`} />}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
+
+const FLEET_VEHICLE_TYPE_OPTIONS: FleetDropdownOption[] = [
+  { value: 'Pick Up Box', label: 'Pick Up Box', sublabel: 'Kapasitas ringan · ±4.5 m³', dotClass: 'bg-sky-400' },
+  { value: 'Engkel STD', label: 'Engkel STD', sublabel: '4 ban standar · ±10.5 m³', dotClass: 'bg-blue-400' },
+  { value: 'Engkel Long', label: 'Engkel Long', sublabel: '4 ban sasis panjang · ±12.5 m³', dotClass: 'bg-indigo-400' },
+  { value: 'Double STD', label: 'Double STD', sublabel: '6 ban kapasitas besar · ±15.0 m³', dotClass: 'bg-emerald-400' }
+];
+
+const FLEET_BRAND_OPTIONS: FleetDropdownOption[] = [
+  { value: 'Mitsubishi L300', label: 'Mitsubishi L300', sublabel: 'Pick Up niaga ringan', dotClass: 'bg-sky-400' },
+  { value: 'Traga', label: 'Traga', sublabel: 'Isuzu Traga box kargo', dotClass: 'bg-cyan-400' },
+  { value: 'Mitsubishi Canter', label: 'Mitsubishi Canter', sublabel: 'Truk ringan Engkel / Double', dotClass: 'bg-blue-400' },
+  { value: 'Hino', label: 'Hino', sublabel: 'Hino Dutro / Ranger niaga', dotClass: 'bg-emerald-400' },
+  { value: 'Isuzu', label: 'Isuzu', sublabel: 'Isuzu Elf / Giga niaga', dotClass: 'bg-amber-400' }
+];
+
+const FLEET_YEAR_OPTIONS: FleetDropdownOption[] = Array.from(
+  { length: new Date().getFullYear() - 1990 + 1 },
+  (_, i) => {
+    const yr = new Date().getFullYear() - i;
+    return { value: String(yr), label: String(yr) };
+  }
+);
 
 interface FleetCrewManagementProps {
   initialTab?: 'fleets' | 'crews';
@@ -251,9 +600,43 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [crewFilter, setCrewFilter] = useState<string>('all');
   const [crewRoleFilter, setCrewRoleFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [crewSortConfig, setCrewSortConfig] = useState<{
+    key: 'name' | 'role' | 'status' | 'fleet' | 'performance';
+    direction: 'asc' | 'desc';
+  } | null>(null);
 
-  // View mode toggle: 'table' (default data table view) or 'cards' (visual card grid view)
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const normalizeCrewRoleLabel = (role?: string): 'Driver' | 'Helper' => {
+    const r = (role || '').toLowerCase();
+    if (r.includes('helper') || r.includes('kernet')) return 'Helper';
+    return 'Driver';
+  };
+
+  const normalizeSimTypeLabel = (sim?: string): 'SIM A' | 'SIM B' | 'SIM B1' => {
+    const s = (sim || '').toUpperCase();
+    if (s.includes('B1')) return 'SIM B1';
+    if (s.includes('B')) return 'SIM B';
+    return 'SIM A';
+  };
+
+  const handleCrewSort = (key: 'name' | 'role' | 'status' | 'fleet' | 'performance') => {
+    setCrewSortConfig(prev => {
+      if (prev && prev.key === key) {
+        if (prev.direction === 'asc') return { key, direction: 'desc' };
+        return null;
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  // View mode toggle: 'table' (default data table view), 'cards' (visual card grid view), or '3d' (studio 3D truck showcase)
+  const [viewMode, setViewMode] = useState<'table' | 'cards' | '3d'>('table');
+  const [selected3DFleetId, setSelected3DFleetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'fleets' && viewMode === '3d') {
+      setViewMode('table');
+    }
+  }, [activeTab, viewMode]);
 
   // Supabase sync feedback & loading state
   const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
@@ -375,6 +758,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         diffDays
       };
     }
+    if (diffDays === 0) {
+      return { 
+        label: 'Sisa 0 hari', 
+        color: 'text-rose-400 bg-rose-500/15 border-rose-500/30',
+        isExpired: true,
+        isNear: true,
+        diffDays: 0
+      };
+    }
     if (diffDays <= defaultDaysWarn) {
       return { 
         label: `Sisa ${diffDays} hari`, 
@@ -393,22 +785,24 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     };
   };
 
-  // New Fleet Form State
-  const [newFleet, setNewFleet] = useState({
-    plateNumber: 'B 9' + Math.floor(Math.random() * 900 + 100) + ' XYZ',
-    vehicleType: 'Pick Up Box' as VehicleType,
+  // New Fleet Form State (Kosong di awal agar hanya tampil shadow/placeholder)
+  const createEmptyNewFleet = () => ({
+    plateNumber: '',
+    vehicleType: '' as VehicleType,
     status: 'available' as FleetStatus,
     gpsImei: '868204059' + Math.floor(Math.random() * 900000 + 100000),
-    initialCode: 'PU-07',
-    lastMaintenance: new Date().toISOString().substring(0, 10),
-    brand: 'Mitsubishi L300',
-    year: new Date().getFullYear(),
-    engineCc: '2500 CC',
-    boxCapacityM3: 5.5,
-    boxDimensions: '2.4 x 1.6 x 1.4 m',
-    taxDueDate: getDefaultTaxDate(),
-    stnkExpiryDate: getDefaultStnkDate()
+    initialCode: '',
+    lastMaintenance: '',
+    brand: '',
+    year: 0,
+    engineCc: '',
+    boxCapacityM3: 0,
+    boxDimensions: '',
+    taxDueDate: '',
+    stnkExpiryDate: ''
   });
+
+  const [newFleet, setNewFleet] = useState(createEmptyNewFleet);
 
   // New Crew Form State
   const [newCrew, setNewCrew] = useState({
@@ -451,10 +845,28 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
   const handleCreateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validateFleet(newFleet, fleets, false);
-    if (!validation.isValid) {
-      setFleetFormErrors(validation.errors);
-      const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang masih salah.';
+    const computedOuterM3 = calculateOuterCubicationFromDimensions(newFleet.boxDimensions);
+    const fleetToValidate = {
+      ...newFleet,
+      boxCapacityM3: computedOuterM3 !== null ? computedOuterM3 : newFleet.boxCapacityM3
+    };
+    const validation = validateFleet(fleetToValidate, fleets, false);
+    const mergedErrors: Record<string, string> = { ...validation.errors };
+    if (!fleetToValidate.vehicleType) {
+      mergedErrors.vehicleType = 'Tipe kendaraan wajib dipilih.';
+    }
+    if (!fleetToValidate.brand) {
+      mergedErrors.brand = 'Merk mobil wajib dipilih.';
+    }
+    if (!fleetToValidate.year) {
+      mergedErrors.year = 'Tahun produksi wajib dipilih.';
+    }
+    if (computedOuterM3 === null) {
+      mergedErrors.boxCapacityM3 = 'Isi Dimensi Box (P x L x T) agar Kubikasi Luar terhitung otomatis.';
+    }
+    if (Object.keys(mergedErrors).length > 0) {
+      setFleetFormErrors(mergedErrors);
+      const firstError = Object.values(mergedErrors)[0] || 'Mohon periksa data armada yang masih salah.';
       setSyncFeedback({
         type: 'error',
         message: firstError
@@ -463,48 +875,35 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
+    const grossM3 = computedOuterM3 ?? fleetToValidate.boxCapacityM3;
+    const innerM3 = Number((grossM3 * 0.9).toFixed(2));
     const created = logisticsStore.addFleet({
-      ...newFleet,
+      ...fleetToValidate,
+      branchId: newFleetBranchId,
+      boxCapacityM3: grossM3,
+      boxInnerMultiplierPercent: 90,
+      boxInnerCapacityM3: innerM3,
+      kirExpiryDate: fleetToValidate.lastMaintenance,
       driverId: newFleetAssignedCrewId || undefined
     });
     if (created) {
       branchStore.setFleetBranchId(created.id, newFleetBranchId);
-      const remoteFleetCreate = await createFleetInSupabase(created);
-      if (!remoteFleetCreate.success) {
-        await reloadFleetCrewFromMySql();
-        setSyncFeedback({
-          type: 'error',
-          message: `Armada ${created.plateNumber} belum tersimpan ke Hostinger MySQL: ${remoteFleetCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
-        });
-        setTimeout(() => setSyncFeedback(null), 7000);
-        return;
-      }
+      // Background sync without blocking UI
+      createFleetInSupabase(created).catch(err => {
+        console.warn('[FleetCrewManagement] Background createFleet sync warning:', err);
+      });
     }
     if (newFleetAssignedCrewId && created) {
       logisticsStore.updateCrew(newFleetAssignedCrewId, { currentFleetId: created.id });
     }
     setIsAddFleetOpen(false);
     setNewFleetAssignedCrewId('');
-    setNewFleet({
-      plateNumber: 'B 9' + Math.floor(Math.random() * 900 + 100) + ' XYZ',
-      vehicleType: 'Pick Up Box',
-      status: 'available',
-      gpsImei: '868204059' + Math.floor(Math.random() * 900000 + 100000),
-      initialCode: 'PU-0' + Math.floor(Math.random() * 90 + 10),
-      lastMaintenance: new Date().toISOString().substring(0, 10),
-      brand: 'Mitsubishi L300',
-      year: new Date().getFullYear(),
-      engineCc: '2500 CC',
-      boxCapacityM3: 5.5,
-      boxDimensions: '2.4 x 1.6 x 1.4 m',
-      taxDueDate: getDefaultTaxDate(),
-      stnkExpiryDate: getDefaultStnkDate()
-    });
+    setNewFleet(createEmptyNewFleet());
     setFleets(logisticsStore.getFleets());
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Armada baru ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Armada baru ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil didaftarkan dan disimpan ke dalam sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -523,38 +922,34 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
+    const normalizedSim = normalizeSimTypeLabel(newCrew.licenseType || newCrew.licenseNumber);
     const created = logisticsStore.addCrew({
       ...newCrew,
+      role: normalizeCrewRoleLabel(newCrew.role),
+      branchId: newCrewBranchId,
       phone: '-',
-      licenseNumber: '-',
-      licenseType: '-'
+      licenseNumber: normalizedSim,
+      licenseType: normalizedSim
     });
     if (created) {
       branchStore.setCrewBranchId(created.id, newCrewBranchId);
-      const remoteCrewCreate = await createCrewInSupabase(created);
-      if (!remoteCrewCreate.success) {
-        await reloadFleetCrewFromMySql();
-        setSyncFeedback({
-          type: 'error',
-          message: `Kru ${created.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
-        });
-        setTimeout(() => setSyncFeedback(null), 7000);
-        return;
-      }
+      createCrewInSupabase(created).catch(err => {
+        console.warn('[FleetCrewManagement] Background createCrew sync warning:', err);
+      });
     }
     setIsAddCrewOpen(false);
     setNewCrew({
       name: '',
       phone: '-',
-      role: 'Driver Utama',
-      licenseNumber: '-',
-      licenseType: '-',
+      licenseNumber: 'SIM B1',
+      licenseType: 'SIM B1',
+      role: 'Driver',
       status: 'available'
     });
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${created.name} (${created.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Data kru ${created.name} (${created.role}) berhasil ditambahkan dan tersimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -562,20 +957,69 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   // Fleet Edit & Delete Handlers
   const handleEditFleetClick = (fleet: Fleet) => {
     setFleetFormErrors({});
-    setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id));
-    const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, fleet.brand);
-    const multiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
-    const innerM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (multiplier / 100)).toFixed(2));
+    setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id, fleet.plateNumber, fleet.initialCode, fleet.branchId));
+    const canonical = resolveCanonicalFleetMeta(fleet);
+    const existingInStore = fleets.find(f => f.id === fleet.id || f.plateNumber === fleet.plateNumber);
+
+    const pickStr = (...vals: Array<string | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'string' && v.trim() !== '') return v.trim();
+      }
+      return '';
+    };
+
+    const brand = pickStr(fleet.brand, existingInStore?.brand, canonical?.brand) || 'Mitsubishi L300';
+    const vType = (pickStr(fleet.vehicleType, existingInStore?.vehicleType, canonical?.vehicleType) || 'Pick Up Box') as VehicleType;
+    const boxDim =
+      pickStr(fleet.boxDimensions, existingInStore?.boxDimensions, canonical?.boxDimensions) ||
+      getDefaultBoxDimensions(vType, brand);
+    const parsedDimM3 = calculateOuterCubicationFromDimensions(boxDim);
+    const boxM3 =
+      parsedDimM3 !== null
+        ? parsedDimM3
+        : fleet.boxCapacityM3 !== undefined && fleet.boxCapacityM3 > 0
+        ? fleet.boxCapacityM3
+        : existingInStore?.boxCapacityM3 && existingInStore.boxCapacityM3 > 0
+        ? existingInStore.boxCapacityM3
+        : canonical?.boxCapacityM3 || getFleetBoxCapacity(fleet);
+    const multiplier =
+      fleet.boxInnerMultiplierPercent !== undefined && fleet.boxInnerMultiplierPercent > 0
+        ? fleet.boxInnerMultiplierPercent
+        : existingInStore?.boxInnerMultiplierPercent || canonical?.boxInnerMultiplierPercent || 90;
+    const innerM3 = Number((boxM3 * (multiplier / 100)).toFixed(2));
+
+    const pickExplicitOrCanon = (primary?: string, existingVal?: string, canonVal?: string, defaultVal = '') => {
+      if (primary !== undefined) return primary;
+      if (existingVal !== undefined) return existingVal;
+      if (canonVal !== undefined) return canonVal;
+      return defaultVal;
+    };
+
+    const unifiedKirDate = pickExplicitOrCanon(
+      fleet.lastMaintenance || fleet.kirExpiryDate,
+      existingInStore?.lastMaintenance || existingInStore?.kirExpiryDate,
+      canonical?.lastMaintenance || canonical?.kirExpiryDate,
+      ''
+    );
 
     setEditingFleet({
+      ...(canonical || ({} as Fleet)),
+      ...(existingInStore || ({} as Fleet)),
       ...fleet,
+      vehicleType: vType,
+      brand,
+      engineCc: pickStr(fleet.engineCc, existingInStore?.engineCc, canonical?.engineCc) || '2477 CC',
+      year: fleet.year || existingInStore?.year || canonical?.year || 2020,
+      lastMaintenance: unifiedKirDate,
+      taxDueDate: pickExplicitOrCanon(fleet.taxDueDate, existingInStore?.taxDueDate, canonical?.taxDueDate, getDefaultTaxDate()),
+      stnkExpiryDate: pickExplicitOrCanon(fleet.stnkExpiryDate, existingInStore?.stnkExpiryDate, canonical?.stnkExpiryDate, getDefaultStnkDate()),
+      kirExpiryDate: unifiedKirDate,
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
       boxInnerCapacityM3: innerM3,
-      kirDocUrl: fleet.kirDocUrl || '',
-      kirDocFileName: fleet.kirDocFileName || ''
+      kirDocUrl: pickExplicitOrCanon(fleet.kirDocUrl, existingInStore?.kirDocUrl, canonical?.kirDocUrl, ''),
+      kirDocFileName: pickExplicitOrCanon(fleet.kirDocFileName, existingInStore?.kirDocFileName, canonical?.kirDocFileName, '')
     });
     const currentCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
     setEditingAssignedCrewId(currentCrew ? currentCrew.id : (fleet.driverId || ''));
@@ -586,7 +1030,34 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingFleet) return;
 
-    const validation = validateFleet(editingFleet, fleets, true, editingFleet.id);
+    const existingFleet = fleets.find(f => f.id === editingFleet.id);
+    const canonical = resolveCanonicalFleetMeta(editingFleet) || resolveCanonicalFleetMeta(existingFleet);
+    const unifiedKirForSave =
+      editingFleet.lastMaintenance !== undefined
+        ? editingFleet.lastMaintenance
+        : editingFleet.kirExpiryDate !== undefined
+        ? editingFleet.kirExpiryDate
+        : (existingFleet?.lastMaintenance ?? existingFleet?.kirExpiryDate ?? '');
+
+    const mergedForSave: Fleet = {
+      ...(canonical || ({} as Fleet)),
+      ...(existingFleet || ({} as Fleet)),
+      ...editingFleet,
+      plateNumber: (editingFleet.plateNumber || existingFleet?.plateNumber || canonical?.plateNumber || '').trim().toUpperCase(),
+      initialCode: editingFleet.initialCode !== undefined ? editingFleet.initialCode.trim() : (existingFleet?.initialCode || canonical?.initialCode || ''),
+      vehicleType: editingFleet.vehicleType || existingFleet?.vehicleType || canonical?.vehicleType || 'Pick Up Box',
+      brand: editingFleet.brand !== undefined ? editingFleet.brand : (existingFleet?.brand || canonical?.brand || 'Mitsubishi L300'),
+      engineCc: editingFleet.engineCc !== undefined ? editingFleet.engineCc : (existingFleet?.engineCc || canonical?.engineCc || '2477 CC'),
+      year: editingFleet.year || existingFleet?.year || canonical?.year || 2020,
+      lastMaintenance: unifiedKirForSave,
+      taxDueDate: editingFleet.taxDueDate !== undefined ? editingFleet.taxDueDate : (existingFleet?.taxDueDate ?? ''),
+      stnkExpiryDate: editingFleet.stnkExpiryDate !== undefined ? editingFleet.stnkExpiryDate : (existingFleet?.stnkExpiryDate ?? ''),
+      kirExpiryDate: unifiedKirForSave,
+      kirDocUrl: editingFleet.kirDocUrl !== undefined ? editingFleet.kirDocUrl : (existingFleet?.kirDocUrl ?? ''),
+      kirDocFileName: editingFleet.kirDocFileName !== undefined ? editingFleet.kirDocFileName : (existingFleet?.kirDocFileName ?? '')
+    };
+
+    const validation = validateFleet(mergedForSave, fleets, true, editingFleet.id);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang belum lengkap.';
@@ -598,56 +1069,62 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
-    const multiplier = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
-    const grossM3 = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
+    const multiplier = mergedForSave.boxInnerMultiplierPercent !== undefined ? mergedForSave.boxInnerMultiplierPercent : 90;
+    const parsedSaveGross = calculateOuterCubicationFromDimensions(mergedForSave.boxDimensions);
+    const grossM3 =
+      parsedSaveGross !== null
+        ? parsedSaveGross
+        : mergedForSave.boxCapacityM3 !== undefined
+        ? mergedForSave.boxCapacityM3
+        : getFleetBoxCapacity(mergedForSave);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
     setIsSavingFleet(true);
     try {
-      // 1. Update fleet record including driverId and inner box dimensions
+      // 1. Update fleet record including driverId and inner box dimensions while keeping all explicitly edited/cleared fields
+      const targetFleetId = editingFleet.id;
       const updatedFleetData: Fleet = {
-        ...editingFleet,
+        ...mergedForSave,
+        branchId: editingFleetBranchId,
+        boxCapacityM3: grossM3,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
-        driverId: editingAssignedCrewId || undefined
+        driverId: editingAssignedCrewId ? editingAssignedCrewId : ''
       };
-      logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
-      branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
+      logisticsStore.updateFleet(targetFleetId, updatedFleetData);
+      branchStore.setFleetBranchId(targetFleetId, editingFleetBranchId);
 
       // 2. Synchronize crew currentFleetId
       const allCrews = logisticsStore.getCrews();
       allCrews.forEach(c => {
         if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
-          logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
-        } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: targetFleetId });
+        } else if (c.currentFleetId === targetFleetId && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
           logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
         }
       });
 
-      // 3. Persist directly to Hostinger MySQL backend (/api/fleets/:id)
-      const remoteFleetUpdate = await updateFleetInSupabase(editingFleet.id, updatedFleetData);
-      if (!remoteFleetUpdate.success) {
-        throw new Error(remoteFleetUpdate.error || 'Gagal menyimpan perubahan armada ke Hostinger MySQL');
-      }
-
-      setFleets(logisticsStore.getFleets());
+      // 3. Immediately update UI and close modal (optimistic save), then sync to database in background
+      setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
       setCrews(logisticsStore.getCrews());
       setIsEditFleetOpen(false);
       setEditingFleet(null);
       setEditingAssignedCrewId('');
       setSyncFeedback({
         type: 'success',
-        message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
+        message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan.`
       });
-      setTimeout(() => setSyncFeedback(null), 6000);
+      setTimeout(() => setSyncFeedback(null), 5000);
+
+      updateFleetInSupabase(targetFleetId, updatedFleetData).catch(err => {
+        console.warn('[FleetCrewManagement] Background updateFleet sync warning:', err);
+      });
     } catch (err: any) {
-      console.warn('[Hostinger MySQL Fleet Sync]', err);
-      await reloadFleetCrewFromMySql();
       setSyncFeedback({
         type: 'error',
-        message: `Perubahan armada belum tersimpan ke Hostinger MySQL: ${err?.message || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+        message: `Gagal menyimpan perubahan armada: ${err?.message || 'terjadi kesalahan'}.`
       });
-      setTimeout(() => setSyncFeedback(null), 7000);
+      setTimeout(() => setSyncFeedback(null), 5000);
     } finally {
       setIsSavingFleet(false);
     }
@@ -661,7 +1138,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const handleEditCrewClick = (crew: Crew) => {
     setCrewFormErrors({});
     setEditingCrewBranchId(branchStore.getCrewBranchId(crew.id, crew.name));
-    setEditingCrew({ ...crew });
+    const normRole = normalizeCrewRoleLabel(crew.role);
+    const normSim = normalizeSimTypeLabel(crew.licenseType || crew.licenseNumber);
+    setEditingCrew({
+      ...crew,
+      role: normRole,
+      licenseType: normSim,
+      licenseNumber: normSim
+    });
     setIsEditCrewOpen(true);
   };
 
@@ -669,7 +1153,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingCrew) return;
 
-    const validation = validateCrew(editingCrew, crews, true, editingCrew.id);
+    const normalizedRole = normalizeCrewRoleLabel(editingCrew.role);
+    const normalizedSim = normalizeSimTypeLabel(editingCrew.licenseType || editingCrew.licenseNumber);
+    const crewToValidate: Crew = {
+      ...editingCrew,
+      role: normalizedRole,
+      licenseType: normalizedSim,
+      licenseNumber: normalizedSim
+    };
+
+    const validation = validateCrew(crewToValidate, crews, true, editingCrew.id);
     if (!validation.isValid) {
       setCrewFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data kru yang belum lengkap.';
@@ -681,35 +1174,31 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
+    const targetCrewId = editingCrew.id;
+    const targetCrewName = editingCrew.name;
     const updatedCrewData: Partial<Crew> = {
-      ...editingCrew,
-      phone: '-',
-      licenseNumber: '-',
-      licenseType: '-'
+      ...crewToValidate,
+      branchId: editingCrewBranchId,
+      phone: editingCrew.phone || '-',
+      licenseNumber: normalizedSim,
+      licenseType: normalizedSim
     };
 
-    logisticsStore.updateCrew(editingCrew.id, updatedCrewData);
-    branchStore.setCrewBranchId(editingCrew.id, editingCrewBranchId);
-
-    const remoteCrewUpdate = await updateCrewInSupabase(editingCrew.id, updatedCrewData);
-    if (!remoteCrewUpdate.success) {
-      await reloadFleetCrewFromMySql();
-      setSyncFeedback({
-        type: 'error',
-        message: `Perubahan kru ${editingCrew.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewUpdate.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
+    logisticsStore.updateCrew(targetCrewId, updatedCrewData);
+    branchStore.setCrewBranchId(targetCrewId, editingCrewBranchId, targetCrewName);
 
     setIsEditCrewOpen(false);
     setEditingCrew(null);
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${editingCrew.name} (${editingCrew.role}) berhasil disimpan permanen ke database Hostinger MySQL.`
+      message: `Data kru ${targetCrewName} (${normalizedRole}) berhasil diperbarui dan disimpan.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    updateCrewInSupabase(targetCrewId, updatedCrewData).catch(err => {
+      console.warn('[FleetCrewManagement] Background updateCrew sync warning:', err);
+    });
   };
 
   const handleDeleteCrewClick = (crew: Crew) => {
@@ -721,24 +1210,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const name = crewToDelete.name;
     const id = crewToDelete.id;
     logisticsStore.deleteCrew(id);
-    const remoteCrewDelete = await deleteCrewInSupabase(id);
-    if (!remoteCrewDelete.success) {
-      await reloadFleetCrewFromMySql();
-      setCrewToDelete(null);
-      setSyncFeedback({
-        type: 'error',
-        message: `Kru ${name} belum terhapus dari Hostinger MySQL: ${remoteCrewDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
     setCrews(logisticsStore.getCrews());
     setCrewToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data kru ${name} berhasil dihapus dari database Hostinger MySQL.`
+      message: `Data kru ${name} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    deleteCrewInSupabase(id).catch(err => {
+      console.warn('[FleetCrewManagement] Background deleteCrew sync warning:', err);
+    });
   };
 
   const handleConfirmDeleteFleet = async () => {
@@ -746,30 +1228,32 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const plate = fleetToDelete.plateNumber;
     const id = fleetToDelete.id;
     logisticsStore.deleteFleet(id);
-    const remoteFleetDelete = await deleteFleetInSupabase(id, plate);
-    if (!remoteFleetDelete.success) {
-      await reloadFleetCrewFromMySql();
-      setFleetToDelete(null);
-      setSyncFeedback({
-        type: 'error',
-        message: `Armada ${plate} belum terhapus dari Hostinger MySQL: ${remoteFleetDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
-      });
-      setTimeout(() => setSyncFeedback(null), 7000);
-      return;
-    }
     setFleets(logisticsStore.getFleets());
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `Data armada ${plate} berhasil dihapus dari database Hostinger MySQL.`
+      message: `Data armada ${plate} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+
+    deleteFleetInSupabase(id, plate).catch(err => {
+      console.warn('[FleetCrewManagement] Background deleteFleet sync warning:', err);
+    });
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
-    const nextStatus: FleetStatus =
-      fleet.status === 'available' ? 'on-duty' : fleet.status === 'on-duty' ? 'maintenance' : 'available';
-    logisticsStore.updateFleetStatus(fleet.id, nextStatus);
+    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+    let nextStatus: FleetStatus;
+    if (liveInfo.effectiveStatus === 'available') {
+      // Hanya masuk status Kirim jika ada jadwal pengiriman hari ini; jika tidak ada, langsung beralih ke Servis
+      nextStatus = liveInfo.todayScheduledArea ? 'on-duty' : 'maintenance';
+    } else if (liveInfo.effectiveStatus === 'on-duty') {
+      nextStatus = 'maintenance';
+    } else {
+      nextStatus = 'available';
+    }
+    logisticsStore.updateFleetStatus(fleet.id, nextStatus, undefined, { syncTodaySchedule: true });
+    setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
   };
 
   // Integrasi 2 arah Status Operasional Kru dengan Manajemen User (Aktif / Nonaktif)
@@ -865,7 +1349,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   };
 
   const filteredFleets = fleets.filter(f => {
-    const fleetBranch = branchStore.getFleetBranch(f.id);
+    const fleetBranch = branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId);
     const matchesBranch = selectedBranchId === 'ALL' || fleetBranch.id === selectedBranchId;
     const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
     const matchesStatus = fleetFilter === 'all' || liveInfo.effectiveStatus === fleetFilter;
@@ -903,23 +1387,98 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     : crews.filter(c => getCrewIntegratedStatus(c).isActive);
 
   const filteredCrews = visibleCrewsForRole.filter(c => {
-    const crewBranch = branchStore.getCrewBranch(c.id, c.name);
-    const matchesBranch = selectedBranchId === 'ALL' || crewBranch.id === selectedBranchId;
+    const effectiveBranch = selectedBranchId && selectedBranchId !== 'ALL' ? selectedBranchId : 'cab-banyuwangi';
+    const allUsers = logisticsStore.getUsers();
+    const matchedUser = allUsers.find(
+      u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, c.name)
+    );
+    const matchesBranch = matchedUser
+      ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveBranch)
+      : branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch;
     const { isActive } = getCrewIntegratedStatus(c);
     const matchesStatus =
       crewFilter === 'all' ||
       (crewFilter === 'aktif' && isActive) ||
       (crewFilter === 'nonaktif' && !isActive) ||
       c.status === crewFilter;
-    const matchesRole = crewRoleFilter === 'all' || c.role === crewRoleFilter;
+    const normRole = normalizeCrewRoleLabel(c.role);
+    const matchesRole = crewRoleFilter === 'all' || normRole === crewRoleFilter || c.role === crewRoleFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery =
       !q ||
       c.name.toLowerCase().includes(q) ||
+      normRole.toLowerCase().includes(q) ||
       c.role.toLowerCase().includes(q) ||
-      (c.licenseNumber && c.licenseNumber.toLowerCase().includes(q));
+      (c.licenseNumber && c.licenseNumber.toLowerCase().includes(q)) ||
+      (c.licenseType && c.licenseType.toLowerCase().includes(q));
     return matchesBranch && matchesStatus && matchesRole && matchesQuery;
   });
+
+  const sortedCrews = [...filteredCrews].sort((a, b) => {
+    if (!crewSortConfig) return 0;
+    const dir = crewSortConfig.direction === 'asc' ? 1 : -1;
+    if (crewSortConfig.key === 'name') {
+      return a.name.localeCompare(b.name, 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'role') {
+      return normalizeCrewRoleLabel(a.role).localeCompare(normalizeCrewRoleLabel(b.role), 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'status') {
+      const aAct = getCrewIntegratedStatus(a).isActive ? 1 : 0;
+      const bAct = getCrewIntegratedStatus(b).isActive ? 1 : 0;
+      return (bAct - aAct) * dir;
+    }
+    if (crewSortConfig.key === 'fleet') {
+      const aFleet = fleets.find(f => f.id === a.currentFleetId || f.driverId === a.id);
+      const bFleet = fleets.find(f => f.id === b.currentFleetId || f.driverId === b.id);
+      const aCode = aFleet ? (aFleet.initialCode || aFleet.plateNumber) : 'ZZZ';
+      const bCode = bFleet ? (bFleet.initialCode || bFleet.plateNumber) : 'ZZZ';
+      return aCode.localeCompare(bCode, 'id-ID') * dir;
+    }
+    if (crewSortConfig.key === 'performance') {
+      const aPerf = getCrewDynamicPerformance(a);
+      const bPerf = getCrewDynamicPerformance(b);
+      if (aPerf.completedRit !== bPerf.completedRit) {
+        return (aPerf.completedRit - bPerf.completedRit) * dir;
+      }
+      return (aPerf.rating - bPerf.rating) * dir;
+    }
+    return 0;
+  });
+
+  // Strictly scope PIC / Kru options to the chosen branch (Cabang A vs Cabang B never mixed)
+  const getBranchScopedCrews = (targetBranchId: string): Crew[] => {
+    const effectiveBranch =
+      targetBranchId && targetBranchId !== 'ALL'
+        ? targetBranchId
+        : branches[0]?.id || 'cab-banyuwangi';
+    const allUsers = logisticsStore.getUsers();
+    return crews
+      .filter(c => {
+        const matchedUser = allUsers.find(
+          u => `crw-${u.id}` === c.id || logisticsStore.isSameCrewPersonName(u.fullName, c.name)
+        );
+        if (matchedUser) {
+          return logisticsStore.isActiveDeliveryCrewUser(matchedUser, effectiveBranch);
+        }
+        const { isActive } = getCrewIntegratedStatus(c);
+        if (!isActive) return false;
+        return branchStore.getCrewBranch(c.id, c.name).id === effectiveBranch;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  };
+
+  const openAddFleetModal = () => {
+    const initialBranch =
+      selectedBranchId && selectedBranchId !== 'ALL'
+        ? selectedBranchId
+        : branches[0]?.id || 'cab-banyuwangi';
+    setNewFleetBranchId(initialBranch);
+    setNewFleetAssignedCrewId('');
+    setFleetFormErrors({});
+    setNewFleet(createEmptyNewFleet());
+    setIsAddFleetOpen(true);
+  };
 
   return (
     <div className="space-y-3">
@@ -927,134 +1486,73 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
           <div className="min-w-0">
-            <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-              <span className="font-semibold text-blue-400">Logistik AKK</span>
-              <span>&middot;</span>
-              <span>{!isCrewsMode ? 'Manajemen Armada Terpadu' : 'Manajemen Personel & Rotasi Kru'}</span>
-            </div>
+            {isCrewsMode && (
+              <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span>Manajemen Personel &amp; Rotasi Kru</span>
+              </div>
+            )}
             <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
               {!isCrewsMode
-                ? 'Data Armada Terpadu (Spesifikasi, BBM, Sparepart & Ritase)'
+                ? 'Data Armada Terpadu'
                 : 'Kru Pengiriman & Audit Rotasi Wilayah'}
             </h2>
           </div>
 
           {/* Sub-Tabs & Primary CTA */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-              {!isCrewsMode ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('fleets')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'fleets'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Truck className="w-3.5 h-3.5" />
-                    <span>Unit ({fleets.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('fuel')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'fuel'
-                        ? 'bg-amber-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Fuel className="w-3.5 h-3.5" />
-                    <span>BBM</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('spareparts')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'spareparts'
-                        ? 'bg-amber-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Wrench className="w-3.5 h-3.5" />
-                    <span>Sparepart</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('forms')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'forms'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Formulir</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('crews')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'crews'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Daftar Kru ({visibleCrewsForRole.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('history')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      activeTab === 'history'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <History className="w-3.5 h-3.5" />
-                    <span>History Kirim &amp; SLA</span>
-                  </button>
-                </>
-              )}
-            </div>
+            {isCrewsMode && (
+              <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('crews')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'crews'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Daftar Kru ({filteredCrews.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('history')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'history'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>History Kirim &amp; SLA</span>
+                </button>
+              </div>
+            )}
 
-            {!isCrewsMode ? (
+            {!isCrewsMode && (
               <button
-                onClick={() => setIsAddFleetOpen(true)}
+                onClick={openAddFleetModal}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Tambah Armada</span>
               </button>
-            ) : (
-              <button
-                onClick={() => setIsAddCrewOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Kru</span>
-              </button>
             )}
           </div>
         </div>
 
-        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab) */}
+        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab — aligned strictly on a single horizontal plane) */}
         {(activeTab === 'fleets' || activeTab === 'crews') && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-800/80">
-            <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 mt-3 pt-3 border-t border-slate-800/80">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   placeholder={activeTab === 'fleets' ? 'Cari plat, inisial, tipe, merk...' : 'Cari nama kru, peran, SIM...'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                  className="w-full h-9 pl-8 pr-7 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
                 />
                 {searchQuery && (
                   <button
@@ -1069,103 +1567,110 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
               {activeTab === 'fleets' ? (
                 <>
-                  {/* Cabang Armada Dropdown (Multi-Branch) */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
-                    <select
-                      value={selectedBranchId}
-                      onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                    >
-                      <option value="ALL">Semua Cabang ({fleets.length} Unit)</option>
-                      {branches.map((b) => {
-                        const count = fleets.filter(fl => branchStore.getFleetBranch(fl.id).id === b.id).length;
-                        return (
-                          <option key={b.id} value={b.id}>
-                            {b.name} ({count} Unit)
-                          </option>
-                        );
+                  {/* Cabang Armada Custom Dropdown (Lurus Sejajar) */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      accent="emerald"
+                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
+                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                      options={branches.map((b) => {
+                        const count = fleets.filter(
+                          fl => branchStore.getFleetBranch(fl.id, fl.plateNumber, fl.initialCode, fl.branchId).id === b.id
+                        ).length;
+                        return {
+                          value: b.id,
+                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Unit)`,
+                          Icon: Building2,
+                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        };
                       })}
-                    </select>
+                    />
                   </div>
 
-                  {/* Status Dropdown */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">STATUS</span>
-                    <select
+                  {/* Status Armada Custom Dropdown */}
+                  <div className="w-48">
+                    <FleetFormDropdown
                       value={fleetFilter}
-                      onChange={(e) => setFleetFilter(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer"
-                    >
-                      <option value="all">Semua Status Kondisi</option>
-                      <option value="available">● Ready (Siap Jadwal Esok)</option>
-                      <option value="on-duty">● Kirim (Sedang Dipakai Kirim)</option>
-                      <option value="maintenance">● Servis (Dalam Perbaikan)</option>
-                    </select>
+                      onChange={setFleetFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Status Kondisi' },
+                        { value: 'available', label: 'Ready (Siap Jadwal Esok)', dotClass: 'bg-emerald-400' },
+                        { value: 'on-duty', label: 'Kirim (Sedang Dipakai)', dotClass: 'bg-blue-400' },
+                        { value: 'maintenance', label: 'Servis (Dalam Perbaikan)', dotClass: 'bg-rose-400' }
+                      ]}
+                    />
                   </div>
 
-                  {/* Tipe Kendaraan Dropdown */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">TIPE</span>
-                    <select
+                  {/* Tipe Kendaraan Custom Dropdown */}
+                  <div className="w-48">
+                    <FleetFormDropdown
                       value={vehicleTypeFilter}
-                      onChange={(e) => setVehicleTypeFilter(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer"
-                    >
-                      <option value="all">Semua Tipe Kendaraan</option>
-                      <option value="Pick Up Box">Pick Up Box</option>
-                      <option value="Engkel STD">Engkel STD</option>
-                      <option value="Engkel Long">Engkel Long</option>
-                      <option value="Double STD">Double STD</option>
-                    </select>
+                      onChange={setVehicleTypeFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Tipe Kendaraan' },
+                        { value: 'Pick Up Box', label: 'Pick Up Box' },
+                        { value: 'Engkel STD', label: 'Engkel STD' },
+                        { value: 'Engkel Long', label: 'Engkel Long' },
+                        { value: 'Double STD', label: 'Double STD' }
+                      ]}
+                    />
                   </div>
                 </>
               ) : (
                 <>
-                  {/* Cabang Kru Dropdown (Multi-Branch) */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">CABANG</span>
-                    <select
-                      value={selectedBranchId}
-                      onChange={(e) => branchStore.setSelectedOriginBranchId(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                    >
-                      <option value="ALL">Semua Cabang ({visibleCrewsForRole.length} Kru)</option>
-                      {branches.map((b) => {
-                        const count = visibleCrewsForRole.filter(cr => branchStore.getCrewBranch(cr.id, cr.name).id === b.id).length;
-                        return (
-                          <option key={b.id} value={b.id}>
-                            {b.name} ({count} Kru)
-                          </option>
-                        );
+                  {/* Cabang Kru Custom Dropdown (Lurus Sejajar tanpa label bertumpuk di atas) */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      accent="emerald"
+                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
+                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                      options={branches.map((b) => {
+                        const allUsers = logisticsStore.getUsers();
+                        const count = visibleCrewsForRole.filter(cr => {
+                          const matchedUser = allUsers.find(
+                            u => `crw-${u.id}` === cr.id || logisticsStore.isSameCrewPersonName(u.fullName, cr.name)
+                          );
+                          return matchedUser
+                            ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, b.id)
+                            : branchStore.getCrewBranch(cr.id, cr.name).id === b.id;
+                        }).length;
+                        return {
+                          value: b.id,
+                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Kru)`,
+                          Icon: Building2,
+                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        };
                       })}
-                    </select>
+                    />
                   </div>
 
-                  {/* Status Operasional Kru Dropdown (Terintegrasi User Manajemen) */}
-                  <select
-                    value={crewFilter}
-                    onChange={(e) => setCrewFilter(e.target.value)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                  >
-                    <option value="all">Semua Status Operasional</option>
-                    <option value="aktif">● Aktif (User Manajemen)</option>
-                    {isCurrentSuperAdmin && (
-                      <option value="nonaktif">○ Nonaktif (User Manajemen)</option>
-                    )}
-                  </select>
+                  {/* Status Operasional Kru Custom Dropdown */}
+                  <div className="w-52">
+                    <FleetFormDropdown
+                      value={crewFilter}
+                      onChange={setCrewFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Status Operasional' },
+                        { value: 'aktif', label: 'Aktif (User Manajemen)', dotClass: 'bg-emerald-400' },
+                        ...(isCurrentSuperAdmin
+                          ? [{ value: 'nonaktif', label: 'Nonaktif (User Manajemen)', dotClass: 'bg-rose-400' }]
+                          : [])
+                      ]}
+                    />
+                  </div>
 
-                  {/* Peran Kru Dropdown */}
-                  <select
-                    value={crewRoleFilter}
-                    onChange={(e) => setCrewRoleFilter(e.target.value)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-                  >
-                    <option value="all">Semua Peran Kru</option>
-                    <option value="Driver Utama">Driver Utama</option>
-                    <option value="Kernet / Helper">Kernet / Helper</option>
-                    <option value="Driver Cadangan">Driver Cadangan</option>
-                  </select>
+                  {/* Peran Kru Custom Dropdown (Driver & Helper) */}
+                  <div className="w-40">
+                    <FleetFormDropdown
+                      value={crewRoleFilter}
+                      onChange={setCrewRoleFilter}
+                      options={[
+                        { value: 'all', label: 'Semua Peran Kru' },
+                        { value: 'Driver', label: 'Driver' },
+                        { value: 'Helper', label: 'Helper' }
+                      ]}
+                    />
+                  </div>
                 </>
               )}
 
@@ -1181,14 +1686,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     setCrewFilter('all');
                     setCrewRoleFilter('all');
                   }}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
+                  className="h-9 px-3 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
                   title="Reset Semua Filter"
                 >
                   Reset
                 </button>
               )}
 
-              {/* View Switcher: Table View vs Cards Grid */}
+              {/* View Switcher: Table View vs Cards Grid vs 3D Showcase */}
               <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
                   type="button"
@@ -1212,6 +1717,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Kartu</span>
                 </button>
+                {activeTab === 'fleets' && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('3d')}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      viewMode === '3d' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Tampilan Desain 3D Interaktif Armada"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>3D</span>
+                  </button>
+                )}
               </div>
 
               {/* Refresh Data Button */}
@@ -1230,63 +1748,108 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )}
       </div>
 
-      {/* Pop-Up Modal Notifikasi "Data Berhasil Disimpan ke Hostinger MySQL" */}
+      {/* Modal Notifikasi Konfirmasi Penyimpanan Data (Tampil langsung di depan halaman Data Armada) */}
       {syncFeedback && (
         <div
-          className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[1300] bg-slate-950/60 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.45)' }}
           onClick={() => setSyncFeedback(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3.5 animate-in zoom-in-95 duration-150"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Top Accent Bar */}
             <div
-              className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center border shadow-xs ${
+              className={`h-1.5 w-full ${
                 syncFeedback.type === 'success'
-                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
-                  : 'bg-rose-500/15 border-rose-500/30 text-rose-500'
+                  ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500'
+                  : 'bg-gradient-to-r from-rose-500 to-amber-500'
               }`}
-            >
-              {syncFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-7 h-7" />
-              ) : (
-                <AlertCircle className="w-7 h-7" />
-              )}
-            </div>
+            />
 
-            {syncFeedback.type === 'success' && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>✓ Tersimpan di Hostinger MySQL</span>
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3.5">
+                <div
+                  className={`w-11 h-11 rounded-xl shrink-0 flex items-center justify-center border ${
+                    syncFeedback.type === 'success'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {syncFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : (
+                    <AlertCircle className="w-6 h-6" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-[10px] font-extrabold uppercase tracking-wider ${
+                        syncFeedback.type === 'success'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {syncFeedback.type === 'success'
+                        ? 'Manajemen Armada & Kru Terpadu'
+                        : 'Peringatan Validasi Data'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSyncFeedback(null)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5 rounded-lg transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
+                    {syncFeedback.type === 'success'
+                      ? 'Perubahan Data Berhasil Disimpan'
+                      : 'Periksa Kembali Data Anda'}
+                  </h3>
+                </div>
               </div>
-            )}
 
-            <div>
-              <h3 className="text-base font-black text-slate-900 dark:text-white">
-                {syncFeedback.type === 'success' ? 'Data Berhasil Disimpan ke Hostinger MySQL' : 'Pemberitahuan Sistem'}
-              </h3>
-              <div className="bg-slate-100 dark:bg-slate-800/80 rounded-xl p-3 border border-slate-200 dark:border-slate-700/60 text-xs text-slate-700 dark:text-slate-200 mt-2 leading-relaxed text-left">
-                {syncFeedback.message}
+              <div className="bg-slate-50 dark:bg-slate-800/70 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-700/70 text-xs text-slate-700 dark:text-slate-200 leading-relaxed flex items-start gap-2.5">
+                <Truck
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    syncFeedback.type === 'success'
+                      ? 'text-teal-600 dark:text-teal-400'
+                      : 'text-rose-500'
+                  }`}
+                />
+                <span>{syncFeedback.message}</span>
               </div>
-            </div>
 
-            <div className="pt-1">
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setSyncFeedback(null)}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs transition cursor-pointer shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-400 active:scale-98"
-              >
-                Oke, Mengerti
-              </button>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setSyncFeedback(null)}
+                  className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs text-white transition cursor-pointer shadow-sm flex items-center justify-center gap-1.5 active:scale-98 ${
+                    syncFeedback.type === 'success'
+                      ? 'bg-slate-900 dark:bg-emerald-600 hover:bg-slate-800 dark:hover:bg-emerald-500'
+                      : 'bg-rose-600 hover:bg-rose-500'
+                  }`}
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Selesai &amp; Tutup</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Compact & Rapat) */}
+      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Filtered by Selected Branch) */}
       {activeTab === 'fleets' && (() => {
-        const liveInfos = fleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
+        const branchFilteredFleets = selectedBranchId === 'ALL'
+          ? fleets
+          : fleets.filter(f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId);
+        const liveInfos = branchFilteredFleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
         const readyCount = liveInfos.filter(i => i.effectiveStatus === 'available').length;
         const kirimCount = liveInfos.filter(i => i.effectiveStatus === 'on-duty').length;
         const servisCount = liveInfos.filter(i => i.effectiveStatus === 'maintenance').length;
@@ -1383,7 +1946,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-2.5 px-3 whitespace-nowrap">Tipe &amp; Kubikasi Box</th>
                   <th className="py-2.5 px-3 text-center whitespace-nowrap">Status Kondisi &amp; Area Kirim</th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Sopir / PIC</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / KIR</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / STNK / KIR</th>
                   <th className="py-2.5 px-3 text-center w-24 whitespace-nowrap">Aksi</th>
                 </tr>
               </thead>
@@ -1400,9 +1963,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   filteredFleets.map((fleet, index) => {
                     const assignedCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
                     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-                    const kirDateVal = fleet.kirExpiryDate || fleet.lastMaintenance;
+                    const kirDateVal = fleet.lastMaintenance || fleet.kirExpiryDate;
                     const kirStatus = getExpiryStatus(kirDateVal);
                     const taxStatus = getExpiryStatus(fleet.taxDueDate);
+                    const stnkDateVal = fleet.stnkExpiryDate;
+                    const stnkStatus = getExpiryStatus(stnkDateVal);
 
                     return (
                       <tr key={fleet.id} className="hover:bg-slate-850/50 transition">
@@ -1418,23 +1983,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                               {fleet.plateNumber}
                             </span>
                           </div>
-                          <div className="mt-1 flex items-center gap-1">
-                            <span className="text-[9px] text-slate-400">Gudang:</span>
-                            <select
-                              value={branchStore.getFleetBranch(fleet.id).id}
-                              onChange={(e) => {
-                                branchStore.setFleetBranch(fleet.id, e.target.value);
-                                setBranches(branchStore.getActiveBranches());
-                              }}
-                              className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
-                            >
-                              {branches.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                  {b.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          {selectedBranchId === 'ALL' && (
+                            <div className="mt-1 flex items-center gap-1">
+                              <select
+                                value={branchStore.getFleetBranch(fleet.id, fleet.plateNumber, fleet.initialCode, fleet.branchId).id}
+                                onChange={(e) => {
+                                  branchStore.setFleetBranch(fleet.id, e.target.value);
+                                  logisticsStore.updateFleet(fleet.id, { branchId: e.target.value });
+                                  setBranches(branchStore.getActiveBranches());
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
+                              >
+                                {branches.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
@@ -1470,9 +2037,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                     <span className="text-rose-400 font-semibold">
                                       Tidak bisa diatur kirim
                                     </span>
-                                  ) : liveInfo.areaName ? (
-                                    <span className="text-emerald-300/90">
-                                      Area: {liveInfo.areaName}
+                                  ) : liveInfo.todayScheduledArea ? (
+                                    <span className="text-amber-300 font-semibold">
+                                      Terjadwal Hari Ini: {liveInfo.todayScheduledArea}
+                                    </span>
+                                  ) : liveInfo.tomorrowScheduledArea ? (
+                                    <span className="text-amber-300 font-semibold">
+                                      Terjadwal Esok: {liveInfo.tomorrowScheduledArea}
                                     </span>
                                   ) : (
                                     <span>Siap jadwal esok</span>
@@ -1493,18 +2064,51 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           )}
                         </td>
 
-                        {/* Pajak & KIR: Tanggal KIR lebih besar, keterangan Aktif/Jatuh Tempo lebih kecil */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold uppercase text-teal-400">KIR:</span>
-                              <span className="text-xs sm:text-[13px] font-black text-white font-mono tracking-tight">
-                                {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
+                        {/* Pajak, STNK & KIR: Menampilkan tanggal jatuh tempo dan status untuk Pajak (Tahunan), STNK (5 Tahunan), dan KIR secara terstruktur */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <div className="flex flex-col gap-1.5 min-w-[225px]">
+                            {/* Baris 1: PAJAK */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 min-w-[40px] text-center">
+                                  PAJAK
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {fleet.taxDueDate ? formatIndoDate(fleet.taxDueDate) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${taxStatus.color}`}>
+                                {taxStatus.label}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <span className={`px-1.5 py-0.2 rounded text-[9px] border font-semibold leading-tight ${kirDateVal ? kirStatus.color : taxStatus.color}`}>
-                                {kirDateVal ? kirStatus.label : taxStatus.label}
+
+                            {/* Baris 2: STNK */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 min-w-[40px] text-center">
+                                  STNK
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {stnkDateVal ? formatIndoDate(stnkDateVal) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${stnkStatus.color}`}>
+                                {stnkStatus.label}
+                              </span>
+                            </div>
+
+                            {/* Baris 3: KIR */}
+                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/30 min-w-[40px] text-center">
+                                  KIR
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
+                                  {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
+                                </span>
+                              </div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${kirStatus.color}`}>
+                                {kirStatus.label}
                               </span>
                             </div>
                           </div>
@@ -1513,6 +2117,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         {/* Aksi */}
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelected3DFleetId(fleet.id);
+                                setViewMode('3d');
+                              }}
+                              className="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+                              title="Lihat Desain 3D Armada"
+                            >
+                              <Box className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleEditFleetClick(fleet)}
@@ -1597,13 +2212,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
                           <span>{liveInfo.statusLabel}</span>
                         </button>
-                        <span className="text-[10px] text-slate-400 font-medium">
+                        <span className="text-[10px] text-slate-400 font-medium max-w-[180px] truncate text-right" title={liveInfo.statusDescription}>
                           {liveInfo.effectiveStatus === 'on-duty'
                             ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
                             : liveInfo.effectiveStatus === 'maintenance'
                             ? 'Dalam perbaikan (Tidak bisa kirim)'
-                            : liveInfo.areaName
-                            ? `Area: ${liveInfo.areaName}`
+                            : liveInfo.todayScheduledArea
+                            ? `Terjadwal Hari Ini: ${liveInfo.todayScheduledArea}`
+                            : liveInfo.tomorrowScheduledArea
+                            ? `Terjadwal Esok: ${liveInfo.tomorrowScheduledArea}`
                             : 'Siap jadwal esok'}
                         </span>
                       </div>
@@ -1965,8 +2582,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </div>
                 </div>
 
-                {/* Edit & Hapus Buttons */}
+                {/* 3D, Edit & Hapus Buttons */}
                 <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-end gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected3DFleetId(fleet.id);
+                      setViewMode('3d');
+                    }}
+                    className="px-3 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-medium flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>3D</span>
+                  </button>
                   <button
                     onClick={() => handleEditFleetClick(fleet)}
                     className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-750 hover:text-white text-slate-300 font-medium flex items-center gap-1 transition cursor-pointer"
@@ -1989,6 +2617,27 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )
       )}
 
+      {/* Fleets Content: 3D Studio Showcase View */}
+      {activeTab === 'fleets' && viewMode === '3d' && (
+        <Fleet3DShowcase
+          fleets={filteredFleets}
+          crews={crews}
+          selectedFleetId={selected3DFleetId}
+          onSelectFleetId={(id) => setSelected3DFleetId(id)}
+          onToggleFleetStatus={toggleFleetStatus}
+          onEditFleet={handleEditFleetClick}
+          onUpdateFleetPhotos={(fleetId, photos3d) => {
+            logisticsStore.updateFleet(fleetId, { photos3d });
+            setFleets(logisticsStore.getFleets());
+          }}
+          onViewKirDoc={(fl) => setSelectedKirDocFleet(fl)}
+          getBoxCapacityM3={getFleetBoxCapacity}
+          getBoxDimensions={(fl) => getDefaultBoxDimensions(fl.vehicleType, fl.brand)}
+          formatIndoDate={formatIndoDate}
+          getExpiryStatus={getExpiryStatus}
+        />
+      )}
+
       {/* Info Indikator Status Operasional & Rumus Performa Rit & Rating */}
       {activeTab === 'crews' && (
         <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
@@ -2009,23 +2658,108 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       )}
 
       {/* Crews Content: Table View */}
-      {activeTab === 'crews' && viewMode === 'table' && (
+      {activeTab === 'crews' && (viewMode === 'table' || viewMode === '3d') && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-950/80 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   <th className="py-3 px-4 w-12 text-center">#</th>
-                  <th className="py-3 px-4">Nama Lengkap Kru</th>
-                  <th className="py-3 px-4">Peran Tugas</th>
-                  <th className="py-3 px-4 text-center">Status Operasional (User)</th>
-                  <th className="py-3 px-4">Armada Ditugaskan</th>
-                  <th className="py-3 px-4 text-center">Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</th>
-                  <th className="py-3 px-4 text-center w-28">Aksi</th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('name')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Nama Lengkap Kru</span>
+                      {crewSortConfig?.key === 'name' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('role')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Peran Tugas</span>
+                      {crewSortConfig?.key === 'role' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('status')}
+                      className="inline-flex items-center justify-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold mx-auto"
+                    >
+                      <span>Status Operasional (User)</span>
+                      {crewSortConfig?.key === 'status' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('fleet')}
+                      className="inline-flex items-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold"
+                    >
+                      <span>Armada Ditugaskan</span>
+                      {crewSortConfig?.key === 'fleet' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCrewSort('performance')}
+                      className="inline-flex items-center justify-center gap-1.5 hover:text-white transition cursor-pointer uppercase font-semibold mx-auto"
+                    >
+                      <span>Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</span>
+                      {crewSortConfig?.key === 'performance' ? (
+                        crewSortConfig.direction === 'asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-center w-24">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {filteredCrews.length === 0 ? (
+                {sortedCrews.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-400">
                       <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
@@ -2034,10 +2768,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredCrews.map((crew, index) => {
+                  sortedCrews.map((crew, index) => {
                     const assignedFleet = fleets.find(f => f.id === crew.currentFleetId || f.driverId === crew.id);
                     const { isActive } = getCrewIntegratedStatus(crew);
                     const perf = getCrewDynamicPerformance(crew);
+                    const displayRole = normalizeCrewRoleLabel(crew.role);
 
                     return (
                       <tr key={crew.id} className="hover:bg-slate-850/50 transition">
@@ -2060,13 +2795,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         </td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
-                            crew.role === 'Driver Utama'
+                            displayRole === 'Driver'
                               ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                              : crew.role === 'Driver Cadangan'
-                              ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
                               : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                           }`}>
-                            {crew.role}
+                            {displayRole}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -2086,12 +2819,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         </td>
                         <td className="py-3 px-4">
                           {assignedFleet ? (
-                            <div className="flex items-center gap-1.5 font-mono font-bold text-slate-200">
-                              <Truck className="w-3.5 h-3.5 text-blue-400" />
-                              <span>{assignedFleet.plateNumber}</span>
-                              {assignedFleet.initialCode && (
-                                <span className="text-[10px] text-indigo-400">({assignedFleet.initialCode})</span>
-                              )}
+                            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 font-mono font-bold text-indigo-300 text-xs">
+                              <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>{assignedFleet.initialCode || assignedFleet.plateNumber}</span>
                             </div>
                           ) : (
                             <span className="text-[11px] text-slate-500 italic">Standby Pool</span>
@@ -2109,7 +2839,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center">
                             <button
                               type="button"
                               onClick={() => handleEditCrewClick(crew)}
@@ -2117,14 +2847,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                               title="Edit Data Kru"
                             >
                               <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteCrewClick(crew)}
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 transition cursor-pointer"
-                              title="Hapus Kru"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -2140,7 +2862,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
       {/* Crews Content: Cards Grid View */}
       {activeTab === 'crews' && viewMode === 'cards' && (
-        filteredCrews.length === 0 ? (
+        sortedCrews.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-400">
             <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
             <p className="font-semibold text-slate-300">Tidak ada kru ditemukan</p>
@@ -2148,9 +2870,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCrews.map(crew => {
+            {sortedCrews.map(crew => {
               const { isActive } = getCrewIntegratedStatus(crew);
               const perf = getCrewDynamicPerformance(crew);
+              const displayRole = normalizeCrewRoleLabel(crew.role);
               return (
                 <div key={crew.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
                   <div className="flex items-center justify-between">
@@ -2165,7 +2888,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             Cabang {branchStore.getCrewBranch(crew.id, crew.name).name}
                           </span>
                         </div>
-                        <span className="text-[11px] text-slate-400">{crew.role}</span>
+                        <span className="text-[11px] text-slate-400">{displayRole}</span>
                       </div>
                     </div>
 
@@ -2211,7 +2934,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     </button>
                   </div>
 
-                  {/* Edit & Hapus Buttons */}
+                  {/* Edit Button */}
                   <div className="pt-2.5 border-t border-slate-800 flex items-center justify-end gap-2 text-xs">
                     <button
                       onClick={() => handleEditCrewClick(crew)}
@@ -2219,13 +2942,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     >
                       <Edit3 className="w-3.5 h-3.5 text-blue-400" />
                       <span>Edit</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCrewClick(crew)}
-                      className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Hapus</span>
                     </button>
                   </div>
                 </div>
@@ -2274,19 +2990,58 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             </div>
 
             <form onSubmit={handleCreateFleet} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {(() => {
+                const selectedNewBranch = branches.find(b => b.id === newFleetBranchId) || branches[0];
+                const newBranchCrews = getBranchScopedCrews(newFleetBranchId);
+                const branchDropdownOptions: FleetDropdownOption[] = branches.map(b => ({
+                  value: b.id,
+                  label: `Cabang ${b.name} (${b.city})`,
+                  sublabel: `Wilayah Operasional ${b.city}`,
+                  Icon: Building2,
+                  iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                }));
+                const picCrewDropdownOptions: FleetDropdownOption[] = [
+                  {
+                    value: '',
+                    label: `Standby / Pool ${selectedNewBranch?.name || 'Cabang'} (Belum Ada PIC)`,
+                    sublabel: 'Belum ditugaskan ke kru tertentu',
+                    dotClass: 'bg-slate-400'
+                  },
+                  ...newBranchCrews.map(c => {
+                    const otherFleetObj = c.currentFleetId
+                      ? fleets.find(f => f.id === c.currentFleetId)
+                      : null;
+                    return {
+                      value: c.id,
+                      label: c.name,
+                      sublabel: otherFleetObj
+                        ? `Aktif di ${otherFleetObj.initialCode || otherFleetObj.plateNumber}`
+                        : `Cabang ${selectedNewBranch?.name || ''}`,
+                      dotClass: otherFleetObj ? 'bg-amber-400' : 'bg-emerald-400',
+                      badge: otherFleetObj ? (otherFleetObj.initialCode || otherFleetObj.plateNumber) : undefined,
+                      badgeTone: 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                    };
+                  })
+                ];
+
+                return (
               <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1 overscroll-contain">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <label className="text-slate-400 block mb-1">Cabang Armada *</label>
-                  <select
+                  <FleetFormDropdown
                     value={newFleetBranchId}
-                    onChange={(e) => setNewFleetBranchId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 font-bold cursor-pointer"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
-                    ))}
-                  </select>
+                    onChange={(nextBranchId) => {
+                      setNewFleetBranchId(nextBranchId);
+                      const allowedCrews = getBranchScopedCrews(nextBranchId);
+                      if (newFleetAssignedCrewId && !allowedCrews.some(c => c.id === newFleetAssignedCrewId)) {
+                        setNewFleetAssignedCrewId('');
+                      }
+                    }}
+                    options={branchDropdownOptions}
+                    placeholder="Pilih Cabang Armada..."
+                    accent="emerald"
+                  />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Nomor Polisi (Plat)</label>
@@ -2299,7 +3054,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                       setNewFleet({ ...newFleet, plateNumber: e.target.value.toUpperCase() });
                       if (fleetFormErrors.plateNumber) setFleetFormErrors({ ...fleetFormErrors, plateNumber: '' });
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white font-mono uppercase ${
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-white placeholder:text-slate-500/70 font-mono uppercase ${
                       fleetFormErrors.plateNumber ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
                     }`}
                   />
@@ -2312,24 +3067,22 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Tipe Kendaraan</label>
-                  <select
+                  <FleetFormDropdown
                     value={newFleet.vehicleType}
-                    onChange={(e) => {
-                      const vType = e.target.value as VehicleType;
-                      setNewFleet({
-                        ...newFleet,
-                        vehicleType: vType,
-                        boxCapacityM3: getDefaultBoxCapacityM3(vType, newFleet.brand),
-                        boxDimensions: getDefaultBoxDimensions(vType, newFleet.brand)
-                      });
+                    onChange={(val) => {
+                      setNewFleet({ ...newFleet, vehicleType: val as VehicleType });
+                      if (fleetFormErrors.vehicleType) setFleetFormErrors({ ...fleetFormErrors, vehicleType: '' });
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                  >
-                    <option value="Pick Up Box">Pick Up Box</option>
-                    <option value="Engkel STD">Engkel STD</option>
-                    <option value="Engkel Long">Engkel Long</option>
-                    <option value="Double STD">Double STD</option>
-                  </select>
+                    options={FLEET_VEHICLE_TYPE_OPTIONS}
+                    placeholder="Pilih Tipe Kendaraan..."
+                    hasError={Boolean(fleetFormErrors.vehicleType)}
+                  />
+                  {fleetFormErrors.vehicleType && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{fleetFormErrors.vehicleType}</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -2344,7 +3097,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     setNewFleet({ ...newFleet, initialCode: e.target.value.toUpperCase() });
                     if (fleetFormErrors.initialCode) setFleetFormErrors({ ...fleetFormErrors, initialCode: '' });
                   }}
-                  className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white font-mono uppercase ${
+                  className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-white placeholder:text-slate-500/70 font-mono uppercase ${
                     fleetFormErrors.initialCode ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
                   }`}
                 />
@@ -2359,25 +3112,22 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-400 block mb-1">Merk Mobil</label>
-                  <select
+                  <FleetFormDropdown
                     value={newFleet.brand}
-                    onChange={(e) => {
-                      const brand = e.target.value;
-                      setNewFleet({
-                        ...newFleet,
-                        brand,
-                        boxCapacityM3: getDefaultBoxCapacityM3(newFleet.vehicleType, brand),
-                        boxDimensions: getDefaultBoxDimensions(newFleet.vehicleType, brand)
-                      });
+                    onChange={(brand) => {
+                      setNewFleet({ ...newFleet, brand });
+                      if (fleetFormErrors.brand) setFleetFormErrors({ ...fleetFormErrors, brand: '' });
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                  >
-                    <option value="Mitsubishi L300">Mitsubishi L300</option>
-                    <option value="Traga">Traga</option>
-                    <option value="Mitsubishi Canter">Mitsubishi Canter</option>
-                    <option value="Hino">Hino</option>
-                    <option value="Isuzu">Isuzu</option>
-                  </select>
+                    options={FLEET_BRAND_OPTIONS}
+                    placeholder="Pilih Merk Mobil..."
+                    hasError={Boolean(fleetFormErrors.brand)}
+                  />
+                  {fleetFormErrors.brand && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{fleetFormErrors.brand}</span>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
@@ -2387,7 +3137,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     placeholder="Contoh: 2477 CC"
                     value={newFleet.engineCc}
                     onChange={(e) => setNewFleet({ ...newFleet, engineCc: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder:text-slate-500/70"
                   />
                 </div>
               </div>
@@ -2395,34 +3145,43 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-400 block mb-1">Tahun Produksi</label>
-                  <select
-                    value={newFleet.year}
-                    onChange={(e) => setNewFleet({ ...newFleet, year: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                  >
-                    {Array.from({ length: new Date().getFullYear() - 1990 + 1 }, (_, i) => new Date().getFullYear() - i).map(y => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
+                  <FleetFormDropdown
+                    value={newFleet.year ? String(newFleet.year) : ''}
+                    onChange={(val) => {
+                      setNewFleet({ ...newFleet, year: parseInt(val, 10) || 0 });
+                      if (fleetFormErrors.year) setFleetFormErrors({ ...fleetFormErrors, year: '' });
+                    }}
+                    options={FLEET_YEAR_OPTIONS}
+                    placeholder="Pilih Tahun..."
+                    searchable
+                    searchPlaceholder="Cari tahun..."
+                    hasError={Boolean(fleetFormErrors.year)}
+                    minMenuWidth={180}
+                  />
+                  {fleetFormErrors.year && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{fleetFormErrors.year}</span>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1 flex items-center justify-between">
-                    <span>Kubikasi Box (m³)</span>
-                    <span className="text-[10px] text-cyan-400 font-medium">Volume CBM</span>
+                    <span>Kubikasi Luar (m³)</span>
+                    <span className="text-[10px] text-cyan-400 font-medium">Otomatis P × L × T</span>
                   </label>
                   <input
-                    type="number"
-                    step="0.1"
-                    min="1"
-                    max="100"
-                    required
-                    placeholder="Contoh: 5.5"
-                    value={newFleet.boxCapacityM3 || ''}
-                    onChange={(e) => {
-                      setNewFleet({ ...newFleet, boxCapacityM3: parseFloat(e.target.value) || 0 });
-                      if (fleetFormErrors.boxCapacityM3) setFleetFormErrors({ ...fleetFormErrors, boxCapacityM3: '' });
-                    }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white font-mono ${
+                    type="text"
+                    readOnly
+                    placeholder="Otomatis dari P x L x T"
+                    value={
+                      calculateOuterCubicationFromDimensions(newFleet.boxDimensions) !== null
+                        ? String(calculateOuterCubicationFromDimensions(newFleet.boxDimensions))
+                        : newFleet.boxCapacityM3 > 0
+                        ? String(newFleet.boxCapacityM3)
+                        : ''
+                    }
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-900/70 border text-cyan-300 placeholder:text-slate-500/70 font-mono font-bold cursor-not-allowed ${
                       fleetFormErrors.boxCapacityM3 ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
                     }`}
                   />
@@ -2442,17 +3201,30 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     type="date"
                     value={newFleet.lastMaintenance}
                     onChange={(e) => setNewFleet({ ...newFleet, lastMaintenance: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 ${
+                      newFleet.lastMaintenance ? 'text-white' : 'text-slate-500'
+                    }`}
                   />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Dimensi Box (P x L x T)</label>
                   <input
                     type="text"
-                    placeholder="Contoh: 2.4 x 1.6 x 1.4 m"
+                    placeholder={`Contoh: ${getDefaultBoxDimensions(newFleet.vehicleType || 'Pick Up Box', newFleet.brand || 'Mitsubishi L300')}`}
                     value={newFleet.boxDimensions || ''}
-                    onChange={(e) => setNewFleet({ ...newFleet, boxDimensions: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                    onChange={(e) => {
+                      const nextDim = e.target.value;
+                      const calcGross = calculateOuterCubicationFromDimensions(nextDim);
+                      setNewFleet({
+                        ...newFleet,
+                        boxDimensions: nextDim,
+                        boxCapacityM3: calcGross !== null ? calcGross : 0
+                      });
+                      if (calcGross !== null && fleetFormErrors.boxCapacityM3) {
+                        setFleetFormErrors({ ...fleetFormErrors, boxCapacityM3: '' });
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder:text-slate-500/70 font-mono"
                   />
                 </div>
               </div>
@@ -2469,7 +3241,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     required
                     value={newFleet.taxDueDate}
                     onChange={(e) => setNewFleet({ ...newFleet, taxDueDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 ${
+                      newFleet.taxDueDate ? 'text-white' : 'text-slate-500'
+                    }`}
                   />
                 </div>
                 <div>
@@ -2482,47 +3256,50 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     required
                     value={newFleet.stnkExpiryDate}
                     onChange={(e) => setNewFleet({ ...newFleet, stnkExpiryDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 ${
+                      newFleet.stnkExpiryDate ? 'text-white' : 'text-slate-500'
+                    }`}
                   />
                 </div>
               </div>
 
-              {/* PIC atau Kru yang Ditugaskan */}
-              <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between">
+              {/* PIC atau Kru yang Ditugaskan (Tersaring Ketat per Cabang) */}
+              <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between gap-2">
                   <label className="text-slate-300 font-semibold flex items-center gap-1.5 text-xs">
-                    <UserCheck className="w-4 h-4 text-blue-400" />
+                    <UserCheck className="w-4 h-4 text-blue-400 shrink-0" />
                     <span>PIC / Kru yang Ditugaskan (Opsional)</span>
                   </label>
-                  {newFleetAssignedCrewId && (
-                    <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded">
-                      Terpilih
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-md">
+                      {selectedNewBranch?.name || 'Cabang'} · {newBranchCrews.length} Kru
                     </span>
-                  )}
+                    {newFleetAssignedCrewId && (
+                      <span className="text-[10px] text-blue-400 font-bold bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 rounded-md">
+                        Terpilih
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <select
+                <FleetFormDropdown
                   value={newFleetAssignedCrewId}
-                  onChange={(e) => setNewFleetAssignedCrewId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-medium text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="">-- Standby / Pool Banyuwangi (Belum Ada PIC) --</option>
-                  {crews.map(c => {
-                    const isOther = c.currentFleetId;
-                    const otherFleetObj = isOther ? fleets.find(f => f.id === c.currentFleetId) : null;
-                    return (
-                      <option key={c.id} value={c.id}>
-                        {c.name} • {c.role} ({c.licenseType}){isOther ? ` [Tugas di ${otherFleetObj?.plateNumber || 'Armada Lain'}]` : ' [Standby/Ready]'}
-                      </option>
-                    );
-                  })}
-                </select>
+                  onChange={(val) => setNewFleetAssignedCrewId(val)}
+                  options={picCrewDropdownOptions}
+                  placeholder={`Standby / Pool ${selectedNewBranch?.name || 'Cabang'} (Belum Ada PIC)`}
+                  searchable
+                  searchPlaceholder={`Cari kru Cabang ${selectedNewBranch?.name || ''}...`}
+                  emptyText={`Tidak ada kru aktif pada Cabang ${selectedNewBranch?.name || 'ini'}.`}
+                  minMenuWidth={280}
+                />
                 <p className="text-[10px] text-slate-400">
-                  Tugaskan pengemudi atau helper penanggung jawab kendaraan ini sejak awal registrasi.
+                  Menampilkan kru aktif khusus Cabang {selectedNewBranch?.name || 'terpilih'} saja agar data antar cabang tidak tercampur.
                 </p>
               </div>
 
               </div>
+                );
+              })()}
 
               {/* Sticky Footer Daftarkan Armada */}
               <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-between gap-3 shadow-lg z-10">
@@ -2540,9 +3317,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer active:scale-95 transition"
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center justify-center whitespace-nowrap cursor-pointer active:scale-95 transition"
                   >
-                    <Plus className="w-4 h-4" />
                     <span>Daftarkan &amp; Simpan Armada</span>
                   </button>
                 </div>
@@ -2706,15 +3482,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <label className="text-slate-400 block mb-1">Cabang Armada *</label>
-                  <select
+                  <FleetFormDropdown
                     value={editingFleetBranchId}
-                    onChange={(e) => setEditingFleetBranchId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 font-bold cursor-pointer"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
-                    ))}
-                  </select>
+                    onChange={(nextBranchId) => {
+                      setEditingFleetBranchId(nextBranchId);
+                      const allowedCrews = getBranchScopedCrews(nextBranchId);
+                      if (editingAssignedCrewId && !allowedCrews.some(c => c.id === editingAssignedCrewId)) {
+                        setEditingAssignedCrewId('');
+                      }
+                    }}
+                    options={branches.map(b => ({
+                      value: b.id,
+                      label: `Cabang ${b.name} (${b.city})`,
+                      sublabel: `Wilayah Operasional ${b.city}`,
+                      Icon: Building2,
+                      iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    }))}
+                    placeholder="Pilih Cabang Armada..."
+                    accent="emerald"
+                  />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Nomor Polisi (Plat)</label>
@@ -2727,7 +3513,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                       setEditingFleet({ ...editingFleet, plateNumber: e.target.value.toUpperCase() });
                       if (fleetFormErrors.plateNumber) setFleetFormErrors({ ...fleetFormErrors, plateNumber: '' });
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white font-mono uppercase ${
+                    className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-white font-mono uppercase ${
                       fleetFormErrors.plateNumber ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
                     }`}
                   />
@@ -2740,24 +3526,26 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Tipe Kendaraan</label>
-                  <select
+                  <FleetFormDropdown
                     value={editingFleet.vehicleType}
-                    onChange={(e) => {
-                      const vType = e.target.value as VehicleType;
+                    onChange={(val) => {
+                      const vType = val as VehicleType;
+                      const nextDim = getDefaultBoxDimensions(vType, editingFleet.brand);
+                      const nextGross =
+                        calculateOuterCubicationFromDimensions(nextDim) ??
+                        getDefaultBoxCapacityM3(vType, editingFleet.brand);
+                      const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
                       setEditingFleet({
                         ...editingFleet,
                         vehicleType: vType,
-                        boxCapacityM3: getDefaultBoxCapacityM3(vType, editingFleet.brand),
-                        boxDimensions: getDefaultBoxDimensions(vType, editingFleet.brand)
+                        boxDimensions: nextDim,
+                        boxCapacityM3: nextGross,
+                        boxInnerCapacityM3: Number((nextGross * (mul / 100)).toFixed(2))
                       });
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                  >
-                    <option value="Pick Up Box">Pick Up Box</option>
-                    <option value="Engkel STD">Engkel STD</option>
-                    <option value="Engkel Long">Engkel Long</option>
-                    <option value="Double STD">Double STD</option>
-                  </select>
+                    options={FLEET_VEHICLE_TYPE_OPTIONS}
+                    placeholder="Pilih Tipe Kendaraan..."
+                  />
                 </div>
               </div>
 
@@ -2818,35 +3606,34 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-400 block mb-1">Merk Mobil</label>
-                  <select
+                  <FleetFormDropdown
                     value={editingFleet.brand || 'Mitsubishi L300'}
-                    onChange={(e) => {
-                      const brand = e.target.value;
+                    onChange={(brand) => {
+                      const nextDim = getDefaultBoxDimensions(editingFleet.vehicleType, brand);
+                      const nextGross =
+                        calculateOuterCubicationFromDimensions(nextDim) ??
+                        getDefaultBoxCapacityM3(editingFleet.vehicleType, brand);
+                      const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
                       setEditingFleet({
                         ...editingFleet,
                         brand,
-                        boxCapacityM3: getDefaultBoxCapacityM3(editingFleet.vehicleType, brand),
-                        boxDimensions: getDefaultBoxDimensions(editingFleet.vehicleType, brand)
+                        boxDimensions: nextDim,
+                        boxCapacityM3: nextGross,
+                        boxInnerCapacityM3: Number((nextGross * (mul / 100)).toFixed(2))
                       });
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                  >
-                    <option value="Mitsubishi L300">Mitsubishi L300</option>
-                    <option value="Traga">Traga</option>
-                    <option value="Mitsubishi Canter">Mitsubishi Canter</option>
-                    <option value="Hino">Hino</option>
-                    <option value="Isuzu">Isuzu</option>
-                  </select>
+                    options={FLEET_BRAND_OPTIONS}
+                    placeholder="Pilih Merk Mobil..."
+                  />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
                   <input
                     type="text"
-                    required
                     placeholder="Contoh: 2477 CC"
                     value={editingFleet.engineCc || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, engineCc: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
                   />
                 </div>
               </div>
@@ -2854,24 +3641,41 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-400 block mb-1">Tahun Produksi</label>
-                  <select
-                    value={editingFleet.year || new Date().getFullYear()}
-                    onChange={(e) => setEditingFleet({ ...editingFleet, year: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    {Array.from({ length: new Date().getFullYear() - 1990 + 1 }, (_, i) => new Date().getFullYear() - i).map(y => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
+                  <FleetFormDropdown
+                    value={String(editingFleet.year || new Date().getFullYear())}
+                    onChange={(val) => setEditingFleet({ ...editingFleet, year: parseInt(val, 10) })}
+                    options={FLEET_YEAR_OPTIONS}
+                    placeholder="Pilih Tahun..."
+                    searchable
+                    searchPlaceholder="Cari tahun..."
+                    minMenuWidth={180}
+                  />
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">Tanggal Terakhir Servis / Uji KIR</label>
+                  <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                    <span>Tanggal Terakhir Servis / Uji KIR</span>
+                    <span className="text-[10px] text-teal-400 font-medium">Jatuh Tempo KIR</span>
+                  </label>
                   <input
                     type="date"
-                    value={editingFleet.lastMaintenance || ''}
-                    onChange={(e) => setEditingFleet({ ...editingFleet, lastMaintenance: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    value={editingFleet.lastMaintenance || editingFleet.kirExpiryDate || ''}
+                    onChange={(e) =>
+                      setEditingFleet({
+                        ...editingFleet,
+                        lastMaintenance: e.target.value,
+                        kirExpiryDate: e.target.value
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
                   />
+                  {(editingFleet.lastMaintenance || editingFleet.kirExpiryDate) && (
+                    <div className="text-[10px] text-teal-400 mt-1 font-medium flex items-center justify-between">
+                      <span>{formatIndoDate(editingFleet.lastMaintenance || editingFleet.kirExpiryDate)}</span>
+                      <span className={getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.lastMaintenance || editingFleet.kirExpiryDate).label}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2887,92 +3691,109 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Dimensi Box Luar (P x L x T)</label>
-                    <input
-                      type="text"
-                      placeholder="Contoh: 4.2 x 1.8 x 1.8 m"
-                      value={editingFleet.boxDimensions || ''}
-                      onChange={(e) => setEditingFleet({ ...editingFleet, boxDimensions: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1 flex items-center justify-between">
-                      <span>Kubikasi Luar (m³)</span>
-                      <span className="text-[10px] text-cyan-400 font-medium">Gross CBM</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="1"
-                      max="100"
-                      required
-                      placeholder="Contoh: 14.0"
-                      value={editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet)}
-                      onChange={(e) => {
-                        const gross = parseFloat(e.target.value) || 0;
-                        const mul = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
-                        setEditingFleet({
-                          ...editingFleet,
-                          boxCapacityM3: gross,
-                          boxInnerCapacityM3: Number((gross * (mul / 100)).toFixed(2))
-                        });
-                      }}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  const computedGrossFromDim = calculateOuterCubicationFromDimensions(editingFleet.boxDimensions);
+                  const activeGrossM3 =
+                    computedGrossFromDim !== null
+                      ? computedGrossFromDim
+                      : editingFleet.boxCapacityM3 !== undefined
+                      ? editingFleet.boxCapacityM3
+                      : getFleetBoxCapacity(editingFleet);
+                  const activeMul =
+                    editingFleet.boxInnerMultiplierPercent !== undefined
+                      ? editingFleet.boxInnerMultiplierPercent
+                      : 90;
+                  const activeInnerM3 = Number((activeGrossM3 * (activeMul / 100)).toFixed(2));
 
-                {/* Pengali Dimensi Dalam Box (... %) */}
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
-                  <div>
-                    <label className="text-cyan-300 font-bold block mb-1 flex items-center justify-between text-xs">
-                      <span>Faktor Pengali Dimensi Dalam</span>
-                      <span className="text-amber-400 font-mono font-black">{editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}%</span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="50"
-                        max="100"
-                        step="1"
-                        required
-                        value={editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}
-                        onChange={(e) => {
-                          const mul = parseInt(e.target.value) || 90;
-                          const gross = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
-                          setEditingFleet({
-                            ...editingFleet,
-                            boxInnerMultiplierPercent: mul,
-                            boxInnerCapacityM3: Number((gross * (mul / 100)).toFixed(2))
-                          });
-                        }}
-                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500/50 text-amber-300 font-mono font-black text-xs"
-                        placeholder="90"
-                      />
-                      <span className="text-xs font-bold text-slate-400">%</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      Dimensi box dikali {editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90}% karena tebal dinding luar &amp; dalam berbeda.
-                    </span>
-                  </div>
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-slate-400 block mb-1">Dimensi Box Luar (P x L x T)</label>
+                          <input
+                            type="text"
+                            placeholder="Contoh: 5,9 x 1,9 x 2,09"
+                            value={editingFleet.boxDimensions || ''}
+                            onChange={(e) => {
+                              const nextDim = e.target.value;
+                              const nextGross = calculateOuterCubicationFromDimensions(nextDim);
+                              setEditingFleet({
+                                ...editingFleet,
+                                boxDimensions: nextDim,
+                                boxCapacityM3: nextGross !== null ? nextGross : 0,
+                                boxInnerCapacityM3:
+                                  nextGross !== null
+                                    ? Number((nextGross * (activeMul / 100)).toFixed(2))
+                                    : 0
+                              });
+                            }}
+                            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                            <span>Kubikasi Luar (m³)</span>
+                            <span className="text-[10px] text-cyan-400 font-medium">Otomatis P × L × T</span>
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={computedGrossFromDim !== null ? String(computedGrossFromDim) : activeGrossM3 > 0 ? String(activeGrossM3) : '0'}
+                            title="Dihitung otomatis dari perkalian Dimensi Box Luar (P × L × T)"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-700/80 text-cyan-300 font-mono font-bold text-xs cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
 
-                  <div className="bg-cyan-950/40 p-2.5 rounded-lg border border-cyan-500/40 flex flex-col justify-between">
-                    <span className="text-[10px] font-bold text-cyan-300">
-                      Hasil Kubikasi Dalam (Netto):
-                    </span>
-                    <div className="text-lg font-black text-white font-mono">
-                      {editingFleet.boxInnerCapacityM3 !== undefined
-                        ? editingFleet.boxInnerCapacityM3
-                        : Number(((editingFleet.boxCapacityM3 || getFleetBoxCapacity(editingFleet)) * ((editingFleet.boxInnerMultiplierPercent || 90) / 100)).toFixed(2))} <span className="text-xs text-cyan-400">m³</span>
-                    </div>
-                    <span className="text-[10px] text-emerald-400 font-medium">
-                      ✓ Kapasitas bersih efektif muat
-                    </span>
-                  </div>
-                </div>
+                      {/* Pengali Dimensi Dalam Box (... %) */}
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                        <div>
+                          <label className="text-cyan-300 font-bold block mb-1 flex items-center justify-between text-xs">
+                            <span>Faktor Pengali Dimensi Dalam</span>
+                            <span className="text-amber-400 font-mono font-black">{activeMul}%</span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="50"
+                              max="100"
+                              step="1"
+                              required
+                              value={activeMul}
+                              onChange={(e) => {
+                                const mul = parseInt(e.target.value) || 90;
+                                setEditingFleet({
+                                  ...editingFleet,
+                                  boxCapacityM3: activeGrossM3,
+                                  boxInnerMultiplierPercent: mul,
+                                  boxInnerCapacityM3: Number((activeGrossM3 * (mul / 100)).toFixed(2))
+                                });
+                              }}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500/50 text-amber-300 font-mono font-black text-xs"
+                              placeholder="90"
+                            />
+                            <span className="text-xs font-bold text-slate-400">%</span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-1 block">
+                            Dimensi box dikali {activeMul}% karena tebal dinding luar &amp; dalam berbeda.
+                          </span>
+                        </div>
+
+                        <div className="bg-cyan-950/40 p-2.5 rounded-lg border border-cyan-500/40 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-cyan-300">
+                            Hasil Kubikasi Dalam (Netto):
+                          </span>
+                          <div className="text-lg font-black text-white font-mono">
+                            {activeInnerM3} <span className="text-xs text-cyan-400">m³</span>
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-medium">
+                            ✓ Kapasitas bersih efektif muat
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* 📑 BUKTI FILE DOKUMEN KIR PADA SETIAP ARMADA */}
@@ -3070,7 +3891,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </label>
                   <input
                     type="date"
-                    required
                     value={editingFleet.taxDueDate || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, taxDueDate: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
@@ -3078,7 +3898,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   {editingFleet.taxDueDate && (
                     <div className="text-[10px] text-blue-400 mt-1 font-medium flex items-center justify-between">
                       <span>{formatIndoDate(editingFleet.taxDueDate)}</span>
-                      <span>{getExpiryStatus(editingFleet.taxDueDate).label}</span>
+                      <span className={getExpiryStatus(editingFleet.taxDueDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.taxDueDate).label}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -3089,7 +3911,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   </label>
                   <input
                     type="date"
-                    required
                     value={editingFleet.stnkExpiryDate || ''}
                     onChange={(e) => setEditingFleet({ ...editingFleet, stnkExpiryDate: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
@@ -3097,47 +3918,86 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   {editingFleet.stnkExpiryDate && (
                     <div className="text-[10px] text-amber-400 mt-1 font-medium flex items-center justify-between">
                       <span>{formatIndoDate(editingFleet.stnkExpiryDate)}</span>
-                      <span>{getExpiryStatus(editingFleet.stnkExpiryDate).label}</span>
+                      <span className={getExpiryStatus(editingFleet.stnkExpiryDate).isExpired ? 'text-rose-500 font-bold' : ''}>
+                        {getExpiryStatus(editingFleet.stnkExpiryDate).label}
+                      </span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* PIC atau Kru yang Ditugaskan */}
-              <div className="bg-slate-950/75 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-slate-200 font-bold flex items-center gap-2 text-xs">
-                    <UserCheck className="w-4 h-4 text-blue-400" />
-                    <span>PIC / Kru yang Ditugaskan (Driver Utama)</span>
-                  </label>
-                  {editingAssignedCrewId ? (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                      Terkait Aktif
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
-                      Standby / Pool
-                    </span>
-                  )}
-                </div>
-
-                <select
-                  value={editingAssignedCrewId}
-                  onChange={(e) => setEditingAssignedCrewId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-medium text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="">-- Standby / Pool Banyuwangi (Belum Ada PIC Khusus) --</option>
-                  {crews.map(c => {
-                    const isCurrentThis = (c.currentFleetId === editingFleet.id || c.id === editingFleet.driverId);
+              {/* PIC atau Kru yang Ditugaskan (Tersaring Ketat per Cabang) */}
+              {(() => {
+                const selectedEditBranch = branches.find(b => b.id === editingFleetBranchId) || branches[0];
+                const editBranchCrews = getBranchScopedCrews(editingFleetBranchId);
+                const editPicOptions: FleetDropdownOption[] = [
+                  {
+                    value: '',
+                    label: `Standby / Pool ${selectedEditBranch?.name || 'Cabang'} (Belum Ada PIC)`,
+                    sublabel: 'Belum ditugaskan ke kru tertentu',
+                    dotClass: 'bg-slate-400'
+                  },
+                  ...editBranchCrews.map(c => {
+                    const isCurrentThis = c.currentFleetId === editingFleet.id || c.id === editingFleet.driverId;
                     const isOtherFleet = c.currentFleetId && c.currentFleetId !== editingFleet.id;
                     const otherFleetObj = isOtherFleet ? fleets.find(f => f.id === c.currentFleetId) : null;
-                    return (
-                      <option key={c.id} value={c.id}>
-                        {c.name} • {c.role} ({c.licenseType}){isCurrentThis ? ' [PIC Saat Ini]' : isOtherFleet ? ` [Ditugaskan di ${otherFleetObj?.plateNumber || 'Armada Lain'}]` : ' [Standby/Ready]'}
-                      </option>
-                    );
-                  })}
-                </select>
+                    return {
+                      value: c.id,
+                      label: c.name,
+                      sublabel: isCurrentThis
+                        ? 'PIC armada saat ini'
+                        : otherFleetObj
+                        ? `Aktif di ${otherFleetObj.initialCode || otherFleetObj.plateNumber}`
+                        : `Cabang ${selectedEditBranch?.name || ''}`,
+                      dotClass: isCurrentThis
+                        ? 'bg-blue-400'
+                        : otherFleetObj
+                        ? 'bg-amber-400'
+                        : 'bg-emerald-400',
+                      badge: isCurrentThis
+                        ? 'PIC Saat Ini'
+                        : otherFleetObj
+                        ? (otherFleetObj.initialCode || otherFleetObj.plateNumber)
+                        : undefined,
+                      badgeTone: isCurrentThis
+                        ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                        : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                    };
+                  })
+                ];
+                return (
+              <div className="bg-slate-950/75 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-slate-200 font-bold flex items-center gap-2 text-xs">
+                    <UserCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>PIC / Kru yang Ditugaskan</span>
+                  </label>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                      {selectedEditBranch?.name || 'Cabang'} · {editBranchCrews.length} Kru
+                    </span>
+                    {editingAssignedCrewId ? (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                        Terkait Aktif
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                        Standby / Pool
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <FleetFormDropdown
+                  value={editingAssignedCrewId}
+                  onChange={(val) => setEditingAssignedCrewId(val)}
+                  options={editPicOptions}
+                  placeholder={`Standby / Pool ${selectedEditBranch?.name || 'Cabang'} (Belum Ada PIC)`}
+                  searchable
+                  searchPlaceholder={`Cari kru Cabang ${selectedEditBranch?.name || ''}...`}
+                  emptyText={`Tidak ada kru aktif pada Cabang ${selectedEditBranch?.name || 'ini'}.`}
+                  minMenuWidth={280}
+                />
 
                 {editingAssignedCrewId ? (() => {
                   const selCrew = crews.find(c => c.id === editingAssignedCrewId);
@@ -3161,21 +4021,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   );
                 })() : (
                   <p className="text-[10px] text-slate-400">
-                    Pilih supir atau helper yang menjadi penanggung jawab operasional armada ini. Kru terpilih otomatis terhubung sebagai PIC resmi dan sinkron di dashboard serta histori penugasan.
+                    Menampilkan kru aktif khusus Cabang {selectedEditBranch?.name || 'terpilih'} saja agar data antar cabang tidak tercampur.
                   </p>
                 )}
               </div>
+                );
+              })()}
 
               </div>
 
               {/* Sticky Footer Simpan Perubahan */}
-              <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-between gap-3 shadow-lg z-10">
-                <div className="text-[11px] text-slate-300 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px]">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    Tersinkron Permanen ke Hostinger MySQL
-                  </span>
-                </div>
+              <div className="p-4 border-t border-slate-800 bg-slate-950/95 shrink-0 flex items-center justify-end gap-3 shadow-lg z-10">
                 <div className="flex items-center gap-2 ml-auto">
                   <button
                     type="button"
@@ -3196,7 +4052,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     {isSavingFleet ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                        <span>Menyimpan ke Hostinger...</span>
+                        <span>Menyimpan...</span>
                       </>
                     ) : (
                       <>
@@ -3234,56 +4090,90 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
             <form onSubmit={handleUpdateCrew} className="p-5 space-y-4 text-xs">
               <div>
-                <label className="text-slate-400 block mb-1">Cabang Penugasan *</label>
-                <select
+                <label className="text-slate-400 block mb-1.5 font-medium">Cabang Penugasan *</label>
+                <FleetFormDropdown
+                  accent="emerald"
                   value={editingCrewBranchId}
-                  onChange={(e) => setEditingCrewBranchId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 font-bold cursor-pointer mb-3"
-                >
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>Cabang {b.name} ({b.city})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setEditingCrewBranchId(val)}
+                  options={branches.map(b => ({
+                    value: b.id,
+                    label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')}`,
+                    sublabel: b.city ? `Wilayah Operasional ${b.city}` : undefined,
+                    Icon: Building2,
+                    iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  }))}
+                />
               </div>
+
               <div>
-                <label className="text-slate-400 block mb-1">Nama Lengkap Kru</label>
+                <label className="text-slate-400 block mb-1.5 font-medium">Nama Lengkap Kru</label>
                 <input
                   type="text"
                   required
                   placeholder="Contoh: Joko Supriyanto"
                   value={editingCrew.name}
                   onChange={(e) => setEditingCrew({ ...editingCrew, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-hidden focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Peran Tugas</label>
-                <select
-                  value={editingCrew.role}
-                  onChange={(e) => setEditingCrew({ ...editingCrew, role: e.target.value as any })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                >
-                  <option value="Driver Utama">Driver Utama</option>
-                  <option value="Driver Cadangan">Driver Cadangan</option>
-                  <option value="Kernet / Helper">Kernet / Helper</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Jenis SIM</label>
-                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Nomor Handphone / WhatsApp</label>
-                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
-                </div>
+                <label className="text-slate-400 block mb-1.5 font-medium">Peran Tugas</label>
+                <FleetFormDropdown
+                  value={normalizeCrewRoleLabel(editingCrew.role)}
+                  onChange={(val) => setEditingCrew({ ...editingCrew, role: val as any })}
+                  options={[
+                    {
+                      value: 'Driver',
+                      label: 'Driver',
+                      sublabel: 'Pengemudi armada pengiriman',
+                      dotClass: 'bg-blue-400'
+                    },
+                    {
+                      value: 'Helper',
+                      label: 'Helper',
+                      sublabel: 'Pendamping pengemudi & bongkar muat',
+                      dotClass: 'bg-amber-400'
+                    }
+                  ]}
+                />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Nomor Registrasi SIM</label>
-                <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
+                <label className="text-slate-400 block mb-1.5 font-medium">SIM (Surat Izin Mengemudi)</label>
+                <FleetFormDropdown
+                  value={normalizeSimTypeLabel(editingCrew.licenseType || editingCrew.licenseNumber)}
+                  onChange={(val) =>
+                    setEditingCrew({
+                      ...editingCrew,
+                      licenseType: val,
+                      licenseNumber: val
+                    })
+                  }
+                  options={[
+                    {
+                      value: 'SIM A',
+                      label: 'SIM A',
+                      sublabel: 'Kendaraan operasional & Pick Up Box',
+                      Icon: CreditCard,
+                      iconTone: 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                    },
+                    {
+                      value: 'SIM B',
+                      label: 'SIM B',
+                      sublabel: 'Kendaraan angkutan barang & truk',
+                      Icon: CreditCard,
+                      iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                    },
+                    {
+                      value: 'SIM B1',
+                      label: 'SIM B1',
+                      sublabel: 'Truk Engkel & Double Box (JBB > 3.500 kg)',
+                      Icon: CreditCard,
+                      iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    }
+                  ]}
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

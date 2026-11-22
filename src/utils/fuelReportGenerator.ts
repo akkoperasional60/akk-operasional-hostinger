@@ -5,13 +5,16 @@ import { FUEL_TARGET_RATIOS } from '../data/fuelMockData';
 import { logisticsStore } from '../services/store';
 
 export interface WeekBounds {
-  weekKey: string;      // e.g. "2026-W38"
-  weekNumber: number;   // 38
+  weekKey: string;      // e.g. "2026-11-W1"
+  weekNumber: number;   // 1..5
+  weekOfMonth: number;  // 1..5
+  monthKey: string;     // e.g. "2026-11"
+  monthLabel: string;   // e.g. "November 2026"
   year: number;         // 2026
-  startDate: string;    // YYYY-MM-DD (Monday)
-  endDate: string;      // YYYY-MM-DD (Sunday)
-  weekLabel: string;    // "Minggu ke-38 (15 Sep - 21 Sep 2026)"
-  shortLabel: string;   // "15 - 21 Sep 2026"
+  startDate: string;    // YYYY-MM-DD
+  endDate: string;      // YYYY-MM-DD
+  weekLabel: string;    // "Minggu 1 (1 - 7 Nov 2026)"
+  shortLabel: string;   // "1 - 7 Nov 2026"
 }
 
 export interface WeeklyFleetFuelSummary {
@@ -60,50 +63,46 @@ export interface WeeklyDriverFuelSummary {
 }
 
 /**
- * Calculate Monday-to-Sunday week bounds for any given ISO date string.
+ * Calculate calendar week-of-month bounds (Minggu 1..5: days 1-7, 8-14, 15-21, 22-28, 29-end) for any ISO date string.
  */
 export function getWeekBounds(dateStr: string): WeekBounds {
-  // Normalize date string (YYYY-MM-DD)
-  const cleanDateStr = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  const parts = cleanDateStr.split('-');
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
+  const cleanDateStr = (dateStr || '').includes('T') ? dateStr.split('T')[0] : dateStr;
+  const parts = (cleanDateStr || '').split('-');
+  const now = new Date();
+  const parsedYear = parseInt(parts[0], 10);
+  const parsedMonth = parseInt(parts[1], 10);
+  const parsedDay = parseInt(parts[2], 10);
 
-  const d = new Date(year, month, day);
-  const dayOfWeek = d.getDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
-  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const year = !isNaN(parsedYear) ? parsedYear : now.getFullYear();
+  const monthIdx = !isNaN(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12 ? parsedMonth - 1 : now.getMonth();
+  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
+  const day = !isNaN(parsedDay) ? Math.min(Math.max(1, parsedDay), daysInMonth) : now.getDate();
 
-  const monday = new Date(year, month, day + diffToMonday);
-  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  const weekOfMonth = Math.min(5, Math.floor((day - 1) / 7) + 1);
+  const startDay = (weekOfMonth - 1) * 7 + 1;
+  const endDay = Math.min(daysInMonth, weekOfMonth * 7);
 
   const pad = (n: number) => n.toString().padStart(2, '0');
-  const startDate = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
-  const endDate = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
+  const monthNum = monthIdx + 1;
+  const monthKey = `${year}-${pad(monthNum)}`;
+  const startDate = `${monthKey}-${pad(startDay)}`;
+  const endDate = `${monthKey}-${pad(endDay)}`;
+  const weekKey = `${monthKey}-W${weekOfMonth}`;
 
-  // ISO 8601 week number calculation
-  const target = new Date(monday.valueOf());
-  const dayNr = (monday.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  }
-  const weekNumber = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
-  const isoYear = monday.getFullYear();
-  const weekKey = `${isoYear}-W${pad(weekNumber)}`;
+  const monthsShortId = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const monthsFullId = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
-  const monthsId = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-  const startFmt = `${monday.getDate()} ${monthsId[monday.getMonth()]}`;
-  const endFmt = `${sunday.getDate()} ${monthsId[sunday.getMonth()]} ${sunday.getFullYear()}`;
-  const shortLabel = `${startFmt} - ${endFmt}`;
-  const weekLabel = `Minggu ke-${weekNumber} (${shortLabel})`;
+  const monthLabel = `${monthsFullId[monthIdx]} ${year}`;
+  const shortLabel = `${startDay} - ${endDay} ${monthsShortId[monthIdx]} ${year}`;
+  const weekLabel = `Minggu ${weekOfMonth} (${shortLabel})`;
 
   return {
     weekKey,
-    weekNumber,
-    year: isoYear,
+    weekNumber: weekOfMonth,
+    weekOfMonth,
+    monthKey,
+    monthLabel,
+    year,
     startDate,
     endDate,
     weekLabel,
@@ -405,28 +404,28 @@ export function exportFuelReportToExcel(options: {
       'Inisial': l.initialCode || '-',
       'Tipe Kendaraan': l.vehicleType,
       'Driver': l.driverName,
+      'Helper': l.helperName || '-',
       'Jenis BBM': l.fuelType,
       'Volume (Liter)': l.liters,
       'Harga / Liter (Rp)': l.costPerLiter,
       'Total Biaya (Rp)': l.totalCost,
       'KM Awal': l.startOdometerKm,
-      'KM Akhir': l.endOdometerKm,
+      'KM Isi': l.endOdometerKm,
       'Jarak Tempuh (KM)': l.distanceKm,
       'Rasio (KM/L)': l.ratioKmPerLiter,
       'Target Rasio (KM/L)': l.targetRatio,
       'Konsumsi (Liter/KM)': l.literPerKm || Number((l.liters / l.distanceKm).toFixed(4)),
       'Status': l.efficiencyStatus,
       'Nama SPBU': l.gasStation,
-      'No Struk': l.receiptNumber || '-',
       'Rute Pengiriman': l.routeTrip || '-',
       'Catatan': l.notes || '-'
     }));
     const logWs = XLSX.utils.json_to_sheet(detailedData);
     logWs['!cols'] = [
       { wch: 5 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
-      { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
+      { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
       { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 14 },
-      { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 28 }, { wch: 16 },
+      { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 28 },
       { wch: 28 }, { wch: 24 }
     ];
     XLSX.utils.book_append_sheet(workbook, logWs, 'Detail_Log_BBM');

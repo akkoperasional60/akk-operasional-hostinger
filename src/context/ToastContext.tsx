@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bell, X, Truck, AlertTriangle, ShieldAlert, Clock, 
   Volume2, VolumeX, Sparkles, HelpCircle, RefreshCw, 
@@ -347,18 +346,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {/* 1. VISIBLE FLOATING TOASTS ON-SCREEN OVERLAYS                             */}
       {/* ========================================================================= */}
       <div className="fixed bottom-5 right-5 z-[999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
-        <AnimatePresence>
-          {visibleToasts.map((toast) => {
-            const isUrgent = toast.urgent;
-            
-            return (
-              <motion.div
-                key={toast.id}
-                layout
-                initial={{ opacity: 0, y: 50, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -20, scale: 0.95, transition: { duration: 0.2 } }}
-                className={`pointer-events-auto w-full p-4 rounded-xl border shadow-2xl flex gap-3.5 backdrop-blur-md relative overflow-hidden group ${
+        {visibleToasts.map((toast) => {
+          const isUrgent = toast.urgent;
+          
+          return (
+            <div
+              key={toast.id}
+              className={`pointer-events-auto w-full p-4 rounded-xl border shadow-2xl flex gap-3.5 backdrop-blur-md relative overflow-hidden group transition-all duration-200 animate-in fade-in slide-in-from-bottom-4 ${
                   toast.type === 'sla_warning'
                     ? 'bg-slate-900/95 border-amber-500/80 ring-2 ring-amber-500/30 text-amber-50 shadow-amber-500/10'
                     : toast.type === 'tax_kir_reminder'
@@ -478,35 +472,26 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
-              </motion.div>
+              </div>
             );
           })}
-        </AnimatePresence>
       </div>
 
       {/* ========================================================================= */}
       {/* 2. REUSABLE DRAWER PANEL: NOTIFICATION HISTORY & SIMULATION FEED         */}
       {/* ========================================================================= */}
-      <AnimatePresence>
-        {isDrawerOpen && (
-          <>
-            {/* Backdrop Overlay */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsDrawerOpen(false)}
-              className="fixed inset-0 bg-black z-[100] cursor-pointer"
-            />
-            
-            {/* Right Drawer */}
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-slate-900 border-l border-slate-800 z-[101] shadow-2xl flex flex-col overflow-hidden"
-            >
+      {isDrawerOpen && (
+        <>
+          {/* Backdrop Overlay */}
+          <div
+            onClick={() => setIsDrawerOpen(false)}
+            className="fixed inset-0 bg-black/50 z-[100] cursor-pointer transition-opacity duration-200"
+          />
+          
+          {/* Right Drawer */}
+          <div
+            className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-slate-900 border-l border-slate-800 z-[101] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
+          >
               {/* Header */}
               <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -726,10 +711,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   </div>
                 )}
               </div>
-            </motion.div>
+            </div>
           </>
         )}
-      </AnimatePresence>
     </ToastContext.Provider>
   );
 };

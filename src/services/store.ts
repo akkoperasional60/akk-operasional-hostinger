@@ -7,6 +7,7 @@ import {
   UserProfile,
   UserRole,
   UserApprovalStatus,
+  UserPermissions,
   CrewDeliveryHistory,
   AreaDeliveryStat,
   AreaApprovalRequest,
@@ -91,7 +92,8 @@ import {
   INITIAL_CREW_HISTORY,
   INITIAL_AREA_APPROVALS,
   INITIAL_SCANNED_DOCUMENTS,
-  resolveCanonicalFleetMeta
+  resolveCanonicalFleetMeta,
+  sortFleetsByCanonicalOrder
 } from '../data/mockData';
 import {
   INITIAL_SALES_ORDERS,
@@ -109,9 +111,9 @@ import {
   INITIAL_FUEL_LOGS,
   FUEL_TARGET_RATIOS
 } from '../data/fuelMockData';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { canAccess, canEdit, getDefaultPermissionsForRole, normalizeUserPermissions } from '../utils/rbac';
+import { branchStore, UserBranchPermissionEntry } from './branchStore';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
-import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
 import {
   createFleetInSupabase,
@@ -144,6 +146,7 @@ const STORAGE_KEYS = {
   DEVICES: 'akk_devices_v1',
   CURRENT_USER: 'akk_user_v2',
   AUTH_SESSION: 'akk_auth_session_active_v1',
+  SESSION_TOKEN: 'akk_session_token_v1',
   USERS: 'akk_users_list_v5',
   SUPABASE_CONFIG: 'akk_supabase_config_v1',
   CREW_HISTORY: 'akk_crew_history_v1',
@@ -164,6 +167,34 @@ const STORAGE_KEYS = {
   SCHEDULE_CHANGE_LOGS: 'akk_schedule_change_logs_v1',
   MESSAGES: 'akk_chat_messages_v1'
 };
+
+const MYSQL_BACKED_STORAGE_KEYS = new Set<string>([
+  STORAGE_KEYS.FLEETS,
+  STORAGE_KEYS.CREWS,
+  STORAGE_KEYS.STORES,
+  STORAGE_KEYS.SCHEDULES,
+  STORAGE_KEYS.CREW_HISTORY,
+  STORAGE_KEYS.AREA_APPROVALS,
+  STORAGE_KEYS.AREA_THRESHOLD,
+  STORAGE_KEYS.FUEL_LOGS,
+  STORAGE_KEYS.SCANNED_DOCUMENTS,
+  STORAGE_KEYS.SPARE_PARTS,
+  STORAGE_KEYS.SPARE_PART_USAGES,
+  STORAGE_KEYS.SALES_ORDERS,
+  STORAGE_KEYS.ADMIN_ACTIVITIES,
+  STORAGE_KEYS.ADMIN_SCHEDULES,
+  STORAGE_KEYS.LOADING_RECORDS,
+  STORAGE_KEYS.SKILL_PROFILES,
+  STORAGE_KEYS.JOBDESK_CONFIGS,
+  STORAGE_KEYS.IMAGES,
+  STORAGE_KEYS.SECURITY_LOGS,
+  STORAGE_KEYS.SCHEDULE_CHANGE_LOGS,
+  'akk_system_activities_v1',
+  'akk_admin_schedule_weeks_cache',
+  'akk_last_admin_schedule_sync_time',
+  'akk_last_admin_schedule_auto_synced',
+  'akk_fuel_logs_empty_init_v2'
+]);
 
 export const GUEST_USER_PROFILE: UserProfile = {
   id: 'guest',
@@ -520,6 +551,8 @@ class LogisticsStore {
   private securityLogs: SecurityGateLog[] = [];
   private scheduleChangeLogs: ScheduleChangeLogEntry[] = [];
   private messages: ChatMessage[] = [];
+  private adminScheduleWeeksCache: Record<string, any[]> = {};
+  private lastAdminScheduleWeeksList: any[] = [];
   private autoSyncStatus: AutoSyncStatus = {
     isSyncing: false,
     lastSyncTime: null,
@@ -534,23 +567,35 @@ class LogisticsStore {
   private middlewares: StoreMiddleware[] = [];
   private offlineScheduleQueue: OfflineScheduleStatusUpdate[] = [];
 
+  private isPreviewEnvironment(): boolean {
+    if (!import.meta?.env?.PROD) return true;
+    if (typeof window !== 'undefined') {
+      const host = (window.location.hostname || '').toLowerCase();
+      if (host.endsWith('.run.app') || host === 'localhost' || host === '127.0.0.1') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   constructor() {
-    const isProd = Boolean(import.meta.env.PROD);
-    this.offlineScheduleQueue = this.loadFromStorage('akk_offline_sync_queue', []);
+    const isProd = Boolean(import.meta?.env?.PROD) && !this.isPreviewEnvironment();
+    // Bersihkan kunci localStorage bisnis lama agar data tidak tersimpan di localStorage browser (100% MySQL Hostinger)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        MYSQL_BACKED_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+        Object.keys(localStorage).forEach((k) => {
+          if (k.startsWith('akk_admin_schedule_cache_')) {
+            localStorage.removeItem(k);
+          }
+        });
+      } catch {}
+    }
+
+    this.offlineScheduleQueue = [];
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.syncOfflineQueueToSupabase();
-      });
-      window.addEventListener('storage', (e) => {
-        if (e.key && Object.values(STORAGE_KEYS).includes(e.key)) {
-          this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
-          this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
-          this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
-          this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
-          this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
-          this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
-          this.notify();
-        }
       });
       setInterval(() => {
         if (navigator.onLine && this.offlineScheduleQueue.length > 0) {
@@ -558,82 +603,110 @@ class LogisticsStore {
         }
       }, 30000);
     }
-    this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
-    this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
-    this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
-    this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
-    this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, isProd ? [] : INITIAL_TRACKSOLID_DEVICES);
+    this.fleets = isProd ? [] : INITIAL_FLEETS;
+    this.crews = isProd ? [] : INITIAL_CREWS;
+    this.stores = [...INITIAL_STORES];
+    this.schedules = [];
+    this.devices = isProd ? [] : INITIAL_TRACKSOLID_DEVICES;
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
-    this.messages = this.loadFromStorage(STORAGE_KEYS.MESSAGES, INITIAL_CHAT_MESSAGES);
+    this.messages = [];
 
-    // Initial authentication session from sessionStorage (Menutup browser otomatis mereset sesi)
-    const sessionUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null;
-    if (sessionUserId) {
-      const activeMatch = this.users.find(u => u.id === sessionUserId && u.status === 'approved');
-      this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
-    } else {
-      this.currentUser = { ...GUEST_USER_PROFILE };
-    }
-
-    // Kosongkan jadwal awal secara otomatis (one-time migration v4) sesuai instruksi operasional
-    try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_schedules_empty_init_v4') !== 'true') {
-        this.schedules = [];
-        this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
-        localStorage.removeItem('akk_driver_cached_deliveries_v2');
-        localStorage.setItem('akk_schedules_empty_init_v4', 'true');
-      }
-    } catch {}
-
-    // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL.
-    if (!isProd && (!this.users || this.users.length === 0)) {
+    // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL in production.
+    // In preview environment, ensure INITIAL_PROFILES are merged so preview login always recognizes standard accounts.
+    if (!isProd) {
       const existingById = new Map((this.users || []).map(u => [u.id, u]));
-      this.users = INITIAL_PROFILES.map(initU => {
-        const existing = existingById.get(initU.id);
-        return {
-          ...(existing || {} as UserProfile),
-          ...initU,
-          password: undefined,
-          permissions: existing?.permissions || initU.permissions,
-          status: existing?.status || initU.status
-        } as UserProfile;
+      const existingByEmail = new Map(
+        (this.users || [])
+          .filter(u => u.email)
+          .map(u => [u.email.trim().toLowerCase(), u])
+      );
+      const mergedUsers: UserProfile[] = [...(this.users || [])];
+      INITIAL_PROFILES.forEach(initU => {
+        const cleanEmail = (initU.email || '').trim().toLowerCase();
+        const existing = existingById.get(initU.id) || (cleanEmail ? existingByEmail.get(cleanEmail) : undefined);
+        if (!existing) {
+          mergedUsers.push({
+            ...initU,
+            password: undefined
+          } as UserProfile);
+        }
       });
+      this.users = mergedUsers;
     }
     this.users = (this.users || []).map(u => ({ ...u, password: undefined } as UserProfile));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
+    // Initial authentication session from sessionStorage or localStorage
+    const sessionUserId =
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+    const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+
+    if (sessionUserId) {
+      const activeMatch =
+        this.users.find(u => u.id === sessionUserId && u.status === 'approved') ||
+        (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : undefined);
+      this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
+    } else if (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved') {
+      this.currentUser = { ...savedCurrentUser };
+      try {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, savedCurrentUser.id);
+        if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, savedCurrentUser.id);
+      } catch {}
+    } else {
+      this.currentUser = { ...GUEST_USER_PROFILE };
+    }
+
     // Sync active session if authenticated
     if (this.currentUser && this.currentUser.id !== 'guest') {
-      const match = this.users.find(u => u.id === this.currentUser.id && u.status === 'approved');
+      const match = this.users.find(u => (u.id === this.currentUser.id || (u.email && this.currentUser.email && u.email.toLowerCase() === this.currentUser.email.toLowerCase())) && u.status === 'approved');
       if (match) {
         this.currentUser = { ...match };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
+      } else if (this.currentUser.status === 'approved') {
+        this.users = [this.currentUser, ...this.users];
+        this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+        this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
       } else {
         this.currentUser = { ...GUEST_USER_PROFILE };
         try {
-          if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
-          }
+          if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
         } catch {}
       }
     }
-    this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
-    this.areaApprovals = this.loadFromStorage(STORAGE_KEYS.AREA_APPROVALS, isProd ? [] : INITIAL_AREA_APPROVALS);
-    this.areaThreshold = this.loadFromStorage(STORAGE_KEYS.AREA_THRESHOLD, 3);
-    this.salesOrders = this.loadFromStorage(STORAGE_KEYS.SALES_ORDERS, isProd ? [] : INITIAL_SALES_ORDERS);
-    this.adminActivities = this.loadFromStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, isProd ? [] : INITIAL_ADMIN_ACTIVITIES);
-    this.adminSchedules = this.loadFromStorage(STORAGE_KEYS.ADMIN_SCHEDULES, isProd ? [] : INITIAL_ADMIN_SCHEDULES);
-    this.loadingRecords = this.loadFromStorage(STORAGE_KEYS.LOADING_RECORDS, isProd ? [] : INITIAL_LOADING_RECORDS);
-    this.skillProfiles = this.loadFromStorage(STORAGE_KEYS.SKILL_PROFILES, isProd ? [] : INITIAL_SKILL_PROFILES);
-    this.jobdeskConfigs = this.loadFromStorage(STORAGE_KEYS.JOBDESK_CONFIGS, isProd ? [] : INITIAL_JOBDESK_CONFIGS);
-    this.spareParts = this.loadFromStorage(STORAGE_KEYS.SPARE_PARTS, isProd ? [] : INITIAL_SPARE_PARTS);
-    this.sparePartUsages = this.loadFromStorage(STORAGE_KEYS.SPARE_PART_USAGES, isProd ? [] : INITIAL_SPARE_PART_USAGES);
-    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, isProd ? [] : INITIAL_FUEL_LOGS);
-    this.imageRecords = this.loadFromStorage(STORAGE_KEYS.IMAGES, []);
-    this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, isProd ? [] : INITIAL_SCANNED_DOCUMENTS);
-    this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, isProd ? [] : INITIAL_SECURITY_LOGS);
-    this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS);
-    this.systemActivities = this.loadFromStorage('akk_system_activities_v1', []);
+    this.crewHistory = [];
+    this.areaApprovals = [];
+    this.areaThreshold = 3;
+    this.salesOrders = isProd ? [] : INITIAL_SALES_ORDERS;
+    this.adminActivities = isProd ? [] : INITIAL_ADMIN_ACTIVITIES;
+    this.adminSchedules = isProd ? [] : INITIAL_ADMIN_SCHEDULES;
+    this.loadingRecords = isProd ? [] : INITIAL_LOADING_RECORDS;
+    this.skillProfiles = isProd ? [] : INITIAL_SKILL_PROFILES;
+    this.jobdeskConfigs = isProd ? [] : INITIAL_JOBDESK_CONFIGS;
+    this.spareParts = isProd ? [] : INITIAL_SPARE_PARTS;
+    this.sparePartUsages = isProd ? [] : INITIAL_SPARE_PART_USAGES;
+    this.fuelLogs = [];
+    this.imageRecords = [];
+    this.scannedDocuments = [];
+    this.securityLogs = isProd ? [] : INITIAL_SECURITY_LOGS;
+    this.scheduleChangeLogs = isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS;
+    this.systemActivities = [];
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        if (this.isAuthenticated()) {
+          void this.hydrateSystemActivitiesFromServer();
+        }
+      }, 1800);
+    }
     // Legacy config object retained only so older UI state does not crash after migration.
     // No Supabase URL/key is embedded in the browser anymore; Hostinger MySQL is accessed via /api/*.
     const savedSupabaseConf = this.loadFromStorage(STORAGE_KEYS.SUPABASE_CONFIG, {
@@ -692,7 +765,7 @@ class LogisticsStore {
   }
 
   private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
-    const isProd = Boolean(import.meta.env.PROD);
+    const isProd = Boolean(import.meta?.env?.PROD) && !this.isPreviewEnvironment();
     let primarySuperAdmin: UserProfile | null = null;
     const seenIds = new Set<string>();
     const seenEmails = new Set<string>();
@@ -782,53 +855,34 @@ class LogisticsStore {
     // 1. Deduplicate Super Admin accounts so only 1 primary Super Admin exists
     this.users = this.deduplicateSuperAdmins(this.users);
 
-    // 2. Ensure each user has valid permissions initialized for their role (and fix partial logistics submenus for SPV Logistik / Operasional / Pengiriman)
-    const primaryLogisticsRoles = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'];
-    this.users = this.users.map(u => {
-      if (!u.permissions || !u.permissions.modules || Object.keys(u.permissions.modules).length === 0) {
-        return {
-          ...u,
-          permissions: {
-            modules: getDefaultPermissionsForRole(u.role)
-          }
-        };
-      }
-      if (primaryLogisticsRoles.includes(u.role)) {
-        const logMod = u.permissions.modules.logistics;
-        const activeSubCount = logMod?.subMenus
-          ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
-          : 0;
-        if (!logMod || !logMod.enabled || activeSubCount <= 1) {
-          const defaultMods = getDefaultPermissionsForRole(u.role);
-          return {
-            ...u,
-            permissions: {
-              modules: {
-                ...defaultMods,
-                ...u.permissions.modules,
-                logistics: defaultMods.logistics
-              }
-            }
-          };
-        }
-      }
-      return u;
-    });
+    // 2. Ensure each user has valid, normalized permissions for their role without overwriting custom read_only/none settings
+    this.users = this.users.map(u => ({
+      ...u,
+      permissions: normalizeUserPermissions(u.role, u.permissions)
+    }));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
-    if (this.currentUser) {
-      const matchedUser = this.users.find(u => u.id === this.currentUser.id || u.role === this.currentUser.role);
+    if (this.currentUser && this.currentUser.id !== 'guest') {
+      const currEmail = (this.currentUser.email || '').trim().toLowerCase();
+      const matchedUser = this.users.find(
+        u =>
+          u.id === this.currentUser.id ||
+          (currEmail && (u.email || '').trim().toLowerCase() === currEmail)
+      );
       if (matchedUser) {
         this.currentUser = {
-          ...matchedUser
+          ...matchedUser,
+          permissions: normalizeUserPermissions(matchedUser.role, matchedUser.permissions)
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
-      } else if (!this.currentUser.permissions) {
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
+      } else {
         this.currentUser = {
           ...this.currentUser,
-          permissions: {
-            modules: getDefaultPermissionsForRole(this.currentUser.role)
-          }
+          permissions: normalizeUserPermissions(this.currentUser.role, this.currentUser.permissions)
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       }
@@ -846,8 +900,8 @@ class LogisticsStore {
       updatedFleets = true;
     }
 
-    // Merge initial fleets only in development preview mode
-    if (!import.meta.env.PROD) {
+    // Merge initial fleets only in development/preview mode
+    if (this.isPreviewEnvironment()) {
       INITIAL_FLEETS.forEach(initF => {
         const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
         if (!exists && !(initF.plateNumber || '').toUpperCase().endsWith('AKK')) {
@@ -1025,11 +1079,21 @@ class LogisticsStore {
           boxDimensions = '3.5 x 1.8 x 1.8 m';
         }
       }
+      // Sinkronkan kirExpiryDate dengan lastMaintenance agar tanggal jatuh tempo KIR di tabel selalu sesuai dengan tanggal yang diinput/disimpan
+      const unifiedKir = f.lastMaintenance !== undefined && f.lastMaintenance !== ''
+        ? f.lastMaintenance
+        : (f.kirExpiryDate || '');
+      if (f.kirExpiryDate !== unifiedKir || f.lastMaintenance !== unifiedKir) {
+        changed = true;
+      }
+
       if (changed) {
         updatedFleets = true;
         return {
           ...f,
           initialCode,
+          lastMaintenance: unifiedKir,
+          kirExpiryDate: unifiedKir,
           taxDueDate,
           stnkExpiryDate,
           boxCapacityM3,
@@ -1039,30 +1103,8 @@ class LogisticsStore {
       return f;
     });
 
-    // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal pengiriman aktif:
-    // - Status 'maintenance' (Servis) tetap dipertahankan.
-    // - Status 'on-duty' (Kirim) hanya aktif apabila armada sedang memiliki jadwal yang sudah Gate-Out ('in_transit' / 'picked_up' / 'delayed').
-    // - Selain itu otomatis menjadi 'available' (Ready) agar siap digunakan jadwal berikutnya.
-    this.fleets = this.fleets.map(f => {
-      if (f.status === 'maintenance') return f;
-      const hasActiveTrip = (this.schedules || []).some(
-        sch =>
-          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
-          (sch.fleetId === f.id ||
-            (sch.fleet?.plateNumber &&
-              sch.fleet.plateNumber.trim().toUpperCase() === f.plateNumber.trim().toUpperCase()))
-      );
-      const targetStatus: Fleet['status'] = hasActiveTrip ? 'on-duty' : 'available';
-      if (f.status !== targetStatus) {
-        updatedFleets = true;
-        return { ...f, status: targetStatus };
-      }
-      return f;
-    });
-
-    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-
     // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC & sanitize combined Denpasar 1 & 2
+    // Serta memulihkan jadwal baru (>= 2026-11-12) yang sempat terdampak bug status 'delivered' tanpa bukti POD / tanpa bypass checklist
     let updatedSchedules = false;
     this.schedules = this.schedules.map(s => {
       let nextS = s;
@@ -1086,35 +1128,32 @@ class LogisticsStore {
       return nextS;
     });
     if (updatedSchedules) {
-      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules, true);
     }
 
-    // Jangan menyuntikkan fuel log contoh di production. Hanya migrasikan record yang memang sudah ada.
-    if (!import.meta.env.PROD && this.fuelLogs.length < INITIAL_FUEL_LOGS.length) {
-      this.fuelLogs = [...INITIAL_FUEL_LOGS];
-      this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
-    } else {
-      let updatedFuel = false;
-      this.fuelLogs = this.fuelLogs.map(l => {
-        if (l.literPerKm === undefined || l.literPer100Km === undefined) {
-          updatedFuel = true;
-          const dist = l.distanceKm > 0 ? l.distanceKm : Math.max(0, l.endOdometerKm - l.startOdometerKm);
-          return {
-            ...l,
-            distanceKm: dist,
-            literPerKm: dist > 0 ? Number((l.liters / dist).toFixed(4)) : 0,
-            literPer100Km: dist > 0 ? Number(((l.liters / dist) * 100).toFixed(2)) : 0
-          };
-        }
-        return l;
-      });
-      if (updatedFuel) {
-        this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+    // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal aktif hari ini (WIB)
+    this.reconcileFleetAndScheduleStatuses(false);
+
+    let updatedFuel = false;
+    this.fuelLogs = this.fuelLogs.map(l => {
+      if (l.literPerKm === undefined || l.literPer100Km === undefined) {
+        updatedFuel = true;
+        const dist = l.distanceKm > 0 ? l.distanceKm : Math.max(0, l.endOdometerKm - l.startOdometerKm);
+        return {
+          ...l,
+          distanceKm: dist,
+          literPerKm: dist > 0 ? Number((l.liters / dist).toFixed(4)) : 0,
+          literPer100Km: dist > 0 ? Number(((l.liters / dist) * 100).toFixed(2)) : 0
+        };
       }
+      return l;
+    });
+    if (updatedFuel) {
+      this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
     }
 
     // Ensure GPS devices in development preview mode only (do not inject mock devices in production)
-    if (!import.meta.env.PROD) {
+    if (!import.meta?.env?.PROD) {
       const hasLeadDevice = this.devices.some(d => d.imei === '353701090461274');
       if (!hasLeadDevice || this.devices.length !== INITIAL_TRACKSOLID_DEVICES.length) {
         this.devices = [...INITIAL_TRACKSOLID_DEVICES];
@@ -1150,56 +1189,33 @@ class LogisticsStore {
   }
 
   /**
-   * RBAC Middleware Guard: Ensures users with 'driver' or 'crew_helper' roles cannot access or execute operational or administrative tasks outside of 'Portal Driver Mobile'.
+   * RBAC Middleware Guard: Evaluates user status rather than blocking by role label so users with custom Hak Akses can operate across modules.
    */
-  public verifyDriverAccess(actionCategory: string): void {
+  public verifyDriverAccess(_actionCategory: string): void {
     const user = this.getCurrentUser();
-    if (user && (user.role === 'driver' || user.role === 'crew_helper')) {
-      const allowedActions = [
-        'update_schedule_status',
-        'upload_pod',
-        'driver_report',
-        'checkin',
-        'vehicle_checklist',
-        'sign_waybill',
-        'get_schedules',
-        'get_fleets',
-        'get_crews',
-        'updateScheduleStatus',
-        'uploadPod',
-        'getSchedules',
-        'getStores'
-      ];
-      if (!allowedActions.includes(actionCategory)) {
-        throw new Error(`Akses Ditolak [RBAC Middleware]: Peran '${user.role}' (${user.fullName}) tidak diizinkan mengakses fungsi admin/operasional '${actionCategory}'. Akses dibatasi khusus Portal Driver Mobile.`);
-      }
+    if (user && (user.status === 'inactive' || user.status === 'rejected')) {
+      throw new Error(`Akses Ditolak: Akun '${user.fullName}' sedang berstatus nonaktif/ditolak.`);
     }
   }
 
   /**
-   * RBAC Helper: Checks if a role has access to specific sub-menu or operation
+   * RBAC Helper: Checks if a user has access to specific sub-menu or operation based on Hak Akses
    */
-  public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, accessLevel?: string): boolean {
+  public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, _accessLevel?: string): boolean {
+    const user = this.getCurrentUser();
+    if (user && module) {
+      return canAccess(user, module, subMenu);
+    }
     if (!role) return true;
-    const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
-      return true;
-    }
-    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
-      return subMenu === 'driver_mobile' || subMenu === 'driver_reports';
-    }
     return true;
   }
 
   public hasMenuAccess(role?: string, menuId?: string): boolean {
+    const user = this.getCurrentUser();
+    if (user && menuId) {
+      return canAccess(user, menuId);
+    }
     if (!role) return true;
-    const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
-      return true;
-    }
-    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
-      return menuId === 'driver_mobile' || menuId === 'driver_reports';
-    }
     return true;
   }
 
@@ -1215,11 +1231,6 @@ class LogisticsStore {
     // 2. Image & Document Storage Middleware
     this.use(async (event: EntityChangeEvent) => {
       await this.handleImageStorageAutoSync(event);
-    });
-
-    // 3. System Audit Activity Trail Middleware
-    this.use(async (event: EntityChangeEvent) => {
-      await this.handleSystemAuditMiddleware(event);
     });
   }
 
@@ -1290,13 +1301,10 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'schedule') {
-          if (googleSheetsApiService) {
-            if (event.action === 'create' || event.action === 'update' || event.action === 'status_change') {
-              googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
-            }
+          if (event.action === 'create' || event.action === 'update' || event.action === 'status_change') {
+            const { googleSheetsApiService } = await import('./googleSheetsApiService');
+            googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
           }
-        } else if (event.entityType === 'admin_schedule' && event.action === 'update') {
-          localStorage.setItem('akk_last_admin_schedule_auto_synced', new Date().toISOString());
         }
       } catch (err) {
         console.warn('[Google Sheets Auto-Write Middleware Warning]', err);
@@ -1313,13 +1321,12 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'fleet' && (event.action === 'status_change' || event.action === 'update')) {
-          if (googleSheetsApiService) {
-            googleSheetsApiService.writeFleetStatusToGoogleSheets(
-              event.id,
-              event.data?.status || 'available',
-              event.data
-            ).catch(() => {});
-          }
+          const { googleSheetsApiService } = await import('./googleSheetsApiService');
+          googleSheetsApiService.writeFleetStatusToGoogleSheets(
+            event.id,
+            event.data?.status || 'available',
+            event.data
+          ).catch(() => {});
         }
       } catch (err) {
         console.warn('[Fleet Status Auto-Sync Warning]', err);
@@ -1354,15 +1361,17 @@ class LogisticsStore {
           this.saveToStorage(STORAGE_KEYS.IMAGES, this.imageRecords);
         }
 
-        // Send to backend attachment proxy
-        if (googleSheetsApiService) {
-          googleSheetsApiService.writeImageAttachmentToBackend(
-            newImg.entityId,
-            newImg.imageUrl,
-            newImg.category,
-            newImg.notes
-          ).catch(() => {});
-        }
+        // Send to backend attachment proxy lazily
+        void import('./googleSheetsApiService')
+          .then(({ googleSheetsApiService }) =>
+            googleSheetsApiService.writeImageAttachmentToBackend(
+              newImg.entityId,
+              newImg.imageUrl,
+              newImg.category,
+              newImg.notes
+            )
+          )
+          .catch(() => {});
       }
     } catch (err) {
       console.warn('[Image Auto-Sync Warning]', err);
@@ -1370,33 +1379,11 @@ class LogisticsStore {
   }
 
   /**
-   * System audit activity auto-sync handler
+   * System audit activity auto-sync handler (dinonaktifkan untuk perubahan teknis web/middleware;
+   * Log Aktivitas hanya mencatat akun pengguna yang menambah, merubah, atau mengurangi data)
    */
-  private async handleSystemAuditMiddleware(event: EntityChangeEvent) {
-    if (event.metadata?.isBatch || event.metadata?.source === 'google_sheets_sync') {
-      return;
-    }
-
-    try {
-      const targetLabel = `${event.entityType.toUpperCase()}: ${event.id}`;
-      const actionLabel = `Auto-Sync [${event.action.toUpperCase()}]`;
-      const details = `Middleware otomatis memicu proses penulisan entitas ${event.entityType} (${event.action}) ke Backend & Google Sheets`;
-
-      const newActivity: SystemActivity = {
-        id: `sys-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
-        timestamp: new Date().toISOString(),
-        userFullName: this.currentUser?.fullName || 'Sistem Auto-Sync Middleware',
-        department: 'Sistem Integrasi Data & Google Sheets',
-        action: actionLabel,
-        target: targetLabel,
-        details
-      };
-
-      this.systemActivities = [newActivity, ...this.systemActivities.slice(0, 25)];
-      this.saveToStorage('akk_system_activities_v1', this.systemActivities);
-    } catch {
-      // Ignore non-critical audit log errors
-    }
+  private async handleSystemAuditMiddleware(_event: EntityChangeEvent) {
+    return;
   }
 
   /**
@@ -1532,60 +1519,43 @@ class LogisticsStore {
     }
   }
 
-  private saveToStorage(key: string, data: any) {
-    try {
-      let sanitizedData = data;
-      if (Array.isArray(data)) {
-        if (key === STORAGE_KEYS.SCHEDULES) {
-          // Strip duplicated heavy sub-objects before stringify while preserving lightweight crew/helper identity
-          sanitizedData = data.slice(0, 5000).map((sch: any) => {
-            if (!sch || typeof sch !== 'object') return sch;
-            const { store, fleet, crew, crewHelper, crewHelper2, ...compact } = sch;
-            return {
-              ...compact,
-              ...(crew && crew.name ? { crew: { id: crew.id, name: crew.name, phone: crew.phone, role: crew.role } } : {}),
-              ...(crewHelper && crewHelper.name ? { crewHelper: { id: crewHelper.id, name: crewHelper.name, phone: crewHelper.phone, role: crewHelper.role } } : {}),
-              ...(crewHelper2 && crewHelper2.name ? { crewHelper2: { id: crewHelper2.id, name: crewHelper2.name, phone: crewHelper2.phone, role: crewHelper2.role } } : {})
-            };
-          });
-        } else if (key === STORAGE_KEYS.CREW_HISTORY) {
-          // Compact crew history records and limit to 50 items max
-          sanitizedData = data.slice(0, 50).map((item: any) => {
-            if (!item || typeof item !== 'object') return item;
-            return {
-              id: item.id,
-              crewId: item.crewId,
-              crewName: item.crewName,
-              scheduleId: item.scheduleId,
-              trackingNumber: item.trackingNumber,
-              storeName: item.storeName,
-              area: item.area,
-              city: item.city,
-              island: item.island,
-              vehiclePlate: item.vehiclePlate,
-              initialCode: item.initialCode,
-              vehicleType: item.vehicleType,
-              completionDate: item.completionDate,
-              status: item.status,
-              onTimeStatus: item.onTimeStatus
-            };
-          });
-        } else if (key === 'akk_system_activities_v1') {
-          sanitizedData = data.slice(0, 20);
-        } else if (key === STORAGE_KEYS.IMAGES) {
-          sanitizedData = data.slice(0, 20);
-        } else if (key === STORAGE_KEYS.SALES_ORDERS) {
-          sanitizedData = data.slice(0, 50);
+  private cachedFleets: Fleet[] | null = null;
+  private cachedCrews: Crew[] | null = null;
+  private cachedStores: RetailStore[] | null = null;
+  private cachedSchedules: Schedule[] | null = null;
+  private hydratePromise: Promise<boolean> | null = null;
+  private lastHydrateAt = 0;
+  private hydrateRateLimitedUntil = 0;
+
+  private invalidateReadCaches() {
+    this.cachedFleets = null;
+    this.cachedCrews = null;
+    this.cachedStores = null;
+    this.cachedSchedules = null;
+  }
+
+  private saveToStorage(key: string, data: any, silent = false) {
+    this.invalidateReadCaches();
+    // Data operasional bisnis disimpan di Hostinger MySQL (/api/*), bukan localStorage browser
+    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(key);
         }
-      }
-      safeSetItem(key, JSON.stringify(sanitizedData));
+      } catch {}
+      if (!silent) this.notify();
+      return;
+    }
+    try {
+      safeSetItem(key, JSON.stringify(data));
     } catch {
       // Safe fallback - in-memory state remains fully intact
     }
-    this.notify();
+    if (!silent) this.notify();
   }
 
   private notify() {
+    this.invalidateReadCaches();
     queueMicrotask(() => {
       this.listeners.forEach(l => {
         try {
@@ -1680,7 +1650,10 @@ class LogisticsStore {
       const sch = this.schedules.find(s => s.id === scheduleId);
       if (sch && (sch.status === 'scheduled' || sch.status === 'picked_up')) {
         sch.status = 'in_transit';
+        sch.actualDeparture = sch.actualDeparture || now.toISOString();
+        sch.updatedAt = now.toISOString();
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('gate_out_sync');
       }
     }
 
@@ -1723,7 +1696,9 @@ class LogisticsStore {
       if (sch) {
         sch.actualArrival = `${now.toISOString().split('T')[0]} ${timeStr}`;
         sch.status = 'delivered';
+        sch.updatedAt = now.toISOString();
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('gate_in_sync');
       }
     }
 
@@ -1750,66 +1725,313 @@ class LogisticsStore {
     return newLog;
   }
 
-  private enrichFleetItem(f: Fleet): Fleet {
-    const canonical = resolveCanonicalFleetMeta(f);
-    if (!canonical) return f;
+  private enrichFleetItem(f: Fleet, existingLocal?: Fleet): Fleet {
+    const canonical = resolveCanonicalFleetMeta(f) || resolveCanonicalFleetMeta(existingLocal);
+    const localRef = existingLocal || this.fleets.find(item => item.id === f.id || item.plateNumber === f.plateNumber);
+
+    const pickStr = (...vals: Array<string | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'string' && v.trim() !== '') return v.trim();
+      }
+      return undefined;
+    };
+
+    const pickExplicitStr = (primary: string | undefined | null, localVal?: string, canonVal?: string) => {
+      if (primary !== undefined && primary !== null) return String(primary).trim();
+      if (localVal !== undefined) return localVal;
+      return canonVal;
+    };
+
+    const pickNum = (...vals: Array<number | undefined | null>) => {
+      for (const v of vals) {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+      }
+      return undefined;
+    };
+
+    const boxCapacityM3 = pickNum(f.boxCapacityM3, localRef?.boxCapacityM3, canonical?.boxCapacityM3) ?? 5.5;
+    const boxInnerMultiplierPercent = pickNum(f.boxInnerMultiplierPercent, localRef?.boxInnerMultiplierPercent, canonical?.boxInnerMultiplierPercent) ?? 90;
+    const boxInnerCapacityM3 =
+      pickNum(f.boxInnerCapacityM3, localRef?.boxInnerCapacityM3, canonical?.boxInnerCapacityM3) ??
+      Number((boxCapacityM3 * (boxInnerMultiplierPercent / 100)).toFixed(2));
+
+    const resolvedId = pickStr(f.id, localRef?.id, canonical?.id) || f.id;
+    const resolvedPlate = pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber;
+    const resolvedInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const explicitBranch = pickStr(f.branchId, localRef?.branchId, canonical?.branchId);
+    const resolvedBranchId = branchStore.getFleetBranchId(resolvedId, resolvedPlate, resolvedInitial, explicitBranch);
+    branchStore.syncFleetBranchIdSilent(resolvedId, resolvedBranchId);
+
     return {
+      ...(canonical || ({} as Fleet)),
+      ...(localRef || ({} as Fleet)),
       ...f,
-      initialCode: f.initialCode || canonical.initialCode,
-      vehicleType: f.vehicleType || canonical.vehicleType,
-      brand: f.brand || canonical.brand
+      id: resolvedId,
+      plateNumber: resolvedPlate,
+      initialCode: resolvedInitial,
+      branchId: resolvedBranchId,
+      vehicleType: (pickStr(f.vehicleType, localRef?.vehicleType, canonical?.vehicleType) || 'Engkel STD') as Fleet['vehicleType'],
+      brand: pickExplicitStr(f.brand, localRef?.brand, canonical?.brand),
+      engineCc: pickExplicitStr(f.engineCc, localRef?.engineCc, canonical?.engineCc),
+      year: pickNum(f.year, localRef?.year, canonical?.year) ?? 2020,
+      boxCapacityM3,
+      boxDimensions: pickExplicitStr(f.boxDimensions, localRef?.boxDimensions, canonical?.boxDimensions),
+      boxInnerMultiplierPercent,
+      boxInnerCapacityM3,
+      lastMaintenance: pickExplicitStr(
+        f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate,
+        localRef?.lastMaintenance ?? localRef?.kirExpiryDate,
+        canonical?.lastMaintenance ?? canonical?.kirExpiryDate
+      ),
+      taxDueDate: pickExplicitStr(f.taxDueDate, localRef?.taxDueDate, canonical?.taxDueDate),
+      stnkExpiryDate: pickExplicitStr(f.stnkExpiryDate, localRef?.stnkExpiryDate, canonical?.stnkExpiryDate),
+      kirExpiryDate: pickExplicitStr(
+        f.lastMaintenance !== undefined ? f.lastMaintenance : f.kirExpiryDate,
+        localRef?.lastMaintenance ?? localRef?.kirExpiryDate,
+        canonical?.lastMaintenance ?? canonical?.kirExpiryDate
+      ),
+      kirDocUrl: pickExplicitStr(f.kirDocUrl, localRef?.kirDocUrl, canonical?.kirDocUrl),
+      kirDocFileName: pickExplicitStr(f.kirDocFileName, localRef?.kirDocFileName, canonical?.kirDocFileName),
+      kirDocUploadedAt: pickExplicitStr(f.kirDocUploadedAt, localRef?.kirDocUploadedAt, canonical?.kirDocUploadedAt),
+      photos3d: f.photos3d !== undefined ? f.photos3d : (localRef?.photos3d ?? canonical?.photos3d),
+      driverId: pickExplicitStr(f.driverId, localRef?.driverId, canonical?.driverId),
+      tonnageCapacity: pickNum(f.tonnageCapacity, localRef?.tonnageCapacity, canonical?.tonnageCapacity) ?? 3.5,
+      odometerKm: typeof f.odometerKm === 'number' && Number.isFinite(f.odometerKm) && f.odometerKm >= 0
+        ? f.odometerKm
+        : (pickNum(localRef?.odometerKm, canonical?.odometerKm) ?? 0)
     };
   }
 
   public getFleets(): Fleet[] {
-    return this.fleets.map(f => this.enrichFleetItem(f));
+    if (this.cachedFleets !== null && this.cachedFleets.length > 0) {
+      return this.cachedFleets;
+    }
+    const sourceFleets = this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS;
+    this.cachedFleets = sortFleetsByCanonicalOrder(sourceFleets.map(f => this.enrichFleetItem(f)));
+    return this.cachedFleets;
+  }
+
+  public findFleetByCodeOrPlate(codeOrPlate?: string | null, areaName?: string): Fleet | undefined {
+    const all = this.getFleets();
+    const cleanStr = String(codeOrPlate || '').trim();
+
+    if (cleanStr && cleanStr !== '-') {
+      // 1. Canonical resolver (checks exact initialCode, slash tokens like N4 / NS2, NMR / DS4, plateNumber, id)
+      const canonical = resolveCanonicalFleetMeta(cleanStr);
+      if (canonical) {
+        const matchInStore = all.find(
+          f =>
+            f.id === canonical.id ||
+            (f.plateNumber && canonical.plateNumber && f.plateNumber.replace(/\s+/g, '').toUpperCase() === canonical.plateNumber.replace(/\s+/g, '').toUpperCase())
+        );
+        return matchInStore || this.enrichFleetItem(canonical);
+      }
+
+      // 2. Normalized comparison across active store fleets and INITIAL_FLEETS
+      const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+      const clean = norm(cleanStr);
+      const upperRaw = cleanStr.toUpperCase();
+
+      const searchPool = [...all, ...INITIAL_FLEETS];
+      const matched = searchPool.find(f => {
+        if (f.id && f.id.toLowerCase() === cleanStr.toLowerCase()) return true;
+        if (f.plateNumber && norm(f.plateNumber) === clean) return true;
+        if (f.initialCode && norm(f.initialCode) === clean) return true;
+        if (f.initialCode && f.initialCode.toUpperCase() === upperRaw) return true;
+        if (f.initialCode) {
+          const parts = f.initialCode.split(/[/]+/).map(p => norm(p)).filter(Boolean);
+          if (parts.includes(clean)) return true;
+        }
+        if (clean.length >= 4 && f.plateNumber && norm(f.plateNumber).includes(clean)) return true;
+        return false;
+      });
+      if (matched) {
+        return this.enrichFleetItem(matched);
+      }
+    }
+
+    // 3. Fallback by areaName ONLY when codeOrPlate was not provided
+    const normArea = (areaName || '').trim().toLowerCase();
+    if (!cleanStr && normArea.includes('muncar')) {
+      const muncarFleet = all.find(
+        f => (f.initialCode || '').includes('NS2') || (f.initialCode || '').includes('N4')
+      );
+      if (muncarFleet) return muncarFleet;
+    }
+
+    return undefined;
   }
 
   public setFleets(fleets: Fleet[]): void {
-    const validFleets = fleets
-      .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
-      .map(f => this.enrichFleetItem(f));
+    const prevFleets = this.fleets || [];
+    const validFleets = sortFleetsByCanonicalOrder(
+      fleets
+        .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
+        .map(f => {
+          const prev = prevFleets.find(pf => pf.id === f.id || pf.plateNumber === f.plateNumber);
+          return this.enrichFleetItem(f, prev);
+        })
+    );
     this.fleets = validFleets;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     this.notify();
   }
 
+  public isSameCrewPersonName(nameA: string, nameB: string): boolean {
+    const cleanA = (nameA || '').trim().toLowerCase();
+    const cleanB = (nameB || '').trim().toLowerCase();
+    if (!cleanA || !cleanB || cleanA === '-' || cleanB === '-') return false;
+    if (cleanA === cleanB) return true;
+    const norm = (s: string) =>
+      s
+        .replace(/\bulloh\b/g, 'ullah')
+        .replace(/\bsaifur\b/g, 'saiful')
+        .replace(/\bmoh\.?\b/g, 'muhammad')
+        .replace(/\bmohammad\b/g, 'muhammad')
+        .replace(/\bach\.?\b/g, 'achmad')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const nA = norm(cleanA);
+    const nB = norm(cleanB);
+    if (!nA || !nB) return false;
+    if (nA === nB) return true;
+    const compactA = nA.replace(/\s+/g, '');
+    const compactB = nB.replace(/\s+/g, '');
+    if (compactA && compactB && compactA === compactB) return true;
+    if (nA.length >= 6 && nB.length >= 6 && (nA.includes(nB) || nB.includes(nA))) return true;
+    if (compactA.length >= 6 && compactB.length >= 6 && (compactA.includes(compactB) || compactB.includes(compactA))) return true;
+    return false;
+  }
+
   /**
-   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (role: driver / crew_helper)
+  /**
+   * Mengecek apakah akun pengguna merupakan Kru Pengiriman aktif (Driver / Helper)
+   * yang memiliki hak akses Full Access ('full_access') ke Portal Driver Mobile (driver_portal / portal_driver).
+   * Akun dengan akses Hanya Lihat ('read_only') tidak masuk ke dalam daftar Stand By / Kru,
+   * serta dipisahkan secara ketat antara Cabang Sidoarjo ('cab-sidoarjo') dan Cabang Nusantara ('cab-banyuwangi').
+   */
+  public isActiveDeliveryCrewUser(u: UserProfile | null | undefined, targetBranchId?: string): boolean {
+    if (!u) return false;
+    if (u.status !== 'approved') return false;
+    const cleanEmail = (u.email || '').trim().toLowerCase();
+    const cleanName = (u.fullName || '').trim().toLowerCase();
+    // Kecualikan akun sistem/manajemen/non-lapangan
+    if (
+      u.role === 'super_admin' ||
+      u.role === 'spv_logistik' ||
+      u.role === 'operasional' ||
+      u.role === 'koordinator_driver' ||
+      u.role === 'dispatcher' ||
+      String(u.role) === 'pengiriman' ||
+      cleanName === 'super admin' ||
+      cleanName === 'tamu / belum login' ||
+      cleanEmail === 'akkoperasional60@gmail.com' ||
+      cleanEmail === 'hendri123@gmail.com' ||
+      cleanEmail === 'hendri.st@gmail.com' ||
+      u.id === 'usr-hendri' ||
+      u.id === 'usr-operasional' ||
+      u.id === 'usr-bahri'
+    ) {
+      return false;
+    }
+
+    const branchPerms = branchStore.getUserBranchPermissions(
+      u.id,
+      u.role,
+      u.permissions?.modules,
+      u.permissions?.branchPermissions
+    );
+
+    const hasBranchPortalFullAccess = (bEntry?: UserBranchPermissionEntry): boolean => {
+      if (!bEntry || !bEntry.enabled) return false;
+      const logMod = bEntry.modules?.logistics;
+      if (!logMod || !logMod.enabled) return false;
+      const subs = logMod.subMenus || {};
+      const dpVal = subs.driver_portal ?? subs.portal_driver;
+      // Hanya akses Full Access pada Portal Driver Mobile yang masuk ke daftar Kru / Stand By (Hanya Lihat / read_only tidak masuk)
+      return dpVal === 'full_access';
+    };
+
+    const anyBranchHasPortalFullAccess = Object.values(branchPerms).some(bEntry =>
+      hasBranchPortalFullAccess(bEntry)
+    );
+    if (!anyBranchHasPortalFullAccess) return false;
+
+    if (targetBranchId && targetBranchId !== 'ALL') {
+      return this.getCrewUserPrimaryBranchId(u) === targetBranchId;
+    }
+
+    return true;
+  }
+
+  public getCrewUserPrimaryBranchId(u: UserProfile): string {
+    const branchPerms = branchStore.getUserBranchPermissions(
+      u.id,
+      u.role,
+      u.permissions?.modules,
+      u.permissions?.branchPermissions
+    );
+    const sdaEntry = branchPerms['cab-sidoarjo'];
+    const bwiEntry = branchPerms['cab-banyuwangi'];
+
+    const hasBranchPortalFullAccess = (entry?: UserBranchPermissionEntry) =>
+      Boolean(
+        entry?.enabled &&
+          entry?.modules?.logistics?.enabled &&
+          (entry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
+            entry.modules.logistics.subMenus?.portal_driver === 'full_access')
+      );
+
+    const sdaHasDp = hasBranchPortalFullAccess(sdaEntry);
+    const bwiHasDp = hasBranchPortalFullAccess(bwiEntry);
+
+    // Jika Cabang Sidoarjo memiliki akses penuh Portal Driver Mobile, prioritaskan sebagai kru Sidoarjo
+    // (karena Cabang Sidoarjo hanya aktif jika diaktifkan secara eksplisit untuk kru Sidoarjo, sehingga tidak tercampur ke Nusantara)
+    if (sdaHasDp) return 'cab-sidoarjo';
+    if (bwiHasDp) return 'cab-banyuwangi';
+
+    const sdaEnabled = Boolean(sdaEntry?.enabled);
+    const bwiEnabled = Boolean(bwiEntry?.enabled);
+    if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
+    return 'cab-banyuwangi';
+  }
+
+  /**
+   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (semua akun aktif yang memiliki akses Portal Driver Mobile atau Jadwal & Penugasan Armada)
    * tanpa memicu efek samping penyimpanan atau notifikasi listener.
    */
   private computeSyncedCrews(): Crew[] {
     const syncedCrews: Crew[] = [];
     const seenNames = new Set<string>();
-    const isCurrentSuperAdmin = this.currentUser?.role === 'super_admin';
 
     for (const u of this.users) {
-      if (u.role !== 'driver' && u.role !== 'crew_helper') continue;
-      if (u.status === 'rejected') continue;
-      // Sembunyikan akun driver/helper yang nonaktif pada user selain Super Admin
-      if (!isCurrentSuperAdmin && u.status === 'inactive') continue;
+      if (!this.isActiveDeliveryCrewUser(u)) continue;
 
       const cleanName = (u.fullName || '').trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
       if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
+      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
 
       const existingInStore = (this.crews || []).find(
-        c => c && c.name && (c.name.trim().toLowerCase() === lowerName || c.id === `crw-${u.id}`)
+        c => c && c.name && (c.id === `crw-${u.id}` || this.isSameCrewPersonName(c.name, cleanName))
       );
       const existingInInitial = INITIAL_CREWS.find(
-        c => c.name.trim().toLowerCase() === lowerName
+        c => this.isSameCrewPersonName(c.name, cleanName)
       );
       const refCrew = existingInStore || existingInInitial;
 
       const crewId = refCrew?.id || `crw-${u.id}`;
-      const crewRole: Crew['role'] = u.role === 'crew_helper'
-        ? 'Kernet / Helper'
-        : (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama');
+      const crewRole: Crew['role'] = u.role !== 'crew_helper'
+        ? (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama')
+        : 'Kernet / Helper';
 
-      const crewStatus: Crew['status'] = u.status === 'inactive'
-        ? 'off'
-        : (existingInStore?.status === 'on-duty' ? 'on-duty' : 'available');
+      const crewStatus: Crew['status'] = existingInStore?.status === 'on-duty' ? 'on-duty' : 'available';
+
+      const primaryBranchId = this.getCrewUserPrimaryBranchId(u);
+      branchStore.syncCrewBranchIdSilent(crewId, primaryBranchId, cleanName);
+      branchStore.syncCrewBranchIdSilent(u.id, primaryBranchId, cleanName);
 
       const crewItem: Crew = {
         id: crewId,
@@ -1817,7 +2039,7 @@ class LogisticsStore {
         phone: u.phone && u.phone !== '-' ? u.phone : (refCrew?.phone || ''),
         role: crewRole,
         licenseNumber: refCrew?.licenseNumber || '',
-        licenseType: u.role === 'crew_helper' ? 'SIM A' : (refCrew?.licenseType || 'SIM B1 Umum'),
+        licenseType: u.role === 'driver' ? (refCrew?.licenseType || 'SIM B1 Umum') : 'SIM A',
         status: crewStatus,
         currentFleetId: existingInStore?.currentFleetId || refCrew?.currentFleetId || undefined,
         tripsCompleted: refCrew?.tripsCompleted ?? 0,
@@ -1828,15 +2050,41 @@ class LogisticsStore {
       syncedCrews.push(crewItem);
     }
 
+    // Hanya pertahankan kru dari this.crews yang BELUM memiliki akun di this.users.
+    // Jika kru memiliki akun di this.users namun akun tersebut tidak lagi memiliki akses Portal Driver Mobile,
+    // maka JANGAN pernah dimasukkan kembali ke syncedCrews!
+    for (const c of (this.crews || [])) {
+      if (!c || !c.name) continue;
+      const cleanName = c.name.trim();
+      if (!cleanName) continue;
+      const lowerName = cleanName.toLowerCase();
+      if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
+      if (c.status === 'off') continue;
+      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
+
+      const matchedUserInStore = this.users.find(
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, cleanName)
+      );
+      if (matchedUserInStore) {
+        // Sudah diproses di loop pertama jika aktif, atau sengaja dikecualikan karena tidak punya akses Portal Driver Mobile
+        continue;
+      }
+
+      seenNames.add(lowerName);
+      syncedCrews.push(c);
+    }
+
     return syncedCrews;
   }
 
   /**
-   * Sinkronisasi 2 arah antara Manajemen User (role: driver / crew_helper) dan daftar Kru Jadwal Penugasan
+   * Sinkronisasi 2 arah antara Manajemen User (akun dengan akses Portal Driver Mobile) dan daftar Kru Jadwal Penugasan
    */
   public syncUsersWithCrews(): Crew[] {
     const syncedCrews = this.computeSyncedCrews();
     this.crews = syncedCrews;
+    this.cachedCrews = syncedCrews;
+    this.cachedSchedules = null;
     try {
       safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
     } catch {}
@@ -1844,35 +2092,43 @@ class LogisticsStore {
   }
 
   public getCrews(): Crew[] {
-    return this.computeSyncedCrews();
+    if (this.cachedCrews !== null) {
+      return this.cachedCrews;
+    }
+    this.cachedCrews = this.computeSyncedCrews();
+    return this.cachedCrews;
   }
 
-  public getDriverCrews(): Crew[] {
+  public getDriverCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const drivers = all.filter(c => {
       const linkedUser = this.users.find(
-        u => (u.role === 'driver' || u.role === 'crew_helper') &&
-          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return linkedUser.status === 'approved' && linkedUser.role === 'driver';
+        return this.isActiveDeliveryCrewUser(linkedUser, branchId) && linkedUser.role !== 'crew_helper';
       }
-      return false;
+      if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+        return false;
+      }
+      return !(c.role || '').toLowerCase().includes('helper') && !(c.role || '').toLowerCase().includes('kernet');
     });
     return drivers;
   }
 
-  public getHelperCrews(): Crew[] {
+  public getHelperCrews(branchId?: string): Crew[] {
     const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const helpers = all.filter(c => {
       const linkedUser = this.users.find(
-        u => (u.role === 'driver' || u.role === 'crew_helper') &&
-          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+        u => `crw-${u.id}` === c.id || this.isSameCrewPersonName(u.fullName, c.name)
       );
       if (linkedUser) {
-        return linkedUser.status === 'approved' && (linkedUser.role === 'crew_helper' || linkedUser.role === 'driver');
+        return this.isActiveDeliveryCrewUser(linkedUser, branchId);
       }
-      return false;
+      if (branchId && branchId !== 'ALL' && branchStore.getCrewBranchId(c.id, c.name) !== branchId) {
+        return false;
+      }
+      return true;
     });
     return helpers;
   }
@@ -1903,11 +2159,21 @@ class LogisticsStore {
     const roleLabelMap: Record<string, string> = {
       super_admin: 'Super Admin',
       spv_logistik: 'SPV Logistik',
-      pengiriman: 'Pengiriman',
-      driver: 'Kru Supir',
-      crew_helper: 'Kru Helper',
-      admin_penjualan: 'Admin Penjualan',
-      operasional: 'Operasional',
+      koordinator_driver: 'Koordinator Driver',
+      driver: 'Driver',
+      crew_helper: 'Helper',
+      sales_admin: 'Adm. Penjualan',
+      spv_sales_admin: 'SPV Adm Penjualan',
+      purchasing_admin: 'Adm. Pembelian',
+      spv_purchasing_admin: 'SPV Adm Pembelian',
+      warehouse_admin: 'Gudang',
+      koordinator_gudang: 'Koordinator Gudang',
+      marketing_online: 'Marketing Online',
+      marketing_offline: 'Marketing Offline',
+      spv_marketing_offline: 'SPV Marketing Offline',
+      hr_admin: 'Human Resource Development',
+      finance_tax_admin: 'Adm Finance & Tax',
+      operasional: 'SPV Operasional',
       security: 'Security'
     };
     const newEntry: ScheduleChangeLogEntry = {
@@ -1928,13 +2194,49 @@ class LogisticsStore {
   }
 
   public getStores(): RetailStore[] {
-    return this.stores.filter(s => !isAreaRouteItem(s));
+    if (this.cachedStores !== null && this.cachedStores.length > 0) {
+      return this.cachedStores;
+    }
+    const sourceStores = this.stores && this.stores.length > 0 ? this.stores : INITIAL_STORES;
+    this.cachedStores = sourceStores.filter(s => !isAreaRouteItem(s));
+    return this.cachedStores;
   }
 
   public getSchedules(): Schedule[] {
-    return this.schedules.map(sch => {
+    if (this.cachedSchedules !== null) {
+      return this.cachedSchedules;
+    }
+    const crewById = new Map<string, Crew>();
+    const crewByName = new Map<string, Crew>();
+    for (const c of this.crews) {
+      if (c.id) crewById.set(c.id, c);
+      if (c.name) crewByName.set(c.name.trim().toLowerCase(), c);
+    }
+
+    const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+    const fleetById = new Map<string, Fleet>();
+    const fleetByPlate = new Map<string, Fleet>();
+    for (const f of this.fleets) {
+      if (f.id) fleetById.set(f.id, f);
+      if (f.plateNumber) fleetByPlate.set(normPlate(f.plateNumber), f);
+    }
+
+    const findMatchingCrew = (id?: string, refCrew?: Crew): Crew | undefined => {
+      if (id) {
+        const byId = crewById.get(id);
+        if (byId) return byId;
+      }
+      if (refCrew?.name) {
+        const byName = crewByName.get(refCrew.name.trim().toLowerCase());
+        if (byName) return byName;
+      }
+      return refCrew;
+    };
+
+    this.cachedSchedules = this.schedules.map(sch => {
       const areaName = resolveScheduleAreaName(sch);
-      const isBali = sch.isInterIsland || areaName.toUpperCase().includes('BALI') || areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA');
+      const upperArea = areaName.toUpperCase();
+      const isBali = sch.isInterIsland || upperArea.includes('BALI') || upperArea.includes('DENPASAR') || upperArea.includes('SINGARAJA') || upperArea.includes('NEGARA');
 
       const areaStore: RetailStore = {
         id: sch.storeId && !sch.storeId.startsWith('str-fix-') ? sch.storeId : `area-${areaName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -1942,7 +2244,7 @@ class LogisticsStore {
         storeName: areaName, // ALWAYS NAMA AREA KIRIM
         island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
         province: isBali ? 'Bali' : 'Jawa Timur',
-        city: isBali ? 'Denpasar' : (areaName.toUpperCase().includes('JEMBER') ? 'Jember' : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo' : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso' : 'Banyuwangi'))),
+        city: isBali ? 'Denpasar' : (upperArea.includes('JEMBER') ? 'Jember' : (upperArea.includes('SITUBONDO') ? 'Situbondo' : (upperArea.includes('BONDOWOSO') ? 'Bondowoso' : 'Banyuwangi'))),
         address: `Area Pengiriman Distribusi ${areaName}`,
         latitude: isBali ? -8.6705 : -8.219,
         longitude: isBali ? 115.2126 : 114.369,
@@ -1952,36 +2254,61 @@ class LogisticsStore {
         storeCategory: 'Distribution Hub'
       };
 
-      const findMatchingCrew = (id?: string, refCrew?: Crew): Crew | undefined => {
-        if (id) {
-          const byId = this.crews.find(c => c.id === id);
-          if (byId) return byId;
-        }
-        if (refCrew?.name) {
-          const byName = this.crews.find(c => c.name.trim().toLowerCase() === refCrew.name.trim().toLowerCase());
-          if (byName) return byName;
-        }
-        return refCrew;
-      };
+      let matchedFleet: Fleet | undefined = undefined;
+      const explicitArmadaCode =
+        (sch.armada && sch.armada !== '-' ? String(sch.armada).trim() : '') ||
+        (sch.fleet?.initialCode ? String(sch.fleet.initialCode).trim() : '') ||
+        (sch.fleet?.plateNumber ? String(sch.fleet.plateNumber).trim() : '');
 
-      const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
-      const matchedFleet =
-        this.fleets.find(f => f.id === sch.fleetId) ||
-        (sch.fleet?.plateNumber
-          ? this.fleets.find(f => normPlate(f.plateNumber) === normPlate(sch.fleet?.plateNumber))
-          : undefined) ||
-        sch.fleet;
+      // Extract armada token from trackingNumber if formatted as PO-AKK-YYYYMMDD-<ARMADA>-<SUFFIX>
+      let trackingArmadaToken = '';
+      if (sch.trackingNumber) {
+        const trkMatch = sch.trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i);
+        if (trkMatch && trkMatch[1] && trkMatch[1].toUpperCase() !== 'FLT') {
+          trackingArmadaToken = trkMatch[1].trim();
+        }
+      }
+
+      if (explicitArmadaCode) {
+        matchedFleet = this.findFleetByCodeOrPlate(explicitArmadaCode);
+      }
+      if (!matchedFleet && sch.fleetId && sch.fleetId !== 'flt-01') {
+        matchedFleet = fleetById.get(sch.fleetId) || this.findFleetByCodeOrPlate(sch.fleetId);
+      }
+      if (!matchedFleet && trackingArmadaToken) {
+        matchedFleet = this.findFleetByCodeOrPlate(trackingArmadaToken);
+      }
+      if (!matchedFleet && sch.fleetId) {
+        matchedFleet = fleetById.get(sch.fleetId) || this.findFleetByCodeOrPlate(sch.fleetId);
+      }
+      if (!matchedFleet && sch.fleet?.plateNumber) {
+        matchedFleet = fleetByPlate.get(normPlate(sch.fleet.plateNumber));
+      }
+      if (!matchedFleet && sch.fleet) {
+        matchedFleet = sch.fleet;
+      }
+
+      const enrichedFleet = matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined;
+      const resolvedArmada =
+        enrichedFleet?.initialCode ||
+        explicitArmadaCode ||
+        trackingArmadaToken ||
+        enrichedFleet?.plateNumber ||
+        sch.armada;
 
       return {
         ...sch,
         areaName,
         store: areaStore,
-        fleet: matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined,
+        fleetId: enrichedFleet?.id || sch.fleetId,
+        fleet: enrichedFleet,
+        armada: resolvedArmada,
         crew: findMatchingCrew(sch.crewId, sch.crew),
         crewHelper: (sch.crewHelperId || sch.crewHelper) ? findMatchingCrew(sch.crewHelperId, sch.crewHelper) : undefined,
         crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
       };
     });
+    return this.cachedSchedules;
   }
 
   public getDevices(): TracksolidDevice[] {
@@ -2008,10 +2335,15 @@ class LogisticsStore {
     if (!this.currentUser || this.currentUser.id === 'guest' || this.currentUser.status !== 'approved') {
       return false;
     }
-    if (typeof sessionStorage !== 'undefined') {
-      const sessionUserId = sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
-      return Boolean(sessionUserId && sessionUserId === this.currentUser.id);
-    }
+    try {
+      const sessionUserId =
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+      if (sessionUserId !== this.currentUser.id) {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+      }
+    } catch {}
     return true;
   }
 
@@ -2024,23 +2356,203 @@ class LogisticsStore {
    *    Otherwise, uses the first approved user holding the 'spv_logistik' role.
    * 3. Fallback to any user matching Syaiful Bahri or official default.
    */
-  public getLogisticsCoordinator(): string {
-    if (this.currentUser && this.currentUser.role === 'spv_logistik' && this.currentUser.status === 'approved') {
-      return this.currentUser.fullName;
+  public resolveLogisticsBranchId(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): string {
+    if (typeof branchIdOrContext === 'string' && branchIdOrContext.trim()) {
+      const clean = branchIdOrContext.trim();
+      if (clean === 'cab-sidoarjo' || clean.toLowerCase().includes('sidoarjo')) return 'cab-sidoarjo';
+      if (clean === 'cab-banyuwangi' || clean.toLowerCase().includes('nusantara') || clean.toLowerCase().includes('banyuwangi')) {
+        return 'cab-banyuwangi';
+      }
+      return branchStore.getScheduleBranchId(undefined, clean);
     }
+
+    if (branchIdOrContext && typeof branchIdOrContext === 'object') {
+      if (branchIdOrContext.branchId && branchIdOrContext.branchId !== 'ALL') {
+        return branchIdOrContext.branchId;
+      }
+      if (branchIdOrContext.plateNumber || branchIdOrContext.initialCode || branchIdOrContext.fleetId) {
+        const matchedFleet =
+          this.findFleetByCodeOrPlate(branchIdOrContext.initialCode) ||
+          this.findFleetByCodeOrPlate(branchIdOrContext.plateNumber) ||
+          this.findFleetByCodeOrPlate(branchIdOrContext.fleetId);
+        const fBranch = branchStore.getFleetBranchId(
+          matchedFleet?.id || branchIdOrContext.fleetId || '',
+          matchedFleet?.plateNumber || branchIdOrContext.plateNumber,
+          matchedFleet?.initialCode || branchIdOrContext.initialCode,
+          matchedFleet?.branchId
+        );
+        if (fBranch === 'cab-sidoarjo' || fBranch === 'cab-banyuwangi') {
+          return fBranch;
+        }
+      }
+      if (branchIdOrContext.areaName || branchIdOrContext.scheduleId) {
+        const sBranch = branchStore.getScheduleBranchId(
+          branchIdOrContext.scheduleId,
+          branchIdOrContext.areaName,
+          branchIdOrContext.fleetId
+        );
+        if (sBranch === 'cab-sidoarjo' || sBranch === 'cab-banyuwangi') {
+          return sBranch;
+        }
+      }
+      if (branchIdOrContext.driverId || branchIdOrContext.driverName) {
+        const cBranch = branchStore.getCrewBranchId(branchIdOrContext.driverId || '', branchIdOrContext.driverName);
+        if (cBranch === 'cab-sidoarjo' || cBranch === 'cab-banyuwangi') {
+          return cBranch;
+        }
+      }
+    }
+
+    return branchStore.getSelectedOriginBranchId() || 'cab-banyuwangi';
+  }
+
+  public getLogisticsCoordinatorUser(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): { fullName: string; role: string } {
+    const targetBranchId = this.resolveLogisticsBranchId(branchIdOrContext);
+
+    const doesUserMatchBranch = (u: UserProfile, bId: string): boolean => {
+      const bMap = branchStore.getUserBranchPermissions(
+        u.id,
+        u.role,
+        u.permissions?.modules,
+        u.permissions?.branchPermissions
+      );
+      if (bMap && Object.keys(bMap).length > 0) {
+        const sdaEnabled = Boolean(bMap['cab-sidoarjo']?.enabled);
+        const bwiEnabled = Boolean(bMap['cab-banyuwangi']?.enabled);
+        if (sdaEnabled && !bwiEnabled) return bId === 'cab-sidoarjo';
+        if (bwiEnabled && !sdaEnabled) return bId === 'cab-banyuwangi';
+      }
+      const lowerName = (u.fullName || '').trim().toLowerCase();
+      const lowerNotes = (u.notes || '').trim().toLowerCase();
+      if (lowerName.includes('allan') || lowerNotes.includes('sidoarjo')) {
+        return bId === 'cab-sidoarjo';
+      }
+      if (
+        lowerName.includes('bahri') ||
+        lowerName.includes('syaiful') ||
+        lowerNotes.includes('nusantara') ||
+        lowerNotes.includes('banyuwangi')
+      ) {
+        return bId === 'cab-banyuwangi';
+      }
+      const crewB = branchStore.getCrewBranchId(u.id, u.fullName);
+      if (crewB === 'cab-sidoarjo' || crewB === 'cab-banyuwangi') {
+        return crewB === bId;
+      }
+      return true;
+    };
+
+    if (
+      this.currentUser &&
+      this.currentUser.role === 'spv_logistik' &&
+      this.currentUser.status === 'approved' &&
+      doesUserMatchBranch(this.currentUser, targetBranchId)
+    ) {
+      return { fullName: this.currentUser.fullName, role: 'spv_logistik' };
+    }
+
     const approvedSpvLogistiks = this.users.filter(u => u.role === 'spv_logistik' && u.status === 'approved');
-    const bahriSpvLogistik = approvedSpvLogistiks.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
-    if (bahriSpvLogistik) {
-      return bahriSpvLogistik.fullName;
+    const branchMatchedSpv = approvedSpvLogistiks.find(u => doesUserMatchBranch(u, targetBranchId));
+    if (branchMatchedSpv) {
+      return { fullName: branchMatchedSpv.fullName, role: 'spv_logistik' };
     }
+
+    if (targetBranchId === 'cab-banyuwangi') {
+      const bahriUser = this.users.find(
+        u =>
+          (u.fullName || '').toLowerCase().includes('bahri') ||
+          (u.fullName || '').toLowerCase().includes('syaiful')
+      );
+      if (bahriUser) {
+        return { fullName: bahriUser.fullName, role: 'spv_logistik' };
+      }
+      return { fullName: 'Muhammad Syaiful Bahri', role: 'spv_logistik' };
+    }
+
+    if (targetBranchId === 'cab-sidoarjo') {
+      const allanUser = this.users.find(u => (u.fullName || '').toLowerCase().includes('allan'));
+      if (allanUser) {
+        return { fullName: allanUser.fullName, role: 'spv_logistik' };
+      }
+    }
+
     if (approvedSpvLogistiks.length > 0) {
-      return approvedSpvLogistiks[0].fullName;
+      return { fullName: approvedSpvLogistiks[0].fullName, role: 'spv_logistik' };
     }
-    const anyBahri = this.users.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
-    if (anyBahri) {
-      return anyBahri.fullName;
+
+    const approvedLogisticsUsers = this.users.filter(
+      u =>
+        u.status === 'approved' &&
+        u.role !== 'super_admin' &&
+        u.role !== 'driver' &&
+        u.role !== 'crew_helper' &&
+        u.permissions?.modules?.logistics?.enabled &&
+        (u.permissions.modules.logistics.subMenus?.schedules === 'full_access' ||
+          u.permissions.modules.logistics.subMenus?.portal_validation === 'full_access')
+    );
+    const branchMatchedLogisticsUser = approvedLogisticsUsers.find(u => doesUserMatchBranch(u, targetBranchId));
+    if (branchMatchedLogisticsUser) {
+      return { fullName: branchMatchedLogisticsUser.fullName, role: branchMatchedLogisticsUser.role };
     }
-    return 'Muhammad Syaiful Bahri';
+    if (approvedLogisticsUsers.length > 0) {
+      return { fullName: approvedLogisticsUsers[0].fullName, role: approvedLogisticsUsers[0].role };
+    }
+
+    const anySpv = this.users.find(u => u.role === 'spv_logistik' && doesUserMatchBranch(u, targetBranchId)) ||
+      this.users.find(u => u.role === 'spv_logistik');
+    if (anySpv) {
+      return { fullName: anySpv.fullName, role: 'spv_logistik' };
+    }
+    return {
+      fullName: targetBranchId === 'cab-sidoarjo' ? 'Allan E.' : 'Muhammad Syaiful Bahri',
+      role: 'spv_logistik'
+    };
+  }
+
+  public getLogisticsCoordinator(
+    branchIdOrContext?:
+      | string
+      | {
+          branchId?: string;
+          scheduleId?: string;
+          areaName?: string;
+          fleetId?: string;
+          plateNumber?: string;
+          initialCode?: string;
+          driverId?: string;
+          driverName?: string;
+        }
+      | null
+  ): string {
+    return this.getLogisticsCoordinatorUser(branchIdOrContext).fullName;
   }
 
   /**
@@ -2154,6 +2666,21 @@ class LogisticsStore {
     return [...this.areaApprovals];
   }
 
+  private persistCrewRotationStateToMysql() {
+    if (typeof window === 'undefined') return;
+    const payload = {
+      areaThreshold: this.areaThreshold,
+      areaApprovals: this.areaApprovals,
+      crewHistory: this.crewHistory.slice(0, 500)
+    };
+    fetch('/api/logistics/crew-rotation-state', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload)
+    }).catch(err => console.warn('[Hostinger Crew Rotation] Gagal simpan ke MySQL:', err));
+  }
+
   public createAreaApprovalRequest(req: Omit<AreaApprovalRequest, 'id' | 'requestedAt'>): AreaApprovalRequest {
     const newReq: AreaApprovalRequest = {
       ...req,
@@ -2161,7 +2688,8 @@ class LogisticsStore {
       requestedAt: new Date().toISOString()
     };
     this.areaApprovals = [newReq, ...this.areaApprovals];
-    this.saveToStorage(STORAGE_KEYS.AREA_APPROVALS, this.areaApprovals);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
     return newReq;
   }
 
@@ -2178,7 +2706,8 @@ class LogisticsStore {
       }
       return req;
     });
-    this.saveToStorage(STORAGE_KEYS.AREA_APPROVALS, this.areaApprovals);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
   }
 
   public getAreaDeliveryThreshold(): number {
@@ -2187,7 +2716,8 @@ class LogisticsStore {
 
   public setAreaDeliveryThreshold(val: number) {
     this.areaThreshold = val;
-    this.saveToStorage(STORAGE_KEYS.AREA_THRESHOLD, val);
+    this.persistCrewRotationStateToMysql();
+    this.notify();
   }
 
   /**
@@ -2197,64 +2727,105 @@ class LogisticsStore {
     const targetSchedules = schedules || this.schedules || [];
     let addedCount = 0;
 
-    // Purge history items for schedules that no longer exist
+    // Purge history items for schedules that no longer exist (and purge legacy mock rows without scheduleId when real schedules exist)
     const activeScheduleIds = new Set(targetSchedules.map(s => s.id));
-    this.crewHistory = this.crewHistory.filter(h => !h.scheduleId || activeScheduleIds.has(h.scheduleId));
+    this.crewHistory = this.crewHistory.filter(h => Boolean(h.scheduleId && activeScheduleIds.has(h.scheduleId)));
 
     targetSchedules.forEach((sch) => {
       // Flexible crew lookup by ID or name
       const driverName = (sch.crew?.name || (sch as any).driver || '').trim();
-      const crew = this.crews.find(c => c.id === sch.crewId || c.id === sch.crew?.id || (driverName && c.name.toLowerCase() === driverName.toLowerCase())) || {
-        id: sch.crewId || `c-custom-${Math.random().toString(36).substring(2, 6)}`,
-        name: driverName || sch.crewId || 'Driver Utama',
+      const crew = this.crews.find(
+        c =>
+          c.id === sch.crewId ||
+          c.id === sch.crew?.id ||
+          (driverName && c.name.trim().toLowerCase() === driverName.toLowerCase())
+      ) || {
+        id: sch.crewId || `c-custom-${driverName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || Math.random().toString(36).substring(2, 6)}`,
+        name: driverName || sch.crewId || 'Driver',
         phone: '081234567890',
-        role: 'Driver Utama' as const,
-        licenseNumber: 'SIM B2 Umum',
-        licenseType: 'SIM B2 Umum',
+        role: 'Driver' as const,
+        licenseNumber: 'SIM B1',
+        licenseType: 'SIM B1',
         status: 'available' as const,
         tripsCompleted: 10,
         rating: 4.8
       };
 
       const helperName = (sch.crewHelper?.name || (sch as any).helper || '').trim();
-      const helper = sch.crewHelperId 
-        ? this.crews.find(c => c.id === sch.crewHelperId) 
-        : (sch.crewHelper ? sch.crewHelper : (helperName && helperName !== '-' ? { id: `hlp-${helperName}`, name: helperName } : null));
+      const matchedHelperInCrews = this.crews.find(
+        c =>
+          (sch.crewHelperId && c.id === sch.crewHelperId) ||
+          (sch.crewHelper?.id && c.id === sch.crewHelper.id) ||
+          (helperName && helperName !== '-' && c.name.trim().toLowerCase() === helperName.toLowerCase())
+      );
+      const helper = matchedHelperInCrews
+        ? matchedHelperInCrews
+        : sch.crewHelper && sch.crewHelper.name && sch.crewHelper.name !== '-'
+        ? {
+            id: sch.crewHelper.id || `hlp-${sch.crewHelper.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            name: sch.crewHelper.name.trim()
+          }
+        : helperName && helperName !== '-'
+        ? {
+            id: `hlp-${helperName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            name: helperName
+          }
+        : null;
 
-      const fleet = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
+      const fleet =
+        this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber) ||
+        this.findFleetByCodeOrPlate(sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId);
       const store = this.stores.find(s => s.id === sch.storeId);
-      
-      const areaName = resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim';
-      const island = areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA') || areaName.toUpperCase().includes('BALI')
-        ? 'Bali & Nusa Tenggara' 
-        : 'Jawa';
-      const city = areaName.toUpperCase().includes('DENPASAR') ? 'Denpasar' 
-        : (areaName.toUpperCase().includes('SINGARAJA') ? 'Singaraja' 
-        : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso' 
-        : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo' 
-        : (areaName.toUpperCase().includes('JEMBER') ? 'Jember' : 'Banyuwangi'))));
-      
-      const departureDate = sch.departureDate || '2026-01-05T07:30:00Z';
+
+      const rawAreaName = (resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim').trim();
+      const areaName = rawAreaName;
+      const island =
+        areaName.toUpperCase().includes('DENPASAR') ||
+        areaName.toUpperCase().includes('SINGARAJA') ||
+        areaName.toUpperCase().includes('NEGARA') ||
+        areaName.toUpperCase().includes('BALI')
+          ? 'Bali & Nusa Tenggara'
+          : 'Jawa';
+      const city = areaName.toUpperCase().includes('DENPASAR')
+        ? 'Denpasar'
+        : areaName.toUpperCase().includes('SINGARAJA')
+        ? 'Singaraja'
+        : areaName.toUpperCase().includes('BONDOWOSO')
+        ? 'Bondowoso'
+        : areaName.toUpperCase().includes('SITUBONDO')
+        ? 'Situbondo'
+        : areaName.toUpperCase().includes('JEMBER')
+        ? 'Jember'
+        : 'Banyuwangi';
+
+      const calIso = this.getScheduleCalendarIso(sch);
+      const departureDate = calIso
+        ? `${calIso}T07:30:00+07:00`
+        : sch.departureDate || '2026-01-05T07:30:00+07:00';
       const trackingNumber = sch.trackingNumber || `PO-AKK-20260105-${fleet?.plateNumber || sch.fleetId || 'DS3'}`;
 
       // Extract Inisial Mobil (e.g. DS1, DS3, NS2, NL1, N20)
+      const trkFullMatch = trackingNumber.match(/^PO-AKK-\d{8}-(.+)-[A-Z0-9]+$/i);
       const poCodeMatch = trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/i);
-      const extractedCode = poCodeMatch ? poCodeMatch[1] : null;
-      const initialCode = fleet?.initialCode || sch.fleet?.initialCode || extractedCode || sch.fleetId || 'DS3';
+      const extractedCode = trkFullMatch ? trkFullMatch[1].trim() : poCodeMatch ? poCodeMatch[1] : null;
+      const initialCode = fleet?.initialCode || sch.fleet?.initialCode || sch.armada || extractedCode || sch.fleetId || 'DS3';
 
       const existingIndex = this.crewHistory.findIndex(
-        h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === crew.id || h.crewName === crew.name)
+        h =>
+          (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
+          (h.crewId === crew.id || h.crewName.trim().toLowerCase() === crew.name.trim().toLowerCase())
       );
 
       const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
       const seqNum = (existingIndex !== -1 ? this.crewHistory[existingIndex].areaTripSequenceNumber : areaStats.tripCount + 1) || 1;
-      const totalAreaTrips = this.crewHistory.filter(h => h.area.toUpperCase() === areaName.toUpperCase()).length + 1;
+      const totalAreaTrips = this.crewHistory.filter(h => h.area.trim().toUpperCase() === areaName.toUpperCase()).length + 1;
       const reqAppr = seqNum >= this.areaThreshold;
 
       const historyItem: CrewDeliveryHistory = {
-        id: existingIndex !== -1 
-          ? this.crewHistory[existingIndex].id 
-          : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
+        id:
+          existingIndex !== -1
+            ? this.crewHistory[existingIndex].id
+            : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
         crewId: crew.id,
         crewName: crew.name,
         scheduleId: sch.id,
@@ -2263,7 +2834,7 @@ class LogisticsStore {
         area: areaName,
         city,
         island,
-        vehiclePlate: fleet?.plateNumber || sch.fleetId || 'DS3',
+        vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
         initialCode,
         vehicleType: fleet?.vehicleType || 'Engkel STD',
         cargoWeightTon: sch.cargoWeightTon || 3.5,
@@ -2289,12 +2860,22 @@ class LogisticsStore {
       // Also track Helper history if assigned
       if (helper) {
         const helperExistingIndex = this.crewHistory.findIndex(
-          h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === helper.id || h.crewName === helper.name)
+          h =>
+            (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
+            (h.crewId === helper.id || h.crewName.trim().toLowerCase() === helper.name.trim().toLowerCase())
         );
+        const helperAreaStats = this.checkCrewAreaThreshold(helper.id, areaName);
+        const helperSeqNum =
+          (helperExistingIndex !== -1
+            ? this.crewHistory[helperExistingIndex].areaTripSequenceNumber
+            : helperAreaStats.tripCount + 1) || 1;
+        const helperReqAppr = helperSeqNum >= this.areaThreshold;
+
         const helperHistoryItem: CrewDeliveryHistory = {
-          id: helperExistingIndex !== -1 
-            ? this.crewHistory[helperExistingIndex].id 
-            : `cdh-sync-hlp-${helper.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
+          id:
+            helperExistingIndex !== -1
+              ? this.crewHistory[helperExistingIndex].id
+              : `cdh-sync-hlp-${helper.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
           crewId: helper.id,
           crewName: helper.name,
           scheduleId: sch.id,
@@ -2303,7 +2884,7 @@ class LogisticsStore {
           area: areaName,
           city,
           island,
-          vehiclePlate: fleet?.plateNumber || sch.fleetId || 'DS3',
+          vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
           initialCode,
           vehicleType: fleet?.vehicleType || 'Engkel STD',
           cargoWeightTon: sch.cargoWeightTon || 3.5,
@@ -2312,9 +2893,10 @@ class LogisticsStore {
           status: 'delivered',
           onTimeStatus: 'Tepat Waktu',
           ratingReceived: 5.0,
-          areaTripSequenceNumber: 1,
-          requiresAreaApproval: false,
-          areaApprovalStatus: 'not_required',
+          areaTripSequenceNumber: helperSeqNum,
+          totalAreaTrips,
+          requiresAreaApproval: helperReqAppr,
+          areaApprovalStatus: helperReqAppr ? 'approved' : 'not_required',
           notes: `Tugas Helper mendampingi Driver: ${crew.name}`
         };
 
@@ -2338,7 +2920,7 @@ class LogisticsStore {
       return item;
     });
 
-    this.saveToStorage(STORAGE_KEYS.CREW_HISTORY, this.crewHistory);
+    this.persistCrewRotationStateToMysql();
     this.notify();
     return addedCount;
   }
@@ -2348,9 +2930,25 @@ class LogisticsStore {
     return this.users;
   }
 
+  public buildSessionAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
+    const savedToken =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+      '';
+    const headers: Record<string, string> = { ...(extraHeaders || {}) };
+    if (savedToken) {
+      headers['Authorization'] = `Bearer ${savedToken}`;
+      headers['x-akk-session-token'] = savedToken;
+    }
+    return headers;
+  }
+
   public async refreshUsersFromHostinger(): Promise<boolean> {
     try {
-      const response = await fetch('/api/users', { credentials: 'same-origin' });
+      const response = await fetch('/api/users', {
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
       if (!response.ok) return false;
       const payload = await response.json();
       if (!Array.isArray(payload?.data)) return false;
@@ -2360,11 +2958,11 @@ class LogisticsStore {
           .filter(u => u.email)
           .map(u => [u.email.trim().toLowerCase(), u])
       );
-      const mappedUsers = payload.data.map((r: any) => {
+      const mappedUsers: UserProfile[] = payload.data.map((r: any) => {
         const cleanEmail = String(r.email || '').trim().toLowerCase();
         const local = localById.get(r.id) || (cleanEmail ? localByEmail.get(cleanEmail) : undefined);
         const role = (r.role || local?.role || 'unassigned') as UserRole;
-        const remotePerms = r.permissions && r.permissions.modules ? r.permissions : undefined;
+        const remotePerms = r.permissions && (r.permissions.modules || r.permissions.branchPermissions) ? r.permissions : undefined;
         const rawRemoteName = String(r.fullName || r.name || '').trim();
         const resolvedFullName = (cleanEmail === 'hendri123@gmail.com' && (!rawRemoteName || rawRemoteName.toLowerCase() === 'super admin'))
           ? 'Hendri'
@@ -2383,9 +2981,24 @@ class LogisticsStore {
           approvedBy: r.approvedBy || local?.approvedBy,
           notes: r.notes ?? local?.notes,
           password: undefined,
-          permissions: remotePerms || local?.permissions || { modules: getDefaultPermissionsForRole(role) }
+          permissions: normalizeUserPermissions(role, remotePerms || local?.permissions)
         } as UserProfile;
       });
+
+      // Pertahankan akun lokal yang belum ada di respons server (misal di mode preview atau baru diedit secara lokal)
+      for (const localU of this.users) {
+        const localEmail = (localU.email || '').trim().toLowerCase();
+        const alreadyInMapped = mappedUsers.some(
+          mu =>
+            mu.id === localU.id ||
+            (localEmail && (mu.email || '').trim().toLowerCase() === localEmail) ||
+            this.isSameCrewPersonName(mu.fullName, localU.fullName)
+        );
+        if (!alreadyInMapped) {
+          mappedUsers.push(localU);
+        }
+      }
+
       this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
@@ -2415,7 +3028,7 @@ class LogisticsStore {
     delete payload.password;
     fetch(`/api/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify(payload)
     }).catch(err => console.warn('[Hostinger Users] Sync update gagal:', err));
@@ -2485,7 +3098,15 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     const rejected = this.users.find(u => u.id === userId);
-    if (rejected) this.syncUserToHostinger(userId, rejected);
+    if (rejected) {
+      this.logActivity(
+        'Tolak / Kurangi Pengajuan Akun',
+        rejected.fullName,
+        `Pengajuan akun ${rejected.fullName} (${rejected.email}) ditolak. Alasan: ${reason || 'Ditolak Administrator'}`,
+        'kurangi'
+      );
+      this.syncUserToHostinger(userId, rejected);
+    }
     this.notify();
   }
 
@@ -2566,31 +3187,66 @@ class LogisticsStore {
 
     const existing = this.users[userIndex];
     const oldName = existing.fullName;
+    const oldRole = existing.role;
     const targetRole = (data.role || existing.role) as UserRole;
-    const isLogisticsLead = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(targetRole);
+    const roleChanged = Boolean(data.role && data.role !== oldRole);
 
-    let nextPermissions = data.permissions
-      ? data.permissions
-      : (data.role && data.role !== existing.role)
-      ? { modules: getDefaultPermissionsForRole(data.role) }
-      : existing.permissions || { modules: getDefaultPermissionsForRole(targetRole) };
+    let rawPermissions: UserPermissions | undefined;
+    if (data.permissions) {
+      rawPermissions = data.permissions;
+    } else if (roleChanged) {
+      const wasCrewRole = oldRole === 'driver' || oldRole === 'crew_helper';
+      const isNowCrewRole = targetRole === 'driver' || targetRole === 'crew_helper';
+      const existingMods = existing.permissions?.modules || {};
+      const hasCustomNonLogisticsAccess = Object.entries(existingMods).some(
+        ([modKey, modVal]) =>
+          modKey !== 'logistics' &&
+          modVal?.enabled &&
+          Object.values(modVal.subMenus || {}).some(v => v === 'full_access' || v === 'read_only')
+      );
 
-    if (isLogisticsLead && nextPermissions?.modules?.logistics) {
-      const logMod = nextPermissions.modules.logistics;
-      const activeSubCount = logMod.subMenus
-        ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
-        : 0;
-      if (logMod.enabled && activeSubCount <= 1 && !data.permissions) {
-        const defaultMods = getDefaultPermissionsForRole(targetRole);
-        nextPermissions = {
-          modules: {
-            ...defaultMods,
-            ...nextPermissions.modules,
-            logistics: defaultMods.logistics
+      if (wasCrewRole && !isNowCrewRole) {
+        if (hasCustomNonLogisticsAccess) {
+          // Pertahankan hak akses kustom non-logistik yang sudah diatur (misal Gudang -> Database Barang)
+          // sambil memastikan akses kru logistik lama dinonaktifkan.
+          const cleanedModules: UserPermissions['modules'] = JSON.parse(JSON.stringify(existingMods));
+          if (cleanedModules.logistics) {
+            cleanedModules.logistics.enabled = false;
+            Object.keys(cleanedModules.logistics.subMenus || {}).forEach(k => {
+              cleanedModules.logistics.subMenus[k] = 'none';
+            });
           }
-        };
+          const cleanedBranches = existing.permissions?.branchPermissions
+            ? JSON.parse(JSON.stringify(existing.permissions.branchPermissions))
+            : undefined;
+          if (cleanedBranches) {
+            Object.values(cleanedBranches).forEach((bEntry: any) => {
+              if (bEntry?.modules?.logistics) {
+                bEntry.modules.logistics.enabled = false;
+                Object.keys(bEntry.modules.logistics.subMenus || {}).forEach(k => {
+                  bEntry.modules.logistics.subMenus[k] = 'none';
+                });
+              }
+            });
+          }
+          rawPermissions = {
+            modules: cleanedModules,
+            branchPermissions: cleanedBranches
+          };
+        } else {
+          // Gunakan default permissions untuk role baru (misal Gudang / Sales / HR)
+          rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
+        }
+      } else {
+        rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
       }
+    } else if (existing.permissions && (existing.permissions.modules || existing.permissions.branchPermissions)) {
+      rawPermissions = existing.permissions;
+    } else {
+      rawPermissions = { modules: getDefaultPermissionsForRole(targetRole) };
     }
+
+    const nextPermissions = normalizeUserPermissions(targetRole, rawPermissions);
 
     const updatedUser: UserProfile = {
       ...existing,
@@ -2606,12 +3262,34 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
 
-    // Direct synchronization: If name or phone changed, sync with crew pool & active schedules
-    if (data.fullName && data.fullName !== oldName) {
+    // Jika akun user ini bukan lagi kru pengiriman aktif (misal diubah ke Gudang / warehouse_admin atau 0 AKSES Logistik),
+    // bersihkan entri kru terkait dari this.crews dan database server agar langsung hilang dari jadwal & stand by!
+    if (!this.isActiveDeliveryCrewUser(updatedUser)) {
+      const crewsToRemove = (this.crews || []).filter(
+        c =>
+          c &&
+          (c.id === `crw-${userId}` ||
+            this.isSameCrewPersonName(c.name, oldName) ||
+            this.isSameCrewPersonName(c.name, updatedUser.fullName))
+      );
+      if (crewsToRemove.length > 0) {
+        const removeIds = new Set(crewsToRemove.map(c => c.id));
+        this.crews = (this.crews || []).filter(c => !removeIds.has(c.id));
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+        crewsToRemove.forEach(c => {
+          fetch(`/api/crews/${encodeURIComponent(c.id)}`, {
+            method: 'DELETE',
+            headers: this.buildSessionAuthHeaders(),
+            credentials: 'same-origin'
+          }).catch(() => {});
+        });
+      }
+    } else if (data.fullName && data.fullName !== oldName) {
+      // Direct synchronization: If name or phone changed on an active crew, sync with crew pool & active schedules
       const newName = data.fullName;
       let crewsUpdated = false;
       this.crews = this.crews.map(c => {
-        if (c.name.toLowerCase() === oldName.toLowerCase() || (c.phone && existing.phone && c.phone === existing.phone)) {
+        if (this.isSameCrewPersonName(c.name, oldName) || (c.phone && existing.phone && c.phone === existing.phone)) {
           crewsUpdated = true;
           return { ...c, name: newName, phone: data.phone || c.phone };
         }
@@ -2628,15 +3306,15 @@ class LogisticsStore {
         let newHelper = s.crewHelper;
         let newHelper2 = s.crewHelper2;
 
-        if (s.crew && s.crew.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crew && this.isSameCrewPersonName(s.crew.name, oldName)) {
           newCrew = { ...s.crew, name: newName };
           changed = true;
         }
-        if (s.crewHelper && s.crewHelper.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crewHelper && this.isSameCrewPersonName(s.crewHelper.name, oldName)) {
           newHelper = { ...s.crewHelper, name: newName };
           changed = true;
         }
-        if (s.crewHelper2 && s.crewHelper2.name.toLowerCase() === oldName.toLowerCase()) {
+        if (s.crewHelper2 && this.isSameCrewPersonName(s.crewHelper2.name, oldName)) {
           newHelper2 = { ...s.crewHelper2, name: newName };
           changed = true;
         }
@@ -2654,16 +3332,46 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.syncUserToHostinger(userId, updatedUser);
+    const changedParts: string[] = [];
+    if (data.fullName && data.fullName !== oldName) changedParts.push(`Nama: ${oldName} → ${data.fullName}`);
+    if (data.role && data.role !== oldRole) changedParts.push(`Role: ${oldRole} → ${data.role}`);
+    if (data.department && data.department !== existing.department) changedParts.push(`Departemen: ${data.department}`);
+    if (data.phone && data.phone !== existing.phone) changedParts.push(`No. HP: ${data.phone}`);
+    if (data.permissions) changedParts.push('Hak Akses Modul');
+    this.logActivity(
+      'Ubah Data Akun User',
+      updatedUser.fullName,
+      changedParts.length > 0
+        ? `Merubah data akun ${updatedUser.fullName} (${changedParts.join(', ')})`
+        : `Merubah profil / hak akses akun ${updatedUser.fullName}`,
+      'ubah'
+    );
     this.notify();
     return true;
   }
 
   public deleteUser(userId: string) {
+    const target = this.users.find(u => u.id === userId);
     this.users = this.users.filter(u => u.id !== userId);
+    if (target) {
+      this.crews = (this.crews || []).filter(
+        c => c.id !== `crw-${userId}` && !this.isSameCrewPersonName(c.name, target.fullName)
+      );
+      this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      this.logActivity(
+        'Hapus Data Akun User',
+        target.fullName,
+        `Menghapus akun user ${target.fullName} (${target.email || target.role}) dari daftar pengguna`,
+        'kurangi'
+      );
+    }
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
-    fetch(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE', credentials: 'same-origin' })
-      .catch(err => console.warn('[Hostinger Users] Hapus user gagal:', err));
+    fetch(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: this.buildSessionAuthHeaders(),
+      credentials: 'same-origin'
+    }).catch(err => console.warn('[Hostinger Users] Hapus user gagal:', err));
     this.notify();
   }
 
@@ -2689,9 +3397,9 @@ class LogisticsStore {
       status: data.status || 'pending',
       createdAt: new Date().toISOString(),
       notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
-      permissions: {
+      permissions: normalizeUserPermissions(resolvedRole, {
         modules: getDefaultPermissionsForRole(resolvedRole)
-      }
+      })
     };
 
     this.users = [newUser, ...this.users];
@@ -2700,7 +3408,7 @@ class LogisticsStore {
     const endpoint = this.currentUser?.role === 'super_admin' ? '/api/users' : '/api/auth/register';
     fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify({
         id: newUser.id,
@@ -2711,6 +3419,7 @@ class LogisticsStore {
         department: newUser.department,
         status: newUser.status,
         notes: newUser.notes,
+        permissions: newUser.permissions,
         password: data.password || ''
       })
     }).catch(err => console.warn('[Hostinger Users] Registrasi user gagal disinkronkan:', err));
@@ -2739,20 +3448,26 @@ class LogisticsStore {
       if (match) return match;
 
       // Preview-only fallback. Production users always come from Hostinger MySQL.
-      if (!import.meta.env.PROD) {
+      if (this.isPreviewEnvironment()) {
         const initMatch = INITIAL_PROFILES.find(p => p.email && p.email.trim().toLowerCase() === cleanId);
         if (initMatch) {
           match = this.users.find(u => u.id === initMatch.id);
-          if (match) return match;
+          return match || initMatch;
         }
       }
 
       const emailPrefix = cleanId.split('@')[0].trim().toLowerCase();
-      if (['admin', 'superadmin', 'super.admin'].includes(emailPrefix)) {
-        return this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
+      if (['admin', 'superadmin', 'super.admin', 'akkoperasional60'].includes(emailPrefix)) {
+        return (
+          this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001') ||
+          (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'super_admin') : undefined)
+        );
       }
       if (['bayun791', 'bayun', 'bayu', 'operasional', 'ops'].includes(emailPrefix)) {
-        return this.users.find(u => u.id === 'usr-operasional' || u.role === 'operasional');
+        return (
+          this.users.find(u => u.id === 'usr-operasional' || u.role === 'operasional') ||
+          (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'operasional') : undefined)
+        );
       }
       return undefined;
     }
@@ -2801,7 +3516,7 @@ class LogisticsStore {
       );
     });
     if (matchedCrew) {
-      let crewUser = this.users.find(u => 
+      const crewUser = this.users.find(u => 
         (u.fullName || '').trim().toLowerCase() === matchedCrew.name.trim().toLowerCase() ||
         (u.id === `usr-${matchedCrew.id}`) ||
         (u.email && u.email.toLowerCase().includes(matchedCrew.name.toLowerCase().split(' ')[0]))
@@ -2809,13 +3524,29 @@ class LogisticsStore {
       if (crewUser) return crewUser;
 
       const targetRole: UserRole = matchedCrew.role.toLowerCase().includes('helper') ? 'crew_helper' : 'driver';
+      if (this.isPreviewEnvironment()) {
+        const dynamicCrewUser: UserProfile = {
+          id: `usr-${matchedCrew.id}`,
+          email: `${matchedCrew.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@gmail.com`,
+          fullName: matchedCrew.name,
+          role: targetRole,
+          department: 'Pengiriman',
+          phone: matchedCrew.phone || '',
+          status: 'approved',
+          permissions: { modules: getDefaultPermissionsForRole(targetRole) }
+        };
+        return dynamicCrewUser;
+      }
       const roleUser = this.users.find(u => u.role === targetRole);
       if (roleUser) return roleUser;
     }
 
-    // 7. Alias Super Admin khusus (hanya jika kata kunci admin/bayun)
-    if (['admin', 'superadmin', 'super admin', 'bayun791', 'bayun'].includes(cleanId)) {
-      return this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
+    // 7. Alias Super Admin khusus (hanya jika kata kunci admin/bayun/akkoperasional60)
+    if (['admin', 'superadmin', 'super admin', 'bayun791', 'bayun', 'akkoperasional60'].includes(cleanId)) {
+      return (
+        this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001') ||
+        (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'super_admin') : undefined)
+      );
     }
 
     return undefined;
@@ -2839,6 +3570,53 @@ class LogisticsStore {
     return this.lastAuthError;
   }
 
+  private tryPreviewLoginFallback(identifier: string, password: string): UserProfile | null {
+    if (!this.isPreviewEnvironment()) return null;
+    const cleanPass = String(password || '').trim();
+    if (cleanPass.length < 6) {
+      this.lastAuthError = {
+        status: 401,
+        message: 'Email/username atau password salah'
+      };
+      return null;
+    }
+
+    const matched = this.findUserByIdentifier(identifier.trim());
+    if (!matched) {
+      this.lastAuthError = {
+        status: 401,
+        message: 'Email/username atau password salah'
+      };
+      return null;
+    }
+
+    if (matched.status !== 'approved') {
+      this.lastAuthError = {
+        status: 403,
+        message: `Akun berstatus ${matched.status || 'pending'} dan belum dapat login`
+      };
+      return null;
+    }
+
+    const resolvedUser: UserProfile = {
+      ...matched,
+      password: undefined,
+      permissions: normalizeUserPermissions(matched.role, matched.permissions)
+    };
+
+    const idx = this.users.findIndex(u =>
+      u.id === resolvedUser.id ||
+      (resolvedUser.email && u.email?.toLowerCase() === resolvedUser.email.toLowerCase())
+    );
+    if (idx >= 0) this.users[idx] = resolvedUser;
+    else this.users = [resolvedUser, ...this.users];
+    this.users = this.deduplicateSuperAdmins(this.users);
+    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.setCurrentUser(resolvedUser);
+    this.lastAuthError = null;
+    return resolvedUser;
+  }
+
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
     try {
@@ -2850,6 +3628,9 @@ class LogisticsStore {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+        if (previewFallback) return previewFallback;
+
         this.lastAuthError = {
           status: response.status,
           message: String(payload?.error || 'Gagal memproses login ke server.')
@@ -2857,7 +3638,18 @@ class LogisticsStore {
         return null;
       }
       const remote = payload?.user;
-      if (!remote?.id) return null;
+      if (!remote?.id) {
+        const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+        if (previewFallback) return previewFallback;
+        return null;
+      }
+
+      if (payload?.sessionToken) {
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+        } catch {}
+      }
 
       const remoteEmail = String(remote.email || '').trim().toLowerCase();
       const existing = this.users.find(u =>
@@ -2878,9 +3670,10 @@ class LogisticsStore {
         department: remote.department || existing?.department || 'Logistics Operations',
         phone: remote.phone || existing?.phone || '',
         status: remote.status || existing?.status || 'approved',
-        permissions: (remote.permissions && remote.permissions.modules)
-          ? remote.permissions
-          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) })
+        permissions: normalizeUserPermissions(
+          role,
+          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+        )
       } as UserProfile;
 
       const idx = this.users.findIndex(u =>
@@ -2893,9 +3686,12 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser({ ...user, password: undefined } as UserProfile);
       void this.hydrateOperationalDataFromHostinger();
-      if (user.role === 'super_admin') await this.refreshUsersFromHostinger();
+      await this.refreshUsersFromHostinger();
       return user;
     } catch (err: any) {
+      const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+      if (previewFallback) return previewFallback;
+
       this.lastAuthError = {
         status: 503,
         message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
@@ -2905,64 +3701,301 @@ class LogisticsStore {
     }
   }
 
-  public async hydrateOperationalDataFromHostinger(): Promise<boolean> {
-    try {
-      const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-        fetch('/api/fleets', { credentials: 'same-origin' }),
-        fetch('/api/crews', { credentials: 'same-origin' }),
-        fetch('/api/stores', { credentials: 'same-origin' }),
-        fetch('/api/schedules/persisted', { credentials: 'same-origin' })
-      ]);
-
-      const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
-        fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
-        crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
-        storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
-        scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
-      ]);
-
-      if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-        this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
-        this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-      }
-      if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
-        this.crews = crewPayload.data;
-        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-      }
-      if (storeRes.ok && Array.isArray(storePayload?.data) && (storePayload.source === 'hostinger_mysql' || storePayload.data.length > 0)) {
-        this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
-        this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
-      }
-      if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
-        this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
-        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-      }
-
-      this.syncUsersWithCrews();
-      this.notify();
-      return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
-    } catch (err) {
-      console.warn('[Hostinger MySQL] Gagal hydrate data operasional:', err);
+  public async hydrateOperationalDataFromHostinger(force: boolean = false): Promise<boolean> {
+    if (this.hydratePromise) {
+      return this.hydratePromise;
+    }
+    const nowMs = Date.now();
+    if (nowMs < this.hydrateRateLimitedUntil) {
       return false;
     }
+    if (!force && nowMs - this.lastHydrateAt < 15000) {
+      return true;
+    }
+    this.lastHydrateAt = nowMs;
+    this.hydratePromise = (async () => {
+      try {
+        const savedToken =
+          (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+          '';
+        const authHeaders: Record<string, string> = {};
+        if (savedToken) {
+          authHeaders['Authorization'] = `Bearer ${savedToken}`;
+          authHeaders['x-akk-session-token'] = savedToken;
+        }
+
+        // Priority 1: muat 4 data inti operasional terlebih dahulu agar UI tampil cepat tanpa membanjiri koneksi server
+        const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+          fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
+        ]);
+
+        if (
+          fleetRes.status === 429 ||
+          crewRes.status === 429 ||
+          storeRes.status === 429 ||
+          scheduleRes.status === 429
+        ) {
+          this.hydrateRateLimitedUntil = Date.now() + 60000;
+          return false;
+        }
+
+        const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
+          fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
+          crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
+          storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
+          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
+        ]);
+
+        // Priority 2: muat data sekunder secara tertunda setelah tampilan utama siap agar tidak memperlambat reload awal
+        if (fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok) {
+          setTimeout(() => {
+            void (async () => {
+              try {
+                const [fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
+                  fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
+                ]);
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
+                  fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
+                  scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
+                  rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
+                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
+                ]);
+                let secondaryUpdated = false;
+                if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
+                  this.fuelLogs = fuelPayload.data;
+                  secondaryUpdated = true;
+                }
+                if (scanRes.ok && Array.isArray(scanPayload?.data)) {
+                  this.scannedDocuments = scanPayload.data;
+                  secondaryUpdated = true;
+                }
+                if (rotationRes.ok && rotationPayload?.data && typeof rotationPayload.data === 'object') {
+                  if (typeof rotationPayload.data.areaThreshold === 'number') {
+                    this.areaThreshold = rotationPayload.data.areaThreshold;
+                  }
+                  if (Array.isArray(rotationPayload.data.areaApprovals)) {
+                    this.areaApprovals = rotationPayload.data.areaApprovals;
+                  }
+                  if (Array.isArray(rotationPayload.data.crewHistory)) {
+                    this.crewHistory = rotationPayload.data.crewHistory;
+                  }
+                  secondaryUpdated = true;
+                }
+                if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
+                  this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+                  secondaryUpdated = true;
+                }
+                if (secondaryUpdated) {
+                  this.notify();
+                }
+              } catch {
+                // ignore secondary background sync error
+              }
+            })();
+          }, 650);
+        }
+
+        if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
+          const deletedIdSet = new Set(
+            Array.isArray(fleetPayload?.deletedIds) ? fleetPayload.deletedIds.map((x: any) => String(x).trim()) : []
+          );
+          const deletedPlateSet = new Set(
+            Array.isArray(fleetPayload?.deletedPlates)
+              ? fleetPayload.deletedPlates.map((x: any) => String(x).replace(/\s+/g, '').toUpperCase())
+              : []
+          );
+          const baseFleets = (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS).filter(bf => {
+            const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+            return !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
+          });
+
+          if (fleetPayload.data.length > 0) {
+            const mergedMap = new Map<string, Fleet>();
+            baseFleets.forEach(bf => {
+              mergedMap.set(bf.id, bf);
+            });
+            fleetPayload.data.forEach((remoteF: Fleet) => {
+              const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+              if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
+              const matchExisting = Array.from(mergedMap.values()).find(
+                ef =>
+                  ef.id === remoteF.id ||
+                  String(ef.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanRemotePlate
+              );
+              const targetKey = matchExisting ? matchExisting.id : remoteF.id;
+              mergedMap.set(targetKey, this.enrichFleetItem({ ...remoteF, id: targetKey }, matchExisting));
+            });
+            this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
+          } else {
+            this.fleets = sortFleetsByCanonicalOrder(baseFleets);
+            this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
+          }
+        }
+        if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
+          this.crews = crewPayload.data;
+          this.saveToStorage(STORAGE_KEYS.CREWS, this.crews, true);
+        }
+        if (storeRes.ok && Array.isArray(storePayload?.data)) {
+          const validRemoteStores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
+          if (validRemoteStores.length > 0) {
+            const storeMap = new Map<string, RetailStore>();
+            INITIAL_STORES.forEach(s => {
+              if (!isAreaRouteItem(s)) storeMap.set(s.id, s);
+            });
+            validRemoteStores.forEach((remS: RetailStore) => {
+              storeMap.set(remS.id, remS);
+            });
+            this.stores = Array.from(storeMap.values());
+          } else if (!this.stores || this.stores.length === 0) {
+            this.stores = [...INITIAL_STORES];
+          }
+          this.saveToStorage(STORAGE_KEYS.STORES, this.stores, true);
+        }
+        if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.source === 'disk_database' || schedulePayload?.exists)) {
+          const remoteSchedules: Schedule[] = (Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : []).filter(
+            (s: any) => s && typeof s === 'object' && s.id && !String(s.id).startsWith('batch-') && (s.departureDate || s.areaName || s.trackingNumber)
+          );
+          const deletedIdsSet = new Set<string>(
+            Array.isArray(schedulePayload?.deletedIds) ? schedulePayload.deletedIds.map((x: any) => String(x)) : []
+          );
+          const localById = new Map<string, Schedule>();
+          for (const loc of this.schedules || []) {
+            if (loc?.id && !String(loc.id).startsWith('batch-')) localById.set(loc.id, loc);
+          }
+          const mergedIds = new Set<string>();
+          const mergedSchedules: Schedule[] = [];
+
+          for (const rem of remoteSchedules) {
+            if (!rem?.id || deletedIdsSet.has(String(rem.id))) continue;
+            mergedIds.add(rem.id);
+            const loc = localById.get(rem.id);
+            const locTime = loc?.updatedAt ? new Date(loc.updatedAt).getTime() : 0;
+            const remTime = rem?.updatedAt ? new Date(rem.updatedAt).getTime() : 0;
+
+            // Server database is authoritative. Only prefer local if local has a strictly newer updatedAt timestamp.
+            const combined: Schedule = (loc && locTime > 0 && remTime > 0 && locTime > remTime)
+              ? { ...rem, ...loc }
+              : (loc ? { ...loc, ...rem } : { ...rem });
+
+            if (!combined.armada && (rem.armada || loc?.armada || rem.fleet?.initialCode || loc?.fleet?.initialCode)) {
+              combined.armada = rem.armada || loc?.armada || rem.fleet?.initialCode || loc?.fleet?.initialCode;
+            }
+            if (!combined.fleet && (rem.fleet || loc?.fleet)) {
+              combined.fleet = rem.fleet || loc?.fleet;
+            }
+            if ((rem.isChecklistBypassed || loc?.isChecklistBypassed) && (rem.status === 'delivered' || loc?.status === 'delivered')) {
+              combined.status = 'delivered';
+              combined.isChecklistBypassed = true;
+              combined.checklistBypassedBy = rem.checklistBypassedBy || loc?.checklistBypassedBy || 'Super Admin';
+              combined.checklistBypassedAt = rem.checklistBypassedAt || loc?.checklistBypassedAt;
+            }
+            if (loc?.status === 'delivered' && (loc.actualArrival || loc.podPhotoTimestamp || loc.podReceiverName)) {
+              combined.status = 'delivered';
+              combined.actualArrival = combined.actualArrival || loc.actualArrival;
+              combined.podPhotoTimestamp = combined.podPhotoTimestamp || loc.podPhotoTimestamp;
+              combined.podReceiverName = combined.podReceiverName || loc.podReceiverName;
+              combined.podConditionNote = combined.podConditionNote || loc.podConditionNote;
+            }
+
+            mergedSchedules.push(combined);
+          }
+
+          // Keep un-synced local schedules created recently or portal self-checkin schedules
+          const nowMs = Date.now();
+          for (const loc of this.schedules || []) {
+            if (loc?.id && !mergedIds.has(loc.id) && !deletedIdsSet.has(String(loc.id)) && !String(loc.id).startsWith('batch-')) {
+              const createdMs = loc.createdAt ? new Date(loc.createdAt).getTime() : 0;
+              if (String(loc.id).startsWith('PORTAL-') || (createdMs > 0 && nowMs - createdMs < 60000)) {
+                mergedSchedules.push(loc);
+              }
+            }
+          }
+
+          this.schedules = mergedSchedules;
+          this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules, true);
+        }
+
+        this.reconcileFleetAndScheduleStatuses(true);
+        this.syncUsersWithCrews();
+        this.notify();
+        return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
+      } catch (err) {
+        console.warn('[Hostinger MySQL] Gagal hydrate data operasional:', err);
+        return false;
+      } finally {
+        this.hydratePromise = null;
+      }
+    })();
+    return this.hydratePromise;
+  }
+
+  private resolveLocalCandidateUser(): UserProfile | null {
+    const savedSessionUserId =
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+    const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+    return (
+      (this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved' ? this.currentUser : null) ||
+      (savedSessionUserId ? this.users.find(u => u.id === savedSessionUserId && u.status === 'approved') || null : null) ||
+      (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : null)
+    );
   }
 
   public async restoreServerSession(): Promise<boolean> {
     try {
+      const savedToken =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        '';
+      // Mulai hydrate paralel hanya bila sudah ada sesi/token lokal agar halaman login tidak mengirim 401 massal
+      if (savedToken || this.isAuthenticated()) {
+        void this.hydrateOperationalDataFromHostinger();
+      }
+      const reqHeaders: Record<string, string> = { 'Accept': 'application/json' };
+      if (savedToken) {
+        reqHeaders['Authorization'] = `Bearer ${savedToken}`;
+        reqHeaders['x-akk-session-token'] = savedToken;
+      }
+
       const response = await fetch('/api/auth/me', {
         method: 'GET',
         credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' }
+        headers: reqHeaders
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.user?.id) {
+        // Jaga agar sesi perangkat lapangan (Android WebView / Mobile Browser) TIDAK keluar sendiri
+        // apabila terjadi pergantian jaringan (Wi-Fi ke Data Seluler), drop cookie WebView saat buka kamera, atau server sibuk.
+        const candidateUser = this.resolveLocalCandidateUser();
+        if (candidateUser) {
+          this.setCurrentUser({ ...candidateUser, password: undefined });
+          void this.hydrateOperationalDataFromHostinger();
+          return true;
+        }
+
         this.currentUser = { ...GUEST_USER_PROFILE };
         try {
           sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
           localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
         } catch {}
         this.notify();
         return false;
+      }
+
+      if (payload?.sessionToken) {
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+        } catch {}
       }
 
       const remote = payload.user;
@@ -2989,9 +4022,10 @@ class LogisticsStore {
         approvedAt: remote.approvedAt || existing?.approvedAt,
         approvedBy: remote.approvedBy || existing?.approvedBy,
         notes: remote.notes ?? existing?.notes,
-        permissions: (remote.permissions && remote.permissions.modules)
-          ? remote.permissions
-          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) }),
+        permissions: normalizeUserPermissions(
+          role,
+          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+        ),
         password: undefined
       } as UserProfile;
 
@@ -3005,13 +4039,19 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser(user);
       void this.hydrateOperationalDataFromHostinger();
-      if (user.role === 'super_admin') void this.refreshUsersFromHostinger();
+      void this.refreshUsersFromHostinger();
       return true;
     } catch (err) {
+      const candidateUser = this.resolveLocalCandidateUser();
+      if (candidateUser) {
+        this.setCurrentUser({ ...candidateUser, password: undefined });
+        return true;
+      }
       console.warn('[Hostinger Auth] Restore session gagal:', err);
       this.currentUser = { ...GUEST_USER_PROFILE };
       try {
         sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+        localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
         localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       } catch {}
       this.notify();
@@ -3065,6 +4105,9 @@ class LogisticsStore {
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, target.id);
         }
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, target.id);
+        }
       } catch {}
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       this.syncCurrentUserToCrew();
@@ -3078,6 +4121,9 @@ class LogisticsStore {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, user.id);
       }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, user.id);
+      }
     } catch {}
     this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     this.syncCurrentUserToCrew();
@@ -3090,7 +4136,10 @@ class LogisticsStore {
     try {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+        sessionStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
       }
+      localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+      localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem('akk_driver_auth_session');
     } catch {}
@@ -3118,7 +4167,7 @@ class LogisticsStore {
     try {
       const response = await fetch(`/api/users/${encodeURIComponent(userId)}/password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'same-origin',
         body: JSON.stringify({ password: newPassword })
       });
@@ -3268,7 +4317,21 @@ class LogisticsStore {
     this.notify();
   }
 
+  private canCurrentUserEditModule(moduleId: string, subMenuId?: string): boolean {
+    const u = this.getCurrentUser();
+    if (!u || u.id === 'guest' || u.id === 'usr-guest') return true;
+    return canEdit(u, moduleId, subMenuId);
+  }
+
   public addSchedule(schedule: Omit<Schedule, 'id' | 'createdAt'>): Schedule {
+    if (!this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi addSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return {
+        ...schedule,
+        id: 'sch-readonly-blocked',
+        createdAt: new Date().toISOString()
+      } as Schedule;
+    }
     const areaName = resolveScheduleAreaName(schedule);
     const isBali = schedule.isInterIsland || areaName.toUpperCase().includes('BALI') || areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA');
 
@@ -3297,39 +4360,67 @@ class LogisticsStore {
       storeCategory: 'Distribution Hub'
     };
 
-    const newSchedule: Schedule = {
+    const customId = (schedule as any).id;
+    const nowIso = new Date().toISOString();
+    const resolvedFleet =
+      this.findFleetByCodeOrPlate(
+        schedule.armada || schedule.fleet?.initialCode || schedule.fleet?.plateNumber || schedule.fleetId
+      ) ||
+      schedule.fleet ||
+      this.fleets.find(f => f.id === schedule.fleetId);
+
+    const resolvedCrew = this.crews.find(c => c.id === schedule.crewId) || schedule.crew;
+    const resolvedHelper = schedule.crewHelperId
+      ? (this.crews.find(c => c.id === schedule.crewHelperId) || schedule.crewHelper)
+      : schedule.crewHelper;
+    const resolvedHelper2 = schedule.crewHelper2Id
+      ? (this.crews.find(c => c.id === schedule.crewHelper2Id) || schedule.crewHelper2)
+      : schedule.crewHelper2;
+
+    const hydratedNewSchedule: Schedule = {
       ...schedule,
-      id: 'sch-' + Math.random().toString(36).substring(2, 9),
+      id: customId && typeof customId === 'string' && customId.trim() ? customId.trim() : 'sch-' + Math.random().toString(36).substring(2, 9),
       areaName,
       store: areaStore,
-      createdAt: new Date().toISOString()
+      fleetId: resolvedFleet?.id || schedule.fleetId || 'flt-01',
+      fleet: resolvedFleet,
+      armada: schedule.armada || resolvedFleet?.initialCode || resolvedFleet?.plateNumber,
+      crew: resolvedCrew,
+      crewHelper: resolvedHelper,
+      crewHelper2: resolvedHelper2,
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     // Status armada berubah menjadi 'on-duty' (Kirim) hanya saat sudah Gate-Out ('in_transit' / 'picked_up')
-    if (newSchedule.status === 'in_transit' || newSchedule.status === 'picked_up') {
-      this.updateFleetStatus(newSchedule.fleetId, 'on-duty', newSchedule.cargoWeightTon);
-      this.updateCrewStatus(newSchedule.crewId, 'on-duty');
+    if (hydratedNewSchedule.status === 'in_transit' || hydratedNewSchedule.status === 'picked_up') {
+      this.updateFleetStatus(hydratedNewSchedule.fleetId, 'on-duty', hydratedNewSchedule.cargoWeightTon);
+      this.updateCrewStatus(hydratedNewSchedule.crewId, 'on-duty');
     }
 
-    this.schedules = [newSchedule, ...this.schedules];
+    this.schedules = [hydratedNewSchedule, ...this.schedules.filter(s => s.id !== hydratedNewSchedule.id)];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
 
-    const hydratedNewSchedule: Schedule = {
-      ...newSchedule,
-      fleet: this.fleets.find(f => f.id === newSchedule.fleetId) || newSchedule.fleet,
-      crew: this.crews.find(c => c.id === newSchedule.crewId) || newSchedule.crew,
-      crewHelper: newSchedule.crewHelperId ? (this.crews.find(c => c.id === newSchedule.crewHelperId) || newSchedule.crewHelper) : undefined,
-      crewHelper2: newSchedule.crewHelper2Id ? (this.crews.find(c => c.id === newSchedule.crewHelper2Id) || newSchedule.crewHelper2) : undefined
-    };
+    const isAutoGenerated = String(hydratedNewSchedule.notes || '').includes('Jadwal: Berangkat') && String(hydratedNewSchedule.trackingNumber || '').startsWith('PO-AKK-');
+    if (!isAutoGenerated) {
+      const fleetLabel = hydratedNewSchedule.fleet?.plateNumber || hydratedNewSchedule.armada || '-';
+      const driverLabel = hydratedNewSchedule.crew?.name || '-';
+      this.logActivity(
+        'Tambah Jadwal Pengiriman',
+        `Area ${areaName} (${fleetLabel})`,
+        `Menambahkan jadwal pengiriman area ${areaName} • Armada: ${fleetLabel} • Driver: ${driverLabel}`,
+        'tambah'
+      );
+    }
 
     // Trigger auto-write middleware
     this.dispatchMiddleware({
       entityType: 'schedule',
       action: 'create',
-      id: newSchedule.id,
+      id: hydratedNewSchedule.id,
       data: hydratedNewSchedule,
-      timestamp: new Date().toISOString()
+      timestamp: nowIso
     });
 
     // Publish real-time assignment notification via Supabase Realtime (filtered to assigned driver)
@@ -3337,19 +4428,112 @@ class LogisticsStore {
       supabaseRealtimeSync.publishScheduleChange('INSERT', hydratedNewSchedule, null).catch(() => {});
     } catch {}
 
+    this.persistSchedulesSnapshotToBackend('add_schedule');
+
     return hydratedNewSchedule;
   }
 
+  private persistSchedulesTimer: any = null;
+  private pendingDeletedScheduleIds: Set<string> = new Set();
+
+  private persistSchedulesSnapshotToBackend(source: string = 'store_sync', deletedIds: string[] = [], replaceAll: boolean = false) {
+    if (typeof fetch === 'undefined') return;
+    deletedIds.forEach(id => {
+      if (id) this.pendingDeletedScheduleIds.add(String(id));
+    });
+    if (this.persistSchedulesTimer) {
+      clearTimeout(this.persistSchedulesTimer);
+    }
+    this.persistSchedulesTimer = setTimeout(() => {
+      this.persistSchedulesTimer = null;
+      const batchDeletedIds = Array.from(this.pendingDeletedScheduleIds);
+      this.pendingDeletedScheduleIds.clear();
+      try {
+        fetch('/api/schedules/persist', {
+          method: 'POST',
+          headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            schedules: this.schedules,
+            deletedIds: batchDeletedIds,
+            replaceAll,
+            source
+          })
+        }).catch(() => {});
+      } catch {}
+    }, 180);
+  }
+
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
+    const u = this.getCurrentUser();
+    const isCrewOrPortalUpdate =
+      Boolean(
+        u &&
+          [
+            'driver',
+            'crew_helper',
+            'warehouse_admin',
+            'koordinator_gudang',
+            'spv_logistik',
+            'koordinator_driver',
+            'super_admin',
+            'operasional',
+            'dispatcher'
+          ].includes(u.role)
+      ) ||
+      updatedSchedule.backupCrewName !== undefined ||
+      updatedSchedule.backupPosition !== undefined ||
+      updatedSchedule.backupTargetName !== undefined ||
+      updatedSchedule.isManuallyEdited === true;
+
+    if (!isCrewOrPortalUpdate && !this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi updateSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return;
+    }
     let oldSch: Schedule | null = null;
     let newSch: Schedule | null = null;
+    const nowIso = new Date().toISOString();
+
     this.schedules = this.schedules.map(sch => {
       if (sch.id === id) {
         oldSch = sch;
-        const result = { ...sch, ...updatedSchedule };
-        newSch = result;
-        this.logActivity('Update Jadwal', sch.trackingNumber, `Perubahan pada jadwal ${id}`);
-        return result;
+        const merged = { ...sch, ...updatedSchedule, updatedAt: nowIso };
+        const resolvedFleet =
+          (updatedSchedule.armada || updatedSchedule.fleet || updatedSchedule.fleetId
+            ? this.findFleetByCodeOrPlate(
+                updatedSchedule.armada ||
+                  updatedSchedule.fleet?.initialCode ||
+                  updatedSchedule.fleet?.plateNumber ||
+                  updatedSchedule.fleetId
+              )
+            : undefined) ||
+          merged.fleet ||
+          this.fleets.find(f => f.id === merged.fleetId);
+
+        const hydrated: Schedule = {
+          ...merged,
+          fleetId: resolvedFleet?.id || merged.fleetId,
+          fleet: resolvedFleet,
+          armada: updatedSchedule.armada || resolvedFleet?.initialCode || merged.armada || resolvedFleet?.plateNumber,
+          crew: this.crews.find(c => c.id === merged.crewId) || merged.crew,
+          crewHelper: merged.crewHelperId ? (this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
+          crewHelper2: merged.crewHelper2Id ? (this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
+        };
+        newSch = hydrated;
+        const isAutoRebalance = String(updatedSchedule.notes || '').includes('[Auto-Rebalanced:');
+        if (!isAutoRebalance) {
+          const areaLabel = hydrated.areaName || hydrated.store?.storeName || sch.trackingNumber || 'Rute Pengiriman';
+          const plateLabel = hydrated.fleet?.plateNumber || hydrated.armada || '-';
+          const driverLabel = hydrated.crew?.name || '-';
+          const helperLabel = hydrated.crewHelper?.name ? `, Helper: ${hydrated.crewHelper.name}` : '';
+          this.logActivity(
+            'Ubah Data Jadwal Pengiriman',
+            `Area ${areaLabel} (${plateLabel})`,
+            `Merubah data jadwal area ${areaLabel} • Armada: ${plateLabel} • Driver: ${driverLabel}${helperLabel}`,
+            'ubah'
+          );
+        }
+        return hydrated;
       }
       return sch;
     });
@@ -3357,36 +4541,47 @@ class LogisticsStore {
     this.syncSchedulesToCrewHistory(this.schedules);
 
     if (newSch) {
-      const hydratedUpdated: Schedule = {
-        ...(newSch as Schedule),
-        fleet: this.fleets.find(f => f.id === (newSch as Schedule).fleetId) || (newSch as Schedule).fleet,
-        crew: this.crews.find(c => c.id === (newSch as Schedule).crewId) || (newSch as Schedule).crew,
-        crewHelper: (newSch as Schedule).crewHelperId ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelperId) || (newSch as Schedule).crewHelper) : undefined,
-        crewHelper2: (newSch as Schedule).crewHelper2Id ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelper2Id) || (newSch as Schedule).crewHelper2) : undefined
-      };
-
       this.dispatchMiddleware({
         entityType: 'schedule',
         action: 'update',
         id,
-        data: hydratedUpdated,
+        data: newSch,
         previousData: oldSch || undefined,
-        timestamp: new Date().toISOString()
+        timestamp: nowIso
       });
 
       try {
-        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedUpdated, oldSch).catch(() => {});
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', newSch, oldSch).catch(() => {});
       } catch {}
     }
 
+    this.persistSchedulesSnapshotToBackend('update_schedule');
     this.notify();
   }
 
   public deleteSchedule(id: string) {
-    const target = this.schedules.find(sch => sch.id === id);
-    this.schedules = this.schedules.filter(sch => sch.id !== id);
+    const u = this.getCurrentUser();
+    const isSuperOrAdmin = !u || u.role === 'super_admin' || (u.role as string) === 'admin_penjualan' || (u.role as string) === 'admin_nusantara' || (u.role as string) === 'admin_sidoarjo';
+    if (!isSuperOrAdmin && !this.canCurrentUserEditModule('schedules')) {
+      console.warn('[RBAC Guard] Aksi deleteSchedule ditolak: Akun memiliki akses Hanya Lihat (Read Only) pada Jadwal & Penugasan Armada.');
+      return;
+    }
+    const target = this.schedules.find(sch => sch.id === id || sch.id === String(id));
+    this.schedules = this.schedules.filter(sch => sch.id !== id && sch.id !== String(id));
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
+    this.reconcileFleetAndScheduleStatuses(true);
+
+    if (target) {
+      const areaLabel = target.areaName || target.store?.storeName || target.trackingNumber || id;
+      const plateLabel = target.fleet?.plateNumber || target.armada || '-';
+      this.logActivity(
+        'Hapus Data Jadwal Pengiriman',
+        `Area ${areaLabel} (${plateLabel})`,
+        `Menghapus jadwal pengiriman area ${areaLabel} • Armada: ${plateLabel} • Driver: ${target.crew?.name || '-'}`,
+        'kurangi'
+      );
+    }
 
     this.dispatchMiddleware({
       entityType: 'schedule',
@@ -3396,15 +4591,27 @@ class LogisticsStore {
       timestamp: new Date().toISOString()
     });
 
+    this.persistSchedulesSnapshotToBackend('delete_schedule', [String(id)]);
     this.notify();
   }
 
   public clearAllSchedules() {
+    const allIds = this.schedules.map(s => String(s.id)).filter(Boolean);
+    if (allIds.length > 0) {
+      this.logActivity(
+        'Hapus Semua Jadwal Pengiriman',
+        'Jadwal & Penugasan Armada',
+        `Menghapus / mengurangi ${allIds.length} data jadwal pengiriman`,
+        'kurangi'
+      );
+    }
     this.schedules = [];
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
+    this.reconcileFleetAndScheduleStatuses(true);
     try {
       localStorage.removeItem('akk_driver_cached_deliveries_v2');
     } catch {}
+    this.persistSchedulesSnapshotToBackend('clear_all', allIds, true);
     this.notify();
   }
 
@@ -3415,7 +4622,7 @@ class LogisticsStore {
   public batchSyncSchedules(
     itemsToAdd: Schedule[],
     itemsToUpdate: { id: string; data: Partial<Schedule> }[] = [],
-    options: { isImport?: boolean; replaceMonth?: boolean } = {}
+    options: { isImport?: boolean; replaceMonth?: boolean; skipBackendPersist?: boolean } = {}
   ): { addedCount: number; updatedCount: number } {
     // On import or explicit replace request, purge old unedited schedules for the affected month(s)
     if (options.isImport || options.replaceMonth) {
@@ -3442,22 +4649,78 @@ class LogisticsStore {
       }
     }
 
+    const sanitizeScheduleItem = (sch: Schedule): Schedule => {
+      const depIso = String(sch?.departureDate || '').slice(0, 10);
+      const resolvedFleet =
+        this.findFleetByCodeOrPlate(
+          sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId
+        ) || sch.fleet;
+      const base: Schedule = {
+        ...sch,
+        fleetId: resolvedFleet?.id || sch.fleetId || 'flt-01',
+        fleet: resolvedFleet,
+        armada: sch.armada || resolvedFleet?.initialCode || resolvedFleet?.plateNumber
+      };
+      if (depIso >= '2026-11-12' && base.status === 'delivered' && !base.podPhotoUrl && !base.isChecklistBypassed) {
+        return {
+          ...base,
+          status: 'scheduled',
+          isChecklistBypassed: false,
+          actualArrival: undefined
+        };
+      }
+      return base;
+    };
+
     const updateMap = new Map<string, Partial<Schedule>>();
     itemsToUpdate.forEach(u => updateMap.set(u.id, u.data));
+    const addByIdMap = new Map<string, Schedule>();
+    const importFleetDateKeys = new Set<string>();
 
-    // 1. In-memory update existing items
-    if (updateMap.size > 0) {
-      this.schedules = this.schedules.map(sch => {
-        if (updateMap.has(sch.id)) {
-          return { ...sch, ...updateMap.get(sch.id)! };
-        }
-        return sch;
+    if (options.isImport) {
+      this.schedules.forEach(sch => {
+        if (sch.status === 'delivered' || String(sch.status) === 'cancelled') return;
+        const calIso = this.getScheduleCalendarIso(sch);
+        const fKey = (sch.fleetId || sch.armada || '').trim().toUpperCase();
+        if (fKey && calIso) importFleetDateKeys.add(`${fKey}__${calIso}`);
       });
     }
 
+    itemsToAdd.forEach(item => {
+      if (item?.id && !String(item.id).startsWith('batch-')) {
+        const sanitized = sanitizeScheduleItem(item);
+        if (options.isImport && sanitized.status !== 'delivered' && String(sanitized.status) !== 'cancelled') {
+          const calIso = this.getScheduleCalendarIso(sanitized);
+          const fKey = (sanitized.fleetId || sanitized.armada || '').trim().toUpperCase();
+          if (fKey && calIso) {
+            const composite = `${fKey}__${calIso}`;
+            if (importFleetDateKeys.has(composite)) {
+              return;
+            }
+            importFleetDateKeys.add(composite);
+          }
+        }
+        addByIdMap.set(item.id, sanitized);
+      }
+    });
+
+    // 1. In-memory update existing items (from itemsToUpdate or matching IDs in itemsToAdd)
+    let updatedExistingCount = 0;
+    this.schedules = this.schedules.map(sch => {
+      if (updateMap.has(sch.id)) {
+        updatedExistingCount++;
+        return sanitizeScheduleItem({ ...sch, ...updateMap.get(sch.id)! });
+      }
+      if (addByIdMap.has(sch.id)) {
+        updatedExistingCount++;
+        return sanitizeScheduleItem({ ...sch, ...addByIdMap.get(sch.id)! });
+      }
+      return sanitizeScheduleItem(sch);
+    });
+
     // 2. In-memory prepend new items (deduplicated by ID)
     const existingIdSet = new Set(this.schedules.map(s => s.id));
-    const cleanNewItems = itemsToAdd.filter(item => !existingIdSet.has(item.id));
+    const cleanNewItems = Array.from(addByIdMap.values()).filter(item => !existingIdSet.has(item.id));
     this.schedules = [...cleanNewItems, ...this.schedules];
 
     // 3. Single disk save
@@ -3466,64 +4729,47 @@ class LogisticsStore {
     // 4. Single crew history recalculation
     this.syncSchedulesToCrewHistory(this.schedules);
 
-    // 5. Single batched middleware dispatch (non-blocking)
-    setTimeout(() => {
-      this.dispatchMiddleware({
-        entityType: 'schedule',
-        action: 'update',
-        id: `batch-${Date.now()}`,
-        data: { added: cleanNewItems.length, updated: itemsToUpdate.length },
-        metadata: { isBatch: true, source: options.isImport ? 'google_sheets_sync' : 'batch' },
-        timestamp: new Date().toISOString()
-      });
-    }, 50);
+    // 5. Persist via debounced snapshot endpoint unless caller handles persistence directly
+    if (!options.skipBackendPersist) {
+      this.persistSchedulesSnapshotToBackend(options.isImport ? 'google_sheets_sync' : 'batch_sync');
+    }
 
     this.notify();
-    return { addedCount: cleanNewItems.length, updatedCount: itemsToUpdate.length };
+    return { addedCount: cleanNewItems.length, updatedCount: updatedExistingCount };
   }
 
   /**
-   * Mengambil data minggu jadwal admin Sheet ALL dari cache persistent atau mengonversi dari jadwal operasional aktif
+   * Mengambil data minggu jadwal admin Sheet ALL dari memori/server Hostinger MySQL (tanpa localStorage)
    */
   public getAdminScheduleWeeks(year: number, month: number): any[] | null {
     const effectiveMonth = month === -1 ? 0 : month;
-    const cacheKey = `akk_admin_schedule_cache_${year}_${effectiveMonth}`;
-    try {
-      const saved = localStorage.getItem(cacheKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.days?.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('Gagal membaca cache admin schedule weeks:', e);
+    const cacheKey = `${year}_${effectiveMonth}`;
+    const saved = this.adminScheduleWeeksCache[cacheKey];
+    if (Array.isArray(saved) && saved.length > 0 && saved[0]?.days?.length > 0) {
+      return saved;
     }
     return null;
   }
 
+  public getAllCachedAdminScheduleWeeks(): any[] {
+    if (this.lastAdminScheduleWeeksList.length > 0) {
+      return this.lastAdminScheduleWeeksList;
+    }
+    const all: any[] = [];
+    Object.values(this.adminScheduleWeeksCache).forEach((arr) => {
+      if (Array.isArray(arr)) all.push(...arr);
+    });
+    return all;
+  }
+
   /**
-   * Menyimpan data minggu jadwal admin Sheet ALL ke cache persistent
+   * Menyimpan data minggu jadwal admin ke memori & Hostinger MySQL (tanpa localStorage)
    */
   public saveAdminScheduleWeeks(year: number, month: number, weeks: any[]) {
     const effectiveMonth = month === -1 ? 0 : month;
-    const cacheKey = `akk_admin_schedule_cache_${year}_${effectiveMonth}`;
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(weeks));
-      localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(weeks));
-      localStorage.setItem('akk_last_admin_schedule_sync_time', new Date().toISOString());
-    } catch (e) {
-      console.warn('Gagal menyimpan admin schedule weeks:', e);
-    }
-
-    this.dispatchMiddleware({
-      entityType: 'admin_schedule',
-      action: 'update',
-      id: `weeks_${year}_${effectiveMonth}`,
-      data: weeks,
-      timestamp: new Date().toISOString()
-    });
-
+    const cacheKey = `${year}_${effectiveMonth}`;
+    this.adminScheduleWeeksCache[cacheKey] = weeks;
+    this.lastAdminScheduleWeeksList = weeks;
     this.notify();
   }
 
@@ -3562,6 +4808,7 @@ class LogisticsStore {
   ) {
     let deliveredSchedule: Schedule | null = null;
     let targetSch: Schedule | null = null;
+    const nowIso = new Date().toISOString();
 
     this.schedules = this.schedules.map(sch => {
       if (sch.id === id) {
@@ -3573,14 +4820,16 @@ class LogisticsStore {
           ...sch,
           status,
           notes: updatedNotes,
+          updatedAt: nowIso,
+          ...(status === 'in_transit' && !sch.actualDeparture ? { actualDeparture: nowIso } : {}),
           ...(podData?.podPhotoUrl ? { podPhotoUrl: podData.podPhotoUrl } : {}),
           ...(podData?.podPhotoTimestamp ? { podPhotoTimestamp: podData.podPhotoTimestamp } : {}),
           ...(podData?.podReceiverName ? { podReceiverName: podData.podReceiverName } : {}),
           ...(podData?.podConditionNote ? { podConditionNote: podData.podConditionNote } : {}),
         };
-        const targetFleetKey = sch.fleetId || sch.fleet?.plateNumber || '';
+        const targetFleetKey = sch.fleetId || sch.armada || sch.fleet?.plateNumber || '';
         if (status === 'delivered') {
-          updated.actualArrival = new Date().toISOString();
+          updated.actualArrival = nowIso;
           deliveredSchedule = updated;
           this.logActivity('Update Status', 'Pengiriman', `Status ${sch.trackingNumber} menjadi delivered`);
           if (podData?.podPhotoUrl) {
@@ -3634,6 +4883,7 @@ class LogisticsStore {
       return sch;
     });
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+    this.persistSchedulesSnapshotToBackend('update_schedule_status');
 
     if (targetSch) {
       const sch = targetSch as Schedule;
@@ -3750,7 +5000,7 @@ class LogisticsStore {
           : undefined;
       const response = await fetch(`/api/schedules/${encodeURIComponent(item.scheduleId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'same-origin',
         body: JSON.stringify({
           status: item.status,
@@ -3818,6 +5068,12 @@ class LogisticsStore {
     };
     this.fleets = [...this.fleets, newFleet];
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+    this.logActivity(
+      'Tambah Data Armada',
+      `${newFleet.plateNumber} (${newFleet.initialCode || newFleet.vehicleType})`,
+      `Menambahkan data armada baru ${newFleet.plateNumber} • Jenis: ${newFleet.vehicleType}`,
+      'tambah'
+    );
 
     // Asynchronous backend integration with Supabase
     createFleetInSupabase(newFleet).then(res => {
@@ -3872,8 +5128,195 @@ class LogisticsStore {
     };
   }
 
-  public updateFleetStatus(idOrPlate: string, status: Fleet['status'], tonnage?: number) {
+  public getWibTodayIso(): string {
+    const now = new Date();
+    const wibMs = now.getTime() + 7 * 60 * 60 * 1000;
+    return new Date(wibMs).toISOString().slice(0, 10);
+  }
+
+  public getScheduleCalendarIso(sch: Schedule): string {
+    const toLocalWibIso = (raw?: string): string => {
+      if (!raw) return '';
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // Extract YYYY-MM-DD directly when +07:00 or plain ISO date prefix exists
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && s.includes('+07:00')) return s.slice(0, 10);
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      }
+      return s.slice(0, 10);
+    };
+
+    const depIso = toLocalWibIso(sch.deliveryDate || sch.departureDate);
+    const retIso = toLocalWibIso(sch.returnDate || sch.estimatedArrival);
+    if (retIso && depIso && retIso > depIso) {
+      return retIso;
+    }
+    return depIso || retIso || toLocalWibIso(sch.createdAt);
+  }
+
+  public doesScheduleCoverDate(sch: Schedule, targetIso: string): boolean {
+    if (!targetIso) return false;
+    const toIso = (raw?: string): string => {
+      if (!raw) return '';
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && s.includes('+07:00')) return s.slice(0, 10);
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      }
+      return s.slice(0, 10);
+    };
+
+    const depIso = toIso(sch.deliveryDate || sch.departureDate);
+    const retIso = toIso(sch.returnDate || sch.estimatedArrival) || depIso;
+    const calIso = this.getScheduleCalendarIso(sch);
+
+    if (calIso === targetIso || depIso === targetIso || retIso === targetIso) return true;
+    if (depIso && retIso && depIso <= targetIso && retIso >= targetIso) return true;
+    return false;
+  }
+
+  public matchesFleetSchedule(fleet: Fleet, sch: Schedule): boolean {
+    if (!fleet || !sch) return false;
+    if (sch.fleetId && sch.fleetId === fleet.id) return true;
+    const cleanPlate = (fleet.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const schPlate = (sch.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    if (cleanPlate && schPlate && schPlate === cleanPlate) return true;
+
+    const resolvedFromSch = this.findFleetByCodeOrPlate(
+      sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId
+    );
+    if (resolvedFromSch && resolvedFromSch.id === fleet.id) return true;
+
+    const fInit = (fleet.initialCode || '').trim().toUpperCase();
+    const sArm = (sch.armada || sch.fleet?.initialCode || '').trim().toUpperCase();
+    if (fInit && sArm) {
+      if (fInit === sArm) return true;
+      const fParts = fInit.split('/').map(x => x.trim()).filter(Boolean);
+      const sParts = sArm.split('/').map(x => x.trim()).filter(Boolean);
+      if (fParts.some(p => sParts.includes(p))) return true;
+    }
+    return false;
+  }
+
+  public findFleetAssignmentConflict(
+    armadaOrFleetId: string,
+    targetDateIso: string,
+    excludeScheduleId?: string
+  ): { fleet: Fleet | null; conflictSchedule: Schedule } | null {
+    const cleanTargetIso = (targetDateIso || '').slice(0, 10);
+    const rawKey = (armadaOrFleetId || '').trim().toUpperCase();
+    if (!rawKey || !cleanTargetIso) return null;
+
+    const resolvedFleet =
+      this.fleets.find(
+        f =>
+          f.id === armadaOrFleetId ||
+          f.plateNumber.trim().toUpperCase() === rawKey ||
+          (f.initialCode && f.initialCode.trim().toUpperCase() === rawKey)
+      ) ||
+      this.findFleetByCodeOrPlate(armadaOrFleetId) ||
+      null;
+
+    const conflictSchedule = (this.schedules || []).find(sch => {
+      if (excludeScheduleId && sch.id === excludeScheduleId) return false;
+      if (sch.status === 'delivered' || String(sch.status) === 'cancelled') return false;
+      if (!this.doesScheduleCoverDate(sch, cleanTargetIso)) return false;
+
+      if (resolvedFleet) {
+        return this.matchesFleetSchedule(resolvedFleet, sch);
+      }
+
+      const schArmada = (sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || '').trim().toUpperCase();
+      return schArmada === rawKey;
+    });
+
+    if (!conflictSchedule) return null;
+    return { fleet: resolvedFleet, conflictSchedule };
+  }
+
+  public reconcileFleetAndScheduleStatuses(persistChanges: boolean = false) {
+    const todayWib = this.getWibTodayIso();
+    let schedulesChanged = false;
+
+    // 1. Tutup otomatis jadwal lampau (< hari ini WIB) yang masih nyangkut status 'in_transit' / 'picked_up' / 'delayed'
+    // agar armada seperti NMR/DS5 tidak terus-terusan stuck status Kirim area hari sebelumnya.
+    this.schedules = (this.schedules || []).map(sch => {
+      if (['in_transit', 'picked_up', 'delayed'].includes(sch.status)) {
+        const calIso = this.getScheduleCalendarIso(sch);
+        const endIso = (sch.returnDate || sch.estimatedArrival || calIso || '').slice(0, 10);
+        const depActIso = (sch.actualDeparture || '').slice(0, 10);
+        const isStillTodayOrFuture =
+          this.doesScheduleCoverDate(sch, todayWib) ||
+          (calIso && calIso >= todayWib) ||
+          (endIso && endIso >= todayWib) ||
+          depActIso === todayWib;
+
+        if (!isStillTodayOrFuture && endIso && endIso < todayWib) {
+          schedulesChanged = true;
+          return {
+            ...sch,
+            status: 'delivered' as const,
+            actualArrival: sch.actualArrival || sch.estimatedArrival || `${endIso}T17:00:00+07:00`,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      }
+      return sch;
+    });
+
+    if (schedulesChanged) {
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      if (persistChanges) {
+        this.persistSchedulesSnapshotToBackend('reconcile_past_active_trips');
+      }
+    }
+
+    // 2. Sinkronkan status armada dengan jadwal aktif hari ini:
+    // - 'maintenance' tetap dipertahankan
+    // - 'on-duty' hanya aktif jika benar-benar ada jadwal aktif hari ini ('in_transit' / 'picked_up' / 'delayed')
+    // - Jika tidak ada jadwal aktif yang sedang jalan hari ini, otomatis pulihkan ke 'available' (Ready)
+    const fleetsNeedingSync: Fleet[] = [];
+    let fleetsChanged = false;
+    this.fleets = (this.fleets || []).map(f => {
+      if (f.status === 'maintenance') return f;
+      const hasTodayActiveTrip = (this.schedules || []).some(
+        sch =>
+          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+          this.matchesFleetSchedule(f, sch) &&
+          (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
+      );
+      const targetStatus: Fleet['status'] = hasTodayActiveTrip ? 'on-duty' : 'available';
+      if (f.status !== targetStatus) {
+        fleetsChanged = true;
+        const updatedF = { ...f, status: targetStatus };
+        fleetsNeedingSync.push(updatedF);
+        return updatedF;
+      }
+      return f;
+    });
+
+    if (fleetsChanged) {
+      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+      if (persistChanges) {
+        fleetsNeedingSync.forEach(uf => {
+          updateFleetInSupabase(uf.id, { status: uf.status }).catch(() => {});
+        });
+      }
+    }
+  }
+
+  public updateFleetStatus(
+    idOrPlate: string,
+    status: Fleet['status'],
+    tonnage?: number,
+    options?: { syncTodaySchedule?: boolean }
+  ) {
     const cleanTarget = (idOrPlate || '').trim().toUpperCase();
+    let matchedFleet: Fleet | null = null;
     let matchedId = idOrPlate;
     this.fleets = this.fleets.map(f => {
       if (
@@ -3882,17 +5325,52 @@ class LogisticsStore {
         (f.initialCode && f.initialCode.trim().toUpperCase() === cleanTarget)
       ) {
         matchedId = f.id;
-        return {
+        matchedFleet = {
           ...f,
           status,
           currentTonnage: tonnage !== undefined ? tonnage : f.currentTonnage
         };
+        return matchedFleet;
       }
       return f;
     });
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
-    // Asynchronous backend integration with Supabase
+    // Sinkronkan status jadwal hari ini apabila admin mengubah status armada secara langsung dari Manajemen Armada
+    if (options?.syncTodaySchedule && matchedFleet) {
+      const todayWib = this.getWibTodayIso();
+      const nowIso = new Date().toISOString();
+      let schUpdated = false;
+      this.schedules = (this.schedules || []).map(sch => {
+        if (!this.matchesFleetSchedule(matchedFleet!, sch)) return sch;
+        const coversToday = this.doesScheduleCoverDate(sch, todayWib);
+        if (status === 'on-duty' && coversToday && sch.status === 'scheduled') {
+          schUpdated = true;
+          return {
+            ...sch,
+            status: 'in_transit' as const,
+            actualDeparture: sch.actualDeparture || nowIso,
+            updatedAt: nowIso
+          };
+        }
+        if ((status === 'available' || status === 'maintenance') && ['in_transit', 'picked_up', 'delayed'].includes(sch.status)) {
+          schUpdated = true;
+          return {
+            ...sch,
+            status: 'delivered' as const,
+            actualArrival: sch.actualArrival || nowIso,
+            updatedAt: nowIso
+          };
+        }
+        return sch;
+      });
+      if (schUpdated) {
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        this.persistSchedulesSnapshotToBackend('fleet_status_sync');
+      }
+    }
+
+    // Asynchronous backend integration with Supabase / Hostinger MySQL
     updateFleetInSupabase(matchedId, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
 
     this.dispatchMiddleware({
@@ -3913,19 +5391,22 @@ class LogisticsStore {
    * - Data Armada & Portal Driver
    *
    * 3 Status Kondisi Armada:
-   * 1. Ready ('available'): Siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / normal). Penanda: Titik Besar Hijau.
-   * 2. Kirim ('on-duty'): Sedang dipakai kirim tim pengiriman (setelah driver/helper klik Gate-Out). Penanda: Titik Besar Biru + Area Kirim hari tersebut.
+   * 1. Ready ('available'): Siap digunakan jadwal (atau sedang terjadwal menunggu berangkat). Penanda: Titik Besar Hijau.
+   * 2. Kirim ('on-duty'): Sedang dipakai kirim tim pengiriman (sudah Gate-Out / status jadwal in_transit / picked_up / delayed hari ini). Penanda: Titik Besar Biru + Area Kirim hari tersebut.
    * 3. Servis ('maintenance'): Dalam keadaan perbaikan dan TIDAK BISA diaturkan kirim. Penanda: Titik Besar Merah.
    */
   public getFleetLiveOperationalInfo(
     fleetOrId: Fleet | string,
-    targetDateStr?: string
+    targetDateStr?: string,
+    excludeScheduleId?: string
   ): {
     effectiveStatus: 'available' | 'on-duty' | 'maintenance';
-    statusLabel: 'Ready' | 'Kirim' | 'Servis';
+    statusLabel: 'Ready' | 'Terjadwal' | 'Kirim' | 'Servis';
     dotColorClass: string;
     badgeColorClass: string;
     areaName: string | null;
+    todayScheduledArea: string | null;
+    tomorrowScheduledArea: string | null;
     driverName: string | null;
     helperName: string | null;
     canBeScheduled: boolean;
@@ -3937,8 +5418,9 @@ class LogisticsStore {
         ? this.fleets.find(
             f =>
               f.id === fleetOrId ||
-              f.plateNumber.trim().toUpperCase() === fleetOrId.trim().toUpperCase()
-          )
+              f.plateNumber.trim().toUpperCase() === fleetOrId.trim().toUpperCase() ||
+              (f.initialCode && f.initialCode.trim().toUpperCase() === fleetOrId.trim().toUpperCase())
+          ) || this.findFleetByCodeOrPlate(fleetOrId)
         : fleetOrId;
 
     if (!fleet) {
@@ -3948,6 +5430,8 @@ class LogisticsStore {
         dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/20',
         badgeColorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
         areaName: null,
+        todayScheduledArea: null,
+        tomorrowScheduledArea: null,
         driverName: null,
         helperName: null,
         canBeScheduled: true,
@@ -3956,50 +5440,84 @@ class LogisticsStore {
       };
     }
 
-    const todayIso = targetDateStr || new Date().toISOString().slice(0, 10);
+    const todayWib = this.getWibTodayIso();
+    const tomorrowWib = (() => {
+      const parts = todayWib.split('-').map(Number);
+      if (parts.length !== 3 || parts.some(isNaN)) return '';
+      const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + 1));
+      return d.toISOString().slice(0, 10);
+    })();
+    const targetIso = (targetDateStr || todayWib).slice(0, 10);
+    const isDateSpecificQuery = Boolean(targetDateStr && targetDateStr.trim() !== '');
     const cleanPlate = (fleet.plateNumber || '').trim().toUpperCase();
 
-    const matchesFleet = (sch: Schedule) => {
-      if (sch.fleetId === fleet.id) return true;
-      const schPlate = (sch.fleet?.plateNumber || '').trim().toUpperCase();
-      if (schPlate && schPlate === cleanPlate) return true;
-      return false;
-    };
+    const matchesFleet = (sch: Schedule) => this.matchesFleetSchedule(fleet, sch);
+    const isActiveAssignableStatus = (st?: Schedule['status']) =>
+      st !== 'delivered' && String(st) !== 'cancelled';
 
-    // 1. Cari jadwal yang sedang aktif di jalan (sudah klik Gate-Out: in_transit, picked_up, delayed)
+    // 1. Cari jadwal yang sedang aktif di jalan pada hari ini (sudah klik Gate-Out: in_transit, picked_up, delayed)
     const activeTripSch = (this.schedules || []).find(
-      sch => ['in_transit', 'picked_up', 'delayed'].includes(sch.status) && matchesFleet(sch)
+      sch =>
+        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+        ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+        matchesFleet(sch) &&
+        (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
     );
 
-    // 2. Cari jadwal pada tanggal hari ini (atau tanggal terpilih) untuk menampilkan info area kirim hari tersebut
-    const dateMatchedSch =
-      activeTripSch ||
-      (this.schedules || []).find(
-        sch =>
-          matchesFleet(sch) &&
-          (sch.departureDate || sch.createdAt || '').slice(0, 10) === todayIso
-      ) ||
-      (this.schedules || []).find(sch => matchesFleet(sch) && sch.status === 'scheduled');
+    // 2. Cari jadwal aktif (belum delivered/cancelled) yang tepat pada tanggal target (hari ini atau tanggal form jadwal)
+    const targetDateSch = (this.schedules || []).find(
+      sch =>
+        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+        isActiveAssignableStatus(sch.status) &&
+        matchesFleet(sch) &&
+        this.doesScheduleCoverDate(sch, targetIso)
+    );
+
+    // 3. Cek juga jadwal aktif untuk esok hari (WIB) agar Data Armada Terpadu konsisten
+    const tomorrowDateSch = tomorrowWib
+      ? (this.schedules || []).find(
+          sch =>
+            (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+            isActiveAssignableStatus(sch.status) &&
+            matchesFleet(sch) &&
+            this.doesScheduleCoverDate(sch, tomorrowWib)
+        )
+      : undefined;
+
+    // Jadwal aktif untuk tampilan Live Armada (hari ini) vs Form Jadwal (tanggal spesifik)
+    const effectiveSch = isDateSpecificQuery
+      ? targetDateSch
+      : (activeTripSch || targetDateSch);
 
     let resolvedArea: string | null = null;
     let resolvedDriver: string | null = null;
     let resolvedHelper: string | null = null;
 
-    if (dateMatchedSch) {
+    if (effectiveSch) {
       resolvedArea =
-        dateMatchedSch.areaName ||
-        dateMatchedSch.store?.storeName ||
+        effectiveSch.areaName ||
+        effectiveSch.store?.storeName ||
         null;
       resolvedDriver =
-        dateMatchedSch.crew?.name ||
-        this.crews.find(c => c.id === dateMatchedSch.crewId)?.name ||
+        effectiveSch.crew?.name ||
+        this.crews.find(c => c.id === effectiveSch.crewId)?.name ||
         null;
       resolvedHelper =
-        dateMatchedSch.crewHelper?.name ||
-        (dateMatchedSch.crewHelperId
-          ? this.crews.find(c => c.id === dateMatchedSch.crewHelperId)?.name || null
+        effectiveSch.crewHelper?.name ||
+        (effectiveSch.crewHelperId
+          ? this.crews.find(c => c.id === effectiveSch.crewHelperId)?.name || null
           : null);
     }
+
+    const todayScheduledArea =
+      !activeTripSch && targetDateSch && targetDateSch.status === 'scheduled'
+        ? (targetDateSch.areaName || targetDateSch.store?.storeName || null)
+        : null;
+
+    const tomorrowScheduledArea =
+      tomorrowDateSch
+        ? (tomorrowDateSch.areaName || tomorrowDateSch.store?.storeName || null)
+        : null;
 
     // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
     if (!resolvedArea && typeof localStorage !== 'undefined') {
@@ -4009,7 +5527,7 @@ class LogisticsStore {
           const shifts: any[] = JSON.parse(rawShifts);
           const activeShift = shifts.find(
             s =>
-              s.date === todayIso &&
+              s.date === targetIso &&
               s.status !== 'checked_out' &&
               (s.fleetId === fleet.id ||
                 (s.plateNumber && s.plateNumber.trim().toUpperCase() === cleanPlate))
@@ -4021,14 +5539,18 @@ class LogisticsStore {
       } catch {}
     }
 
-    // Penentuan 3 Status Kondisi Armada:
-    // - Servis ('maintenance'): Armada dalam perbaikan (tidak bisa diaturkan kirim)
-    // - Kirim ('on-duty'): Armada sedang dipakai kirim (setelah klik Gate-Out atau status armada 'on-duty')
-    // - Ready ('available'): Armada siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / standby)
+    // Penentuan Status Kondisi Armada:
+    // - Jika sedang ditanya untuk tanggal penjadwalan tertentu (`isDateSpecificQuery`):
+    //   armada yang SUDAH punya jadwal aktif (belum delivered/cancelled) pada `targetIso` tidak boleh dipilih ulang (canBeScheduled: false)
+    // - Untuk status Live Operasional hari ini:
+    //   'Kirim' hanya aktif apabila benar-benar memiliki trip aktif hari ini (`activeTripSch`),
+    //   sehingga armada tanpa trip hari ini tidak pernah stuck di status 'Kirim' area kemarin.
     let effectiveStatus: 'available' | 'on-duty' | 'maintenance' = 'available';
     if (fleet.status === 'maintenance') {
       effectiveStatus = 'maintenance';
-    } else if (activeTripSch || fleet.status === 'on-duty') {
+    } else if (isDateSpecificQuery) {
+      effectiveStatus = targetDateSch ? 'on-duty' : 'available';
+    } else if (activeTripSch) {
       effectiveStatus = 'on-duty';
     } else {
       effectiveStatus = 'available';
@@ -4041,28 +5563,40 @@ class LogisticsStore {
         dotColorClass: 'bg-rose-500 ring-4 ring-rose-500/25',
         badgeColorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
         areaName: resolvedArea,
+        todayScheduledArea: null,
+        tomorrowScheduledArea: null,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: false,
         statusDescription: 'Dalam perbaikan (Tidak bisa diaturkan kirim)',
-        scheduleStatus: dateMatchedSch?.status || null
+        scheduleStatus: effectiveSch?.status || null
       };
     }
 
     if (effectiveStatus === 'on-duty') {
+      const isPendingScheduleOnly = isDateSpecificQuery && targetDateSch?.status === 'scheduled';
+      const canScheduleFlag = !targetDateSch;
       return {
         effectiveStatus: 'on-duty',
-        statusLabel: 'Kirim',
-        dotColorClass: 'bg-blue-500 ring-4 ring-blue-500/25',
-        badgeColorClass: 'bg-blue-500/15 text-blue-300 border-blue-500/40',
+        statusLabel: isPendingScheduleOnly ? 'Terjadwal' : 'Kirim',
+        dotColorClass: isPendingScheduleOnly
+          ? 'bg-amber-500 ring-4 ring-amber-500/25'
+          : 'bg-blue-500 ring-4 ring-blue-500/25',
+        badgeColorClass: isPendingScheduleOnly
+          ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+          : 'bg-blue-500/15 text-blue-300 border-blue-500/40',
         areaName: resolvedArea,
+        todayScheduledArea: isPendingScheduleOnly ? resolvedArea : null,
+        tomorrowScheduledArea,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
-        canBeScheduled: true,
-        statusDescription: resolvedArea
+        canBeScheduled: canScheduleFlag,
+        statusDescription: isPendingScheduleOnly
+          ? `Terjadwal (${targetIso}): ${resolvedArea || 'Kirim'}`
+          : resolvedArea
           ? `Sedang Kirim • Area: ${resolvedArea}`
           : 'Sedang dipakai kirim tim pengiriman (Gate-Out)',
-        scheduleStatus: dateMatchedSch?.status || 'in_transit'
+        scheduleStatus: effectiveSch?.status || 'in_transit'
       };
     }
 
@@ -4071,14 +5605,18 @@ class LogisticsStore {
       statusLabel: 'Ready',
       dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/25',
       badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
-      areaName: resolvedArea,
+      areaName: null,
+      todayScheduledArea,
+      tomorrowScheduledArea,
       driverName: resolvedDriver,
       helperName: resolvedHelper,
       canBeScheduled: true,
-      statusDescription: resolvedArea
-        ? `Siap jadwal esok • Area Hari Ini: ${resolvedArea}`
-        : 'Siap untuk digunakan jadwal esok harinya',
-      scheduleStatus: dateMatchedSch?.status || null
+      statusDescription: todayScheduledArea
+        ? `Terjadwal hari ini: ${todayScheduledArea}`
+        : tomorrowScheduledArea
+        ? `Terjadwal esok: ${tomorrowScheduledArea}`
+        : 'Siap jadwal esok',
+      scheduleStatus: effectiveSch?.status || null
     };
   }
 
@@ -4086,16 +5624,25 @@ class LogisticsStore {
     this.verifyDriverAccess('updateFleet');
 
     let updatedFleet: Fleet | null = null;
-    this.fleets = this.fleets.map(f => {
-      if (f.id === id) {
-        updatedFleet = { ...f, ...updatedFields };
-        return updatedFleet;
-      }
-      return f;
-    });
+    this.fleets = sortFleetsByCanonicalOrder(
+      this.fleets.map(f => {
+        if (f.id === id) {
+          updatedFleet = this.enrichFleetItem({ ...f, ...updatedFields }, f);
+          return updatedFleet;
+        }
+        return f;
+      })
+    );
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     if (updatedFleet) {
+      const fObj = updatedFleet as Fleet;
+      this.logActivity(
+        'Ubah Data Armada',
+        `${fObj.plateNumber} (${fObj.initialCode || fObj.vehicleType})`,
+        `Merubah data armada ${fObj.plateNumber} (${fObj.vehicleType})`,
+        'ubah'
+      );
       // Asynchronous backend integration with Supabase
       updateFleetInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
 
@@ -4240,6 +5787,13 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
 
     if (updatedCrew) {
+      const cObj = updatedCrew as Crew;
+      this.logActivity(
+        'Ubah Data Kru',
+        cObj.name,
+        `Merubah data kru pengiriman ${cObj.name} (${cObj.role})`,
+        'ubah'
+      );
       // Asynchronous backend integration with Supabase
       updateCrewInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Crew Update Sync Note]', err));
 
@@ -4260,7 +5814,7 @@ class LogisticsStore {
     this.crews = this.crews.filter(c => c.id !== id);
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     if (deletedCrew) {
-      this.logActivity('Hapus Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`);
+      this.logActivity('Hapus Data Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`, 'kurangi');
       
       // Asynchronous backend integration with Supabase
       deleteCrewInSupabase(id, deletedCrew.name).catch(err => console.warn('[Supabase Crew Delete Sync Note]', err));
@@ -4294,8 +5848,14 @@ class LogisticsStore {
     };
     this.stores = [...this.stores.filter(s => !isAreaRouteItem(s)), newStore];
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+    this.logActivity(
+      'Tambah Data Pelanggan / Toko',
+      newStore.storeName,
+      `Menambahkan data pelanggan/toko ${newStore.storeName} (${newStore.city || newStore.kabupaten || '-'})`,
+      'tambah'
+    );
     fetch('/api/stores', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(newStore)
+      method: 'POST', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(newStore)
     }).catch(err => console.warn('[Hostinger Stores] Tambah toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
@@ -4314,7 +5874,7 @@ class LogisticsStore {
     this.stores = newStores.filter(s => !isAreaRouteItem(s));
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
     fetch('/api/stores/batch', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
+      method: 'POST', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
     }).catch(err => console.warn('[Hostinger Stores] Batch toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
@@ -4341,8 +5901,15 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (updatedStore) {
+      const sObj = updatedStore as RetailStore;
+      this.logActivity(
+        'Ubah Data Pelanggan / Toko',
+        sObj.storeName,
+        `Merubah data pelanggan/toko ${sObj.storeName} (${sObj.city || sObj.kabupaten || '-'})`,
+        'ubah'
+      );
       fetch(`/api/stores/${encodeURIComponent(id)}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(updatedStore)
+        method: 'PUT', headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(updatedStore)
       }).catch(err => console.warn('[Hostinger Stores] Update toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
@@ -4362,8 +5929,17 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (target) {
-      fetch(`/api/stores/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' })
-        .catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
+      this.logActivity(
+        'Hapus Data Pelanggan / Toko',
+        target.storeName,
+        `Menghapus data pelanggan/toko ${target.storeName} (${target.city || target.kabupaten || '-'})`,
+        'kurangi'
+      );
+      fetch(`/api/stores/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: this.buildSessionAuthHeaders(),
+        credentials: 'same-origin'
+      }).catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
         action: 'delete',
@@ -4482,22 +6058,135 @@ class LogisticsStore {
     return this.jobdeskConfigs;
   }
 
-  public getSystemActivities(): SystemActivity[] {
-    return [...this.systemActivities];
+  private isSystemWebNoiseActivity(item: any): boolean {
+    if (!item || typeof item !== 'object') return true;
+    const action = String(item.action || '').trim().toLowerCase();
+    const dept = String(item.department || '').trim().toLowerCase();
+    const details = String(item.details || '').trim().toLowerCase();
+    const target = String(item.target || '').trim().toLowerCase();
+    const user = String(item.userFullName || '').trim().toLowerCase();
+
+    if (
+      action.includes('auto-sync') ||
+      action.includes('smart fill') ||
+      action.includes('penyeimbangan jeda') ||
+      action.includes('broadcast alert sla') ||
+      action.includes('middleware') ||
+      dept.includes('sistem integrasi data') ||
+      user.includes('middleware') ||
+      user === 'guest' ||
+      user.includes('belum login') ||
+      details.includes('middleware otomatis') ||
+      details.includes('smart fill mengeksekusi') ||
+      /^perubahan pada jadwal sch-[a-z0-9]+$/i.test(details) ||
+      /^schedule:\s*sch-/i.test(target)
+    ) {
+      return true;
+    }
+    return false;
   }
 
-  public logActivity(action: string, target: string, details: string) {
-    const newActivity: SystemActivity = {
-      id: 'log-' + Math.random().toString(36).substring(2, 9),
-      timestamp: new Date().toISOString(),
-      userFullName: this.currentUser.fullName,
-      department: this.currentUser.department,
+  private inferDataChangeType(action: string, details: string): 'tambah' | 'ubah' | 'kurangi' {
+    const combined = `${action} ${details}`.toLowerCase();
+    if (
+      /\b(hapus|kurang|potong|nonaktif|tolak|reset|keluar|pemakaian|ganti komponen)\b/.test(combined)
+    ) {
+      return 'kurangi';
+    }
+    if (
+      /\b(tambah|buat|input|upload|unggah|restock|registrasi|approval|disetujui|aktifkan)\b/.test(combined)
+    ) {
+      return 'tambah';
+    }
+    return 'ubah';
+  }
+
+  private sanitizeLoadedActivities(list: any[]): SystemActivity[] {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>();
+    const result: SystemActivity[] = [];
+    for (const raw of list) {
+      if (this.isSystemWebNoiseActivity(raw)) continue;
+      const id = String(raw.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push({
+        ...raw,
+        changeType: raw.changeType || this.inferDataChangeType(raw.action || '', raw.details || '')
+      });
+      if (result.length >= 150) break;
+    }
+    return result;
+  }
+
+  public async hydrateSystemActivitiesFromServer(): Promise<void> {
+    if (typeof fetch === 'undefined') return;
+    try {
+      const res = await fetch('/api/system-activities', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.activities)) {
+        const merged = this.sanitizeLoadedActivities([...data.activities, ...this.systemActivities]);
+        this.systemActivities = merged;
+        this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+        this.notify();
+      }
+    } catch {
+      // Ignore transient network errors
+    }
+  }
+
+  public getSystemActivities(): SystemActivity[] {
+    return this.sanitizeLoadedActivities(this.systemActivities);
+  }
+
+  public logActivity(
+    action: string,
+    target: string,
+    details: string,
+    changeType?: 'tambah' | 'ubah' | 'kurangi'
+  ) {
+    const activeUser = this.currentUser;
+    const candidate = {
       action,
       target,
-      details
+      details,
+      userFullName: activeUser?.fullName || 'Super Admin',
+      department: activeUser?.department || 'Manajemen & Direksi'
     };
-    this.systemActivities = [newActivity, ...this.systemActivities].slice(0, 100);
+    if (this.isSystemWebNoiseActivity(candidate)) {
+      return;
+    }
+
+    const resolvedChangeType = changeType || this.inferDataChangeType(action, details);
+    const newActivity: SystemActivity = {
+      id: 'log-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 7),
+      timestamp: new Date().toISOString(),
+      userFullName: activeUser?.fullName && activeUser.id !== 'guest' ? activeUser.fullName : 'Super Admin',
+      userEmail: activeUser?.email && activeUser.id !== 'guest' ? activeUser.email : 'akkoperasional60@gmail.com',
+      userRole: activeUser?.role && activeUser.id !== 'guest' ? activeUser.role : 'super_admin',
+      department: activeUser?.department && activeUser.id !== 'guest' ? activeUser.department : 'Manajemen & Direksi',
+      action,
+      target,
+      details,
+      changeType: resolvedChangeType
+    };
+    this.systemActivities = this.sanitizeLoadedActivities([newActivity, ...this.systemActivities]).slice(0, 150);
     this.saveToStorage('akk_system_activities_v1', this.systemActivities);
+
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/system-activities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ activity: newActivity })
+      }).catch(() => {});
+    }
+
     this.notify();
   }
 
@@ -4523,15 +6212,25 @@ class LogisticsStore {
     this.logActivity(
       'Tambah Sparepart Baru',
       newPart.name,
-      `Stok Awal: ${newPart.stock} ${newPart.unit} (Lokasi: ${newPart.storageLocation})`
+      `Stok Awal: ${newPart.stock} ${newPart.unit} (Lokasi: ${newPart.storageLocation})`,
+      'tambah'
     );
     this.notify();
     return newPart;
   }
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
+    const existing = this.spareParts.find(p => p.id === id);
     this.spareParts = this.spareParts.map(p => p.id === id ? { ...p, ...updated } : p);
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    if (existing) {
+      this.logActivity(
+        'Ubah Data Sparepart',
+        updated.name || existing.name,
+        `Merubah data inventaris sparepart ${updated.name || existing.name}`,
+        'ubah'
+      );
+    }
     this.notify();
   }
 
@@ -4654,6 +6353,38 @@ class LogisticsStore {
     const latestBattery = getLatest('aki');
     const latestFilter = getLatest('filter');
 
+    const getLatestTireByPosition = (positionKeyword: string) => {
+      const kw = positionKeyword.toLowerCase();
+      const specificMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return text.includes(kw);
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      if (specificMatch) return specificMatch;
+
+      // Fallback: if a general tire usage exists without any position keyword, apply it
+      const generalMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return (
+            !text.includes('depan kanan') &&
+            !text.includes('depan kiri') &&
+            !text.includes('belakang kanan') &&
+            !text.includes('belakang kiri')
+          );
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      return generalMatch;
+    };
+
+    const latestTireFR = getLatestTireByPosition('depan kanan');
+    const latestTireFL = getLatestTireByPosition('depan kiri');
+    const latestTireRR = getLatestTireByPosition('belakang kanan');
+    const latestTireRL = getLatestTireByPosition('belakang kiri');
+
     const calculateStatus = (usage: SparePartUsage | undefined, defaultDays: number, defaultKm: number) => {
       if (!usage) {
         return {
@@ -4710,6 +6441,26 @@ class LogisticsStore {
       tire: {
         latest: latestTire,
         ...calculateStatus(latestTire, 365, 50000) // Ban: 1 tahun / 50.000 KM
+      },
+      tireFrontRight: {
+        positionLabel: 'Ban Armada Depan Kanan',
+        latest: latestTireFR,
+        ...calculateStatus(latestTireFR, 365, 50000)
+      },
+      tireFrontLeft: {
+        positionLabel: 'Ban Armada Depan Kiri',
+        latest: latestTireFL,
+        ...calculateStatus(latestTireFL, 365, 50000)
+      },
+      tireRearRight: {
+        positionLabel: 'Ban Armada Belakang Kanan',
+        latest: latestTireRR,
+        ...calculateStatus(latestTireRR, 365, 50000)
+      },
+      tireRearLeft: {
+        positionLabel: 'Ban Armada Belakang Kiri',
+        latest: latestTireRL,
+        ...calculateStatus(latestTireRL, 365, 50000)
       },
       battery: {
         latest: latestBattery,
@@ -4816,28 +6567,27 @@ class LogisticsStore {
     };
 
     this.fuelLogs = [newLog, ...this.fuelLogs];
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch('/api/fuel-logs', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newLog)
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal simpan ke MySQL:', err));
 
     if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
       this.fleets = this.fleets.map(f =>
         f.id === fleet.id ? { ...f, odometerKm: data.endOdometerKm } : f
       );
-      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+      updateFleetInSupabase(fleet.id, { odometerKm: data.endOdometerKm }).catch(() => {});
     }
 
     this.logActivity(
       'Pencatatan BBM Armada',
       `${newLog.plateNumber} (${newLog.initialCode || 'Armada'})`,
-      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${totalCost.toLocaleString('id-ID')}) - Rasio: ${ratioKmPerLiter} KM/L [${efficiencyStatus}]`
+      `Pengisian ${newLog.liters} L ${newLog.fuelType} (Rp ${totalCost.toLocaleString('id-ID')}) - Rasio: ${ratioKmPerLiter} KM/L [${efficiencyStatus}]`,
+      'tambah'
     );
-
-    this.dispatchMiddleware({
-      entityType: 'fuel',
-      action: 'create',
-      id: newLog.id,
-      data: newLog,
-      timestamp: new Date().toISOString()
-    });
 
     this.notify();
     return newLog;
@@ -4884,21 +6634,20 @@ class LogisticsStore {
     };
 
     this.fuelLogs = this.fuelLogs.map(l => l.id === id ? updatedLog : l);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updatedLog)
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal update ke MySQL:', err));
 
     this.logActivity(
       'Edit Log Pengisian BBM',
       updatedLog.plateNumber,
-      `Pembaruan catatan BBM ID: ${id}`
+      `Pembaruan catatan BBM ID: ${id}`,
+      'ubah'
     );
-
-    this.dispatchMiddleware({
-      entityType: 'fuel',
-      action: 'update',
-      id,
-      data: updatedLog,
-      timestamp: new Date().toISOString()
-    });
 
     this.notify();
   }
@@ -4906,29 +6655,30 @@ class LogisticsStore {
   public deleteFuelLog(id: string) {
     const item = this.fuelLogs.find(l => l.id === id);
     this.fuelLogs = this.fuelLogs.filter(l => l.id !== id);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+
+    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal hapus di MySQL:', err));
 
     if (item) {
       this.logActivity(
         'Hapus Log Pengisian BBM',
         item.plateNumber,
-        `Catatan pengisian BBM ${item.liters} L pada tanggal ${item.date} dihapus`
+        `Catatan pengisian BBM ${item.liters} L pada tanggal ${item.date} dihapus`,
+        'kurangi'
       );
-
-      this.dispatchMiddleware({
-        entityType: 'fuel',
-        action: 'delete',
-        id,
-        data: item,
-        timestamp: new Date().toISOString()
-      });
     }
     this.notify();
   }
 
   public getFleetFuelSummary(): FleetFuelSummary[] {
-    return this.fleets.map(fleet => {
-      const logs = this.fuelLogs.filter(l => l.fleetId === fleet.id);
+    const orderedFleets = sortFleetsByCanonicalOrder(this.fleets);
+    return orderedFleets.map(fleet => {
+      const logs = this.fuelLogs.filter(
+        l => l.fleetId === fleet.id || (l.plateNumber && l.plateNumber.toUpperCase() === fleet.plateNumber.toUpperCase())
+      );
       const totalLogs = logs.length;
       const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
       const totalCost = logs.reduce((acc, l) => acc + l.totalCost, 0);
@@ -4936,23 +6686,30 @@ class LogisticsStore {
 
       const targetConfig = FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
       const targetRatio = targetConfig.target;
-      const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : targetRatio;
-      
-      // Rata-rata Konsumsi Liter per Kilometer
-      const avgLiterPerKm = totalDistanceKm > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : (targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0);
-      const avgLiterPer100Km = totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : (targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0);
+      const avgKmPerLiter = totalLiters > 0 && totalDistanceKm > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+
+      // Rata-rata Konsumsi Liter per Kilometer (0 jika belum ada data input BBM)
+      const avgLiterPerKm = totalDistanceKm > 0 && totalLiters > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
+      const avgLiterPer100Km = totalDistanceKm > 0 && totalLiters > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
       const targetLiterPerKm = targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0;
       const targetLiterPer100Km = targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0;
 
       const avgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
-      const efficiencyScore = targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 100;
+      const efficiencyScore = totalDistanceKm > 0 && targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 0;
       const anomaliesCount = logs.filter(l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali').length;
 
       let status: EfficiencyStatus = 'Efisien / Normal';
-      if (efficiencyScore >= 105) status = 'Sangat Efisien';
-      else if (efficiencyScore >= 90) status = 'Efisien / Normal';
-      else if (efficiencyScore >= 75) status = 'Boros';
-      else status = 'Kritis / Potensi Anomali';
+      if (totalLogs === 0 || totalDistanceKm === 0) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 105) {
+        status = 'Sangat Efisien';
+      } else if (efficiencyScore >= 90) {
+        status = 'Efisien / Normal';
+      } else if (efficiencyScore >= 75) {
+        status = 'Boros';
+      } else {
+        status = 'Kritis / Potensi Anomali';
+      }
 
       return {
         fleetId: fleet.id,
@@ -5254,11 +7011,17 @@ class LogisticsStore {
       timestamp: new Date().toISOString()
     };
     this.scannedDocuments = [newDoc, ...this.scannedDocuments];
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch('/api/scanned-documents', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newDoc)
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal simpan ke MySQL:', err));
     this.logActivity(
       'Scan Dokumen',
       newDoc.documentNumber,
-      `Dokumen digital dipindai & diarsipkan: ${newDoc.documentTypeLabel} (${newDoc.documentNumber})`
+      `Dokumen digital dipindai & diarsipkan: ${newDoc.documentTypeLabel} (${newDoc.documentNumber})`,
+      'tambah'
     );
     this.notify();
     return newDoc;
@@ -5266,13 +7029,22 @@ class LogisticsStore {
 
   public updateScannedDocument(id: string, updates: Partial<ScannedDocumentLog>): void {
     this.scannedDocuments = this.scannedDocuments.map(d => d.id === id ? { ...d, ...updates } : d);
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch(`/api/scanned-documents/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updates)
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal update ke MySQL:', err));
     this.notify();
   }
 
   public deleteScannedDocument(id: string): void {
     this.scannedDocuments = this.scannedDocuments.filter(d => d.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
+    fetch(`/api/scanned-documents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[Hostinger ScannedDocs] Gagal hapus di MySQL:', err));
     this.notify();
   }
 

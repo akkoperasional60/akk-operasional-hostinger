@@ -1,3 +1,5 @@
+import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+
 export interface DriverHelperReport {
   id: string;
   timestamp: string;
@@ -7,7 +9,19 @@ export interface DriverHelperReport {
   userRole?: string;
   helperName?: string;
   plateNumber: string;
-  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
+  category:
+    | 'kendala_jalan'
+    | 'akhir_kiriman'
+    | 'istirahat'
+    | 'update_lokasi'
+    | 'presensi_shift'
+    | 'pin_keamanan'
+    | 'mode_offline'
+    | 'isi_bbm'
+    | 'retur'
+    | 'kurang_muat'
+    | 'lebih_muat'
+    | 'salah_muat';
   areaName: string;
   deliveryId?: string;
   notes: string;
@@ -19,9 +33,32 @@ export interface DriverHelperReport {
   status: 'pending' | 'verified' | 'follow_up' | 'resolved';
   verifiedBy?: string;
   verifiedAt?: string;
+  // Data Barang Retur / Kurang Muat / Lebih Muat / Salah Muat
+  issueItemName?: string;
+  issueItemCode?: string;
+  issueItemUnit?: string;
+  issueQty?: string;
+  invoiceNumber?: string;
+  validationDecision?: 'pending' | 'approved' | 'follow_up' | 'rejected';
+  validationNote?: string;
+  validatedBy?: string;
+  validatedAt?: string;
+  // Validasi Titik GPS Lapangan (Super Admin & SPV Logistik)
+  gpsValidationStatus?: 'valid' | 'mismatch' | 'unchecked';
+  gpsValidatedBy?: string;
+  gpsValidatedAt?: string;
+  gpsValidationNote?: string;
   // Data Pengisian BBM (Solar) di Farly / Gajah Mada
-  fuelLocation?: 'Farly' | 'Gajah Mada' | string;
+  fuelLocation?: 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)' | string;
   fuelLiters?: string;
+  exifMetadata?: {
+    DateTimeOriginal: string;
+    DateTimeDigitized: string;
+    OffsetTimeOriginal: string;
+    OffsetTime: string;
+    SubSecTimeOriginal: string;
+    source?: 'EXIF_BINARY' | 'CAMERA_CAPTURE_SENSOR';
+  };
   // Data Presensi Check-In & Check-Out Terpadu + PIN Keamanan
   shiftId?: string;
   checkinTimeFormatted?: string;
@@ -47,38 +84,55 @@ export interface DriverHelperReport {
 }
 
 const STORAGE_KEY = 'akk_driver_helper_reports_v2';
+const DELETED_REPORTS_KEY = 'akk_deleted_driver_report_ids_v1';
 
 export const getLocalDateStr = (input?: string | Date): string => {
-  if (!input) {
+  const fallbackNow = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  }
-  if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
-    return input.trim();
+  };
+  if (!input) return fallbackNow();
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed || trimmed.toLowerCase().includes('invalid')) return fallbackNow();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T\s]/);
+    if (isoPrefix) return isoPrefix[1];
+    const dmy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) {
+      return `${dmy[3]}-${ dmy[2].padStart(2, '0') }-${ dmy[1].padStart(2, '0') }`;
+    }
   }
   const d = input instanceof Date ? input : new Date(input);
   if (isNaN(d.getTime())) {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return fallbackNow();
   }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
+  private deletedReportIds: Set<string> = new Set<string>();
+  private deletedIdsLoaded = false;
+  private syncedToServerIds: Set<string> = new Set<string>();
+  private isSyncingWithServer = false;
+  private lastServerSyncAt = 0;
   private seqCounter = 0;
   private channel: BroadcastChannel | null = null;
-  private eventSource: EventSource | null = null;
-  private reconnectTimer: number | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
+      this.migrateLegacyLocalStorageOnce();
       try {
         if ('BroadcastChannel' in window) {
           this.channel = new BroadcastChannel('akk_driver_reports_realtime');
           this.channel.onmessage = (evt) => {
             const msg = evt.data;
             if (!msg) return;
+            if (msg.deletedId) {
+              this.applyRemoteDeletion(String(msg.deletedId), false);
+              return;
+            }
             if (Array.isArray(msg.reports)) {
               this.mergeIncomingReports(msg.reports, false);
             } else if (msg.report && msg.report.id) {
@@ -88,105 +142,175 @@ class DriverReportService {
         }
       } catch {}
 
-      window.addEventListener('storage', (evt) => {
-        if (evt.key === STORAGE_KEY && evt.newValue) {
-          try {
-            const parsed = JSON.parse(evt.newValue);
-            if (Array.isArray(parsed)) {
-              this.mergeIncomingReports(parsed, false);
-            }
-          } catch {}
-        }
-      });
+      void this.syncWithServer(true);
     }
   }
 
-  private ensureServerRealtimeSync() {
-    if (typeof window === 'undefined' || !('EventSource' in window)) return;
-    if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) return;
-
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const es = new EventSource('/api/driver-reports/stream');
-      this.eventSource = es;
+      const token =
+        localStorage.getItem('akk_session_token') ||
+        localStorage.getItem('session_token') ||
+        sessionStorage.getItem('akk_session_token') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
 
-      es.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          if (
-            data.type === 'report_upserted' ||
-            data.type === 'solution_updated' ||
-            data.type === 'solution_acknowledged'
-          ) {
-            if (data.payload && data.payload.id) {
-              this.mergeIncomingReports([data.payload], false);
-            }
-          } else if (data.type === 'reports_synced') {
-            this.syncWithServer().catch(() => {});
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        try {
-          es.close();
-        } catch {}
-        if (this.eventSource === es) this.eventSource = null;
-
-        // Re-check the authenticated API first. If the session has expired,
-        // syncWithServer() returns without reopening SSE, avoiding a reconnect loop on the login page.
-        if (this.reconnectTimer !== null) {
-          window.clearTimeout(this.reconnectTimer);
+  private migrateLegacyLocalStorageOnce() {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    try {
+      const rawDel = localStorage.getItem(DELETED_REPORTS_KEY);
+      if (rawDel) {
+        const parsedDel = JSON.parse(rawDel);
+        if (Array.isArray(parsedDel)) {
+          parsedDel.forEach((id) => {
+            if (id) this.deletedReportIds.add(String(id));
+          });
         }
-        this.reconnectTimer = window.setTimeout(() => {
-          this.reconnectTimer = null;
-          this.syncWithServer().catch(() => {});
-        }, 4000);
-      };
+        localStorage.removeItem(DELETED_REPORTS_KEY);
+      }
+      const rawReports = localStorage.getItem(STORAGE_KEY);
+      if (rawReports) {
+        const parsedReports = JSON.parse(rawReports);
+        if (Array.isArray(parsedReports) && parsedReports.length > 0) {
+          this.memoryReports = this.normalizeList(parsedReports);
+        }
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      this.deletedIdsLoaded = true;
     } catch {}
   }
 
-  public async syncWithServer(): Promise<void> {
+  private loadDeletedReportIds(_force: boolean = false) {
+    this.deletedIdsLoaded = true;
+  }
+
+  private saveDeletedReportIds() {
+    // Disimpan langsung pada MySQL melalui endpoint /api/driver-reports
+  }
+
+  private applyRemoteDeletion(id: string, broadcastToPeers: boolean = false) {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return;
+    this.deletedReportIds.add(cleanId);
+    const current = this.getStoredReports().filter(r => r.id !== cleanId);
+    this.persistListInternal(current, broadcastToPeers);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated'));
+    }
+  }
+
+  public async syncWithServer(force: boolean = false): Promise<void> {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (this.isSyncingWithServer) return;
+    const nowMs = Date.now();
+    if (!force && nowMs - this.lastServerSyncAt < 8000) return;
+    this.isSyncingWithServer = true;
+    this.lastServerSyncAt = nowMs;
     try {
-      const res = await fetch('/api/driver-reports', { credentials: 'include' });
+      const res = await fetch('/api/driver-reports', {
+        credentials: 'include',
+        headers: this.getAuthHeaders()
+      });
       if (!res.ok) return;
-      this.ensureServerRealtimeSync();
       const json = await res.json();
+      if (Array.isArray(json.deletedIds) && json.deletedIds.length > 0) {
+        let hasNewDeleted = false;
+        json.deletedIds.forEach((delId: any) => {
+          const clean = String(delId || '').trim();
+          if (clean && !this.deletedReportIds.has(clean)) {
+            this.deletedReportIds.add(clean);
+            hasNewDeleted = true;
+          }
+        });
+        if (hasNewDeleted && this.memoryReports) {
+          this.memoryReports = this.memoryReports.filter(r => !this.deletedReportIds.has(r.id));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('driver-report-updated'));
+          }
+        }
+      }
+      const serverIds = new Set<string>();
       if (Array.isArray(json.reports) && json.reports.length > 0) {
+        json.reports.forEach((r: any) => {
+          if (r?.id) {
+            serverIds.add(String(r.id));
+            this.syncedToServerIds.add(String(r.id));
+          }
+        });
         this.mergeIncomingReports(json.reports, false);
       }
       const localList = this.getReports();
-      if (localList.length > 0 && (!Array.isArray(json.reports) || json.reports.length < localList.length)) {
+      const unsyncedReports = localList
+        .slice(0, 25)
+        .filter(r => r?.id && !serverIds.has(r.id) && !this.syncedToServerIds.has(r.id));
+      if (unsyncedReports.length > 0) {
+        unsyncedReports.forEach(r => this.syncedToServerIds.add(r.id));
         await fetch('/api/driver-reports', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include',
-          body: JSON.stringify({ reports: localList.slice(0, 60) })
+          body: JSON.stringify({ reports: unsyncedReports })
         });
       }
-    } catch {}
+    } catch {
+      // ignore transient network errors
+    } finally {
+      this.isSyncingWithServer = false;
+    }
   }
 
   private pushReportToServer(report: DriverHelperReport) {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (report?.id) {
+      this.syncedToServerIds.add(report.id);
+    }
     fetch('/api/driver-reports', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getAuthHeaders(),
       credentials: 'include',
       body: JSON.stringify({ report })
-    }).catch(() => {});
+    }).catch(() => {
+      if (report?.id) {
+        this.syncedToServerIds.delete(report.id);
+      }
+    });
   }
 
   private normalizeList(parsed: DriverHelperReport[]): DriverHelperReport[] {
+    this.loadDeletedReportIds();
     const seenIds = new Set<string>();
-    return parsed.map((r, index) => {
+    const filtered = parsed.filter(r => !r?.id || !this.deletedReportIds.has(String(r.id)));
+
+    // Hitung frekuensi koordinat mentah agar koordinat duplikat antar pelanggan otomatis dipresisikan per toko
+    const coordFreq = new Map<string, number>();
+    filtered.forEach(r => {
+      if (typeof r.latitude === 'number' && typeof r.longitude === 'number') {
+        const k = `${r.latitude.toFixed(4)},${r.longitude.toFixed(4)}`;
+        coordFreq.set(k, (coordFreq.get(k) || 0) + 1);
+      }
+    });
+
+    return filtered.map((r, index) => {
       let uniqueId = r.id || `REP-2026-${1000 + index}`;
       if (seenIds.has(uniqueId)) {
         uniqueId = `${uniqueId}-${index + 1}`;
       }
       seenIds.add(uniqueId);
       const hasSol = Boolean(r.solution && r.solution.trim());
-      const isConstraintCategory = r.category === 'kendala_jalan' || r.category === 'mode_offline';
+      const isConstraintCategory =
+        r.category === 'kendala_jalan' ||
+        r.category === 'mode_offline' ||
+        r.category === 'retur' ||
+        r.category === 'kurang_muat' ||
+        r.category === 'lebih_muat' ||
+        r.category === 'salah_muat';
       const resolvedStatus =
         hasSol && r.status === 'pending'
           ? 'resolved'
@@ -198,11 +322,51 @@ class DriverReportService {
         : r.photoUrl
         ? [r.photoUrl]
         : [];
+
+      let finalLat = r.latitude;
+      let finalLng = r.longitude;
+      let finalGmapsUrl = r.gmapsUrl;
+
+      if (
+        r.category === 'istirahat' ||
+        r.category === 'isi_bbm' ||
+        r.category === 'retur' ||
+        r.category === 'kurang_muat' ||
+        r.category === 'lebih_muat' ||
+        r.category === 'salah_muat'
+      ) {
+        const customerName =
+          r.customerOutletName ||
+          (r.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+          (r.category === 'isi_bbm' && r.fuelLocation ? `SPBU ${r.fuelLocation}` : '') ||
+          r.issueItemName ||
+          '';
+        const coordKey =
+          typeof r.latitude === 'number' && typeof r.longitude === 'number'
+            ? `${r.latitude.toFixed(4)},${r.longitude.toFixed(4)}`
+            : '';
+        const isDuplicate = coordKey ? (coordFreq.get(coordKey) || 0) > 1 : false;
+        const precise = resolvePreciseCustomerGps({
+          customerName,
+          areaName: r.areaName,
+          rawLat: r.latitude,
+          rawLng: r.longitude,
+          rawGmapsUrl: r.gmapsUrl,
+          isDuplicateCoordInGroup: isDuplicate
+        });
+        finalLat = precise.latitude;
+        finalLng = precise.longitude;
+        finalGmapsUrl = precise.gmapsUrl;
+      }
+
       return {
         ...r,
         id: uniqueId,
         photoUrl: r.photoUrl || photoUrls[0] || null,
         photoUrls,
+        latitude: finalLat,
+        longitude: finalLng,
+        gmapsUrl: finalGmapsUrl,
         status: resolvedStatus,
         date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
       };
@@ -210,34 +374,80 @@ class DriverReportService {
   }
 
   private mergeIncomingReports(incoming: DriverHelperReport[], broadcastToPeers: boolean = false) {
+    this.loadDeletedReportIds();
     const current = this.getStoredReports();
     const map = new Map<string, DriverHelperReport>();
     for (const r of current) {
-      map.set(r.id, r);
+      if (!this.deletedReportIds.has(r.id)) {
+        map.set(r.id, r);
+      }
     }
     let changedReport: DriverHelperReport | null = null;
+    let hasMeaningfulChange = false;
     for (const inc of incoming) {
-      if (!inc || !inc.id) continue;
+      if (!inc || !inc.id || this.deletedReportIds.has(inc.id)) continue;
       const existing = map.get(inc.id);
       if (!existing) {
         map.set(inc.id, inc);
         changedReport = inc;
+        hasMeaningfulChange = true;
       } else {
         const incHasSol = Boolean(inc.solution && inc.solution.trim());
         const exHasSol = Boolean(existing.solution && existing.solution.trim());
-        const merged: DriverHelperReport = {
-          ...existing,
-          ...inc,
-          solution: incHasSol ? inc.solution : existing.solution,
-          solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
-          solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
-          status: incHasSol ? (inc.status === 'pending' ? 'resolved' : inc.status) : (exHasSol ? existing.status : inc.status),
-          photoUrl: inc.photoUrl || existing.photoUrl,
-          photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
-        };
-        map.set(inc.id, merged);
-        changedReport = merged;
+        const nextSolution = incHasSol ? inc.solution : existing.solution;
+        const nextStatus = incHasSol
+          ? (inc.status === 'pending' ? 'resolved' : inc.status)
+          : (exHasSol ? existing.status : inc.status);
+        const nextCheckout = inc.checkoutTimeFormatted || existing.checkoutTimeFormatted;
+        const nextQueueStatus = inc.customerQueueStatus || existing.customerQueueStatus;
+        const nextOfflineStatus = inc.offlineStatus || existing.offlineStatus;
+        const nextAck = inc.driverAcknowledged ?? existing.driverAcknowledged;
+        const nextNotes = inc.notes || existing.notes;
+        const nextValidationDecision = inc.validationDecision || existing.validationDecision;
+        const nextValidationNote = inc.validationNote || existing.validationNote;
+        const nextGpsValidationStatus = inc.gpsValidationStatus || existing.gpsValidationStatus;
+        const nextGpsValidationNote = inc.gpsValidationNote || existing.gpsValidationNote;
+
+        const isDiff =
+          nextSolution !== existing.solution ||
+          nextStatus !== existing.status ||
+          nextCheckout !== existing.checkoutTimeFormatted ||
+          nextQueueStatus !== existing.customerQueueStatus ||
+          nextOfflineStatus !== existing.offlineStatus ||
+          nextAck !== existing.driverAcknowledged ||
+          nextNotes !== existing.notes ||
+          nextValidationDecision !== existing.validationDecision ||
+          nextValidationNote !== existing.validationNote ||
+          nextGpsValidationStatus !== existing.gpsValidationStatus ||
+          nextGpsValidationNote !== existing.gpsValidationNote;
+
+        if (isDiff) {
+          const merged: DriverHelperReport = {
+            ...existing,
+            ...inc,
+            solution: nextSolution,
+            solutionBy: incHasSol ? inc.solutionBy : existing.solutionBy,
+            solutionAt: incHasSol ? inc.solutionAt : existing.solutionAt,
+            validationDecision: nextValidationDecision,
+            validationNote: nextValidationNote,
+            validatedBy: inc.validatedBy || existing.validatedBy,
+            validatedAt: inc.validatedAt || existing.validatedAt,
+            gpsValidationStatus: nextGpsValidationStatus,
+            gpsValidationNote: nextGpsValidationNote,
+            gpsValidatedBy: inc.gpsValidatedBy || existing.gpsValidatedBy,
+            gpsValidatedAt: inc.gpsValidatedAt || existing.gpsValidatedAt,
+            status: nextStatus,
+            photoUrl: inc.photoUrl || existing.photoUrl,
+            photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
+          };
+          map.set(inc.id, merged);
+          changedReport = merged;
+          hasMeaningfulChange = true;
+        }
       }
+    }
+    if (!hasMeaningfulChange) {
+      return;
     }
     const mergedList = this.normalizeList(
       Array.from(map.values()).sort(
@@ -251,84 +461,17 @@ class DriverReportService {
   }
 
   private getStoredReports(): DriverHelperReport[] {
-    let storedList: DriverHelperReport[] = [];
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        const data = localStorage.getItem(STORAGE_KEY);
-        if (data) {
-          const parsed: DriverHelperReport[] = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            storedList = this.normalizeList(parsed);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to read from localStorage:', e);
-      }
-    }
-
-    if (this.memoryReports && this.memoryReports.length > 0) {
-      if (storedList.length === 0) return this.memoryReports;
-      // Merge memoryReports and storedList so neither in-memory nor localStorage changes are ever lost
-      const map = new Map<string, DriverHelperReport>();
-      for (const r of storedList) map.set(r.id, r);
-      for (const m of this.memoryReports) {
-        const ex = map.get(m.id);
-        if (!ex) {
-          map.set(m.id, m);
-        } else {
-          const mHasSol = Boolean(m.solution && m.solution.trim());
-          const exHasSol = Boolean(ex.solution && ex.solution.trim());
-          map.set(m.id, {
-            ...ex,
-            ...m,
-            solution: mHasSol ? m.solution : ex.solution,
-            solutionBy: mHasSol ? m.solutionBy : ex.solutionBy,
-            solutionAt: mHasSol ? m.solutionAt : ex.solutionAt,
-            status: mHasSol ? m.status : (exHasSol ? ex.status : m.status)
-          });
-        }
-      }
-      this.memoryReports = this.normalizeList(
-        Array.from(map.values()).sort(
-          (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-        )
-      );
+    this.loadDeletedReportIds();
+    if (this.memoryReports !== null) {
       return this.memoryReports;
     }
-
-    this.memoryReports = storedList;
+    this.memoryReports = [];
     return this.memoryReports;
   }
 
   private persistListInternal(list: DriverHelperReport[], broadcastToPeers: boolean = true): void {
     const normalized = this.normalizeList(list);
     this.memoryReports = normalized;
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      } catch {
-        // QuotaExceededError fallback: keep photos on the 15 most recent reports and strip oversized base64 from older reports
-        try {
-          const compact = normalized.map((r, idx) => {
-            if (idx < 15) {
-              // Keep up to 3 photos on recent reports
-              const trimmedPhotos = Array.isArray(r.photoUrls) ? r.photoUrls.slice(0, 3) : undefined;
-              return { ...r, photoUrls: trimmedPhotos };
-            }
-            return { ...r, photoUrl: null, photoUrls: [] };
-          });
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
-        } catch {
-          // Final fallback: keep latest 30 reports metadata + latest 3 photos
-          try {
-            const ultraCompact = normalized.slice(0, 30).map((r, idx) =>
-              idx < 3 ? r : { ...r, photoUrl: null, photoUrls: [] }
-            );
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(ultraCompact));
-          } catch {}
-        }
-      }
-    }
 
     if (broadcastToPeers && this.channel) {
       try {
@@ -355,7 +498,13 @@ class DriverReportService {
     while (list.some(r => r.id === uniqueId)) {
       uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}-${this.seqCounter}`;
     }
-    const isConstraintCategory = report.category === 'kendala_jalan' || report.category === 'mode_offline';
+    const isConstraintCategory =
+      report.category === 'kendala_jalan' ||
+      report.category === 'mode_offline' ||
+      report.category === 'retur' ||
+      report.category === 'kurang_muat' ||
+      report.category === 'lebih_muat' ||
+      report.category === 'salah_muat';
     const defaultStatus = isConstraintCategory ? 'pending' : 'verified';
     const photoUrls = Array.isArray(report.photoUrls) && report.photoUrls.length > 0
       ? report.photoUrls
@@ -389,6 +538,7 @@ class DriverReportService {
     driverId: string;
     driverName: string;
     userRole?: string;
+    helperName?: string;
     plateNumber: string;
     areaName?: string;
     checkinTimeFormatted: string;
@@ -397,26 +547,50 @@ class DriverReportService {
   }): DriverHelperReport {
     const list = this.getReports();
     const today = getLocalDateStr();
+    const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const targetNameCompact = normCompact(params.driverName);
+    const targetPlateNorm = normPlate(params.plateNumber);
 
-    // Cari laporan presensi aktif untuk shiftId atau driverId pada hari ini
-    const existingIdx = list.findIndex(
-      r =>
-        r.category === 'presensi_shift' &&
-        (r.shiftId === params.shiftId || (r.driverId === params.driverId && r.date === today && !r.checkoutTimeFormatted))
-    );
+    const resolveHelperText = (h?: string) => {
+      const clean = String(h || '').trim();
+      return clean && clean !== '-' ? clean : '';
+    };
+
+    const matchesPersonOrShift = (r: DriverHelperReport) => {
+      if (r.category !== 'presensi_shift') return false;
+      if (params.shiftId && r.shiftId === params.shiftId) return true;
+      const isClosed = Boolean(r.checkoutTimeFormatted && r.checkoutTimeFormatted.trim() !== '' && r.checkoutTimeFormatted.trim() !== '-');
+      if (isClosed) return false;
+      const sameId = Boolean(r.driverId && params.driverId && r.driverId.replace(/^crw-/, '') === params.driverId.replace(/^crw-/, ''));
+      const sameName = Boolean(targetNameCompact && normCompact(r.driverName) === targetNameCompact);
+      if (r.date === today && (sameId || sameName)) return true;
+      // When checking out a recent open shift, match by name + plate even across midnight / earlier open row
+      if (params.checkoutTimeFormatted && (sameId || sameName)) {
+        if (!targetPlateNorm || targetPlateNorm === '-' || normPlate(r.plateNumber) === targetPlateNorm) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const existingIdx = list.findIndex(matchesPersonOrShift);
 
     if (existingIdx >= 0) {
       const existing = list[existingIdx];
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
+      const mergedHelperName = resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined;
+      const helperSuffix = mergedHelperName ? ` | Helper: ${mergedHelperName}` : '';
       const mergedPin = '****';
       const updatedNotes = mergedCheckout
-        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan: Terverifikasi`
-        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
+        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout}${helperSuffix} | PIN Keamanan: Terverifikasi`
+        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
       list[existingIdx] = {
         ...existing,
         driverName: params.driverName || existing.driverName,
         userRole: params.userRole || existing.userRole,
+        helperName: mergedHelperName,
         plateNumber: params.plateNumber || existing.plateNumber,
         areaName: params.areaName || existing.areaName,
         checkoutTimeFormatted: mergedCheckout,
@@ -429,21 +603,25 @@ class DriverReportService {
       };
 
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
       return list[existingIdx];
     }
 
+    const cleanHelper = resolveHelperText(params.helperName) || undefined;
+    const helperSuffix = cleanHelper ? ` | Helper: ${cleanHelper}` : '';
     const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
-      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan: Terverifikasi`
-      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
+      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted}${helperSuffix} | PIN Keamanan: Terverifikasi`
+      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
     return this.addReport({
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
+      helperName: cleanHelper,
       plateNumber: params.plateNumber || '-',
       category: 'presensi_shift',
       areaName: params.areaName || 'Presensi Operasional DC',
@@ -455,6 +633,63 @@ class DriverReportService {
       status: 'verified',
       verifiedBy: 'Sistem Presensi Terpadu'
     });
+  }
+
+  public closeOpenPresensiReportsForTeam(params: {
+    shiftIds?: string[];
+    crewNames?: Array<string | undefined>;
+    plateNumber?: string;
+    areaName?: string;
+    checkoutTimeFormatted: string;
+  }): number {
+    const list = this.getReports();
+    const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normPlate = (v?: string) => String(v || '').replace(/\s+/g, '').toLowerCase();
+    const shiftIdSet = new Set((params.shiftIds || []).filter(Boolean));
+    const nameSet = new Set((params.crewNames || []).map(normCompact).filter(v => Boolean(v && v.length >= 3)));
+    const targetPlate = normPlate(params.plateNumber);
+    const today = getLocalDateStr();
+    const yesterday = getLocalDateStr(new Date(Date.now() - 24 * 3600 * 1000));
+
+    let updatedCount = 0;
+    const updatedReports: DriverHelperReport[] = [];
+
+    const nextList = list.map(r => {
+      if (r.category !== 'presensi_shift') return r;
+      const alreadyClosed = Boolean(r.checkoutTimeFormatted && r.checkoutTimeFormatted.trim() !== '' && r.checkoutTimeFormatted.trim() !== '-');
+      if (alreadyClosed) return r;
+
+      const byShiftId = Boolean(r.shiftId && shiftIdSet.has(r.shiftId));
+      const rDate = r.date || getLocalDateStr(new Date(r.timestamp));
+      const recentDate = rDate === today || rDate === yesterday;
+      const byName = nameSet.has(normCompact(r.driverName));
+      const byPlate = Boolean(targetPlate && targetPlate !== '-' && normPlate(r.plateNumber) === targetPlate && recentDate);
+
+      if (byShiftId || (recentDate && byName) || byPlate) {
+        const helperSuffix = r.helperName ? ` | Helper: ${r.helperName}` : '';
+        const updatedRow: DriverHelperReport = {
+          ...r,
+          checkoutTimeFormatted: params.checkoutTimeFormatted,
+          notes: `[PRESENSI SHIFT TERPADU] Check-In: ${r.checkinTimeFormatted || '-'} | Check-Out: ${params.checkoutTimeFormatted}${helperSuffix} | PIN Keamanan: Terverifikasi`,
+          status: 'verified',
+          verifiedBy: 'Sistem Presensi Terpadu',
+          verifiedAt: new Date().toISOString()
+        };
+        updatedCount += 1;
+        updatedReports.push(updatedRow);
+        return updatedRow;
+      }
+      return r;
+    });
+
+    if (updatedCount > 0) {
+      this.saveReports(nextList);
+      updatedReports.forEach(rep => this.pushReportToServer(rep));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: updatedReports[0] }));
+      }
+    }
+    return updatedCount;
   }
 
   /**
@@ -478,6 +713,7 @@ class DriverReportService {
     if (activeShiftIdx >= 0) {
       list[activeShiftIdx].securityPin = '****';
       this.saveReports(list);
+      this.pushReportToServer(list[activeShiftIdx]);
     }
 
     return this.addReport({
@@ -516,7 +752,7 @@ class DriverReportService {
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
         fetch(`/api/driver-reports/${encodeURIComponent(id)}/solution`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include',
           body: JSON.stringify({
             solution,
@@ -549,7 +785,7 @@ class DriverReportService {
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
         fetch(`/api/driver-reports/${encodeURIComponent(id)}/acknowledge`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getAuthHeaders(),
           credentials: 'include'
         }).catch(() => {});
       }
@@ -587,10 +823,154 @@ class DriverReportService {
     return false;
   }
 
+  public validateItemIssueReport(params: {
+    id: string;
+    decision: 'approved' | 'follow_up' | 'rejected';
+    note: string;
+    validatedBy: string;
+    gpsValidationStatus?: 'valid' | 'mismatch' | 'unchecked';
+    gpsValidationNote?: string;
+  }): DriverHelperReport | null {
+    const list = [...this.getReports()];
+    const idx = list.findIndex(r => r.id === params.id);
+    if (idx < 0) return null;
+
+    const nowIso = new Date().toISOString();
+    const cleanNote = String(params.note || '').trim();
+    const mappedStatus: DriverHelperReport['status'] =
+      params.decision === 'approved'
+        ? 'verified'
+        : params.decision === 'follow_up'
+        ? 'follow_up'
+        : 'resolved';
+
+    const decisionLabel =
+      params.decision === 'approved'
+        ? 'Disetujui / Valid'
+        : params.decision === 'follow_up'
+        ? 'Perlu Tindak Lanjut'
+        : 'Ditolak / Tidak Sesuai';
+
+    const feedbackText = cleanNote
+      ? `[${decisionLabel}] ${cleanNote}`
+      : `Laporan telah divalidasi dengan status: ${decisionLabel}.`;
+
+    const nextGpsStatus = params.gpsValidationStatus || list[idx].gpsValidationStatus;
+    const nextGpsNote = params.gpsValidationNote !== undefined ? params.gpsValidationNote : list[idx].gpsValidationNote;
+
+    list[idx] = {
+      ...list[idx],
+      status: mappedStatus,
+      validationDecision: params.decision,
+      validationNote: cleanNote || decisionLabel,
+      validatedBy: params.validatedBy,
+      validatedAt: nowIso,
+      verifiedBy: params.validatedBy,
+      verifiedAt: nowIso,
+      gpsValidationStatus: nextGpsStatus,
+      gpsValidationNote: nextGpsNote,
+      gpsValidatedBy: params.gpsValidationStatus ? params.validatedBy : list[idx].gpsValidatedBy,
+      gpsValidatedAt: params.gpsValidationStatus ? nowIso : list[idx].gpsValidatedAt,
+      solution: feedbackText,
+      solutionBy: params.validatedBy,
+      solutionAt: nowIso,
+      driverAcknowledged: false
+    };
+
+    this.saveReports(list);
+    this.pushReportToServer(list[idx]);
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          solution: feedbackText,
+          solutionBy: params.validatedBy,
+          status: mappedStatus,
+          reportSnapshot: list[idx]
+        })
+      }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
+    }
+    return list[idx];
+  }
+
+  public validateReportGpsLocation(params: {
+    id: string;
+    gpsStatus: 'valid' | 'mismatch';
+    note?: string;
+    validatedBy: string;
+  }): DriverHelperReport | null {
+    const list = [...this.getReports()];
+    const idx = list.findIndex(r => r.id === params.id);
+    if (idx < 0) return null;
+
+    const nowIso = new Date().toISOString();
+    const gpsNoteText = String(params.note || '').trim() ||
+      (params.gpsStatus === 'valid'
+        ? 'Titik koordinat GPS sesuai dengan lokasi toko/rute pengiriman.'
+        : 'Titik koordinat GPS tidak sesuai / berada di luar jangkauan toko tujuan.');
+
+    list[idx] = {
+      ...list[idx],
+      gpsValidationStatus: params.gpsStatus,
+      gpsValidatedBy: params.validatedBy,
+      gpsValidatedAt: nowIso,
+      gpsValidationNote: gpsNoteText
+    };
+
+    this.saveReports(list);
+    this.pushReportToServer(list[idx]);
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          solution: list[idx].solution || `[Validasi GPS: ${params.gpsStatus === 'valid' ? 'Valid' : 'Tidak Sesuai'}] ${gpsNoteText}`,
+          solutionBy: list[idx].solutionBy || params.validatedBy,
+          status: list[idx].status,
+          reportSnapshot: list[idx]
+        })
+      }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[idx] }));
+    }
+    return list[idx];
+  }
+
   public deleteReport(id: string): boolean {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return false;
+    this.deletedReportIds.add(cleanId);
+    this.saveDeletedReportIds();
+
     const list = this.getReports();
-    const filtered = list.filter(r => r.id !== id);
+    const filtered = list.filter(r => r.id !== cleanId);
+    this.memoryReports = filtered;
     this.saveReports(filtered);
+
+    if (this.channel) {
+      try {
+        this.channel.postMessage({ deletedId: cleanId });
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/driver-reports/${encodeURIComponent(cleanId)}`, {
+        method: 'DELETE',
+        headers: this.getAuthHeaders(),
+        credentials: 'include'
+      }).catch(() => {});
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('driver-report-updated'));
@@ -642,6 +1022,7 @@ class DriverReportService {
         timestamp: now.toISOString()
       };
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
@@ -711,6 +1092,7 @@ class DriverReportService {
 
     if (updatedReport) {
       this.saveReports(list);
+      this.pushReportToServer(updatedReport);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: updatedReport }));
         window.dispatchEvent(new CustomEvent('akk-force-online-mode'));
@@ -769,6 +1151,7 @@ class DriverReportService {
         timestamp: now.toISOString()
       };
       this.saveReports(list);
+      this.pushReportToServer(list[existingIdx]);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
       }
@@ -854,6 +1237,7 @@ class DriverReportService {
     };
 
     this.saveReports(list);
+    this.pushReportToServer(list[targetIdx]);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[targetIdx] }));
     }
@@ -865,7 +1249,7 @@ class DriverReportService {
     driverName: string;
     driverPhone?: string;
     plateNumber: string;
-    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm';
+    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline' | 'isi_bbm' | 'retur' | 'kurang_muat' | 'lebih_muat' | 'salah_muat';
     reportText?: string;
     notes?: string;
     latitude?: number;

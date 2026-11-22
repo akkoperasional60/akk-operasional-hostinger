@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import ReactFlow, { Background, Controls, MiniMap, Node, Edge } from 'reactflow';
-import 'reactflow/dist/style.css';
 
 // Mock schema based on typical logistics application structure
 const initialNodes: Node[] = [

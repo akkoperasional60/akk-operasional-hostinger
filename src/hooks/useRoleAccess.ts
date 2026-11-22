@@ -3,10 +3,12 @@ import { UserProfile, UserRole } from '../types';
 import { logisticsStore } from '../services/store';
 import {
   canAccess,
+  canEdit,
   getUserRoleDisplayTitle,
   hasRequiredRole,
   isDispatcherRole,
   isDriverRole,
+  isReadOnlyAccess,
   isSuperAdminRole
 } from '../utils/rbac';
 
@@ -21,11 +23,13 @@ export interface UseRoleAccessReturn {
   isDispatcher: (targetUser?: UserProfile) => boolean;
   hasRole: (allowedRoles: Array<UserRole | 'dispatcher' | 'manager'>, targetUser?: UserProfile) => boolean;
   canAccessModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
+  canEditModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
+  isReadOnlyModule: (moduleId: string, subMenuId?: string, targetUser?: UserProfile) => boolean;
 }
 
 /**
  * Custom RBAC hook providing reactive user state from the logistics store
- * along with role helper functions (`canManageFleet`, `isDriver`, `isAdmin`).
+ * along with role helper functions (`canManageFleet`, `isDriver`, `isAdmin`, `canEditModule`, `isReadOnlyModule`).
  */
 export function useRoleAccess(): UseRoleAccessReturn {
   const [user, setUser] = useState<UserProfile>(() => logisticsStore.getCurrentUser());
@@ -33,7 +37,21 @@ export function useRoleAccess(): UseRoleAccessReturn {
 
   useEffect(() => {
     const unsubscribe = logisticsStore.subscribe(() => {
-      setUser(logisticsStore.getCurrentUser());
+      const next = logisticsStore.getCurrentUser();
+      setUser(prev => {
+        if (
+          prev.id === next.id &&
+          prev.fullName === next.fullName &&
+          prev.role === next.role &&
+          prev.status === next.status &&
+          prev.email === next.email &&
+          JSON.stringify(prev.permissions) === JSON.stringify(next.permissions)
+        ) {
+          return prev;
+        }
+        return { ...next };
+      });
+      setIsSupabaseAuthenticated(Boolean(next?.id && next.id !== 'guest'));
     });
 
     setIsSupabaseAuthenticated(Boolean(logisticsStore.getCurrentUser()?.id && logisticsStore.getCurrentUser().id !== 'guest'));
@@ -73,16 +91,21 @@ export function useRoleAccess(): UseRoleAccessReturn {
   const canManageFleet = useCallback(
     (targetUser?: UserProfile): boolean => {
       const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
-      if (!activeUser || activeUser.status !== 'approved' || activeUser.role === 'unassigned') {
+      if (!activeUser || activeUser.status === 'inactive' || activeUser.status === 'rejected') {
         return false;
       }
-      if (isDriverRole(activeUser.role)) {
-        return false;
-      }
-      if (isSuperAdminRole(activeUser.role) || isDispatcherRole(activeUser.role)) {
+      if (isSuperAdminRole(activeUser.role)) {
         return true;
       }
-      return canAccess(activeUser, 'fleets') || canAccess(activeUser, 'schedules');
+      return (
+        canAccess(activeUser, 'fleets') ||
+        canAccess(activeUser, 'schedules') ||
+        canAccess(activeUser, 'spareparts') ||
+        canAccess(activeUser, 'maintenance_costs') ||
+        canAccess(activeUser, 'fuel_efficiency') ||
+        canAccess(activeUser, 'fleet_forms') ||
+        canAccess(activeUser, 'warehouse_fleet_cubication')
+      );
     },
     [user]
   );
@@ -103,6 +126,22 @@ export function useRoleAccess(): UseRoleAccessReturn {
     [user]
   );
 
+  const canEditModule = useCallback(
+    (moduleId: string, subMenuId?: string, targetUser?: UserProfile): boolean => {
+      const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
+      return canEdit(activeUser, moduleId, subMenuId);
+    },
+    [user]
+  );
+
+  const isReadOnlyModule = useCallback(
+    (moduleId: string, subMenuId?: string, targetUser?: UserProfile): boolean => {
+      const activeUser = targetUser ?? user ?? logisticsStore.getCurrentUser();
+      return isReadOnlyAccess(activeUser, moduleId, subMenuId);
+    },
+    [user]
+  );
+
   return {
     user,
     role: user.role,
@@ -113,6 +152,9 @@ export function useRoleAccess(): UseRoleAccessReturn {
     isAdmin,
     isDispatcher,
     hasRole,
-    canAccessModule
+    canAccessModule,
+    canEditModule,
+    isReadOnlyModule
   };
 }
+

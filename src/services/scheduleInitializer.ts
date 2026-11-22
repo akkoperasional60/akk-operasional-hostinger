@@ -399,12 +399,6 @@ export class ScheduleInitializerService {
     const allCurrentSchedules = logisticsStore.getSchedules();
     const conflicts = ScheduleInitializerService.validateCrossDayConflicts(allCurrentSchedules);
 
-    logisticsStore.logActivity(
-      'Smart Fill Jadwal Mingguan (Pola Prioritas)',
-      `Target: ${targetMonday.toLocaleDateString('id-ID')}`,
-      `Smart Fill mengeksekusi ${addedCount} rute baru (${outboundCount} Luar Kota & ${localCount} Lokal). Status bentrok keesokan hari: ${conflicts.length === 0 ? '100% AMAN' : `${conflicts.length} Perlu Penyesuaian`}.`
-    );
-
     return {
       addedCount,
       updatedCount,
@@ -511,14 +505,6 @@ export class ScheduleInitializerService {
         driverLastOutboundMap.set(sched.crewId, depTime);
       }
     });
-
-    if (violationsResolved > 0) {
-      logisticsStore.logActivity(
-        'Penyeimbangan Jeda 24 Jam Otomatis',
-        'Audit & Resolusi Konflik',
-        `Berhasil menyelesaikan ${violationsResolved} konflik jeda istirahat supir luar kota.`
-      );
-    }
 
     return {
       rebalancedCount,

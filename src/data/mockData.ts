@@ -14,7 +14,16 @@ export const CENTRAL_WAREHOUSE = {
   rating: '4.7 (55 ulasan)'
 };
 
-const IS_PROD_BUILD = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
+const IS_AISTUDIO_PREVIEW =
+  typeof window !== 'undefined' &&
+  (window.location.hostname.endsWith('.run.app') ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1');
+
+const IS_PROD_BUILD =
+  typeof import.meta !== 'undefined' &&
+  Boolean((import.meta as any).env?.PROD) &&
+  !IS_AISTUDIO_PREVIEW;
 
 export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   {
@@ -184,11 +193,37 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
     createdAt: '2026-01-10T08:00:00Z',
     approvedAt: '2026-01-10T08:05:00Z',
     approvedBy: 'Super Admin',
-    notes: 'Marketing Offline — Terintegrasi langsung ke Menu Marketing (Offline)'
+    notes: 'Marketing Offline — Terintegrasi langsung ke Menu Marketing (Offline & Validasi Faktur)'
+  },
+  {
+    id: 'usr-marketing-gilang',
+    email: 'gilang.marketing@gmail.com',
+    fullName: 'Gilang Arya Pramuditya',
+    role: 'marketing_offline',
+    department: 'Marketing',
+    phone: '0813-5566-7788',
+    status: 'approved',
+    createdAt: '2026-01-10T08:00:00Z',
+    approvedAt: '2026-01-10T08:05:00Z',
+    approvedBy: 'Super Admin',
+    notes: 'Marketing Offline / Sales — Akses Validasi Faktur & Kunjungan'
+  },
+  {
+    id: 'usr-marketing-wongso',
+    email: 'wongso.marketing@gmail.com',
+    fullName: 'Wongso Arrohman Hidayat',
+    role: 'marketing_offline',
+    department: 'Marketing',
+    phone: '0813-6677-8899',
+    status: 'approved',
+    createdAt: '2026-01-10T08:00:00Z',
+    approvedAt: '2026-01-10T08:05:00Z',
+    approvedBy: 'Super Admin',
+    notes: 'Marketing Offline / Sales — Akses Validasi Faktur & Kunjungan'
   }
 ];
 
-const CANONICAL_FLEETS: Fleet[] = [
+export const INITIAL_FLEETS: Fleet[] = [
   {
     id: 'flt-01',
     plateNumber: 'P 8125 VC',
@@ -213,7 +248,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-23',
     taxDueDate: '2027-06-25',
     stnkExpiryDate: '2029-06-25',
-    kirExpiryDate: '2026-10-18'
+    kirExpiryDate: '2026-12-23'
   },
   {
     id: 'flt-02',
@@ -239,7 +274,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-02-05',
     taxDueDate: '2027-08-03',
     stnkExpiryDate: '2031-08-03',
-    kirExpiryDate: '2027-01-20'
+    kirExpiryDate: '2027-02-05'
   },
   {
     id: 'flt-03',
@@ -265,7 +300,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-01-29',
     taxDueDate: '2027-08-03',
     stnkExpiryDate: '2027-08-03',
-    kirExpiryDate: '2026-10-05'
+    kirExpiryDate: '2027-01-29'
   },
   {
     id: 'flt-04',
@@ -288,7 +323,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     kirDocUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=800&q=80',
     kirDocFileName: 'LEGALITAS_KIR_P9677VB.jpg',
     kirDocUploadedAt: '2026-10-04T09:40:00Z',
-    lastMaintenance: '2026-11-27',
+    lastMaintenance: '2026-11-28',
     taxDueDate: '2027-05-17',
     stnkExpiryDate: '2029-05-27',
     kirExpiryDate: '2026-11-28'
@@ -311,7 +346,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     boxDimensions: '3.1 x 1.7 x 1.7 m',
     boxInnerMultiplierPercent: 90,
     boxInnerCapacityM3: 8.1,
-    lastMaintenance: '2026-08-11',
+    lastMaintenance: '2026-10-12',
     taxDueDate: '2026-10-07',
     stnkExpiryDate: '2026-10-07',
     kirExpiryDate: '2026-10-12'
@@ -340,7 +375,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-01',
     taxDueDate: '2027-01-16',
     stnkExpiryDate: '2030-01-16',
-    kirExpiryDate: '2026-09-20'
+    kirExpiryDate: '2026-12-01'
   },
   {
     id: 'flt-07',
@@ -361,7 +396,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2027-02-20',
     taxDueDate: '2027-02-18',
     stnkExpiryDate: '2027-02-18',
-    kirExpiryDate: '2026-10-22'
+    kirExpiryDate: '2027-02-20'
   },
   {
     id: 'flt-08',
@@ -379,7 +414,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     engineCc: '4009 CC',
     boxCapacityM3: 17.5,
     boxDimensions: '4.3 x 2.0 x 2.0 m',
-    lastMaintenance: '2026-11-24',
+    lastMaintenance: '2027-02-15',
     taxDueDate: '2027-07-04',
     stnkExpiryDate: '2028-07-04',
     kirExpiryDate: '2027-02-15'
@@ -403,7 +438,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-10-23',
     taxDueDate: '2026-11-11',
     stnkExpiryDate: '2030-11-11',
-    kirExpiryDate: '2026-10-10'
+    kirExpiryDate: '2026-10-23'
   },
   {
     id: 'flt-10',
@@ -424,7 +459,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-12-23',
     taxDueDate: '2027-05-17',
     stnkExpiryDate: '2028-05-17',
-    kirExpiryDate: '2026-12-14'
+    kirExpiryDate: '2026-12-23'
   },
   {
     id: 'flt-11',
@@ -442,7 +477,7 @@ const CANONICAL_FLEETS: Fleet[] = [
     engineCc: '4778 CC',
     boxCapacityM3: 18.0,
     boxDimensions: '4.4 x 2.0 x 2.0 m',
-    lastMaintenance: '2026-12-02',
+    lastMaintenance: '2027-03-10',
     taxDueDate: '2027-05-20',
     stnkExpiryDate: '2029-05-20',
     kirExpiryDate: '2027-03-10'
@@ -466,12 +501,63 @@ const CANONICAL_FLEETS: Fleet[] = [
     lastMaintenance: '2026-11-19',
     taxDueDate: '2026-10-06',
     stnkExpiryDate: '2027-10-06',
-    kirExpiryDate: '2026-10-08'
+    kirExpiryDate: '2026-11-19'
   }
 ];
 
+export const CANONICAL_FLEET_ORDER = [
+  'N1',
+  'A3',
+  'N3',
+  'N4',
+  'N5',
+  'N20',
+  'N21',
+  'N22',
+  'N23',
+  'S5',
+  'DS4',
+  'DS5'
+] as const;
 
-export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : CANONICAL_FLEETS.map(f => ({ ...f }));
+export function getCanonicalFleetOrderIndex(fleetOrCode?: Partial<Fleet> | string | null): number {
+  if (!fleetOrCode) return 999;
+  const rawCode = typeof fleetOrCode === 'string'
+    ? fleetOrCode
+    : `${fleetOrCode.initialCode || ''} ${fleetOrCode.plateNumber || ''} ${fleetOrCode.id || ''}`;
+  const upper = rawCode.toUpperCase();
+  const tokens = upper.split(/[\s\/\-_,()]+/).filter(Boolean);
+
+  for (let i = 0; i < CANONICAL_FLEET_ORDER.length; i++) {
+    const target = CANONICAL_FLEET_ORDER[i];
+    if (tokens.includes(target)) return i;
+  }
+
+  // Fallback by alias codes
+  if (tokens.includes('NP1') || upper.includes('8125')) return 0; // N1
+  if (tokens.includes('NP3') || upper.includes('8509')) return 1; // A3
+  if (tokens.includes('NS1') || upper.includes('8848')) return 2; // N3
+  if (tokens.includes('NS2') || upper.includes('9677')) return 3; // N4
+  if (tokens.includes('NS3') || upper.includes('8801')) return 4; // N5
+  if (tokens.includes('NL1') || upper.includes('8381')) return 5; // N20
+  if (tokens.includes('NL2') || upper.includes('8711')) return 6; // N21
+  if (tokens.includes('DS1') || upper.includes('9281')) return 7; // N22
+  if (tokens.includes('DS2') || upper.includes('8928')) return 8; // N23
+  if (tokens.includes('DS3') || upper.includes('9194')) return 9; // S5
+  if (upper.includes('8229')) return 10; // DS4
+  if (upper.includes('8603')) return 11; // DS5
+
+  return 999;
+}
+
+export function sortFleetsByCanonicalOrder<T extends Partial<Fleet>>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const idxA = getCanonicalFleetOrderIndex(a);
+    const idxB = getCanonicalFleetOrderIndex(b);
+    if (idxA !== idxB) return idxA - idxB;
+    return String(a.initialCode || a.plateNumber || '').localeCompare(String(b.initialCode || b.plateNumber || ''));
+  });
+}
 
 export function resolveCanonicalFleetMeta(
   fleetOrPlate?: Partial<Fleet> | string | null
@@ -481,24 +567,42 @@ export function resolveCanonicalFleetMeta(
   const rawPlate = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.plateNumber || '');
   const rawInit = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.initialCode || '');
 
-  const cleanPlate = rawPlate.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+  const norm = (s: string) => (s || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+  const cleanPlate = norm(rawPlate);
   const cleanId = rawId.trim().toLowerCase();
-  const cleanInit = rawInit.trim().toUpperCase();
+  const cleanInit = norm(rawInit);
+  const rawStr = typeof fleetOrPlate === 'string' ? norm(fleetOrPlate) : '';
 
-  const matched = CANONICAL_FLEETS.find(f => {
+  // Direct special tokens for NS2 / N4
+  if (
+    cleanInit === 'NS2' ||
+    cleanInit === 'N4' ||
+    rawStr === 'NS2' ||
+    rawStr === 'N4' ||
+    rawStr.includes('NS2') ||
+    rawStr.includes('N4NS2')
+  ) {
+    const f4 = INITIAL_FLEETS.find(f => f.initialCode === 'N4 / NS2');
+    if (f4) return f4;
+  }
+
+  return INITIAL_FLEETS.find(f => {
     if (cleanId && f.id.toLowerCase() === cleanId) return true;
-    const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+    const fPlate = norm(f.plateNumber || '');
     if (cleanPlate && fPlate === cleanPlate) return true;
-    if (cleanInit && f.initialCode) {
-      const fInit = f.initialCode.trim().toUpperCase();
-      if (fInit === cleanInit) return true;
-      const parts = fInit.split('/').map(part => part.trim());
-      if (parts.includes(cleanInit)) return true;
+    if (rawStr && fPlate === rawStr) return true;
+
+    if (f.initialCode) {
+      const fInit = norm(f.initialCode);
+      if (cleanInit && fInit === cleanInit) return true;
+      if (rawStr && fInit === rawStr) return true;
+
+      const parts = f.initialCode.split(/[/]+/).map(p => norm(p));
+      if (cleanInit && parts.includes(cleanInit)) return true;
+      if (rawStr && parts.includes(rawStr)) return true;
     }
     return false;
   });
-
-  return matched ? { ...matched } : undefined;
 }
 
 export const INITIAL_CREWS: Crew[] = IS_PROD_BUILD ? [] : [

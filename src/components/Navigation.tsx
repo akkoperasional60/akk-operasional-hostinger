@@ -58,7 +58,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab,
     { id: 'tracking_eval' as NavTab, label: 'Evaluasi Jalur (Excel)', icon: FileSpreadsheet, badge: 'SheetJS' },
     { id: 'customer_map' as NavTab, label: 'Pemetaan Toko Retail', icon: Map, badge: '10 Outlet' },
     { id: 'hr_dashboard' as NavTab, label: 'Dashboard HR', icon: Users, badge: null },
-    { id: 'architecture' as NavTab, label: 'Skema SQL & MySQL', icon: Database, badge: 'MySQL' },
+    { id: 'architecture' as NavTab, label: 'Skema Database & SQL', icon: Database, badge: 'DB' },
   ].filter(item => {
     if (currentUser.role === 'sales_admin') {
       return item.id === 'dashboard' || item.id === 'tracking_eval';

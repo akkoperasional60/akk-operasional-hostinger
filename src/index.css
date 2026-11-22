@@ -571,14 +571,77 @@ html.light .bg-slate-950 {
   border-color: #e5eaf2 !important;
 }
 
-html.light .bg-slate-950\/90,
-html.light .bg-slate-950\/85,
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/70,
-html.light .bg-slate-950\/60,
-html.light .bg-slate-950\/40 {
+html.light .bg-slate-950\/90:not(.fixed),
+html.light .bg-slate-950\/85:not(.fixed),
+html.light .bg-slate-950\/80:not(.fixed),
+html.light .bg-slate-950\/75:not(.fixed),
+html.light .bg-slate-950\/70:not(.fixed),
+html.light .bg-slate-950\/60:not(.fixed),
+html.light .bg-slate-950\/50:not(.fixed),
+html.light .bg-slate-950\/40:not(.fixed) {
   background-color: #f8fafc !important;
   border-color: #e5eaf2 !important;
+}
+
+/* Global Modal Overlay Fix: Ensure all fixed modals sit above sticky header (z-1050) & sidebar (z-1100)
+   and never clip their top content when viewport zoom is 80% - 150% */
+div.fixed.inset-0.z-50,
+div.fixed.inset-0.z-\[70\],
+div.fixed.inset-0.z-\[1300\],
+div.fixed.inset-0.z-\[1400\] {
+  overflow-y: auto !important;
+  align-items: flex-start !important;
+  padding-top: 1rem !important;
+  padding-bottom: 1rem !important;
+}
+
+div.fixed.inset-0.z-\[1500\],
+div.fixed.inset-0.z-\[1600\],
+div.fixed.inset-0.z-\[1700\] {
+  overflow-y: auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 1rem !important;
+}
+
+div.fixed.inset-0.z-50,
+div.fixed.inset-0.z-\[1300\] {
+  z-index: 1300 !important;
+}
+
+div.fixed.inset-0.z-\[1400\] {
+  z-index: 1400 !important;
+}
+
+div.fixed.inset-0.z-\[1500\] {
+  z-index: 1500 !important;
+}
+
+div.fixed.inset-0.z-\[1600\] {
+  z-index: 1600 !important;
+}
+
+div.fixed.inset-0.z-\[1700\] {
+  z-index: 1700 !important;
+}
+
+div.fixed.inset-0.z-50 > div,
+div.fixed.inset-0.z-\[70\] > div,
+div.fixed.inset-0.z-\[1300\] > div,
+div.fixed.inset-0.z-\[1400\] > div,
+div.fixed.inset-0.z-\[1500\] > div,
+div.fixed.inset-0.z-\[1600\] > div,
+div.fixed.inset-0.z-\[1700\] > div {
+  margin-top: auto !important;
+  margin-bottom: auto !important;
+}
+
+html.light div.fixed.inset-0.bg-slate-950\/80,
+html.light div.fixed.inset-0.bg-slate-950\/85,
+html.light div.fixed.inset-0.bg-slate-950\/70,
+html.light div.fixed.inset-0.bg-slate-950\/60,
+html.light div.fixed.inset-0.bg-slate-900\/60 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
 }
 
 html.light .bg-slate-900 {
@@ -589,11 +652,14 @@ html.light .bg-slate-900 {
 
 html.light .bg-slate-900\/95,
 html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/85,
 html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/75,
 html.light .bg-slate-900\/70,
 html.light .bg-slate-900\/60,
-html.light .bg-slate-900\/50 {
-  background-color: rgba(255, 255, 255, 0.96) !important;
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/40 {
+  background-color: rgba(255, 255, 255, 0.98) !important;
   backdrop-filter: blur(8px);
   border-color: #eef2f6 !important;
   box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.03) !important;
@@ -604,6 +670,13 @@ html.light .bg-slate-800 {
   border-color: #e5eaf2 !important;
 }
 
+html.light .bg-slate-700 {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light .bg-slate-800\/95,
 html.light .bg-slate-800\/90,
 html.light .bg-slate-800\/80,
 html.light .bg-slate-800\/75,
@@ -614,6 +687,14 @@ html.light .bg-slate-800\/40,
 html.light .bg-slate-800\/30 {
   background-color: #f1f5f9 !important;
   border-color: #cbd5e1 !important;
+}
+
+html.light .from-slate-900.to-indigo-950,
+html.light .from-slate-900.via-slate-900.to-indigo-950,
+html.light .from-slate-950.to-slate-900 {
+  background-image: linear-gradient(to bottom right, #ffffff, #f8fafc, #eef2ff) !important;
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
 }
 
 html.light .bg-slate-50 {
@@ -784,7 +865,7 @@ html.light .bg-blue-900 *,
 html.light .bg-emerald-600 *,
 html.light .bg-emerald-700 *,
 html.light .bg-emerald-800 *,
-html.light .bg-rose-600 *,
+html.light .bg-rose-600 *:not(.bg-white):not(.bg-white *),
 html.light .bg-amber-600 *,
 html.light .bg-purple-600 *,
 html.light .bg-indigo-600 *,
@@ -794,42 +875,61 @@ html.light .from-indigo-600 * {
   color: #ffffff !important;
 }
 
+html.light .bg-rose-600 .bg-white,
+html.light .bg-rose-600 .bg-white * {
+  color: #be123c !important;
+}
+
 html.light .bg-emerald-950\/30,
 html.light .bg-emerald-950\/40,
-html.light .bg-emerald-950\/50 {
+html.light .bg-emerald-950\/50,
+html.light .bg-emerald-950\/60 {
   background-color: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
+  border-color: #6ee7b7 !important;
 }
 
 html.light .bg-blue-950\/30,
 html.light .bg-blue-950\/40,
-html.light .bg-blue-950\/50 {
-  background-color: #eff6ff !important;
-  border-color: #bfdbfe !important;
+html.light .bg-blue-950\/50,
+html.light .bg-blue-950\/60,
+html.light .bg-sky-950\/40,
+html.light .bg-sky-950\/60 {
+  background-color: #f0f9ff !important;
+  border-color: #38bdf8 !important;
 }
 
 html.light .bg-amber-950\/30,
-html.light .bg-amber-950\/40 {
+html.light .bg-amber-950\/40,
+html.light .bg-amber-950\/60 {
   background-color: #fffbeb !important;
-  border-color: #fde68a !important;
+  border-color: #fcd34d !important;
 }
 
 html.light .bg-rose-950\/30,
-html.light .bg-rose-950\/40 {
+html.light .bg-rose-950\/35,
+html.light .bg-rose-950\/40,
+html.light .bg-rose-950\/60 {
   background-color: #fff1f2 !important;
-  border-color: #fecdd3 !important;
+  border-color: #fda4af !important;
 }
 
 html.light .bg-indigo-950\/30,
-html.light .bg-indigo-950\/40 {
+html.light .bg-indigo-950\/40,
+html.light .bg-indigo-950\/50,
+html.light .bg-indigo-950\/60 {
   background-color: #eef2ff !important;
-  border-color: #c7d2fe !important;
+  border-color: #818cf8 !important;
 }
 
-html.light .bg-slate-950\/50,
-html.light .bg-slate-950\/30 {
+html.light .bg-slate-950:not(.fixed),
+html.light .bg-slate-950\/95:not(.fixed),
+html.light .bg-slate-950\/90:not(.fixed),
+html.light .bg-slate-950\/80:not(.fixed),
+html.light .bg-slate-950\/70:not(.fixed),
+html.light .bg-slate-950\/50:not(.fixed),
+html.light .bg-slate-950\/30:not(.fixed) {
   background-color: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  border-color: #e2e8f0 !important;
 }
 
 /* Light Theme Inputs in Clean Modern style */
@@ -981,3 +1081,94 @@ html.dark .leaflet-cluster-spider-leg {
 .leaflet-overlay-pane svg path.leaflet-interactive {
   fill: none !important;
 }
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes skeletonWave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-wave {
+  background: linear-gradient(
+    110deg,
+    rgba(226, 232, 240, 0.72) 25%,
+    rgba(248, 250, 252, 0.96) 37%,
+    rgba(226, 232, 240, 0.72) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeletonWave 1.65s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+html.dark .skeleton-wave {
+  background: linear-gradient(
+    110deg,
+    rgba(30, 41, 59, 0.65) 25%,
+    rgba(51, 65, 85, 0.85) 37%,
+    rgba(30, 41, 59, 0.65) 63%
+  );
+  background-size: 400% 100%;
+}
+
+/* =========================================================================
+   HANDHELD WMS SCANNER DARK PHONE FRAME ISOLATION (IMMUNE TO LIGHT THEME)
+   ========================================================================= */
+html.light .wms-handheld-dark,
+html.light .wms-handheld-dark .text-white {
+  color: #ffffff !important;
+}
+
+html.light .wms-handheld-dark .text-emerald-200,
+html.light .wms-handheld-dark .text-emerald-300,
+html.light .wms-handheld-dark .text-emerald-400 {
+  color: #6ee7b7 !important;
+}
+
+html.light .wms-handheld-dark .text-sky-300,
+html.light .wms-handheld-dark .text-sky-400 {
+  color: #7dd3fc !important;
+}
+
+html.light .wms-handheld-dark .text-amber-200,
+html.light .wms-handheld-dark .text-amber-300,
+html.light .wms-handheld-dark .text-amber-400 {
+  color: #fcd34d !important;
+}
+
+html.light .wms-handheld-dark .text-rose-100,
+html.light .wms-handheld-dark .text-rose-200,
+html.light .wms-handheld-dark .text-rose-300,
+html.light .wms-handheld-dark .text-rose-400 {
+  color: #fda4af !important;
+}
+
+html.light .wms-handheld-dark .text-indigo-200,
+html.light .wms-handheld-dark .text-indigo-300,
+html.light .wms-handheld-dark .text-indigo-400 {
+  color: #a5b4fc !important;
+}
+
+html.light .wms-handheld-dark select,
+html.light .wms-handheld-dark input {
+  background-color: #111827 !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+html.light .wms-handheld-dark select option {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+}
+
+

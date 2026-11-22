@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check, Building2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check, Building2, Wrench } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -303,6 +304,15 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
     setSelectedRouteScheduleId(sch.id);
   };
   const [consecutiveConflict, setConsecutiveConflict] = useState<AreaRepetitionConflict | null>(null);
+  const [notReadyFleetPopup, setNotReadyFleetPopup] = useState<{
+    fleet: Fleet;
+    statusTitle: string;
+    reasonType: 'maintenance' | 'on_duty' | 'scheduled';
+    description: string;
+    areaName: string | null;
+    driverName: string | null;
+    canForceProceed: boolean;
+  } | null>(null);
   const { addNotification } = useToast();
   const [isExportingManifestPdf, setIsExportingManifestPdf] = useState(false);
 
@@ -418,127 +428,15 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   };
 
   const handleManualSyncAll = () => {
-    // 1. Sync from admin schedule weeks cache if available
-    let cachedWeeks: any[] | null = null;
-    try {
-      const saved2026 = localStorage.getItem('akk_admin_schedule_cache_2026_0');
-      if (saved2026) cachedWeeks = JSON.parse(saved2026);
-      if (!cachedWeeks) {
-        const savedAll = localStorage.getItem('akk_admin_schedule_weeks_cache');
-        if (savedAll) cachedWeeks = JSON.parse(savedAll);
-      }
-    } catch {}
-
-    let syncedCount = 0;
-    if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0 && cachedWeeks[0]?.days?.length > 0) {
-      const curFleets = logisticsStore.getFleets();
-      const curCrews = logisticsStore.getCrews();
-
-      cachedWeeks.forEach((week: any, weekIdx: number) => {
-        (week.days || []).forEach((day: any) => {
-          let dayNum = day.dayNumber || 5;
-          let dayPadded = String(dayNum).padStart(2, '0');
-          let depIso = `2026-01-${dayPadded}T07:30:00.000Z`;
-          let arrIso = `2026-01-${dayPadded}T18:00:00.000Z`;
-
-          if (day.dateString) {
-            const parsed = scheduleImportValidator.parseDate(day.dateString, new Date(2026, 0, dayNum));
-            if (parsed.date) {
-              const dStr = parsed.date.toISOString().substring(0, 10);
-              depIso = `${dStr}T07:30:00.000Z`;
-              arrIso = `${dStr}T18:00:00.000Z`;
-            }
-          }
-
-          (day.pengiriman || []).forEach((p: any, idx: number) => {
-            const stdArea = p.area || 'Area Kirim';
-            const isBali = stdArea.toUpperCase().includes('DENPASAR') || stdArea.toUpperCase().includes('SINGARAJA') || stdArea.toUpperCase().includes('NEGARA') || stdArea.toUpperCase().includes('BALI');
-            const cleanArmada = (p.armada || 'FLT').replace(/[^a-zA-Z0-9]/g, '').toUpperCase() || 'FLT';
-            const datePart = depIso.substring(0, 10).replace(/-/g, '');
-            const targetTracking = `PO-AKK-${datePart}-${cleanArmada}-${idx + 1}`;
-            const targetId = p.id || `sch-${datePart}-${cleanArmada}-${idx + 1}`;
-
-            const matchedFleet = curFleets.find(f => 
-              f.initialCode?.toUpperCase() === p.armada?.toUpperCase() ||
-              f.plateNumber.replace(/\s+/g, '').toUpperCase().includes((p.armada || '').replace(/\s+/g, '').toUpperCase())
-            ) || curFleets[idx % curFleets.length] || curFleets[0];
-
-            const matchedDriver = curCrews.find(c => 
-              c.name.toLowerCase().includes((p.driver || '').toLowerCase()) || 
-              (p.driver || '').toLowerCase().includes(c.name.toLowerCase())
-            ) || curCrews[0];
-
-            const matchedHelper = p.helper && p.helper !== '-' ? curCrews.find(c =>
-              c.name.toLowerCase().includes((p.helper || '').toLowerCase()) ||
-              (p.helper || '').toLowerCase().includes(c.name.toLowerCase())
-            ) : undefined;
-
-            const matchedHelper2 = p.helper2 && p.helper2 !== '-' ? curCrews.find(c =>
-              c.name.toLowerCase().includes((p.helper2 || '').toLowerCase()) ||
-              (p.helper2 || '').toLowerCase().includes(c.name.toLowerCase())
-            ) : undefined;
-
-            const existingList = logisticsStore.getSchedules();
-            const existingIdx = existingList.findIndex(s => s.id === targetId || s.trackingNumber === targetTracking || (p.id && s.id === p.id));
-
-            const newSch: Schedule = {
-              id: targetId,
-              trackingNumber: targetTracking,
-              originName: 'Gudang Pusat Banyuwangi DC',
-              originCoords: [-8.1906, 114.3708],
-              storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-              store: {
-                id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-                storeCode: `AREA-${stdArea.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
-                storeName: stdArea,
-                island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
-                province: isBali ? 'Bali' : 'Jawa Timur',
-                city: isBali ? 'Denpasar' : 'Banyuwangi',
-                address: `Area Distribusi ${stdArea}`,
-                latitude: isBali ? -8.6705 : -8.219,
-                longitude: isBali ? 115.2126 : 114.369,
-                contactPerson: 'PIC Distribusi Area',
-                phone: '-',
-                deliveryWindow: '08:00 - 17:00',
-                storeCategory: 'Distribution Hub'
-              },
-              areaName: stdArea,
-              fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
-              fleet: matchedFleet,
-              crewId: matchedDriver ? matchedDriver.id : 'crw-01',
-              crew: matchedDriver,
-              crewHelperId: matchedHelper ? matchedHelper.id : undefined,
-              crewHelper: matchedHelper,
-              crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
-              crewHelper2: matchedHelper2,
-              status: 'scheduled',
-              departureDate: depIso,
-              estimatedArrival: arrIso,
-              cargoDescription: `Karton Box & Sheet Kemasan - ${stdArea}`,
-              cargoWeightTon: isBali ? 4.5 : 2.5,
-              isInterIsland: isBali,
-              ferryBookingCode: isBali ? `ASDP-KTP-GLM-${idx + 100}` : undefined,
-              transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-              notes: p.target || `Rute Distribusi ${stdArea}`,
-              createdAt: new Date().toISOString(),
-              isManuallyEdited: !!p.isManuallyEdited
-            };
-
-            if (existingIdx !== -1) {
-              logisticsStore.updateSchedule(existingList[existingIdx].id, newSch);
-            } else {
-              logisticsStore.addSchedule(newSch);
-            }
-            syncedCount++;
-          });
-        });
-      });
-    }
-
-    logisticsStore.syncSchedulesToCrewHistory();
-    setSchedules(logisticsStore.getSchedules());
-    setAutoInitMessage(`⚡ Sinkronisasi manual selesai! Semua jadwal operasional (${logisticsStore.getSchedules().length} ritase), kalender mingguan, dan histori kru tersinkronkan penuh tanpa ada data yang terlewat.`);
-    setTimeout(() => setAutoInitMessage(null), 7000);
+    void logisticsStore.hydrateOperationalDataFromHostinger(true).then(() => {
+      logisticsStore.syncSchedulesToCrewHistory();
+      setSchedules(logisticsStore.getSchedules());
+      setStores(logisticsStore.getStores());
+      setCrews(logisticsStore.getCrews());
+      setFleets(logisticsStore.getFleets());
+      setAutoInitMessage(`⚡ Sinkronisasi manual selesai! Semua jadwal operasional (${logisticsStore.getSchedules().length} ritase), kalender mingguan, dan histori kru tersinkronkan penuh dari database.`);
+      setTimeout(() => setAutoInitMessage(null), 7000);
+    });
   };
 
   // Area Approval Pop-up State
@@ -831,14 +729,55 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
         ? [-8.1724, 113.6995]
         : CENTRAL_WAREHOUSE.coordinates;
 
+    const depDateObj = new Date(newSchedule.departureDate);
+    const arrDateObj = new Date(newSchedule.estimatedArrival);
+    const fmtHhMm = (d: Date, fallback: string) =>
+      isNaN(d.getTime())
+        ? fallback
+        : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const fmtYyyyMmDd = (d: Date) =>
+      isNaN(d.getTime())
+        ? ''
+        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const depDateStr = fmtYyyyMmDd(depDateObj);
+    const arrDateStr = fmtYyyyMmDd(arrDateObj);
+    const editSchId = (newSchedule as any).id as string | undefined;
+    const fleetConflict =
+      (depDateStr && logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, depDateStr, editSchId)) ||
+      (arrDateStr && arrDateStr !== depDateStr
+        ? logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, arrDateStr, editSchId)
+        : null);
+
+    if (fleetConflict) {
+      const conflictSch = fleetConflict.conflictSchedule;
+      const conflictCode =
+        fleetConflict.fleet?.initialCode ||
+        conflictSch.armada ||
+        selectedFleetObj?.initialCode ||
+        selectedFleetObj?.plateNumber ||
+        newSchedule.fleetId;
+      const conflictArea = conflictSch.areaName || conflictSch.store?.storeName || '-';
+      const conflictDriver = conflictSch.crew?.name || '-';
+      const conflictMsg = `Armada ${conflictCode} sudah terjadwal pada tanggal tersebut (${conflictArea} • Driver: ${conflictDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
+      addNotification('sla_warning', 'Bentrok Jadwal Armada', conflictMsg);
+      setAutoInitMessage(`⚠️ ${conflictMsg}`);
+      setTimeout(() => setAutoInitMessage(null), 6000);
+      return;
+    }
+
     const scheduleData = {
       ...newSchedule,
       areaName: targetAreaLabel,
       cargoDescription: `Karton Box & Sheet Kemasan - Area ${targetAreaLabel}`,
       originName: originWarehouseLabel,
       originCoords: originTuple,
-      departureDate: new Date(newSchedule.departureDate).toISOString(),
-      estimatedArrival: new Date(newSchedule.estimatedArrival).toISOString(),
+      departureDate: depDateObj.toISOString(),
+      estimatedArrival: arrDateObj.toISOString(),
+      departureTime: fmtHhMm(depDateObj, '07:30'),
+      targetReturnTime: fmtHhMm(arrDateObj, '17:00'),
+      deliveryDate: fmtYyyyMmDd(depDateObj),
+      returnDate: fmtYyyyMmDd(arrDateObj),
       areaApprovalStatus: (areaCheck?.requiresApproval ? 'approved' : 'not_required') as 'approved' | 'not_required',
       areaTripCount: (areaCheck?.tripCount || 0) + 1,
       isManuallyEdited: true
@@ -1288,86 +1227,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
         </div>
       )}
 
-      {/* Cabang Selector Toolbar (Design matching image_bbbfdc09.png) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3 shadow-xs no-print">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-            <Building2 className="w-4.5 h-4.5" />
-          </div>
-          <div>
-            <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-              Jadwal Distribusi &amp; Penugasan Armada
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Sistem jadwal terintegrasi cabang operasional.
-            </p>
-          </div>
-        </div>
-
-        {/* Dropdown UI/UX matching user reference image_bbbfdc09.png */}
-        <div className="relative self-start sm:self-auto" ref={branchDropdownRef}>
-          <div className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider mb-0.5">
-            CABANG
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsBranchDropdownOpen((prev) => !prev)}
-            className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs font-bold shadow-xs hover:border-blue-500 transition cursor-pointer min-w-[150px] justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <CalendarDays className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              <span>
-                {selectedOriginBranchId === 'ALL'
-                  ? 'Semua Cabang'
-                  : branches.find((b) => b.id === selectedOriginBranchId)?.name || 'Pilih Cabang'}
-              </span>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {isBranchDropdownOpen && (
-            <div className="absolute right-0 mt-1.5 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 py-1 z-30 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => {
-                  branchStore.setSelectedOriginBranchId('ALL');
-                  setIsBranchDropdownOpen(false);
-                }}
-                className={`w-full text-left px-3.5 py-2 text-xs transition cursor-pointer flex items-center justify-between ${
-                  selectedOriginBranchId === 'ALL'
-                    ? 'bg-blue-600 text-white font-black'
-                    : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
-                }`}
-              >
-                <span>Semua Cabang</span>
-                <span className="text-[10px] opacity-80 font-mono">({schedules.length})</span>
-              </button>
-              {branches.map((b) => {
-                const count = schedules.filter((s) => branchStore.getScheduleBranch(s.id).id === b.id).length;
-                const isSelected = selectedOriginBranchId === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      branchStore.setSelectedOriginBranchId(b.id);
-                      setIsBranchDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 text-xs transition cursor-pointer flex items-center justify-between ${
-                      isSelected
-                        ? 'bg-blue-600 text-white font-black'
-                        : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
-                    }`}
-                  >
-                    <span>{b.name}</span>
-                    <span className="text-[10px] opacity-80 font-mono">({count})</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
 
       <GoogleSheetsAdminScheduleView
         onSyncComplete={() => {
@@ -1594,18 +1453,73 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     <select
                       required
                       value={newSchedule.fleetId}
-                      onChange={(e) => setNewSchedule({ ...newSchedule, fleetId: e.target.value })}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        if (!nextId) {
+                          setNewSchedule({ ...newSchedule, fleetId: '' });
+                          return;
+                        }
+                        const chosenFleet = fleets.find(f => f.id === nextId);
+                        if (chosenFleet) {
+                          const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                          const liveDate = logisticsStore.getFleetLiveOperationalInfo(chosenFleet, depDateIso);
+                          const liveNow = logisticsStore.getFleetLiveOperationalInfo(chosenFleet);
+                          const isMaintenance = liveDate.effectiveStatus === 'maintenance' || chosenFleet.status === 'maintenance';
+                          const isSameDateConflict = !isMaintenance && !liveDate.canBeScheduled;
+                          const isCurrentlyOnDuty =
+                            !isMaintenance &&
+                            liveDate.canBeScheduled &&
+                            (liveNow.effectiveStatus === 'on-duty' || chosenFleet.status === 'on-duty');
+
+                          if (isMaintenance || isSameDateConflict || isCurrentlyOnDuty) {
+                            setNotReadyFleetPopup({
+                              fleet: chosenFleet,
+                              reasonType: isMaintenance ? 'maintenance' : isSameDateConflict ? 'scheduled' : 'on_duty',
+                              statusTitle: isMaintenance
+                                ? 'Sedang Servis / Perbaikan'
+                                : isSameDateConflict
+                                ? liveDate.statusLabel === 'Kirim'
+                                  ? 'Sedang Kirim (Di Jalan)'
+                                  : 'Sudah Terjadwal'
+                                : 'Sedang Kirim (Belum Kembali)',
+                              description: isMaintenance
+                                ? 'Status armada ini masih dalam proses servis atau perbaikan bengkel (Belum Ready). Pastikan kendaraan benar-benar siap sebelum dijadwalkan.'
+                                : isSameDateConflict
+                                ? `Armada ini sudah terjadwal atau sedang pengiriman pada tanggal tersebut (${liveDate.areaName || liveDate.todayScheduledArea || 'Area Kirim'}).`
+                                : 'Armada ini saat ini masih dalam pengiriman di jalan dan belum kembali ke gudang (Belum Ready).',
+                              areaName: liveDate.areaName || liveNow.areaName || liveDate.todayScheduledArea,
+                              driverName: liveDate.driverName || liveNow.driverName,
+                              canForceProceed: !isSameDateConflict
+                            });
+                            return;
+                          }
+                        }
+                        setNewSchedule({ ...newSchedule, fleetId: nextId });
+                      }}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
                     >
                       <option value="">-- Pilih Truk Armada --</option>
                       {fleets.map(fl => {
-                        const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fl);
-                        const isServis = !liveInfo.canBeScheduled;
+                        const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                        const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fl, depDateIso);
+                        const liveNow = logisticsStore.getFleetLiveOperationalInfo(fl);
+                        const isNotReady =
+                          liveInfo.effectiveStatus === 'maintenance' ||
+                          fl.status === 'maintenance' ||
+                          !liveInfo.canBeScheduled ||
+                          liveNow.effectiveStatus === 'on-duty' ||
+                          fl.status === 'on-duty';
                         return (
-                          <option key={fl.id} value={fl.id} disabled={isServis}>
-                            {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} — {liveInfo.statusLabel}
-                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
-                            {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
+                          <option key={fl.id} value={fl.id}>
+                            {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} — {
+                              liveInfo.effectiveStatus === 'maintenance' || fl.status === 'maintenance'
+                                ? 'Servis (Belum Ready)'
+                                : !liveInfo.canBeScheduled
+                                ? `${liveInfo.statusLabel} (${liveInfo.areaName || liveInfo.todayScheduledArea || 'Terjadwal'})`
+                                : liveNow.effectiveStatus === 'on-duty' || fl.status === 'on-duty'
+                                ? `Sedang Kirim (${liveNow.areaName || 'Belum Kembali'})`
+                                : liveInfo.statusLabel
+                            }{isNotReady ? ' ⚠' : ''}
                           </option>
                         );
                       })}
@@ -1613,25 +1527,158 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     {newSchedule.fleetId && (() => {
                       const selFleet = fleets.find(f => f.id === newSchedule.fleetId);
                       if (!selFleet) return null;
-                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                      const depDateIso = (newSchedule.departureDate || '').slice(0, 10) || undefined;
+                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet, depDateIso);
+                      const liveNow = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                      const isNotReady =
+                        liveInfo.effectiveStatus === 'maintenance' ||
+                        selFleet.status === 'maintenance' ||
+                        !liveInfo.canBeScheduled ||
+                        liveNow.effectiveStatus === 'on-duty' ||
+                        selFleet.status === 'on-duty';
                       return (
-                        <div className="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+                        <div className={`mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border text-[11px] ${
+                          isNotReady
+                            ? liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
+                              ? 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+                              : 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                            : 'bg-slate-950 border-slate-800'
+                        }`}>
                           <div className="flex items-center gap-2">
-                            <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                            {isNotReady ? (
+                              <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${
+                                liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
+                                  ? 'text-rose-400'
+                                  : 'text-amber-400'
+                              }`} />
+                            ) : (
+                              <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                            )}
                             <span className="font-bold text-white">
-                              Status Armada: {liveInfo.statusLabel}
+                              {isNotReady
+                                ? `Peringatan: Armada Belum Ready (${liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance' ? 'Servis' : liveNow.statusLabel})`
+                                : `Status Armada: ${liveInfo.statusLabel}`}
                             </span>
                           </div>
                           <span className="text-[10px] font-medium text-slate-400 truncate">
-                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
-                              ? `Area Hari Ini: ${liveInfo.areaName}`
-                              : liveInfo.effectiveStatus === 'maintenance'
+                            {liveInfo.effectiveStatus === 'maintenance' || selFleet.status === 'maintenance'
                               ? 'Sedang Perbaikan (Servis)'
+                              : liveNow.effectiveStatus === 'on-duty' && liveNow.areaName
+                              ? `Area Aktif: ${liveNow.areaName}`
                               : 'Siap Digunakan Kirim'}
                           </span>
                         </div>
                       );
                     })()}
+
+                    {notReadyFleetPopup &&
+                      typeof document !== 'undefined' &&
+                      createPortal(
+                        <div
+                          onClick={() => setNotReadyFleetPopup(null)}
+                          className="fixed inset-0 z-[10000] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+                        >
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
+                          >
+                            <div className={`px-5 py-4 border-b flex items-start justify-between gap-3 ${
+                              notReadyFleetPopup.reasonType === 'maintenance'
+                                ? 'bg-rose-500/10 border-rose-500/30'
+                                : 'bg-amber-500/10 border-amber-500/30'
+                            }`}>
+                              <div className="flex items-start gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                                  notReadyFleetPopup.reasonType === 'maintenance'
+                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                    : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                                }`}>
+                                  {notReadyFleetPopup.reasonType === 'maintenance' ? (
+                                    <Wrench className="w-5 h-5" />
+                                  ) : (
+                                    <AlertTriangle className="w-5 h-5" />
+                                  )}
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-extrabold text-white">Peringatan: Armada Belum Ready</h4>
+                                  <p className={`text-[11px] font-semibold mt-0.5 ${
+                                    notReadyFleetPopup.reasonType === 'maintenance' ? 'text-rose-300' : 'text-amber-300'
+                                  }`}>
+                                    Status saat ini: {notReadyFleetPopup.statusTitle}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setNotReadyFleetPopup(null)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="p-5 space-y-3.5">
+                              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-extrabold text-white">
+                                    {notReadyFleetPopup.fleet.initialCode ? `[${notReadyFleetPopup.fleet.initialCode}] ` : ''}
+                                    {notReadyFleetPopup.fleet.plateNumber}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                    notReadyFleetPopup.reasonType === 'maintenance'
+                                      ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                  }`}>
+                                    {notReadyFleetPopup.statusTitle}
+                                  </span>
+                                </div>
+                                {notReadyFleetPopup.areaName && (
+                                  <div className="text-[11px] text-slate-400">
+                                    Area Aktif: <strong className="text-slate-200">{notReadyFleetPopup.areaName}</strong>
+                                  </div>
+                                )}
+                                {notReadyFleetPopup.driverName && (
+                                  <div className="text-[11px] text-slate-400">
+                                    Driver: <strong className="text-slate-200">{notReadyFleetPopup.driverName}</strong>
+                                  </div>
+                                )}
+                              </div>
+                              <p className="text-xs leading-relaxed text-slate-300">{notReadyFleetPopup.description}</p>
+                              <div className={`rounded-xl border px-3.5 py-2.5 text-xs font-bold ${
+                                notReadyFleetPopup.reasonType === 'maintenance'
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                              }`}>
+                                Yakin untuk memilih armada ini?
+                              </div>
+                            </div>
+                            <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setNotReadyFleetPopup(null)}
+                                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const chosenId = notReadyFleetPopup.fleet.id;
+                                  setNotReadyFleetPopup(null);
+                                  setNewSchedule({ ...newSchedule, fleetId: chosenId });
+                                }}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold text-white transition cursor-pointer ${
+                                  notReadyFleetPopup.reasonType === 'maintenance'
+                                    ? 'bg-rose-600 hover:bg-rose-500'
+                                    : 'bg-blue-600 hover:bg-blue-500'
+                                }`}
+                              >
+                                Iya, Saya Yakin
+                              </button>
+                            </div>
+                          </div>
+                        </div>,
+                        document.body
+                      )}
                   </div>
                 </div>
 

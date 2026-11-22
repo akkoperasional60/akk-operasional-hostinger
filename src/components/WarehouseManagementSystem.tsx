@@ -19,7 +19,11 @@ import {
   RefreshCw,
   X,
   Sliders,
-  Filter
+  Filter,
+  Trash2,
+  Lock,
+  Clock,
+  User
 } from 'lucide-react';
 import { Warehouse3DSimulation } from './Warehouse3DSimulation';
 import {
@@ -27,6 +31,8 @@ import {
   WarehouseFleetCubicationSimulator
 } from './WarehouseCubicationModules';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import { WarehouseDatabaseBarangView } from './WarehouseDatabaseBarangView';
+import { databaseBarangService, isLegacySeededBarang } from '../services/databaseBarangService';
 
 export type WmsSubTab =
   | 'overview'
@@ -36,8 +42,163 @@ export type WmsSubTab =
   | 'scanner'
   | 'slotting'
   | 'opname'
+  | 'purchasing_opname'
+  | 'kartu_stok'
   | 'cubication'
   | 'fleet_cubication';
+
+export interface WarehouseOpnameAuditItem {
+  id: string;
+  kodeBarang: string;
+  namaBarang: string;
+  kategori: string;
+  namaGudang: string;
+  cabang: string;
+  satuan: string;
+  stokSistem: number;
+  stokFisik: number;
+  selisihOpname?: number | null;
+  hitungan1?: number | null;
+  hitungan2?: number | null;
+  reorderQty: number;
+  tanggalAudit: string;
+  auditor: string;
+  namaAdmin?: string;
+  jamMulai?: string;
+  jamSelesai?: string;
+  purchasingStatus: 'Sesuai Sistem' | 'Perlu Kirim ke Pembelian' | 'Terkirim ke Adm Pembelian' | 'Diproses PO Pembelian';
+  catatan: string;
+}
+
+export interface WarehouseOpnameSessionMeta {
+  namaGudang: string;
+  cabang: string;
+  tanggalOpname: string;
+  namaAdmin: string;
+  jamMulai: string;
+  jamSelesai: string;
+}
+
+export function calculateOpnameDuration(jamMulai?: string, jamSelesai?: string): { minutes: number; label: string } {
+  const start = (jamMulai || '').trim();
+  const end = (jamSelesai || '').trim();
+  if (!start || !end || !start.includes(':') || !end.includes(':')) {
+    return { minutes: 0, label: '—' };
+  }
+  const [sh, sm] = start.split(':').map(n => parseInt(n, 10));
+  const [eh, em] = end.split(':').map(n => parseInt(n, 10));
+  if ([sh, sm, eh, em].some(n => Number.isNaN(n))) {
+    return { minutes: 0, label: '—' };
+  }
+  let diff = eh * 60 + em - (sh * 60 + sm);
+  if (diff < 0) diff += 24 * 60;
+  if (diff === 0) return { minutes: 0, label: '0 Menit' };
+  const hours = Math.floor(diff / 60);
+  const mins = diff % 60;
+  if (hours > 0 && mins > 0) return { minutes: diff, label: `${hours} Jam ${mins} Menit` };
+  if (hours > 0) return { minutes: diff, label: `${hours} Jam` };
+  return { minutes: diff, label: `${mins} Menit` };
+}
+
+export function getOpnameSelisihValue(item: WarehouseOpnameAuditItem): number | null {
+  if (item.selisihOpname !== undefined && item.selisihOpname !== null && !Number.isNaN(Number(item.selisihOpname))) {
+    return Number(item.selisihOpname);
+  }
+  return null;
+}
+
+export function computeOpnameSelisih(item: WarehouseOpnameAuditItem): number {
+  const manual = getOpnameSelisihValue(item);
+  if (manual !== null) return manual;
+  const hasH2 = item.hitungan2 !== undefined && item.hitungan2 !== null && !Number.isNaN(Number(item.hitungan2));
+  const hasH1 = item.hitungan1 !== undefined && item.hitungan1 !== null && !Number.isNaN(Number(item.hitungan1));
+  if (hasH2) {
+    return (hasH1 ? Number(item.hitungan1) : 0) - Number(item.hitungan2);
+  }
+  const fisik = hasH1 ? Number(item.hitungan1) : Number(item.stokFisik || 0);
+  return fisik - Number(item.stokSistem || 0);
+}
+
+export const LS_KEY_OPNAME_PURCHASING_SYNC = 'akk_wms_opname_purchasing_sync_v1';
+
+export const INITIAL_OPNAME_AUDIT_ITEMS: WarehouseOpnameAuditItem[] = [
+  {
+    id: 'OPN-2611-001',
+    kodeBarang: '7GPJA001',
+    namaBarang: 'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)',
+    kategori: 'Paper Cup & Food Pack',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    satuan: 'CRT',
+    stokSistem: 120,
+    stokFisik: 95,
+    selisihOpname: null,
+    hitungan1: 95,
+    hitungan2: null,
+    reorderQty: 0,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Terkirim ke Adm Pembelian',
+    catatan: ''
+  },
+  {
+    id: 'OPN-2611-002',
+    kodeBarang: '7AFBG453',
+    namaBarang: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
+    kategori: 'Box Kemasan Makanan',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    satuan: 'CRT',
+    stokSistem: 80,
+    stokFisik: 62,
+    selisihOpname: null,
+    hitungan1: 62,
+    hitungan2: null,
+    reorderQty: 0,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Perlu Kirim ke Pembelian',
+    catatan: ''
+  },
+  {
+    id: 'OPN-2611-003',
+    kodeBarang: '7AT00935',
+    namaBarang: 'ALU TRAY OX-935 (100PCS/PAK)',
+    kategori: 'Box Kemasan Makanan',
+    namaGudang: 'Sidoarjo',
+    cabang: 'Sidoarjo',
+    satuan: 'PAK',
+    stokSistem: 210,
+    stokFisik: 210,
+    selisihOpname: null,
+    hitungan1: 210,
+    hitungan2: null,
+    reorderQty: 0,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Sesuai Sistem',
+    catatan: ''
+  },
+  {
+    id: 'OPN-2611-004',
+    kodeBarang: '7KRBJ406',
+    namaBarang: 'KR BAJA (HJ) 40X68 KN @40 (60PAK/ZAK)',
+    kategori: 'Plastik & Stretch Film',
+    namaGudang: 'Denpasar',
+    cabang: 'Bali',
+    satuan: 'ZAK',
+    stokSistem: 65,
+    stokFisik: 48,
+    selisihOpname: null,
+    hitungan1: 48,
+    hitungan2: null,
+    reorderQty: 0,
+    tanggalAudit: '2026-11-07',
+    auditor: 'Tim Opname Gudang',
+    purchasingStatus: 'Diproses PO Pembelian',
+    catatan: ''
+  }
+];
 
 export interface MasterSkuRecord {
   id: string;
@@ -98,13 +259,7 @@ export interface KartuStokAnalysisRecord {
   namaGudang: string;
 }
 
-const INITIAL_MASTER_SKUS: MasterSkuRecord[] = [
-  { id: 'sku-1', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-001', namaBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)', stokTersedia: 4850, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-2', kategoriBarang: 'Karton Box Double Wall', noBarang: 'AKK-KBX-002', namaBarang: 'Karton Box Double Wall CB-Flute Export 80x50x50 cm', stokTersedia: 1120, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-3', kategoriBarang: 'Box Kemasan Makanan', noBarang: 'AKK-KBX-003', namaBarang: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm', stokTersedia: 9400, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-4', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-004', namaBarang: 'Karton Box Polos E-Flute 40x30x25 cm', stokTersedia: 3600, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-5', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-005', namaBarang: 'Karton Box C-Flute Tebal 50x35x35 cm', stokTersedia: 4100, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' }
-];
+const INITIAL_MASTER_SKUS: MasterSkuRecord[] = [];
 
 const INITIAL_KARTU_STOK_ANALYSIS: KartuStokAnalysisRecord[] = [
   {
@@ -392,45 +547,13 @@ export const WarehouseManagementSystem: React.FC<{
 }> = ({ initialTab = 'overview', onNavigateTab }) => {
   const [activeTab, setActiveTab] = useState<WmsSubTab>(initialTab);
 
-  // Master SKU State (persisted in localStorage)
+  // Master SKU State (Kosong secara default, terpisah dari Database Barang penjualan)
   const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>(() => {
     try {
-      // Prefer the current v3 store, but migrate existing v2 data instead of
-      // silently discarding user-imported Master SKU records on upgrade.
-      const savedV3 = localStorage.getItem(LS_KEY_MASTER_SKU);
-      const savedLegacy = localStorage.getItem(LS_KEY_MASTER_SKU_LEGACY);
-      const saved = savedV3 || savedLegacy;
-
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Only replace the exact 24-row legacy demo dataset. Do not wipe
-          // arbitrary user-imported data merely because it contains sku-6.
-          const legacyDemoCodes = new Set([
-            'AKK-KBX-001', 'AKK-KBX-002', 'AKK-KBX-003', 'AKK-KBX-004', 'AKK-KBX-005',
-            'AKK-KBX-006', 'AKK-KBX-007', 'AKK-KBX-008', 'AKK-KBX-009', 'AKK-KBX-010',
-            'AKK-PLS-014', 'AKK-PLS-019', 'AKK-PLS-022', 'AKK-PLS-030', 'AKK-PLS-034',
-            'AKK-MPK-007', 'AKK-MPK-008', 'AKK-MPK-011', 'AKK-MPK-015',
-            'AKK-PRD-025', 'AKK-PRD-028', 'AKK-PRD-031', 'AKK-PRD-035', 'AKK-KBX-040'
-          ]);
-          const isExactLegacyDemo =
-            parsed.length === legacyDemoCodes.size &&
-            parsed.every((item: any) => legacyDemoCodes.has(String(item?.noBarang || '').toUpperCase()));
-
-          if (isExactLegacyDemo) {
-            return INITIAL_MASTER_SKUS;
-          }
-
-          return parsed.map((item: any) => ({
-            ...item,
-            kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
-          }));
-        }
-      }
-    } catch {
-      // ignore malformed local cache and fall back to initial data
-    }
-    return INITIAL_MASTER_SKUS;
+      localStorage.removeItem(LS_KEY_MASTER_SKU);
+      localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+    } catch {}
+    return [];
   });
 
   // Kartu Stok Analysis State (persisted in localStorage)
@@ -439,12 +562,14 @@ export const WarehouseManagementSystem: React.FC<{
       const saved = localStorage.getItem(LS_KEY_KARTU_STOK);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter((item: any) => !isLegacySeededBarang(item?.kodeBarang));
+        }
       }
     } catch {
       // ignore
     }
-    return INITIAL_KARTU_STOK_ANALYSIS;
+    return INITIAL_KARTU_STOK_ANALYSIS.filter(item => !isLegacySeededBarang(item.kodeBarang));
   });
 
   // Dynamic Lokasi Stock List
@@ -461,11 +586,341 @@ export const WarehouseManagementSystem: React.FC<{
     return ['Sidoarjo', 'Gudang Utama Banyuwangi', 'Farly', 'Gajah Mada', 'Denpasar'];
   });
 
+  // Opname Gudang & Stok Opname State (persisted server-side via /api/warehouse/opname)
+  const [opnameAuditList, setOpnameAuditList] = useState<WarehouseOpnameAuditItem[]>(INITIAL_OPNAME_AUDIT_ITEMS);
+  const [opnameSessions, setOpnameSessions] = useState<Record<string, WarehouseOpnameSessionMeta>>(() => ({
+    'Gudang Utama Banyuwangi': {
+      namaGudang: 'Gudang Utama Banyuwangi',
+      cabang: 'Banyuwangi',
+      tanggalOpname: new Date().toISOString().slice(0, 10),
+      namaAdmin: 'Admin Opname',
+      jamMulai: '08:00',
+      jamSelesai: ''
+    }
+  }));
+  const opnameHydratedRef = useRef(false);
+
+  const [opnameSearch, setOpnameSearch] = useState('');
+  const [opnameBranchFilter, setOpnameBranchFilter] = useState('ALL');
+  const [opnameActiveGudang, setOpnameActiveGudang] = useState('Gudang Utama Banyuwangi');
+
+  const [purchasingOpnameView, setPurchasingOpnameView] = useState<'main' | 'upload_excel'>('main');
+  const [purchasingOpnameSearch, setPurchasingOpnameSearch] = useState('');
+  const [purchasingOpnameBranchFilter, setPurchasingOpnameBranchFilter] = useState('ALL');
+  const [purchasingOpnameGudangFilter, setPurchasingOpnameGudangFilter] = useState('ALL');
+  const [purchasingOpnameDateFilter, setPurchasingOpnameDateFilter] = useState('');
+  const [purchasingOpnameConditionFilter, setPurchasingOpnameConditionFilter] = useState<'ALL' | 'SELISIH' | 'KLOP' | 'BELUM'>('ALL');
+  const [isReloadingOpname, setIsReloadingOpname] = useState(false);
+  const [isAddOpnameModalOpen, setIsAddOpnameModalOpen] = useState(false);
+  const [newOpnameForm, setNewOpnameForm] = useState({
+    kodeBarang: '',
+    namaBarang: '',
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    tanggalAudit: new Date().toISOString().slice(0, 10),
+    namaAdmin: 'Admin Opname',
+    jamMulai: '08:00',
+    jamSelesai: '',
+    satuan: 'PAK',
+    selisihOpname: '',
+    hitungan1: '',
+    hitungan2: '',
+    catatan: ''
+  });
+
+  // Upload Excel Stok Opname Page States
+  const opnameExcelInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadOpnameFileName, setUploadOpnameFileName] = useState('');
+  const [uploadOpnameHeaders, setUploadOpnameHeaders] = useState<string[]>([]);
+  const [uploadOpnameRawRows, setUploadOpnameRawRows] = useState<Record<string, any>[]>([]);
+  const [uploadOpnameColMap, setUploadOpnameColMap] = useState({
+    kode: '',
+    namaBarang: '',
+    selisih: '',
+    satuan: '',
+    hitungan1: '',
+    hitungan2: '',
+    keterangan: ''
+  });
+  const [uploadOpnameMeta, setUploadOpnameMeta] = useState({
+    tanggalOpname: new Date().toISOString().slice(0, 10),
+    namaGudang: 'Gudang Utama Banyuwangi',
+    cabang: 'Banyuwangi',
+    namaAdmin: '',
+    jamMulai: '08:00',
+    jamSelesai: ''
+  });
+  const [uploadOpnameImportMode, setUploadOpnameImportMode] = useState<'append' | 'replace_warehouse'>('replace_warehouse');
+  const [isSavingOpnameUpload, setIsSavingOpnameUpload] = useState(false);
+
+  const LEGACY_SEED_NOTES = new Set([
+    'Selisih -25 CRT hasil audit fisik rak A1',
+    'Stok fisik menipis di bawah buffer minimum',
+    'Klop antara fisik gudang dan kartu stok',
+    'Sudah diteruskan ke Adm Pembelian untuk PO supplier'
+  ]);
+
+  const normalizeLoadedOpnameItems = (rawItems: WarehouseOpnameAuditItem[]): WarehouseOpnameAuditItem[] =>
+    rawItems.map(item => ({
+      ...item,
+      selisihOpname:
+        item.selisihOpname !== undefined && item.selisihOpname !== null && !Number.isNaN(Number(item.selisihOpname))
+          ? Number(item.selisihOpname)
+          : null,
+      catatan: LEGACY_SEED_NOTES.has((item.catatan || '').trim()) ? '' : item.catatan || ''
+    }));
+
+  const getCurrentHHMM = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const getWarehouseSession = (gudangName: string, fallbackCabang = 'Banyuwangi'): WarehouseOpnameSessionMeta => {
+    const existing = opnameSessions[gudangName];
+    if (existing) return existing;
+    const sampleItem = opnameAuditList.find(i => i.namaGudang === gudangName);
+    return {
+      namaGudang: gudangName,
+      cabang: sampleItem?.cabang || fallbackCabang,
+      tanggalOpname: sampleItem?.tanggalAudit || new Date().toISOString().slice(0, 10),
+      namaAdmin: sampleItem?.namaAdmin || sampleItem?.auditor || '',
+      jamMulai: sampleItem?.jamMulai || '',
+      jamSelesai: sampleItem?.jamSelesai || ''
+    };
+  };
+
+  const updateWarehouseSessionField = (
+    gudangName: string,
+    patch: Partial<WarehouseOpnameSessionMeta>,
+    syncToItems = true
+  ) => {
+    const current = getWarehouseSession(gudangName);
+    const nextMeta: WarehouseOpnameSessionMeta = { ...current, ...patch, namaGudang: gudangName };
+    setOpnameSessions(prev => ({ ...prev, [gudangName]: nextMeta }));
+    if (syncToItems) {
+      setOpnameAuditList(prev =>
+        prev.map(row =>
+          row.namaGudang === gudangName
+            ? {
+                ...row,
+                tanggalAudit: patch.tanggalOpname !== undefined ? patch.tanggalOpname : row.tanggalAudit,
+                namaAdmin: patch.namaAdmin !== undefined ? patch.namaAdmin : row.namaAdmin,
+                jamMulai: patch.jamMulai !== undefined ? patch.jamMulai : row.jamMulai,
+                jamSelesai: patch.jamSelesai !== undefined ? patch.jamSelesai : row.jamSelesai
+              }
+            : row
+        )
+      );
+    }
+  };
+
+  const availableOpnameWarehouses = useMemo(() => {
+    const set = new Set<string>([
+      'Gudang Utama Banyuwangi',
+      'Gudang Cabang Sidoarjo',
+      'Gudang Farly',
+      'Gudang Gajah Mada',
+      'Gudang Denpasar'
+    ]);
+    lokasiList.forEach(l => {
+      if (l && l.trim()) set.add(l.trim());
+    });
+    opnameAuditList.forEach(item => {
+      if (item.namaGudang && item.namaGudang.trim()) set.add(item.namaGudang.trim());
+    });
+    Object.keys(opnameSessions).forEach(k => {
+      if (k && k.trim()) set.add(k.trim());
+    });
+    return Array.from(set);
+  }, [lokasiList, opnameAuditList, opnameSessions]);
+
+  const detectOpnameColumnMapping = (headers: string[]) => {
+    const findCol = (patterns: RegExp[]) => {
+      for (const p of patterns) {
+        const match = headers.find(h => p.test(h.toLowerCase().trim()));
+        if (match) return match;
+      }
+      return '';
+    };
+    return {
+      kode: findCol([/^kode$/, /kode\s*barang/, /kode\s*item/, /sku/, /^code$/, /kode/]),
+      namaBarang: findCol([/nama\s*barang/, /deskripsi/, /description/, /item\s*name/, /nama\s*item/, /barang/, /^nama$/]),
+      selisih: findCol([/^selisih$/, /selisih/, /variance/, /diff/]),
+      satuan: findCol([/^satuan$/, /uom/, /unit/, /satuan/]),
+      hitungan1: findCol([/hitungan\s*1/, /hitung\s*1/, /fisik\s*1/, /count\s*1/, /stok\s*fisik/, /^h1$/]),
+      hitungan2: findCol([/hitungan\s*2/, /hitung\s*2/, /fisik\s*2/, /count\s*2/, /^h2$/]),
+      keterangan: findCol([/keterangan/, /catatan/, /notes?/, /remark/])
+    };
+  };
+
+  const handleOpnameExcelFileSelect = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const data = evt.target?.result;
+        const wb = XLSX.read(data, { type: 'array' });
+        const sheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const matrix = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' });
+        if (!matrix || matrix.length === 0) {
+          setPopupModal({
+            title: 'File Kosong',
+            message: 'File Excel tidak memiliki baris data yang bisa dibaca.'
+          });
+          return;
+        }
+        // Find the header row (first row with >= 2 non-empty string cells)
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+          const row = matrix[i] || [];
+          const nonEmpty = row.filter(c => String(c ?? '').trim() !== '');
+          const joined = nonEmpty.map(c => String(c).toLowerCase()).join(' ');
+          if (nonEmpty.length >= 2 && (joined.includes('kode') || joined.includes('nama') || joined.includes('satuan') || joined.includes('hitungan'))) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+        const rawHeaders = (matrix[headerRowIdx] || []).map((cell, idx) => {
+          const text = String(cell ?? '').trim();
+          return text || `Kolom ${idx + 1}`;
+        });
+        const uniqueHeaders: string[] = [];
+        const seen = new Map<string, number>();
+        rawHeaders.forEach(h => {
+          const count = seen.get(h) || 0;
+          seen.set(h, count + 1);
+          uniqueHeaders.push(count === 0 ? h : `${h} (${count + 1})`);
+        });
+
+        const parsedObjects: Record<string, any>[] = [];
+        for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+          const rowArr = matrix[r] || [];
+          const hasValue = rowArr.some(c => String(c ?? '').trim() !== '');
+          if (!hasValue) continue;
+          const obj: Record<string, any> = {};
+          uniqueHeaders.forEach((colName, cIdx) => {
+            obj[colName] = rowArr[cIdx] ?? '';
+          });
+          parsedObjects.push(obj);
+        }
+
+        setUploadOpnameFileName(file.name);
+        setUploadOpnameHeaders(uniqueHeaders);
+        setUploadOpnameRawRows(parsedObjects);
+        setUploadOpnameColMap(detectOpnameColumnMapping(uniqueHeaders));
+      } catch (err) {
+        setPopupModal({
+          title: 'Gagal Membaca File Excel',
+          message: 'Pastikan format file adalah .xlsx, .xls, atau .csv yang valid.'
+        });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const parsedUploadOpnamePreview = useMemo(() => {
+    if (uploadOpnameRawRows.length === 0) return [];
+    const parseOptNum = (v: any): number | null => {
+      if (v === undefined || v === null) return null;
+      const str = String(v).trim().replace(/,/g, '.');
+      if (str === '' || str === '-') return null;
+      const num = Number(str);
+      return Number.isNaN(num) ? null : num;
+    };
+    return uploadOpnameRawRows
+      .map((row, idx) => {
+        const kode = uploadOpnameColMap.kode ? String(row[uploadOpnameColMap.kode] ?? '').trim().toUpperCase() : '';
+        const namaBarang = uploadOpnameColMap.namaBarang ? String(row[uploadOpnameColMap.namaBarang] ?? '').trim() : '';
+        if (!kode && !namaBarang) return null;
+        const selVal = uploadOpnameColMap.selisih ? parseOptNum(row[uploadOpnameColMap.selisih]) : null;
+        const h1 = uploadOpnameColMap.hitungan1 ? parseOptNum(row[uploadOpnameColMap.hitungan1]) : null;
+        const h2 = uploadOpnameColMap.hitungan2 ? parseOptNum(row[uploadOpnameColMap.hitungan2]) : null;
+        const satuan = uploadOpnameColMap.satuan
+          ? String(row[uploadOpnameColMap.satuan] ?? '').trim().toUpperCase() || 'PAK'
+          : 'PAK';
+        const catatan = uploadOpnameColMap.keterangan ? String(row[uploadOpnameColMap.keterangan] ?? '').trim() : '';
+
+        return {
+          id: `OPN-XLS-${Date.now()}-${idx}`,
+          kodeBarang: kode || `SKU-${idx + 1}`,
+          namaBarang: namaBarang || kode || `Barang #${idx + 1}`,
+          kategori: inferKategoriBarang(kode, namaBarang),
+          namaGudang: uploadOpnameMeta.namaGudang.trim() || 'Gudang Utama Banyuwangi',
+          cabang: uploadOpnameMeta.cabang || 'Banyuwangi',
+          satuan,
+          stokSistem: h1 ?? 0,
+          stokFisik: h1 ?? 0,
+          selisihOpname: selVal,
+          hitungan1: h1,
+          hitungan2: h2,
+          reorderQty: selVal !== null && selVal < 0 ? Math.abs(selVal) : 0,
+          tanggalAudit: uploadOpnameMeta.tanggalOpname || new Date().toISOString().slice(0, 10),
+          auditor: uploadOpnameMeta.namaAdmin.trim() || 'Admin Opname',
+          namaAdmin: uploadOpnameMeta.namaAdmin.trim() || 'Admin Opname',
+          jamMulai: uploadOpnameMeta.jamMulai || '',
+          jamSelesai: uploadOpnameMeta.jamSelesai || '',
+          purchasingStatus: (selVal === 0 ? 'Sesuai Sistem' : 'Terkirim ke Adm Pembelian') as WarehouseOpnameAuditItem['purchasingStatus'],
+          catatan
+        } as WarehouseOpnameAuditItem;
+      })
+      .filter(Boolean) as WarehouseOpnameAuditItem[];
+  }, [uploadOpnameRawRows, uploadOpnameColMap, uploadOpnameMeta]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchOpnameFromDb = () => {
+      fetch('/api/warehouse/opname', { credentials: 'include', cache: 'no-store' })
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (!active) return;
+          if (Array.isArray(data?.items) && data.items.length > 0) {
+            setOpnameAuditList(normalizeLoadedOpnameItems(data.items));
+          }
+          if (data?.sessions && typeof data.sessions === 'object' && Object.keys(data.sessions).length > 0) {
+            setOpnameSessions(prev => ({ ...prev, ...data.sessions }));
+          }
+          opnameHydratedRef.current = true;
+        })
+        .catch(() => {
+          opnameHydratedRef.current = true;
+        });
+    };
+    fetchOpnameFromDb();
+    const onExternalSync = () => {
+      fetchOpnameFromDb();
+    };
+    window.addEventListener('akk-opname-purchasing-sync', onExternalSync);
+    return () => {
+      active = false;
+      window.removeEventListener('akk-opname-purchasing-sync', onExternalSync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!opnameHydratedRef.current) return;
+    const timer = setTimeout(() => {
+      fetch('/api/warehouse/opname', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: opnameAuditList, sessions: opnameSessions })
+      }).catch(() => {});
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [opnameAuditList, opnameSessions]);
+
   useEffect(() => {
     try {
-      localStorage.setItem(LS_KEY_MASTER_SKU, JSON.stringify(skuItems));
+      const cleaned = skuItems.filter(item => !isLegacySeededBarang(item.noBarang));
+      if (cleaned.length <= 400) {
+        localStorage.setItem(LS_KEY_MASTER_SKU, JSON.stringify(cleaned));
+      } else {
+        localStorage.removeItem(LS_KEY_MASTER_SKU);
+      }
     } catch {
-      // ignore
+      try {
+        localStorage.removeItem(LS_KEY_MASTER_SKU);
+      } catch {}
     }
   }, [skuItems]);
 
@@ -725,6 +1180,13 @@ export const WarehouseManagementSystem: React.FC<{
           ...item,
           tanggalStok: uploadTanggal
         });
+        databaseBarangService.upsertItem({
+          noBarang: item.noBarang,
+          keteranganBarang: item.namaBarang,
+          satuan: item.satuan,
+          kategoriBarang: item.kategoriBarang,
+          stokTersedia: item.stokTersedia
+        });
       });
       return Array.from(map.values());
     });
@@ -736,7 +1198,7 @@ export const WarehouseManagementSystem: React.FC<{
     setShowSkuPreviewTable(false);
     setPopupModal({
       title: 'Data Berhasil Disimpan',
-      message: `${count} data barang dari file Excel berhasil diimport ke Master Barang.`
+      message: `${count} data barang dari file Excel berhasil diimport ke Master Barang & Database Barang.`
     });
   };
 
@@ -796,11 +1258,18 @@ export const WarehouseManagementSystem: React.FC<{
       tanggalStok: new Date().toISOString().split('T')[0]
     };
     setSkuItems(prev => [item, ...prev]);
+    databaseBarangService.upsertItem({
+      noBarang: item.noBarang,
+      keteranganBarang: item.namaBarang,
+      satuan: item.satuan,
+      kategoriBarang: item.kategoriBarang,
+      stokTersedia: item.stokTersedia
+    });
     setIsAddSkuModalOpen(false);
     setNewSkuForm({ kategoriBarang: 'Karton Box Corrugated', noBarang: '', namaBarang: '', stokTersedia: '', satuan: 'Pcs' });
     setPopupModal({
       title: 'Data Berhasil Disimpan',
-      message: `Barang "${item.namaBarang}" (${item.noBarang}) berhasil ditambahkan ke Gudang ${targetBranch?.name || 'Nusantara'}.`
+      message: `Barang "${item.namaBarang}" (${item.noBarang}) berhasil ditambahkan ke Gudang ${targetBranch?.name || 'Nusantara'} & Database Barang.`
     });
   };
 
@@ -1486,20 +1955,1682 @@ export const WarehouseManagementSystem: React.FC<{
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: KARTU STOK & ANALISA OTOMATIS                                    */}
       {/* ===================================================================== */}
-      {activeTab === 'opname' && (
+      {/* TAB: OPNAME GUDANG                                                    */}
+      {/* ===================================================================== */}
+      {activeTab === 'opname' && (() => {
+        const activeSession = getWarehouseSession(opnameActiveGudang);
+        const activeDuration = calculateOpnameDuration(activeSession.jamMulai, activeSession.jamSelesai);
+        const filteredGudangOpname = opnameAuditList.filter(item => {
+          const q = opnameSearch.trim().toLowerCase();
+          const matchQ =
+            !q ||
+            item.kodeBarang.toLowerCase().includes(q) ||
+            item.namaBarang.toLowerCase().includes(q) ||
+            item.namaGudang.toLowerCase().includes(q) ||
+            (item.catatan || '').toLowerCase().includes(q);
+          const matchBranch = opnameBranchFilter === 'ALL' || item.cabang === opnameBranchFilter;
+          return matchQ && matchBranch;
+        });
+
+        return (
+          <div className="space-y-4">
+            {/* Header Opname Gudang */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                  Opname Gudang
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Pencatatan hasil hitung fisik barang di rak gudang beserta waktu pelaksanaan opname.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={isReloadingOpname}
+                  onClick={async () => {
+                    setIsReloadingOpname(true);
+                    const updated = opnameAuditList.map(item => ({
+                      ...item,
+                      tanggalAudit:
+                        item.namaGudang === opnameActiveGudang && activeSession.tanggalOpname
+                          ? activeSession.tanggalOpname
+                          : item.tanggalAudit,
+                      jamMulai:
+                        item.namaGudang === opnameActiveGudang && activeSession.jamMulai
+                          ? activeSession.jamMulai
+                          : item.jamMulai,
+                      jamSelesai:
+                        item.namaGudang === opnameActiveGudang && activeSession.jamSelesai
+                          ? activeSession.jamSelesai
+                          : item.jamSelesai,
+                      purchasingStatus: 'Terkirim ke Adm Pembelian' as const
+                    }));
+                    setOpnameAuditList(updated);
+                    try {
+                      await fetch('/api/warehouse/opname', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: updated, sessions: opnameSessions })
+                      });
+                      window.dispatchEvent(new CustomEvent('akk-opname-purchasing-sync'));
+                    } catch {}
+                    setIsReloadingOpname(false);
+                    setPopupModal({
+                      title: 'Data Opname Berhasil Disimpan',
+                      message: 'Hasil hitung fisik gudang beserta waktu opname telah tersimpan ke sistem dan diperbarui ke laporan Stok Opname.'
+                    });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReloadingOpname ? 'animate-spin' : ''}`} />
+                  <span>Reload</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rows = filteredGudangOpname.map(item => {
+                      const h1 = item.hitungan1 !== undefined && item.hitungan1 !== null ? item.hitungan1 : '';
+                      const sess = getWarehouseSession(item.namaGudang, item.cabang);
+                      const dur = calculateOpnameDuration(item.jamMulai || sess.jamMulai, item.jamSelesai || sess.jamSelesai);
+                      return {
+                        Kode: item.kodeBarang,
+                        'Nama Barang': item.namaBarang,
+                        Selisih: '',
+                        Satuan: item.satuan,
+                        'Hitungan 1': h1,
+                        'Hitungan 2': item.hitungan2 ?? '',
+                        Keterangan: item.catatan || '',
+                        Gudang: item.namaGudang,
+                        Tanggal: item.tanggalAudit || sess.tanggalOpname,
+                        'Jam Mulai': item.jamMulai || sess.jamMulai || '',
+                        'Jam Selesai': item.jamSelesai || sess.jamSelesai || '',
+                        'Lama Waktu': dur.label
+                      };
+                    });
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    ws['!cols'] = [
+                      { wch: 14 },
+                      { wch: 46 },
+                      { wch: 12 },
+                      { wch: 10 },
+                      { wch: 13 },
+                      { wch: 13 },
+                      { wch: 32 },
+                      { wch: 24 },
+                      { wch: 13 },
+                      { wch: 11 },
+                      { wch: 12 },
+                      { wch: 16 }
+                    ];
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Opname Gudang');
+                    XLSX.writeFile(wb, `opname-gudang-${new Date().toISOString().slice(0, 10)}.xlsx`);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Export Excel</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Waktu Pelaksanaan Opname Gudang (Jam Mulai & Jam Selesai) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Warehouse className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Gudang Opname</span>
+                  </label>
+                  <select
+                    value={opnameActiveGudang}
+                    onChange={e => setOpnameActiveGudang(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
+                  >
+                    {availableOpnameWarehouses.map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Tanggal Opname</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={activeSession.tanggalOpname}
+                    onChange={e => updateWarehouseSessionField(opnameActiveGudang, { tanggalOpname: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Jam Mulai</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => updateWarehouseSessionField(opnameActiveGudang, { jamMulai: getCurrentHHMM() })}
+                      className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      Mulai Sekarang
+                    </button>
+                  </div>
+                  <input
+                    type="time"
+                    value={activeSession.jamMulai}
+                    onChange={e => updateWarehouseSessionField(opnameActiveGudang, { jamMulai: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Jam Selesai</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => updateWarehouseSessionField(opnameActiveGudang, { jamSelesai: getCurrentHHMM() })}
+                      className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      Selesai Sekarang
+                    </button>
+                  </div>
+                  <input
+                    type="time"
+                    value={activeSession.jamSelesai}
+                    onChange={e => updateWarehouseSessionField(opnameActiveGudang, { jamSelesai: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 flex flex-col justify-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Lama Waktu Opname
+                  </span>
+                  <span className="text-sm font-black font-mono tabular-nums text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    {activeDuration.label}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Opname Gudang */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={opnameSearch}
+                  onChange={e => setOpnameSearch(e.target.value)}
+                  placeholder="Cari Kode, Nama Barang, atau Keterangan..."
+                  className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={opnameBranchFilter}
+                  onChange={e => setOpnameBranchFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value="ALL">Semua Cabang</option>
+                  <option value="Banyuwangi">Cabang Banyuwangi</option>
+                  <option value="Sidoarjo">Cabang Sidoarjo</option>
+                  <option value="Jember">Cabang Jember</option>
+                  <option value="Bali">Cabang Bali</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tabel Audit Fisik Gudang — Format Lembar Opname 7 Kolom */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 text-blue-900 dark:text-blue-300 font-bold text-xs">
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[115px] whitespace-nowrap">
+                        Kode
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 min-w-[260px]">
+                        Nama Barang
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[96px] whitespace-nowrap">
+                        <span className="inline-flex items-center justify-center gap-1">
+                          <Lock className="w-3 h-3 text-slate-400" />
+                          <span>Selisih</span>
+                        </span>
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[80px] whitespace-nowrap">
+                        Satuan
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[108px] whitespace-nowrap">
+                        Hitungan 1
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[108px] whitespace-nowrap">
+                        Hitungan 2
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-slate-300 dark:border-slate-700 min-w-[210px]">
+                        Keterangan
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-900 dark:text-slate-100">
+                    {filteredGudangOpname.map(item => {
+                      const hit1Val =
+                        item.hitungan1 !== undefined && item.hitungan1 !== null ? String(item.hitungan1) : '';
+                      const hit2Val =
+                        item.hitungan2 !== undefined && item.hitungan2 !== null ? String(item.hitungan2) : '';
+
+                      return (
+                        <tr
+                          key={item.id}
+                          className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition-colors"
+                        >
+                          <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                            {item.kodeBarang}
+                          </td>
+                          <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white leading-tight">
+                            {item.namaBarang}
+                          </td>
+                          {/* Kolom Selisih dikosongkan & terkunci untuk akses Gudang (diisi oleh Admin Opname) */}
+                          <td
+                            title="Terkunci — kolom Selisih diisi oleh Admin Opname"
+                            className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 text-center bg-slate-100/80 dark:bg-slate-800/50 text-slate-400 select-none cursor-not-allowed whitespace-nowrap"
+                          >
+                            <span className="inline-flex items-center justify-center gap-1 text-[10px]">
+                              <Lock className="w-2.5 h-2.5 opacity-60" />
+                            </span>
+                          </td>
+                          <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-semibold uppercase text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                            {item.satuan}
+                          </td>
+                          <td className="p-0 border-b border-r border-slate-300 dark:border-slate-700">
+                            <input
+                              type="number"
+                              value={hit1Val}
+                              placeholder=""
+                              aria-label={`Hitungan 1 ${item.kodeBarang}`}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                const parsed = raw === '' ? null : Math.max(0, Number(raw) || 0);
+                                setOpnameAuditList(prev =>
+                                  prev.map(row =>
+                                    row.id === item.id
+                                      ? {
+                                          ...row,
+                                          hitungan1: parsed,
+                                          stokFisik: parsed ?? 0
+                                        }
+                                      : row
+                                  )
+                                );
+                              }}
+                              className="w-full h-full py-1 px-2.5 bg-transparent focus:bg-blue-50/70 dark:focus:bg-blue-950/40 font-mono tabular-nums font-bold text-slate-900 dark:text-white focus:outline-none"
+                            />
+                          </td>
+                          <td className="p-0 border-b border-r border-slate-300 dark:border-slate-700">
+                            <input
+                              type="number"
+                              value={hit2Val}
+                              placeholder=""
+                              aria-label={`Hitungan 2 ${item.kodeBarang}`}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                const parsed = raw === '' ? null : Math.max(0, Number(raw) || 0);
+                                setOpnameAuditList(prev =>
+                                  prev.map(row => (row.id === item.id ? { ...row, hitungan2: parsed } : row))
+                                );
+                              }}
+                              className="w-full h-full py-1 px-2.5 bg-transparent focus:bg-blue-50/70 dark:focus:bg-blue-950/40 font-mono tabular-nums font-bold text-slate-900 dark:text-white focus:outline-none"
+                            />
+                          </td>
+                          <td className="p-0 border-b border-slate-300 dark:border-slate-700">
+                            <input
+                              type="text"
+                              value={item.catatan || ''}
+                              placeholder=""
+                              aria-label={`Keterangan ${item.kodeBarang}`}
+                              onChange={e => {
+                                const text = e.target.value;
+                                setOpnameAuditList(prev =>
+                                  prev.map(row => (row.id === item.id ? { ...row, catatan: text } : row))
+                                );
+                              }}
+                              className="w-full h-full py-1 px-2.5 bg-transparent focus:bg-blue-50/70 dark:focus:bg-blue-950/40 text-xs text-slate-800 dark:text-slate-200 focus:outline-none"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ===================================================================== */}
+      {/* TAB: STOK OPNAME (ADM PEMBELIAN)                                      */}
+      {/* ===================================================================== */}
+      {activeTab === 'purchasing_opname' && (() => {
+        // Sub-halaman Upload Excel Stok Opname
+        if (purchasingOpnameView === 'upload_excel') {
+          const uploadDuration = calculateOpnameDuration(uploadOpnameMeta.jamMulai, uploadOpnameMeta.jamSelesai);
+          const previewSelisihCount = parsedUploadOpnamePreview.filter(r => {
+            const s = getOpnameSelisihValue(r);
+            return s !== null && s !== 0;
+          }).length;
+          const previewKlopCount = parsedUploadOpnamePreview.filter(r => getOpnameSelisihValue(r) === 0).length;
+          const previewErrorPct =
+            parsedUploadOpnamePreview.length > 0
+              ? ((previewSelisihCount / parsedUploadOpnamePreview.length) * 100).toFixed(1)
+              : '0.0';
+
+          const mappingFields: Array<{
+            key: keyof typeof uploadOpnameColMap;
+            label: string;
+            required?: boolean;
+          }> = [
+            { key: 'kode', label: 'Kode Barang', required: true },
+            { key: 'namaBarang', label: 'Nama Barang', required: true },
+            { key: 'selisih', label: 'Selisih' },
+            { key: 'satuan', label: 'Satuan' },
+            { key: 'hitungan1', label: 'Hitungan 1' },
+            { key: 'hitungan2', label: 'Hitungan 2' },
+            { key: 'keterangan', label: 'Keterangan' }
+          ];
+
+          return (
+            <div className="space-y-4">
+              {/* Header Halaman Upload Excel */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPurchasingOpnameView('main')}
+                    className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer shrink-0"
+                    title="Kembali ke Stok Opname"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <div className="space-y-0.5">
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                      Upload Excel Stok Opname
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Unggah lembar kerja Excel (.xlsx / .xls / .csv), periksa kolom yang terbaca, lengkapi tanggal &amp; nama admin, lalu simpan.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sampleRows = [
+                        {
+                          Kode: '7GPJA001',
+                          'Nama Barang': 'CUP PLST JAGUAR BR 10 OZ NAT @50 (40SLP/CRT)',
+                          Selisih: 0,
+                          Satuan: 'CRT',
+                          'Hitungan 1': 95,
+                          'Hitungan 2': 95,
+                          Keterangan: ''
+                        },
+                        {
+                          Kode: '7AFBG453',
+                          'Nama Barang': 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)',
+                          Selisih: -2,
+                          Satuan: 'CRT',
+                          'Hitungan 1': 60,
+                          'Hitungan 2': 62,
+                          Keterangan: 'Cek ulang rak B2'
+                        }
+                      ];
+                      const ws = XLSX.utils.json_to_sheet(sampleRows);
+                      ws['!cols'] = [
+                        { wch: 14 },
+                        { wch: 46 },
+                        { wch: 10 },
+                        { wch: 10 },
+                        { wch: 13 },
+                        { wch: 13 },
+                        { wch: 28 }
+                      ];
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, 'Template Stok Opname');
+                      XLSX.writeFile(wb, 'template-upload-stok-opname.xlsx');
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Download Template Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPurchasingOpnameView('main')}
+                    className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+
+              {/* Informasi Sesi Upload: Tanggal, Nama Gudang, Cabang, Nama Admin, Jam Mulai, Jam Selesai */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <div className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                  1. Informasi Pelaksanaan Opname
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Tanggal Opname *</label>
+                    <input
+                      type="date"
+                      value={uploadOpnameMeta.tanggalOpname}
+                      onChange={e => setUploadOpnameMeta(prev => ({ ...prev, tanggalOpname: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Gudang Opname *</label>
+                    <input
+                      type="text"
+                      list="opname-warehouse-datalist"
+                      value={uploadOpnameMeta.namaGudang}
+                      onChange={e => setUploadOpnameMeta(prev => ({ ...prev, namaGudang: e.target.value }))}
+                      placeholder="Pilih atau ketik nama gudang..."
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold"
+                    />
+                    <datalist id="opname-warehouse-datalist">
+                      {availableOpnameWarehouses.map(g => (
+                        <option key={g} value={g} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Cabang</label>
+                    <select
+                      value={uploadOpnameMeta.cabang}
+                      onChange={e => setUploadOpnameMeta(prev => ({ ...prev, cabang: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
+                    >
+                      <option value="Banyuwangi">Banyuwangi</option>
+                      <option value="Sidoarjo">Sidoarjo</option>
+                      <option value="Jember">Jember</option>
+                      <option value="Bali">Bali</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Admin Opname *</label>
+                    <input
+                      type="text"
+                      value={uploadOpnameMeta.namaAdmin}
+                      onChange={e => setUploadOpnameMeta(prev => ({ ...prev, namaAdmin: e.target.value }))}
+                      placeholder="Contoh: Rina / Admin Pembelian"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Jam Mulai</label>
+                      <input
+                        type="time"
+                        value={uploadOpnameMeta.jamMulai}
+                        onChange={e => setUploadOpnameMeta(prev => ({ ...prev, jamMulai: e.target.value }))}
+                        className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Jam Selesai</label>
+                      <input
+                        type="time"
+                        value={uploadOpnameMeta.jamSelesai}
+                        onChange={e => setUploadOpnameMeta(prev => ({ ...prev, jamSelesai: e.target.value }))}
+                        className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 flex flex-col justify-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Lama Waktu Opname
+                    </span>
+                    <span className="text-sm font-black font-mono tabular-nums text-indigo-600 dark:text-indigo-400 mt-0.5">
+                      {uploadDuration.label}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Area Upload File Excel */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    2. Pilih File Excel Stok Opname
+                  </div>
+                  {uploadOpnameFileName && (
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>{uploadOpnameFileName} ({uploadOpnameRawRows.length} baris)</span>
+                    </span>
+                  )}
+                </div>
+
+                <input
+                  ref={opnameExcelInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) handleOpnameExcelFileSelect(f);
+                    e.target.value = '';
+                  }}
+                />
+                <div
+                  onClick={() => opnameExcelInputRef.current?.click()}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0];
+                    if (f) handleOpnameExcelFileSelect(f);
+                  }}
+                  className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-400 rounded-2xl p-8 text-center cursor-pointer transition bg-slate-50/70 dark:bg-slate-950/60"
+                >
+                  <Upload className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-800 dark:text-white">
+                    Klik untuk pilih file Excel atau seret file ke sini
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Mendukung format .xlsx, .xls, dan .csv — sistem otomatis membaca seluruh nama kolom di sheet pertama.
+                  </p>
+                </div>
+              </div>
+
+              {/* Kolom yang Terbaca & Pemetaan Kolom */}
+              {uploadOpnameHeaders.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                        3. Kolom yang Terbaca dari File Excel ({uploadOpnameHeaders.length} Kolom)
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Berikut daftar kolom yang terdeteksi dari file Excel Anda beserta pemetaannya ke tabel Stok Opname.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Daftar Kolom Terdeteksi */}
+                  <div className="flex flex-wrap gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                    {uploadOpnameHeaders.map((header, i) => {
+                      const isMapped = Object.values(uploadOpnameColMap).includes(header);
+                      return (
+                        <span
+                          key={`${header}-${i}`}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                            isMapped
+                              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {i + 1}. {header} {isMapped ? '✓' : ''}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {/* Mapping Dropdowns */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    {mappingFields.map(field => (
+                      <div key={field.key}>
+                        <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                          {field.label} {field.required && <span className="text-rose-500">*</span>}
+                        </label>
+                        <select
+                          value={uploadOpnameColMap[field.key]}
+                          onChange={e =>
+                            setUploadOpnameColMap(prev => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
+                        >
+                          <option value="">— Tidak Dipetakan —</option>
+                          {uploadOpnameHeaders.map(h => (
+                            <option key={h} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Data Terbaca & Simpan */}
+              {parsedUploadOpnamePreview.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                        4. Pratinjau Data Hasil Baca ({parsedUploadOpnamePreview.length} Barang)
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Selisih: <strong className="text-rose-600 dark:text-rose-400">{previewSelisihCount} SKU</strong> • Klop: <strong className="text-emerald-600 dark:text-emerald-400">{previewKlopCount} SKU</strong> • Prosentase Kesalahan: <strong className="font-mono text-slate-900 dark:text-white">{previewErrorPct}%</strong>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={uploadOpnameImportMode}
+                        onChange={e => setUploadOpnameImportMode(e.target.value as 'append' | 'replace_warehouse')}
+                        className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                      >
+                        <option value="replace_warehouse">Ganti Data Gudang Ini ({uploadOpnameMeta.namaGudang})</option>
+                        <option value="append">Tambahkan ke Data yang Ada</option>
+                      </select>
+                      <button
+                        type="button"
+                        disabled={isSavingOpnameUpload}
+                        onClick={async () => {
+                          if (!uploadOpnameMeta.namaGudang.trim()) {
+                            setPopupModal({
+                              title: 'Nama Gudang Wajib Diisi',
+                              message: 'Silakan isi Nama Gudang Opname terlebih dahulu.'
+                            });
+                            return;
+                          }
+                          setIsSavingOpnameUpload(true);
+                          const targetGudang = uploadOpnameMeta.namaGudang.trim();
+                          const nextItems =
+                            uploadOpnameImportMode === 'replace_warehouse'
+                              ? [
+                                  ...parsedUploadOpnamePreview,
+                                  ...opnameAuditList.filter(i => i.namaGudang !== targetGudang)
+                                ]
+                              : [...parsedUploadOpnamePreview, ...opnameAuditList];
+
+                          const nextSessions: Record<string, WarehouseOpnameSessionMeta> = {
+                            ...opnameSessions,
+                            [targetGudang]: {
+                              namaGudang: targetGudang,
+                              cabang: uploadOpnameMeta.cabang || 'Banyuwangi',
+                              tanggalOpname: uploadOpnameMeta.tanggalOpname || new Date().toISOString().slice(0, 10),
+                              namaAdmin: uploadOpnameMeta.namaAdmin.trim() || 'Admin Opname',
+                              jamMulai: uploadOpnameMeta.jamMulai || '',
+                              jamSelesai: uploadOpnameMeta.jamSelesai || ''
+                            }
+                          };
+
+                          setOpnameAuditList(nextItems);
+                          setOpnameSessions(nextSessions);
+                          try {
+                            await fetch('/api/warehouse/opname', {
+                              method: 'POST',
+                              credentials: 'include',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ items: nextItems, sessions: nextSessions })
+                            });
+                            window.dispatchEvent(new CustomEvent('akk-opname-purchasing-sync'));
+                          } catch {}
+                          setIsSavingOpnameUpload(false);
+                          setUploadOpnameFileName('');
+                          setUploadOpnameHeaders([]);
+                          setUploadOpnameRawRows([]);
+                          setPurchasingOpnameGudangFilter(targetGudang);
+                          setPurchasingOpnameView('main');
+                          setPopupModal({
+                            title: 'Upload Excel Stok Opname Berhasil',
+                            message: `${parsedUploadOpnamePreview.length} data barang untuk ${targetGudang} telah disimpan.`
+                          });
+                        }}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{isSavingOpnameUpload ? 'Menyimpan...' : `Simpan ${parsedUploadOpnamePreview.length} Data`}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-slate-300 dark:border-slate-700 max-h-[380px]">
+                    <table className="w-full text-xs border-collapse">
+                      <thead className="sticky top-0 z-10">
+                        <tr className="bg-slate-50 dark:bg-slate-950 text-blue-900 dark:text-blue-300 font-bold">
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[110px]">Kode</th>
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 min-w-[240px]">Nama Barang</th>
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[90px]">Selisih</th>
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[75px]">Satuan</th>
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[95px]">Hitungan 1</th>
+                          <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[95px]">Hitungan 2</th>
+                          <th className="py-2 px-2.5 text-center border-b border-slate-300 dark:border-slate-700 min-w-[160px]">Keterangan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-slate-900 dark:text-slate-100">
+                        {parsedUploadOpnamePreview.slice(0, 30).map(row => {
+                          const sVal = getOpnameSelisihValue(row);
+                          return (
+                            <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono font-bold">{row.kodeBarang}</td>
+                              <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-semibold">{row.namaBarang}</td>
+                              <td className={`py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 text-right font-mono font-bold ${
+                                sVal === null ? '' : sVal > 0 ? 'bg-[#82c944] text-slate-950' : sVal < 0 ? 'bg-[#ffef00] text-slate-950' : 'bg-emerald-50 dark:bg-emerald-950/40'
+                              }`}>
+                                {sVal !== null ? sVal : '—'}
+                              </td>
+                              <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 uppercase font-semibold">{row.satuan}</td>
+                              <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono tabular-nums">{row.hitungan1 ?? ''}</td>
+                              <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono tabular-nums">{row.hitungan2 ?? ''}</td>
+                              <td className="py-1 px-2.5 border-b border-slate-300 dark:border-slate-700">{row.catatan}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {parsedUploadOpnamePreview.length > 30 && (
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Menampilkan 30 baris pertama dari total {parsedUploadOpnamePreview.length} baris yang siap disimpan.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Main View: Stok Opname (Adm Pembelian)
+        const totalDiopname = opnameAuditList.length;
+        const totalSelisihCount = opnameAuditList.filter(i => {
+          const s = getOpnameSelisihValue(i);
+          return s !== null && s !== 0;
+        }).length;
+        const totalKlopCount = opnameAuditList.filter(i => getOpnameSelisihValue(i) === 0).length;
+        const totalBelumDiisiCount = opnameAuditList.filter(i => getOpnameSelisihValue(i) === null).length;
+        const overallErrorRate =
+          totalDiopname > 0 ? ((totalSelisihCount / totalDiopname) * 100).toFixed(1) : '0.0';
+
+        // Per-Warehouse Dashboard Summary
+        const warehouseNamesPresent = Array.from(
+          new Set<string>([
+            ...opnameAuditList.map(i => i.namaGudang).filter(Boolean),
+            ...Object.keys(opnameSessions)
+          ])
+        );
+        const warehouseDashboardRows = warehouseNamesPresent
+          .map(gudangName => {
+            const itemsInWarehouse = opnameAuditList.filter(i => i.namaGudang === gudangName);
+            const sess = getWarehouseSession(gudangName);
+            const totalSku = itemsInWarehouse.length;
+            const selisihSku = itemsInWarehouse.filter(i => {
+              const s = getOpnameSelisihValue(i);
+              return s !== null && s !== 0;
+            }).length;
+            const klopSku = itemsInWarehouse.filter(i => getOpnameSelisihValue(i) === 0).length;
+            const errorPct = totalSku > 0 ? (selisihSku / totalSku) * 100 : 0;
+            const jamMulai = sess.jamMulai || itemsInWarehouse.find(i => i.jamMulai)?.jamMulai || '';
+            const jamSelesai = sess.jamSelesai || itemsInWarehouse.find(i => i.jamSelesai)?.jamSelesai || '';
+            const duration = calculateOpnameDuration(jamMulai, jamSelesai);
+            const tanggalOpname = sess.tanggalOpname || itemsInWarehouse[0]?.tanggalAudit || '—';
+            const namaAdmin =
+              sess.namaAdmin ||
+              itemsInWarehouse.find(i => i.namaAdmin)?.namaAdmin ||
+              itemsInWarehouse[0]?.auditor ||
+              '—';
+            return {
+              namaGudang: gudangName,
+              cabang: sess.cabang || itemsInWarehouse[0]?.cabang || 'Banyuwangi',
+              tanggalOpname,
+              namaAdmin,
+              totalSku,
+              selisihSku,
+              klopSku,
+              errorPct,
+              jamMulai,
+              jamSelesai,
+              durationLabel: duration.label
+            };
+          })
+          .filter(w => w.totalSku > 0 || w.jamMulai || w.jamSelesai);
+
+        const activeEditGudang =
+          purchasingOpnameGudangFilter !== 'ALL'
+            ? purchasingOpnameGudangFilter
+            : warehouseDashboardRows[0]?.namaGudang || 'Gudang Utama Banyuwangi';
+        const activePurchasingSession = getWarehouseSession(activeEditGudang);
+        const activePurchasingDuration = calculateOpnameDuration(
+          activePurchasingSession.jamMulai,
+          activePurchasingSession.jamSelesai
+        );
+
+        const filteredPurchasingOpname = opnameAuditList.filter(item => {
+          const q = purchasingOpnameSearch.trim().toLowerCase();
+          const matchQ =
+            !q ||
+            item.kodeBarang.toLowerCase().includes(q) ||
+            item.namaBarang.toLowerCase().includes(q) ||
+            item.namaGudang.toLowerCase().includes(q) ||
+            (item.namaAdmin || item.auditor || '').toLowerCase().includes(q) ||
+            (item.catatan || '').toLowerCase().includes(q);
+          const matchBranch =
+            purchasingOpnameBranchFilter === 'ALL' || item.cabang === purchasingOpnameBranchFilter;
+          const matchGudang =
+            purchasingOpnameGudangFilter === 'ALL' || item.namaGudang === purchasingOpnameGudangFilter;
+          const matchDate =
+            !purchasingOpnameDateFilter || (item.tanggalAudit || '').slice(0, 10) === purchasingOpnameDateFilter;
+          const sVal = getOpnameSelisihValue(item);
+          const matchCond =
+            purchasingOpnameConditionFilter === 'ALL' ||
+            (purchasingOpnameConditionFilter === 'SELISIH' && sVal !== null && sVal !== 0) ||
+            (purchasingOpnameConditionFilter === 'KLOP' && sVal === 0) ||
+            (purchasingOpnameConditionFilter === 'BELUM' && sVal === null);
+          return matchQ && matchBranch && matchGudang && matchDate && matchCond;
+        });
+
+        return (
+          <div className="space-y-4">
+            {/* Header Stok Opname */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                  Stok Opname
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Analisa hasil opname barang per gudang, prosentase kesalahan, durasi opname, dan verifikasi selisih.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadOpnameMeta(prev => ({
+                      ...prev,
+                      namaGudang: activeEditGudang,
+                      cabang: activePurchasingSession.cabang || prev.cabang,
+                      tanggalOpname: activePurchasingSession.tanggalOpname || new Date().toISOString().slice(0, 10),
+                      namaAdmin: activePurchasingSession.namaAdmin || prev.namaAdmin,
+                      jamMulai: activePurchasingSession.jamMulai || prev.jamMulai || '08:00',
+                      jamSelesai: activePurchasingSession.jamSelesai || prev.jamSelesai
+                    }));
+                    setPurchasingOpnameView('upload_excel');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rows = filteredPurchasingOpname.map(item => {
+                      const sVal = getOpnameSelisihValue(item);
+                      const sess = getWarehouseSession(item.namaGudang, item.cabang);
+                      const dur = calculateOpnameDuration(item.jamMulai || sess.jamMulai, item.jamSelesai || sess.jamSelesai);
+                      return {
+                        Kode: item.kodeBarang,
+                        'Nama Barang': item.namaBarang,
+                        Selisih: sVal !== null ? sVal : '',
+                        Satuan: item.satuan,
+                        'Hitungan 1': item.hitungan1 ?? '',
+                        'Hitungan 2': item.hitungan2 ?? '',
+                        Keterangan: item.catatan || '',
+                        Gudang: item.namaGudang,
+                        Tanggal: item.tanggalAudit || sess.tanggalOpname,
+                        'Nama Admin': item.namaAdmin || sess.namaAdmin || item.auditor || '',
+                        'Jam Mulai': item.jamMulai || sess.jamMulai || '',
+                        'Jam Selesai': item.jamSelesai || sess.jamSelesai || '',
+                        'Lama Waktu': dur.label
+                      };
+                    });
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    ws['!cols'] = [
+                      { wch: 14 },
+                      { wch: 46 },
+                      { wch: 12 },
+                      { wch: 10 },
+                      { wch: 13 },
+                      { wch: 13 },
+                      { wch: 30 },
+                      { wch: 24 },
+                      { wch: 13 },
+                      { wch: 18 },
+                      { wch: 11 },
+                      { wch: 12 },
+                      { wch: 16 }
+                    ];
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Stok Opname');
+                    XLSX.writeFile(wb, `stok-opname-${new Date().toISOString().slice(0, 10)}.xlsx`);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Export Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewOpnameForm(prev => ({
+                      ...prev,
+                      namaGudang: activeEditGudang,
+                      cabang: activePurchasingSession.cabang || prev.cabang,
+                      tanggalAudit: activePurchasingSession.tanggalOpname || new Date().toISOString().slice(0, 10),
+                      namaAdmin: activePurchasingSession.namaAdmin || prev.namaAdmin,
+                      jamMulai: activePurchasingSession.jamMulai || prev.jamMulai,
+                      jamSelesai: activePurchasingSession.jamSelesai || prev.jamSelesai
+                    }));
+                    setIsAddOpnameModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Input Data Opname</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Dashboard Analisa Ringkas Stok Opname */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Barang Diopname
+                </div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono tabular-nums">
+                  {totalDiopname} <span className="text-sm font-bold text-slate-500">SKU</span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {totalBelumDiisiCount > 0
+                    ? `${totalBelumDiisiCount} SKU belum diisi selisih`
+                    : 'Seluruh SKU sudah diverifikasi'}
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                <div className="text-[10px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                  Total Selisih
+                </div>
+                <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 font-mono tabular-nums">
+                  {totalSelisihCount} <span className="text-sm font-bold">SKU</span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Barang dengan nilai selisih lebih / kurang
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                <div className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Total Sesuai / Klop
+                </div>
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono tabular-nums">
+                  {totalKlopCount} <span className="text-sm font-bold">SKU</span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Barang dengan hasil opname sesuai (selisih 0)
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Prosentase Kesalahan Total
+                </div>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 font-mono tabular-nums">
+                  {overallErrorRate}%
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Dari {warehouseDashboardRows.length} gudang yang diopname
+                </div>
+              </div>
+            </div>
+
+            {/* Dashboard Per Gudang Opname: Nama Gudang, Tanggal, Nama Admin, Prosentase Kesalahan, Lama Waktu */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Warehouse className="w-4 h-4 text-indigo-500" />
+                    <span>Dashboard Opname Per Gudang</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Ringkasan prosentase kesalahan, tanggal, nama admin, serta lama waktu opname masing-masing gudang. Klik gudang untuk memfilter tabel.
+                  </p>
+                </div>
+                {purchasingOpnameGudangFilter !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setPurchasingOpnameGudangFilter('ALL')}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200 cursor-pointer self-start"
+                  >
+                    Tampilkan Semua Gudang
+                  </button>
+                )}
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                      <th className="py-2.5 px-3">Nama Gudang</th>
+                      <th className="py-2.5 px-3">Tanggal</th>
+                      <th className="py-2.5 px-3">Nama Admin</th>
+                      <th className="py-2.5 px-3 text-right">SKU</th>
+                      <th className="py-2.5 px-3 text-right">Klop</th>
+                      <th className="py-2.5 px-3 text-right">Selisih</th>
+                      <th className="py-2.5 px-3 min-w-[165px]">Prosentase Kesalahan</th>
+                      <th className="py-2.5 px-3">Jam Mulai - Selesai</th>
+                      <th className="py-2.5 px-3 text-right">Lama Waktu</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {warehouseDashboardRows.map(w => {
+                      const isSelected = purchasingOpnameGudangFilter === w.namaGudang;
+                      const pctColor =
+                        w.errorPct === 0
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : w.errorPct < 10
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-rose-600 dark:text-rose-400';
+                      const barColor =
+                        w.errorPct === 0
+                          ? 'bg-emerald-500'
+                          : w.errorPct < 10
+                          ? 'bg-amber-500'
+                          : 'bg-rose-500';
+                      return (
+                        <tr
+                          key={w.namaGudang}
+                          onClick={() =>
+                            setPurchasingOpnameGudangFilter(prev =>
+                              prev === w.namaGudang ? 'ALL' : w.namaGudang
+                            )
+                          }
+                          className={`cursor-pointer transition ${
+                            isSelected
+                              ? 'bg-indigo-50/80 dark:bg-indigo-950/30'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900 dark:text-white">{w.namaGudang}</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">Cabang {w.cabang}</div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                            {w.tanggalOpname}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800 dark:text-slate-200">
+                            {w.namaAdmin}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+                            {w.totalSku}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
+                            {w.klopSku}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-rose-600 dark:text-rose-400">
+                            {w.selisihSku}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className={`font-mono tabular-nums font-black ${pctColor}`}>
+                                {w.errorPct.toFixed(1)}%
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {w.selisihSku}/{w.totalSku} SKU
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${barColor}`}
+                                style={{ width: `${Math.min(100, Math.max(w.errorPct > 0 ? 4 : 0, w.errorPct))}%` }}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                            {w.jamMulai || '—'} – {w.jamSelesai || '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                            {w.durationLabel}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Editor Informasi Sesi Opname (Tanggal, Nama Admin, Jam Mulai, Jam Selesai) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end text-xs">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Warehouse className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Gudang</span>
+                  </label>
+                  <select
+                    value={activeEditGudang}
+                    onChange={e => setPurchasingOpnameGudangFilter(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
+                  >
+                    {availableOpnameWarehouses.map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Tanggal Opname</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={activePurchasingSession.tanggalOpname}
+                    onChange={e => updateWarehouseSessionField(activeEditGudang, { tanggalOpname: e.target.value })}
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-semibold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <User className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Nama Admin</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={activePurchasingSession.namaAdmin}
+                    placeholder="Isi nama admin..."
+                    onChange={e => updateWarehouseSessionField(activeEditGudang, { namaAdmin: e.target.value })}
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-semibold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Jam Mulai</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={activePurchasingSession.jamMulai}
+                    onChange={e => updateWarehouseSessionField(activeEditGudang, { jamMulai: e.target.value })}
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mb-1">
+                    <Clock className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Jam Selesai</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={activePurchasingSession.jamSelesai}
+                    onChange={e => updateWarehouseSessionField(activeEditGudang, { jamSelesai: e.target.value })}
+                    className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 flex flex-col justify-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Lama Waktu
+                  </span>
+                  <span className="text-xs font-black font-mono tabular-nums text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    {activePurchasingDuration.label}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Bar Stok Opname */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={purchasingOpnameSearch}
+                  onChange={e => setPurchasingOpnameSearch(e.target.value)}
+                  placeholder="Cari Kode, Nama Barang, Gudang, Admin, atau Keterangan..."
+                  className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={purchasingOpnameDateFilter}
+                  onChange={e => setPurchasingOpnameDateFilter(e.target.value)}
+                  title="Filter Tanggal Opname"
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200"
+                />
+                {purchasingOpnameDateFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setPurchasingOpnameDateFilter('')}
+                    className="px-2 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 text-xs cursor-pointer"
+                    title="Hapus filter tanggal"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <select
+                  value={purchasingOpnameBranchFilter}
+                  onChange={e => setPurchasingOpnameBranchFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value="ALL">Semua Cabang</option>
+                  <option value="Banyuwangi">Cabang Banyuwangi</option>
+                  <option value="Sidoarjo">Cabang Sidoarjo</option>
+                  <option value="Jember">Cabang Jember</option>
+                  <option value="Bali">Cabang Bali</option>
+                </select>
+                <select
+                  value={purchasingOpnameConditionFilter}
+                  onChange={e => setPurchasingOpnameConditionFilter(e.target.value as any)}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value="ALL">Semua Kondisi</option>
+                  <option value="SELISIH">Ada Selisih</option>
+                  <option value="KLOP">Sesuai / Klop (0)</option>
+                  <option value="BELUM">Belum Diisi Selisih</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tabel Stok Opname — Format 7 Kolom Seragam dengan Opname Gudang */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 text-blue-900 dark:text-blue-300 font-bold text-xs">
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[115px] whitespace-nowrap">
+                        Kode
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 min-w-[260px]">
+                        Nama Barang
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[104px] whitespace-nowrap">
+                        Selisih
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[80px] whitespace-nowrap">
+                        Satuan
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[108px] whitespace-nowrap">
+                        Hitungan 1
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-r border-slate-300 dark:border-slate-700 w-[108px] whitespace-nowrap">
+                        Hitungan 2
+                      </th>
+                      <th className="py-2 px-2.5 text-center border-b border-slate-300 dark:border-slate-700 min-w-[210px]">
+                        Keterangan
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-900 dark:text-slate-100">
+                    {filteredPurchasingOpname.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                          Belum ada data stok opname yang sesuai filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredPurchasingOpname.map(item => {
+                        const selisihVal = getOpnameSelisihValue(item);
+                        const selisihStr = selisihVal !== null ? String(selisihVal) : '';
+                        const selisihBgClass =
+                          selisihVal === null
+                            ? 'bg-white dark:bg-slate-900'
+                            : selisihVal > 0
+                            ? 'bg-[#82c944] dark:bg-emerald-500/45'
+                            : selisihVal < 0
+                            ? 'bg-[#ffef00] dark:bg-amber-400/50'
+                            : 'bg-emerald-50/50 dark:bg-emerald-950/30';
+
+                        return (
+                          <tr
+                            key={item.id}
+                            className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40 transition-colors"
+                          >
+                            <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                              {item.kodeBarang}
+                            </td>
+                            <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white leading-tight">
+                              {item.namaBarang}
+                            </td>
+                            {/* Kolom Selisih: diisi oleh Admin Opname */}
+                            <td className={`p-0 border-b border-r border-slate-300 dark:border-slate-700 ${selisihBgClass}`}>
+                              <input
+                                type="number"
+                                value={selisihStr}
+                                placeholder="—"
+                                aria-label={`Selisih ${item.kodeBarang}`}
+                                onChange={e => {
+                                  const raw = e.target.value;
+                                  const parsed = raw === '' ? null : Number(raw);
+                                  const safeParsed = parsed !== null && !Number.isNaN(parsed) ? parsed : null;
+                                  setOpnameAuditList(prev =>
+                                    prev.map(row =>
+                                      row.id === item.id
+                                        ? {
+                                            ...row,
+                                            selisihOpname: safeParsed,
+                                            reorderQty: safeParsed !== null && safeParsed < 0 ? Math.abs(safeParsed) : 0,
+                                            purchasingStatus:
+                                              safeParsed === 0
+                                                ? 'Sesuai Sistem'
+                                                : row.purchasingStatus
+                                          }
+                                        : row
+                                    )
+                                  );
+                                }}
+                                className="w-full h-full py-1 px-2.5 bg-transparent text-right font-mono tabular-nums font-bold text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
+                              />
+                            </td>
+                            <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-semibold uppercase text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                              {item.satuan}
+                            </td>
+                            <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono tabular-nums font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                              {item.hitungan1 !== undefined && item.hitungan1 !== null ? item.hitungan1 : ''}
+                            </td>
+                            <td className="py-1 px-2.5 border-b border-r border-slate-300 dark:border-slate-700 font-mono tabular-nums font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                              {item.hitungan2 !== undefined && item.hitungan2 !== null ? item.hitungan2 : ''}
+                            </td>
+                            <td className="p-0 border-b border-slate-300 dark:border-slate-700">
+                              <input
+                                type="text"
+                                value={item.catatan || ''}
+                                placeholder=""
+                                aria-label={`Keterangan ${item.kodeBarang}`}
+                                onChange={e => {
+                                  const text = e.target.value;
+                                  setOpnameAuditList(prev =>
+                                    prev.map(row => (row.id === item.id ? { ...row, catatan: text } : row))
+                                  );
+                                }}
+                                className="w-full h-full py-1 px-2.5 bg-transparent focus:bg-blue-50/70 dark:focus:bg-blue-950/40 text-xs text-slate-800 dark:text-slate-200 focus:outline-none"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal Input Data Stok Opname (Dibuka dari Adm Pembelian -> Stok Opname) */}
+      {isAddOpnameModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-xl p-5 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                Input Data Stok Opname
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddOpnameModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                const h1 = newOpnameForm.hitungan1 === '' ? null : Math.max(0, Number(newOpnameForm.hitungan1) || 0);
+                const h2 = newOpnameForm.hitungan2 === '' ? null : Math.max(0, Number(newOpnameForm.hitungan2) || 0);
+                const selVal =
+                  newOpnameForm.selisihOpname === ''
+                    ? null
+                    : Number.isNaN(Number(newOpnameForm.selisihOpname))
+                    ? null
+                    : Number(newOpnameForm.selisihOpname);
+                const targetGudang = newOpnameForm.namaGudang.trim() || 'Gudang Utama Banyuwangi';
+                const draft: WarehouseOpnameAuditItem = {
+                  id: `OPN-${Date.now()}`,
+                  kodeBarang: newOpnameForm.kodeBarang.trim().toUpperCase(),
+                  namaBarang: newOpnameForm.namaBarang.trim(),
+                  kategori: inferKategoriBarang(newOpnameForm.kodeBarang, newOpnameForm.namaBarang),
+                  namaGudang: targetGudang,
+                  cabang: newOpnameForm.cabang,
+                  satuan: newOpnameForm.satuan.trim().toUpperCase() || 'PAK',
+                  stokSistem: h1 ?? 0,
+                  stokFisik: h1 ?? 0,
+                  selisihOpname: selVal,
+                  hitungan1: h1,
+                  hitungan2: h2,
+                  reorderQty: selVal !== null && selVal < 0 ? Math.abs(selVal) : 0,
+                  tanggalAudit: newOpnameForm.tanggalAudit || new Date().toISOString().slice(0, 10),
+                  auditor: newOpnameForm.namaAdmin.trim() || 'Admin Opname',
+                  namaAdmin: newOpnameForm.namaAdmin.trim() || 'Admin Opname',
+                  jamMulai: newOpnameForm.jamMulai || '',
+                  jamSelesai: newOpnameForm.jamSelesai || '',
+                  purchasingStatus: selVal === 0 ? 'Sesuai Sistem' : 'Terkirim ke Adm Pembelian',
+                  catatan: newOpnameForm.catatan.trim()
+                };
+
+                setOpnameAuditList(prev => [draft, ...prev]);
+                setOpnameSessions(prev => ({
+                  ...prev,
+                  [targetGudang]: {
+                    namaGudang: targetGudang,
+                    cabang: newOpnameForm.cabang,
+                    tanggalOpname: draft.tanggalAudit,
+                    namaAdmin: draft.namaAdmin || 'Admin Opname',
+                    jamMulai: draft.jamMulai || '',
+                    jamSelesai: draft.jamSelesai || ''
+                  }
+                }));
+                setNewOpnameForm({
+                  kodeBarang: '',
+                  namaBarang: '',
+                  namaGudang: targetGudang,
+                  cabang: newOpnameForm.cabang,
+                  tanggalAudit: draft.tanggalAudit,
+                  namaAdmin: draft.namaAdmin || 'Admin Opname',
+                  jamMulai: draft.jamMulai || '',
+                  jamSelesai: draft.jamSelesai || '',
+                  satuan: 'PAK',
+                  selisihOpname: '',
+                  hitungan1: '',
+                  hitungan2: '',
+                  catatan: ''
+                });
+                setIsAddOpnameModalOpen(false);
+                setPopupModal({
+                  title: 'Data Stok Opname Disimpan',
+                  message: `Item ${draft.kodeBarang} berhasil ditambahkan ke daftar Stok Opname (${targetGudang}).`
+                });
+              }}
+              className="space-y-3 text-xs"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Tanggal Opname</label>
+                  <input
+                    type="date"
+                    required
+                    value={newOpnameForm.tanggalAudit}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, tanggalAudit: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Admin</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Rina"
+                    value={newOpnameForm.namaAdmin}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, namaAdmin: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-1">
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Gudang</label>
+                  <input
+                    type="text"
+                    list="opname-modal-warehouse-datalist"
+                    required
+                    value={newOpnameForm.namaGudang}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, namaGudang: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                  <datalist id="opname-modal-warehouse-datalist">
+                    {availableOpnameWarehouses.map(g => (
+                      <option key={g} value={g} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Jam Mulai</label>
+                  <input
+                    type="time"
+                    value={newOpnameForm.jamMulai}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, jamMulai: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Jam Selesai</label>
+                  <input
+                    type="time"
+                    value={newOpnameForm.jamSelesai}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, jamSelesai: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Kode</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: 7HTOS151"
+                    value={newOpnameForm.kodeBarang}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, kodeBarang: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Cabang</label>
+                  <select
+                    value={newOpnameForm.cabang}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, cabang: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="Banyuwangi">Banyuwangi</option>
+                    <option value="Sidoarjo">Sidoarjo</option>
+                    <option value="Jember">Jember</option>
+                    <option value="Bali">Bali</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Barang</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: HD TAS OVAL SPIRIT 15X23 SMILE @48 (120PAK/ZAK)"
+                  value={newOpnameForm.namaBarang}
+                  onChange={e => setNewOpnameForm({ ...newOpnameForm, namaBarang: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Satuan</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="PAK"
+                    value={newOpnameForm.satuan}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, satuan: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Selisih</label>
+                  <input
+                    type="number"
+                    placeholder="Opsional"
+                    value={newOpnameForm.selisihOpname}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, selisihOpname: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Hitungan 1</label>
+                  <input
+                    type="number"
+                    placeholder="Opsional"
+                    value={newOpnameForm.hitungan1}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, hitungan1: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Hitungan 2</label>
+                  <input
+                    type="number"
+                    placeholder="Opsional"
+                    value={newOpnameForm.hitungan2}
+                    onChange={e => setNewOpnameForm({ ...newOpnameForm, hitungan2: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Keterangan</label>
+                <input
+                  type="text"
+                  value={newOpnameForm.catatan}
+                  onChange={e => setNewOpnameForm({ ...newOpnameForm, catatan: e.target.value })}
+                  placeholder="Opsional..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddOpnameModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                >
+                  Simpan Opname
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: KARTU STOK DIGITAL (ADM PEMBELIAN — ANALISA SELISIH HARI)        */}
+      {/* ===================================================================== */}
+      {activeTab === 'kartu_stok' && (
         <div className="space-y-4">
           {/* Header Kartu Stok */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
-                  Analisa Otomatis Kartu Stok
+                  Adm Pembelian &bull; Analisa Otomatis Kartu Stok
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Kartu Stok Digital &amp; Analisa Selisih Hari Pengisian Stok
+                Kartu Stok Digital (Analisa Selisih Hari Pengisian Stok)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Unggah file Excel mentahan Kartu Stok untuk diolah otomatis oleh sistem menjadi laporan analisa tanggal kuantitas minimum/kosong, tanggal stok masuk, selisih hari, dan kuantitas terakhir per gudang.
@@ -1698,397 +3829,46 @@ export const WarehouseManagementSystem: React.FC<{
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: MASTER SKU & STOK BIN GUDANG (DEFAULT FOR OVERVIEW / INVENTORY)  */}
+      {/* TAB: DATABASE BARANG (NOMOR BARANG, KETERANGAN, SATUAN, DOKUMENTASI)  */}
       {/* ===================================================================== */}
-      {(activeTab === 'inventory' || activeTab === 'overview' || activeTab === 'scanner') && (
-        <div className="space-y-4">
-          {/* Header Banner WMS */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span>Master SKU &amp; Stok Gudang</span>
-                </span>
-              </div>
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Warehouse Management System (WMS) &mdash; PT Anugrah Kemasan Kreatif
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Daftar Master SKU dan ketersediaan stok barang gudang. Gunakan fitur <strong>Unggah File</strong> untuk mengimport file Excel stok mentah secara otomatis.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsUploadSkuPageOpen(true)}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Unggah File (Upload Excel)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsAddSkuModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Master SKU</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Multi-Store Branch Selector Bar */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Warehouse className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                Filter Cabang (Multi-Store Inventaris):
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  branchStore.setSelectedOriginBranchId('ALL');
-                  setSkuPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                  selectedBranchId === 'ALL'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
-                }`}
-              >
-                Semua Cabang ({skuItems.length} SKU)
-              </button>
-              {branches.map((b) => {
-                const count = skuItems.filter(i => branchStore.getInventoryBranch(i.id).id === b.id).length;
-                const active = selectedBranchId === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      branchStore.setSelectedOriginBranchId(b.id);
-                      setSkuPage(1);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                      active
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                        : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
-                    }`}
-                  >
-                    {b.name} ({count} SKU)
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Search, Filter & Page Size Controls */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={skuSearch}
-                onChange={(e) => setSkuSearch(e.target.value)}
-                placeholder="Cari No Barang / Kode Barang atau Nama Barang..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={skuKategoriFilter}
-                onChange={(e) => setSkuKategoriFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="ALL">Semua Kategori Barang ({availableKategoriList.length})</option>
-                {availableKategoriList.map((kat) => (
-                  <option key={kat} value={kat}>
-                    {kat}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={skuSatuanFilter}
-                onChange={(e) => setSkuSatuanFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="ALL">Semua Satuan ({skuItems.length})</option>
-                {availableSatuanList.map((sat) => (
-                  <option key={sat} value={sat}>
-                    Satuan: {sat}
-                  </option>
-                ))}
-              </select>
-
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-slate-500 font-semibold">Batas Halaman:</span>
-                <select
-                  value={skuPageSize}
-                  onChange={(e) => setSkuPageSize(Number(e.target.value))}
-                  className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-                >
-                  <option value={5}>5 Baris / Hal</option>
-                  <option value={10}>10 Baris / Hal</option>
-                  <option value={20}>20 Baris / Hal</option>
-                  <option value={50}>50 Baris / Hal</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Master Barang Table with 5 Required Columns: Kategori Barang, No Barang, Nama Barang, Stok Tersedia, Satuan */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Daftar Master Barang &amp; Stok Tersedia
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Menampilkan Kategori Barang, No Barang, Nama Barang, Stok Tersedia, dan Satuan.
-                </p>
-              </div>
-              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                Total Barang: <span className="font-mono text-indigo-600 dark:text-indigo-400">{filteredSkus.length}</span>
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Kategori Barang</th>
-                    <th className="py-3 px-4">No Barang</th>
-                    <th className="py-3 px-4">Nama Barang</th>
-                    <th className="py-3 px-4 text-right">Stok Tersedia</th>
-                    <th className="py-3 px-4">Satuan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
-                  {paginatedSkus.length > 0 ? (
-                    paginatedSkus.map((item) => {
-                      const itemBranch = branchStore.getInventoryBranch(item.id);
-                      return (
-                        <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                          <td className="py-3 px-4">
-                            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] inline-block">
-                              {item.kategoriBarang || 'Karton Box Corrugated'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                            {item.noBarang}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="font-bold text-slate-900 dark:text-white">{item.namaBarang}</div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[10px] text-slate-400 font-semibold">Cabang:</span>
-                              <select
-                                value={itemBranch.id}
-                                onChange={(e) => {
-                                  branchStore.setInventoryBranch(item.id, e.target.value);
-                                  setBranches(branchStore.getActiveBranches());
-                                }}
-                                className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 cursor-pointer focus:outline-none"
-                              >
-                                {branches.map((b) => (
-                                  <option key={b.id} value={b.id}>
-                                    Gudang {b.name} ({b.slug})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono font-black text-slate-900 dark:text-white">
-                            {item.stokTersedia.toLocaleString('id-ID')}
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">
-                            {item.satuan}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
-                        Tidak ada data barang yang cocok dengan pencarian.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination (Pagging) Controls */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="text-slate-500 dark:text-slate-400 font-medium">
-                Menampilkan{' '}
-                <strong className="text-slate-900 dark:text-white">
-                  {filteredSkus.length === 0 ? 0 : (currentSkuPage - 1) * skuPageSize + 1}
-                </strong>{' '}
-                &ndash;{' '}
-                <strong className="text-slate-900 dark:text-white">
-                  {Math.min(currentSkuPage * skuPageSize, filteredSkus.length)}
-                </strong>{' '}
-                dari <strong className="text-slate-900 dark:text-white">{filteredSkus.length}</strong> barang (Halaman {currentSkuPage} dari {totalSkuPages})
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={currentSkuPage <= 1}
-                  onClick={() => setSkuPage(p => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Sebelumnya</span>
-                </button>
-
-                {Array.from({ length: totalSkuPages }, (_, i) => i + 1).map((pageNum) => (
-                  <button
-                    key={pageNum}
-                    type="button"
-                    onClick={() => setSkuPage(pageNum)}
-                    className={`w-8 h-8 rounded-xl font-mono text-xs font-black transition cursor-pointer ${
-                      pageNum === currentSkuPage
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  disabled={currentSkuPage >= totalSkuPages}
-                  onClick={() => setSkuPage(p => Math.min(totalSkuPages, p + 1))}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                >
-                  <span>Selanjutnya</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===================================================================== */}
-      {/* MODAL: TAMBAH MASTER SKU MANUAL                                       */}
-      {/* ===================================================================== */}
-      {isAddSkuModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                Tambah Master SKU Baru
-              </h4>
-              <button
-                onClick={() => setIsAddSkuModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddManualSku} className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  Kategori Barang
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Karton Box Corrugated"
-                  value={newSkuForm.kategoriBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, kategoriBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  No Barang / Kode Barang
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: AKK-KBX-055"
-                  value={newSkuForm.noBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, noBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                  Nama Barang / Deskripsi
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Karton Box B-Flute 60x40x40 cm"
-                  value={newSkuForm.namaBarang}
-                  onChange={(e) => setNewSkuForm({ ...newSkuForm, namaBarang: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                    Stok Tersedia
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="Contoh: 1500"
-                    value={newSkuForm.stokTersedia}
-                    onChange={(e) => setNewSkuForm({ ...newSkuForm, stokTersedia: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                    Satuan
-                  </label>
-                  <select
-                    value={newSkuForm.satuan}
-                    onChange={(e) => setNewSkuForm({ ...newSkuForm, satuan: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
-                  >
-                    <option value="Pcs">Pcs</option>
-                    <option value="Ball">Ball</option>
-                    <option value="Roll">Roll</option>
-                    <option value="Karton">Karton</option>
-                    <option value="Ikat">Ikat</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddSkuModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer"
-                >
-                  Simpan Barang
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {(activeTab === 'scanner' || activeTab === 'inventory' || activeTab === 'overview') && (
+        <WarehouseDatabaseBarangView
+          onSyncWithMasterSku={records => {
+            setSkuItems(prev => {
+              const existingByCode = new Map<string, MasterSkuRecord>();
+              prev.forEach(item => {
+                if (!isLegacySeededBarang(item.noBarang)) {
+                  existingByCode.set(item.noBarang.trim().toUpperCase(), item);
+                }
+              });
+              return records
+                .filter(rec => !isLegacySeededBarang(rec.noBarang))
+                .map(rec => {
+                  const key = rec.noBarang.trim().toUpperCase();
+                  const existing = existingByCode.get(key);
+                  return {
+                    id: existing?.id || rec.id,
+                    kategoriBarang:
+                      rec.kategoriBarang ||
+                      existing?.kategoriBarang ||
+                      inferKategoriBarang(rec.noBarang, rec.deskripsiBarang || rec.keteranganBarang),
+                    noBarang: rec.noBarang,
+                    namaBarang: rec.deskripsiBarang || rec.keteranganBarang,
+                    stokTersedia: existing?.stokTersedia ?? rec.stokTersedia ?? 1000,
+                    satuan: rec.unit1 || rec.satuan,
+                    cabang: existing?.cabang || rec.cabang || 'Banyuwangi',
+                    lokasiStock: existing?.lokasiStock || 'Gudang Utama Argopuro',
+                    tanggalStok: rec.updatedAt,
+                    panjangCm: rec.panjangCm,
+                    lebarCm: rec.lebarCm,
+                    tinggiCm: rec.tinggiCm,
+                    kubikasiM3: rec.volM3,
+                    beratKg: rec.beratKg
+                  };
+                });
+            });
+          }}
+        />
       )}
 
       {/* ===================================================================== */}

@@ -10,7 +10,8 @@ import {
 import { logisticsStore } from '../../services/store';
 import {
   SalesHeaderFilter,
-  SalesTopTab
+  SalesTopTab,
+  useSalesAdminUsers
 } from './SalesHeaderFilter';
 
 interface JobdeskConfigTabProps {
@@ -66,8 +67,7 @@ export const JobdeskConfigTab: React.FC<JobdeskConfigTabProps> = ({
   const [selectedYear, setSelectedYear] = useState('2026');
   const [saveToast, setSaveToast] = useState(false);
 
-  // Load all users to populate the admin dropdown correctly
-  const allUsers = logisticsStore.getUsers();
+  const salesAdminUsers = useSalesAdminUsers();
   
   // Admin assignments storage: adminKey -> string[]
   const [assignments, setAssignments] = useState<Record<string, string[]>>(() => {
@@ -82,24 +82,16 @@ export const JobdeskConfigTab: React.FC<JobdeskConfigTabProps> = ({
       }
     }
     
-    // Ensure default structure exists or merge it
-    const defaultStructure = {
-      'SEMUA ADMIN': DEFAULT_CHECKED_FOR_ALL,
-      ISTI: ['Cek Eceran', 'HP Telkomsel', 'Input Retur Toko'],
-      IZZUL: ['Cek Faktur Toko', 'Cek Faktur Kuning', 'Membuat Pesanan Penjualan & Faktur (1)'],
-      SHOIM: ['Cek Surat Jalan Toko', 'Muat Toko (1)', 'Muat Toko (2)'],
-      FATA: ['Data Rekap', 'Masukan Armada', 'Revisi Faktur Toko'],
-      BINTANG: ['HP XL', 'Muat Kelilingan (1)', 'Muat Kelilingan (2)'],
-      BAYU: ['Muat AKS', 'Muat NX', 'Muat Toko (3)']
+    const defaultStructure: Record<string, string[]> = {
+      'SEMUA ADMIN': DEFAULT_CHECKED_FOR_ALL
     };
     
-    // Merge default and saved config
     config = { ...defaultStructure, ...config };
     
-    // Add any Adm. Penjualan users found in store to assignments if not already there
-    allUsers.forEach(user => {
-      if (user.role === 'sales_admin' && !config[user.fullName.toUpperCase()]) {
-        config[user.fullName.toUpperCase()] = ['Membuat Pesanan Penjualan & Faktur (1)', 'Input Retur Toko'];
+    salesAdminUsers.forEach(user => {
+      const key = (user.fullName || '').trim().toUpperCase();
+      if (key && !config[key]) {
+        config[key] = ['Membuat Pesanan Penjualan & Faktur (1)', 'Input Retur Toko'];
       }
     });
     

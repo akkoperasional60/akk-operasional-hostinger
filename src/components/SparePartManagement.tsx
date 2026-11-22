@@ -22,10 +22,13 @@ import {
   AlertCircle,
   TrendingDown,
   Warehouse,
-  FileText
+  FileText,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { SparePart, SparePartUsage, SparePartCategory, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
+import { branchStore } from '../services/branchStore';
 
 interface SparePartManagementProps {
   initialFleetId?: string;
@@ -39,7 +42,24 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   const [activeTab, setActiveTab] = useState<'inventory' | 'fleet_health' | 'history'>('fleet_health');
   const [spareParts, setSpareParts] = useState<SparePart[]>(logisticsStore.getSpareParts());
   const [usages, setUsages] = useState<SparePartUsage[]>(logisticsStore.getSparePartUsages());
-  const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+  const [allFleets, setAllFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+
+  // Multi-Branch State
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
+  const branches = branchStore.getBranches();
+  const selectedBranch = branches.find((b: any) => b.id === selectedBranchId) || branches[0];
+
+  useEffect(() => {
+    return branchStore.subscribe(() => {
+      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
+    });
+  }, []);
+
+  // Filter fleets by selected branch
+  const fleets = selectedBranchId === 'ALL'
+    ? allFleets
+    : allFleets.filter(f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,12 +107,42 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     notes: 'Penggantian rutin sesuai standar pemakaian armada'
   });
 
+  // Custom Dropdown Open States for Modals
+  const [openDropdown, setOpenDropdown] = useState<
+    null | 'usage_fleet' | 'usage_category' | 'usage_part' | 'new_category' | 'edit_category'
+  >(null);
+  const [fleetDropdownSearch, setFleetDropdownSearch] = useState('');
+
+  const CATEGORY_OPTIONS_META: Array<{
+    value: SparePartCategory;
+    label: string;
+    sub: string;
+    color: string;
+    icon: React.ElementType;
+  }> = [
+    { value: 'oli', label: 'Oli Mesin & Pelumas', sub: 'Siklus 10.000 KM / 3 Bulan', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30', icon: Droplets },
+    { value: 'ban', label: 'Ban & Velg', sub: 'Siklus 50.000 KM / 12 Bulan', color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30', icon: Disc },
+    { value: 'aki', label: 'Aki & Baterai', sub: 'Siklus 80.000 KM / 18 Bulan', color: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30', icon: BatteryCharging },
+    { value: 'filter', label: 'Filter Oli / Solar / Udara', sub: 'Siklus 15.000 KM / 4 Bulan', color: 'text-purple-400 bg-purple-500/15 border-purple-500/30', icon: Filter },
+    { value: 'rem', label: 'Sistem Pengereman', sub: 'Siklus 30.000 KM / 8 Bulan', color: 'text-rose-400 bg-rose-500/15 border-rose-500/30', icon: AlertCircle },
+    { value: 'lainnya', label: 'Komponen Lainnya', sub: 'Sesuai kebutuhan servis', color: 'text-slate-300 bg-slate-500/15 border-slate-500/30', icon: Package }
+  ];
+
+  const formatIndoDateDisplay = (isoDate: string) => {
+    if (!isoDate) return '-';
+    const parts = isoDate.split('-');
+    if (parts.length !== 3) return isoDate;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const mIdx = parseInt(parts[1], 10) - 1;
+    return `${parts[2]} ${months[mIdx] || parts[1]} ${parts[0]}`;
+  };
+
   // Subscribe to store updates
   useEffect(() => {
     const unsubscribe = logisticsStore.subscribe(() => {
       setSpareParts(logisticsStore.getSpareParts());
       setUsages(logisticsStore.getSparePartUsages());
-      setFleets(logisticsStore.getFleets());
+      setAllFleets(logisticsStore.getFleets());
     });
     return unsubscribe;
   }, []);
@@ -139,7 +189,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   };
 
   // Open Log Usage for a specific fleet
-  const handleOpenLogForFleet = (fleet: Fleet, specificCategory?: SparePartCategory) => {
+  const handleOpenLogForFleet = (fleet: Fleet, specificCategory?: SparePartCategory, tirePositionLabel?: string) => {
     const cat = specificCategory || 'oli';
     const matchedParts = spareParts.filter(p => p.category === cat);
     const firstPart = matchedParts[0];
@@ -158,6 +208,8 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     const d = new Date();
     d.setMonth(d.getMonth() + targetMonths);
 
+    const componentDesc = tirePositionLabel || (cat === 'ban' ? 'Ban Armada Depan Kanan' : cat);
+
     setUsageForm({
       fleetId: fleet.id,
       category: cat,
@@ -169,7 +221,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       nextReplacementDate: d.toISOString().substring(0, 10),
       mechanicOrWorkshop: 'Mekanik Internal AKK',
       totalCost: firstPart ? firstPart.costPerUnit : 0,
-      notes: `Penggantian rutin ${cat} untuk armada ${fleet.initialCode || fleet.plateNumber}`
+      notes: `Penggantian rutin ${componentDesc} untuk armada ${fleet.initialCode || fleet.plateNumber}`
     });
     setIsLogUsageOpen(true);
   };
@@ -342,29 +394,110 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-400 mb-1">
               <Warehouse className="w-4 h-4" />
-              <span>LOGISTIK & PEMELIHARAAN ARMADA BANYUWANGI</span>
+              <span>LOGISTIK &amp; PEMELIHARAAN ARMADA {selectedBranchId === 'ALL' ? 'SEMUA CABANG' : selectedBranch.name.toUpperCase()}</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-              <span>Manajemen Sparepart & Komponen Rutin</span>
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                Oli &bull; Ban &bull; Aki &bull; Filter
-              </span>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Manajemen Sparepart &amp; Komponen Rutin
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Pantau ketersediaan stok fisik sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada secara akurat berdasarkan tanggal & kilometer odometer.
+              Pantau ketersediaan stok fisik sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada secara akurat.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Cabang Selector (Custom Dropdown) */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsBranchDropdownOpen(prev => !prev)}
+                className="flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-xs font-bold text-white transition cursor-pointer shadow-xs min-w-[230px]"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Warehouse className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider">Cabang:</span>
+                  <span className="text-amber-300 truncate font-bold">
+                    {selectedBranchId === 'ALL'
+                      ? `Semua Cabang (${allFleets.length} Unit)`
+                      : `${selectedBranch?.name || 'Cabang'} (${fleets.length} Unit)`}
+                  </span>
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${
+                    isBranchDropdownOpen ? 'rotate-180 text-amber-400' : ''
+                  }`}
+                />
+              </button>
+
+              {isBranchDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsBranchDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-1.5 w-64 z-50 bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/70 animate-in fade-in zoom-in-95 duration-150">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        branchStore.setSelectedOriginBranchId('ALL');
+                        setIsBranchDropdownOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                        selectedBranchId === 'ALL'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'text-slate-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>Semua Cabang</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                          {allFleets.length} Unit
+                        </span>
+                        {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                      </div>
+                    </button>
+                    {branches.map((b: any) => {
+                      const cnt = allFleets.filter(
+                        f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === b.id
+                      ).length;
+                      const isSel = selectedBranchId === b.id;
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => {
+                            branchStore.setSelectedOriginBranchId(b.id);
+                            setIsBranchDropdownOpen(false);
+                          }}
+                          className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                            isSel
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span>Cabang {b.name.replace(/^Cabang\s+/i, '')}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                              {cnt} Unit
+                            </span>
+                            {isSel && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
             <button
               onClick={() => {
-                const defaultFleet = fleets[0];
+                const defaultFleet = fleets[0] || allFleets[0];
                 if (defaultFleet) handleOpenLogForFleet(defaultFleet, 'oli');
               }}
               className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
             >
               <Wrench className="w-4 h-4" />
-              <span>+ Catat Ganti Komponen</span>
+              <span>Ganti Sparepart</span>
             </button>
 
             <button
@@ -374,16 +507,6 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
               <Plus className="w-4 h-4 text-emerald-400" />
               <span>Tambah Master Part</span>
             </button>
-
-            {onNavigateToFleets && (
-              <button
-                onClick={onNavigateToFleets}
-                className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Truck className="w-4 h-4 text-blue-400" />
-                <span>Lihat Data Armada</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -485,64 +608,6 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
             </span>
           </button>
         </div>
-
-        {/* Category Quick Filter */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-          <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              selectedCategory === 'all'
-                ? 'bg-slate-800 text-white border border-slate-700'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Semua
-          </button>
-          <button
-            onClick={() => setSelectedCategory('oli')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'oli'
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                : 'text-slate-400 hover:text-amber-300'
-            }`}
-          >
-            <Droplets className="w-3.5 h-3.5" />
-            <span>Oli Mesin</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('ban')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'ban'
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                : 'text-slate-400 hover:text-emerald-300'
-            }`}
-          >
-            <Disc className="w-3.5 h-3.5" />
-            <span>Ban</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('aki')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'aki'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                : 'text-slate-400 hover:text-cyan-300'
-            }`}
-          >
-            <BatteryCharging className="w-3.5 h-3.5" />
-            <span>Aki</span>
-          </button>
-          <button
-            onClick={() => setSelectedCategory('filter')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedCategory === 'filter'
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-                : 'text-slate-400 hover:text-purple-300'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>Filter</span>
-          </button>
-        </div>
       </div>
 
       {/* ========================================================= */}
@@ -640,39 +705,63 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                         </button>
                       </div>
 
-                      {/* BAN */}
-                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
-                            <Disc className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span>Ban Armada</span>
-                              <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded font-semibold border ${
-                                  status.tire.status === 'urgent'
-                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                    : status.tire.status === 'warning'
-                                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                }`}
-                              >
-                                {status.tire.label}
-                              </span>
+                      {/* BAN ARMADA (RINGKAS 2x2 GRID: DEPAN KANAN, DEPAN KIRI, BELAKANG KANAN, BELAKANG KIRI) */}
+                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
+                              <Disc className="w-3.5 h-3.5" />
                             </div>
-                            <div className="text-[10px] text-slate-400">
-                              Terakhir: {status.tire.lastDate} {status.tire.lastKm > 0 && `(${status.tire.lastKm.toLocaleString('id-ID')} KM)`}
+                            <div>
+                              <div className="text-xs font-bold text-white leading-tight">Ban Armada (4 Posisi)</div>
+                              <div className="text-[10px] text-slate-400">Klik posisi ban untuk catat penggantian</div>
                             </div>
                           </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                            4 Roda
+                          </span>
                         </div>
-                        <button
-                          onClick={() => handleOpenLogForFleet(fleet, 'ban')}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 text-[10px] font-bold transition cursor-pointer"
-                          title="Catat Ganti Ban"
-                        >
-                          Ganti
-                        </button>
+
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { data: status.tireFrontRight, shortName: 'Depan Kanan' },
+                            { data: status.tireFrontLeft, shortName: 'Depan Kiri' },
+                            { data: status.tireRearRight, shortName: 'Belakang Kanan' },
+                            { data: status.tireRearLeft, shortName: 'Belakang Kiri' }
+                          ].map(({ data: tirePos, shortName }) => (
+                            <div
+                              key={tirePos.positionLabel}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/90 flex items-center justify-between gap-1.5"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                      tirePos.status === 'urgent'
+                                        ? 'bg-rose-400'
+                                        : tirePos.status === 'warning'
+                                        ? 'bg-amber-400'
+                                        : 'bg-emerald-400'
+                                    }`}
+                                  />
+                                  <span className="text-[11px] font-bold text-white truncate">
+                                    {shortName}
+                                  </span>
+                                </div>
+                                <div className="text-[9px] text-slate-400 truncate pl-2.5">
+                                  {tirePos.lastDate !== '-' ? tirePos.lastDate : tirePos.label}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleOpenLogForFleet(fleet, 'ban', tirePos.positionLabel)}
+                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 text-[9px] font-bold transition cursor-pointer shrink-0"
+                                title={`Catat Ganti ${tirePos.positionLabel}`}
+                              >
+                                Ganti
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       {/* AKI */}
@@ -949,8 +1038,8 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                 }}
                 className="px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
-                <span>+ Catat Ganti Baru</span>
+                <Wrench className="w-4 h-4" />
+                <span>Ganti Sparepart</span>
               </button>
             </div>
           </div>
@@ -1065,99 +1154,340 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Wrench className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-black text-white">Catat Penggantian Komponen Rutin</h3>
+                <h3 className="text-base font-black text-white">Ganti Sparepart &amp; Komponen Rutin</h3>
               </div>
               <button
-                onClick={() => setIsLogUsageOpen(false)}
-                className="text-slate-400 hover:text-white text-sm"
+                onClick={() => {
+                  setIsLogUsageOpen(false);
+                  setOpenDropdown(null);
+                }}
+                className="text-slate-400 hover:text-white text-sm cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
             <form onSubmit={handleSubmitUsage} className="space-y-3.5 text-xs">
-              {/* Pilih Armada */}
-              <div>
+              {/* Pilih Armada (Custom Interactive Dropdown) */}
+              <div className="relative">
                 <label className="text-slate-300 block mb-1 font-semibold">Armada Kendaraan:</label>
-                <select
-                  required
-                  value={usageForm.fleetId}
-                  onChange={(e) => {
-                    const f = fleets.find(fl => fl.id === e.target.value);
-                    setUsageForm({
-                      ...usageForm,
-                      fleetId: e.target.value,
-                      odometerKm: f?.odometerKm || usageForm.odometerKm
-                    });
-                  }}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
-                >
-                  {fleets.map(f => (
-                    <option key={f.id} value={f.id}>
-                      {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} - {f.vehicleType} ({f.brand})
-                    </option>
-                  ))}
-                </select>
+                {(() => {
+                  const selectedFleetObj = fleets.find(fl => fl.id === usageForm.fleetId) || fleets[0];
+                  const filteredFleetList = fleets.filter(fl => {
+                    const q = fleetDropdownSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      fl.plateNumber.toLowerCase().includes(q) ||
+                      (fl.initialCode || '').toLowerCase().includes(q) ||
+                      fl.vehicleType.toLowerCase().includes(q) ||
+                      (fl.brand || '').toLowerCase().includes(q)
+                    );
+                  });
+
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setOpenDropdown(openDropdown === 'usage_fleet' ? null : 'usage_fleet')}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner"
+                      >
+                        {selectedFleetObj ? (
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-[11px] font-black shrink-0">
+                              {selectedFleetObj.initialCode || 'ARM'}
+                            </span>
+                            <span className="font-mono font-black text-white text-xs shrink-0">
+                              {selectedFleetObj.plateNumber}
+                            </span>
+                            <span className="text-slate-400 text-[11px] truncate">
+                              &bull; {selectedFleetObj.vehicleType} ({selectedFleetObj.brand || 'Standar'})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-- Pilih Armada Kendaraan --</span>
+                        )}
+                        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openDropdown === 'usage_fleet' ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
+
+                      {openDropdown === 'usage_fleet' && (
+                        <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                          <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                placeholder="Cari plat nomor, kode inisial, atau tipe..."
+                                value={fleetDropdownSearch}
+                                onChange={(e) => setFleetDropdownSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                          </div>
+                          <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                            {filteredFleetList.map(fl => {
+                              const isSelected = fl.id === usageForm.fleetId;
+                              return (
+                                <button
+                                  key={fl.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setUsageForm({
+                                      ...usageForm,
+                                      fleetId: fl.id,
+                                      odometerKm: fl.odometerKm || usageForm.odometerKm
+                                    });
+                                    setOpenDropdown(null);
+                                    setFleetDropdownSearch('');
+                                  }}
+                                  className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected ? 'bg-amber-500/15 text-white' : 'hover:bg-slate-800/80 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[10px] font-bold shrink-0">
+                                      {fl.initialCode || 'UNIT'}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="font-mono font-bold text-xs text-white flex items-center gap-1.5">
+                                        <span>{fl.plateNumber}</span>
+                                        <span className="text-[10px] font-sans font-normal text-slate-400">
+                                          ({fl.vehicleType} &bull; {fl.brand || '-'})
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] font-mono text-slate-400">
+                                      {(fl.odometerKm || 45000).toLocaleString('id-ID')} KM
+                                    </span>
+                                    {isSelected && <Check className="w-4 h-4 text-amber-400" />}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
-              {/* Kategori Komponen */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              {/* Kategori Komponen & Tanggal Pemasangan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="relative">
                   <label className="text-slate-300 block mb-1 font-semibold">Kategori Komponen:</label>
-                  <select
-                    value={usageForm.category}
-                    onChange={(e) => handleCategoryChangeForUsage(e.target.value as SparePartCategory)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="oli">Oli Mesin & Pelumas</option>
-                    <option value="ban">Ban & Velg</option>
-                    <option value="aki">Aki & Baterai</option>
-                    <option value="filter">Filter Oli / Solar</option>
-                    <option value="rem">Pengereman</option>
-                    <option value="lainnya">Lainnya</option>
-                  </select>
+                  {(() => {
+                    const activeCatMeta = CATEGORY_OPTIONS_META.find(c => c.value === usageForm.category) || CATEGORY_OPTIONS_META[0];
+                    const ActiveCatIcon = activeCatMeta.icon;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenDropdown(openDropdown === 'usage_category' ? null : 'usage_category')}
+                          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`p-1 rounded-lg border shrink-0 ${activeCatMeta.color}`}>
+                              <ActiveCatIcon className="w-3.5 h-3.5" />
+                            </span>
+                            <span className="font-bold text-white truncate">{activeCatMeta.label}</span>
+                          </div>
+                          <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openDropdown === 'usage_category' ? 'rotate-180 text-amber-400' : ''}`} />
+                        </button>
+
+                        {openDropdown === 'usage_category' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
+                            {CATEGORY_OPTIONS_META.map(cat => {
+                              const CatIcon = cat.icon;
+                              const isSelected = cat.value === usageForm.category;
+                              return (
+                                <button
+                                  key={cat.value}
+                                  type="button"
+                                  onClick={() => {
+                                    handleCategoryChangeForUsage(cat.value);
+                                    setOpenDropdown(null);
+                                  }}
+                                  className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected ? 'bg-amber-500/15 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className={`p-1.5 rounded-lg border shrink-0 ${cat.color}`}>
+                                      <CatIcon className="w-3.5 h-3.5" />
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-xs text-white truncate">{cat.label}</div>
+                                      <div className="text-[10px] text-slate-400 truncate">{cat.sub}</div>
+                                    </div>
+                                  </div>
+                                  {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div>
-                  <label className="text-slate-300 block mb-1 font-semibold">Tanggal Pemasangan:</label>
-                  <input
-                    type="date"
-                    required
-                    value={usageForm.replacementDate}
-                    onChange={(e) => setUsageForm({ ...usageForm, replacementDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
-                  />
+                  <label className="text-slate-300 block mb-1 font-semibold flex items-center justify-between">
+                    <span>Tanggal Pemasangan:</span>
+                    <span className="text-[10px] font-mono text-amber-400">{formatIndoDateDisplay(usageForm.replacementDate)}</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      required
+                      value={usageForm.replacementDate}
+                      onChange={(e) => setUsageForm({ ...usageForm, replacementDate: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-amber-500 text-white font-mono cursor-pointer"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Pilih Sparepart dari Master Inventaris */}
-              <div>
+              {usageForm.category === 'ban' && (
+                <div>
+                  <label className="text-slate-300 block mb-1 font-semibold">Posisi Ban Armada:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      'Ban Armada Depan Kanan',
+                      'Ban Armada Depan Kiri',
+                      'Ban Armada Belakang Kanan',
+                      'Ban Armada Belakang Kiri'
+                    ].map(pos => {
+                      const isSelected = usageForm.notes.toLowerCase().includes(pos.toLowerCase());
+                      return (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => {
+                            const f = fleets.find(fl => fl.id === usageForm.fleetId);
+                            setUsageForm({
+                              ...usageForm,
+                              notes: `Penggantian rutin ${pos} untuk armada ${f?.initialCode || f?.plateNumber || ''}`
+                            });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border text-left transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {pos}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Pilih Sparepart dari Master Inventaris (Custom Interactive Dropdown) */}
+              <div className="relative">
                 <label className="text-slate-300 block mb-1 font-semibold flex items-center justify-between">
                   <span>Pilih Sparepart dari Gudang:</span>
                   <span className="text-[10px] text-amber-400">Stok otomatis berkurang</span>
                 </label>
-                <select
-                  required
-                  value={usageForm.partId}
-                  onChange={(e) => {
-                    const selected = spareParts.find(p => p.id === e.target.value);
-                    setUsageForm({
-                      ...usageForm,
-                      partId: e.target.value,
-                      totalCost: selected ? selected.costPerUnit * usageForm.quantity : usageForm.totalCost
-                    });
-                  }}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                >
-                  <option value="">-- Pilih Barang Master Part --</option>
-                  {spareParts
-                    .filter(p => p.category === usageForm.category)
-                    .map(p => (
-                      <option key={p.id} value={p.id} disabled={p.stock <= 0}>
-                        {p.name} ({p.partNumber}) - Sisa Stok: {p.stock} {p.unit} - Rp {p.costPerUnit.toLocaleString('id-ID')}
-                      </option>
-                    ))}
-                </select>
+                {(() => {
+                  const categoryParts = spareParts.filter(p => p.category === usageForm.category);
+                  const selectedPartObj = spareParts.find(p => p.id === usageForm.partId);
+
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setOpenDropdown(openDropdown === 'usage_part' ? null : 'usage_part')}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                      >
+                        {selectedPartObj ? (
+                          <div className="flex items-center justify-between w-full pr-2 gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold shrink-0">
+                                {selectedPartObj.partNumber}
+                              </span>
+                              <span className="font-bold text-white truncate">{selectedPartObj.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold">
+                                Stok: {selectedPartObj.stock} {selectedPartObj.unit}
+                              </span>
+                              <span className="text-[11px] font-mono font-bold text-amber-400">
+                                Rp {selectedPartObj.costPerUnit.toLocaleString('id-ID')}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-- Pilih Barang Master Part --</span>
+                        )}
+                        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openDropdown === 'usage_part' ? 'rotate-180 text-amber-400' : ''}`} />
+                      </button>
+
+                      {openDropdown === 'usage_part' && (
+                        <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+                          {categoryParts.length === 0 ? (
+                            <div className="p-3 text-center text-slate-400 text-xs">
+                              Belum ada master sparepart untuk kategori ini.
+                            </div>
+                          ) : (
+                            categoryParts.map(p => {
+                              const isSelected = p.id === usageForm.partId;
+                              const isOut = p.stock <= 0;
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  disabled={isOut}
+                                  onClick={() => {
+                                    setUsageForm({
+                                      ...usageForm,
+                                      partId: p.id,
+                                      totalCost: p.costPerUnit * usageForm.quantity
+                                    });
+                                    setOpenDropdown(null);
+                                  }}
+                                  className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition ${
+                                    isOut
+                                      ? 'opacity-45 cursor-not-allowed bg-slate-950'
+                                      : isSelected
+                                      ? 'bg-amber-500/15 text-white cursor-pointer'
+                                      : 'hover:bg-slate-800 text-slate-200 cursor-pointer'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-1.5 py-0.2 rounded bg-slate-800 text-amber-400 border border-slate-700 font-mono text-[10px] font-bold">
+                                        {p.partNumber}
+                                      </span>
+                                      <span className="font-bold text-white text-xs truncate">{p.name}</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5">
+                                      Kompatibel: {p.compatibleVehicles} &bull; Lokasi: {p.storageLocation}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <div className="text-right">
+                                      <div className={`text-[10px] font-mono font-bold ${p.stock <= p.minStock ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                        Sisa Stok: {p.stock} {p.unit}
+                                      </div>
+                                      <div className="text-[11px] font-mono font-bold text-amber-400">
+                                        Rp {p.costPerUnit.toLocaleString('id-ID')}
+                                      </div>
+                                    </div>
+                                    {isSelected && <Check className="w-4 h-4 text-amber-400" />}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Jumlah & Total Biaya */}
@@ -1178,7 +1508,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                         totalCost: selected ? selected.costPerUnit * qty : usageForm.totalCost
                       });
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono font-bold"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono font-bold"
                   />
                 </div>
 
@@ -1189,7 +1519,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     required
                     value={usageForm.totalCost}
                     onChange={(e) => setUsageForm({ ...usageForm, totalCost: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 font-mono font-bold"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 font-mono font-bold"
                   />
                 </div>
               </div>
@@ -1203,7 +1533,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     required
                     value={usageForm.odometerKm}
                     onChange={(e) => setUsageForm({ ...usageForm, odometerKm: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
                   />
                 </div>
 
@@ -1216,13 +1546,13 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     type="number"
                     value={usageForm.nextReplacementKm}
                     onChange={(e) => setUsageForm({ ...usageForm, nextReplacementKm: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
                   />
                 </div>
               </div>
 
               {/* Bengkel / Teknisi & Target Tanggal */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-300 block mb-1 font-semibold">Teknisi / Bengkel Rekanan:</label>
                   <input
@@ -1231,17 +1561,20 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     placeholder="Mekanik Internal / Bengkel Hino"
                     value={usageForm.mechanicOrWorkshop}
                     onChange={(e) => setUsageForm({ ...usageForm, mechanicOrWorkshop: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-300 block mb-1 font-semibold">Estimasi Tanggal Berikutnya:</label>
+                  <label className="text-slate-300 block mb-1 font-semibold flex items-center justify-between">
+                    <span>Estimasi Tanggal Berikutnya:</span>
+                    <span className="text-[10px] font-mono text-emerald-400">{formatIndoDateDisplay(usageForm.nextReplacementDate)}</span>
+                  </label>
                   <input
                     type="date"
                     value={usageForm.nextReplacementDate}
                     onChange={(e) => setUsageForm({ ...usageForm, nextReplacementDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-amber-500 text-white font-mono cursor-pointer"
                   />
                 </div>
               </div>
@@ -1254,21 +1587,24 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                   value={usageForm.notes}
                   onChange={(e) => setUsageForm({ ...usageForm, notes: e.target.value })}
                   placeholder="Kondisi komponen lama, alasan ganti, atau keluhan supir..."
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
                 />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsLogUsageOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                  onClick={() => {
+                    setIsLogUsageOpen(false);
+                    setOpenDropdown(null);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black flex items-center gap-1.5 shadow-md"
+                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black flex items-center gap-1.5 shadow-md cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Simpan Penggantian</span>
@@ -1311,21 +1647,60 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="relative">
                   <label className="text-slate-300 block mb-1 font-semibold">Kategori:</label>
-                  <select
-                    value={newPart.category}
-                    onChange={(e) => setNewPart({ ...newPart, category: e.target.value as SparePartCategory })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="oli">Oli Mesin & Pelumas</option>
-                    <option value="ban">Ban & Velg</option>
-                    <option value="aki">Aki & Baterai</option>
-                    <option value="filter">Filter</option>
-                    <option value="rem">Pengereman</option>
-                    <option value="lainnya">Lainnya</option>
-                  </select>
+                  {(() => {
+                    const activeCatMeta = CATEGORY_OPTIONS_META.find(c => c.value === newPart.category) || CATEGORY_OPTIONS_META[0];
+                    const ActiveCatIcon = activeCatMeta.icon;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setOpenDropdown(openDropdown === 'new_category' ? null : 'new_category')}
+                          className="w-full px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`p-1 rounded-lg border shrink-0 ${activeCatMeta.color}`}>
+                              <ActiveCatIcon className="w-3.5 h-3.5" />
+                            </span>
+                            <span className="font-bold text-white truncate">{activeCatMeta.label}</span>
+                          </div>
+                          <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${openDropdown === 'new_category' ? 'rotate-180 text-emerald-400' : ''}`} />
+                        </button>
+
+                        {openDropdown === 'new_category' && (
+                          <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/60">
+                            {CATEGORY_OPTIONS_META.map(cat => {
+                              const CatIcon = cat.icon;
+                              const isSelected = cat.value === newPart.category;
+                              return (
+                                <button
+                                  key={cat.value}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewPart({ ...newPart, category: cat.value });
+                                    setOpenDropdown(null);
+                                  }}
+                                  className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected ? 'bg-emerald-500/15 text-white' : 'hover:bg-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className={`p-1 rounded-lg border shrink-0 ${cat.color}`}>
+                                      <CatIcon className="w-3.5 h-3.5" />
+                                    </span>
+                                    <span className="font-bold text-xs text-white truncate">{cat.label}</span>
+                                  </div>
+                                  {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -1336,7 +1711,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     placeholder="Contoh: MED-SX-4L"
                     value={newPart.partNumber}
                     onChange={(e) => setNewPart({ ...newPart, partNumber: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
                   />
                 </div>
               </div>

@@ -1,4 +1,24 @@
-export type UserRole = 'super_admin' | 'dispatcher' | 'spv_logistik' | 'operasional' | 'pengiriman' | 'security' | 'driver' | 'crew_helper' | 'sales_admin' | 'purchasing_admin' | 'hr_admin' | 'finance_tax_admin' | 'warehouse_admin' | 'marketing_online' | 'marketing_offline' | 'unassigned';
+export type UserRole =
+  | 'super_admin'
+  | 'dispatcher'
+  | 'spv_logistik'
+  | 'operasional'
+  | 'security'
+  | 'driver'
+  | 'crew_helper'
+  | 'koordinator_driver'
+  | 'sales_admin'
+  | 'spv_sales_admin'
+  | 'purchasing_admin'
+  | 'spv_purchasing_admin'
+  | 'hr_admin'
+  | 'finance_tax_admin'
+  | 'warehouse_admin'
+  | 'koordinator_gudang'
+  | 'marketing_online'
+  | 'marketing_offline'
+  | 'spv_marketing_offline'
+  | 'unassigned';
 export type UserApprovalStatus = 'approved' | 'pending' | 'rejected' | 'inactive';
 
 export type FleetStatus = 'available' | 'on-duty' | 'maintenance';
@@ -10,6 +30,15 @@ export interface UserPermissions {
   modules: Record<string, {
     enabled: boolean;
     subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
+  }>;
+  branchPermissions?: Record<string, {
+    branchId: string;
+    enabled: boolean;
+    allAccess: boolean;
+    modules: Record<string, {
+      enabled: boolean;
+      subMenus: Record<string, 'read_only' | 'full_access' | 'none'>;
+    }>;
   }>;
 }
 
@@ -29,6 +58,9 @@ export interface UserProfile {
   permissions?: UserPermissions;
   password?: string;
 }
+
+export type FleetAngleKey = 'front' | 'rear' | 'right' | 'left' | 'top' | 'cab';
+export type FleetAnglePhotos = Partial<Record<FleetAngleKey, string>>;
 
 export interface Fleet {
   id: string;
@@ -53,6 +85,8 @@ export interface Fleet {
   taxDueDate?: string; // Tanggal Jatuh Tempo Pajak (Tahunan)
   stnkExpiryDate?: string; // Masa Berlaku STNK / Plat (5 Tahunan)
   kirExpiryDate?: string; // Masa Berlaku Uji KIR Dishub (6 Bulanan / Berkala)
+  photos3d?: FleetAnglePhotos; // Foto kondisi armada 6 sudut (depan, belakang, kanan, kiri, atas, kabin)
+  branchId?: string; // Cabang Penugasan ('cab-sidoarjo' | 'cab-banyuwangi')
   // Optional backwards compatibility fields
   tonnageCapacity?: number;
   currentTonnage?: number;
@@ -84,11 +118,12 @@ export interface Crew {
   id: string;
   name: string;
   phone: string;
-  role: 'Driver Utama' | 'Driver Cadangan' | 'Kernet / Helper';
+  role: 'Driver' | 'Helper' | 'Driver Utama' | 'Driver Cadangan' | 'Kernet / Helper';
   licenseNumber: string;
-  licenseType: 'SIM B2 Umum' | 'SIM B1 Umum' | 'SIM A' | '-' | string;
+  licenseType: 'SIM A' | 'SIM B' | 'SIM B1' | 'SIM B2 Umum' | 'SIM B1 Umum' | '-' | string;
   status: CrewStatus;
   currentFleetId?: string;
+  branchId?: string;
   tripsCompleted: number;
   rating: number; // e.g. 4.8 / 5
   certifications?: string[];
@@ -115,6 +150,8 @@ export interface RetailStore {
   deliveryWindow: string; // e.g. "08:00 - 17:00"
   storeCategory: 'Hypermarket' | 'Supermarket' | 'Distribution Hub' | 'Minimarket Cluster' | 'Toko Kelontong / Minimarket' | 'Horeca & Corporate' | 'Mitra Distributor' | 'Needs Correction';
   priorityLevel?: 'High' | 'Medium' | 'Low';
+  catatan?: string;
+  notes?: string;
 }
 
 export interface Schedule {
@@ -126,6 +163,8 @@ export interface Schedule {
   store?: RetailStore;
   fleetId: string;
   fleet?: Fleet;
+  armada?: string;
+  updatedAt?: string;
   crewId: string;
   crewHelperId?: string; // Kernet / Helper 1
   crewHelper2Id?: string; // Kernet / Helper 2 (Tambahan)
@@ -540,10 +579,13 @@ export interface SystemActivity {
   id: string;
   timestamp: string;
   userFullName: string;
+  userEmail?: string;
+  userRole?: string;
   department: string;
   action: string;
   target: string;
   details: string;
+  changeType?: 'tambah' | 'ubah' | 'kurangi';
 }
 
 export type SparePartCategory = 'oli' | 'ban' | 'aki' | 'filter' | 'rem' | 'lainnya';
@@ -583,6 +625,50 @@ export interface SparePartUsage {
   performedBy: string;
 }
 
+export type MaintenanceCategory =
+  | 'servis_berkala'
+  | 'ganti_oli'
+  | 'ban_velg'
+  | 'rem_kopling'
+  | 'aki_kelistrikan'
+  | 'mesin_transmisi'
+  | 'body_box_ac'
+  | 'pajak_kir_surat'
+  | 'darurat_derek'
+  | 'lainnya';
+
+export type MaintenancePaymentStatus =
+  | 'Lunas'
+  | 'Menunggu Approval'
+  | 'Cicilan / Tempo'
+  | 'Dibatalkan';
+
+export interface FleetMaintenanceCost {
+  id: string;
+  fleetId: string;
+  plateNumber: string;
+  initialCode?: string;
+  vehicleType: VehicleType;
+  branchId?: string;
+  serviceDate: string; // YYYY-MM-DD
+  category: MaintenanceCategory;
+  workTitle: string;
+  workshopName: string;
+  odometerKm: number;
+  partsCost: number;
+  laborCost: number;
+  otherCost: number;
+  totalCost: number;
+  paymentStatus: MaintenancePaymentStatus;
+  invoiceNumber?: string;
+  nextServiceKm?: number;
+  nextServiceDate?: string;
+  receiptPhotoUrl?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export type FuelType = 'BioSolar' | 'Dexlite' | 'Pertamina Dex' | 'Pertalite' | 'Pertamax';
 export type EfficiencyStatus = 'Sangat Efisien' | 'Efisien / Normal' | 'Boros' | 'Kritis / Potensi Anomali';
 
@@ -594,6 +680,9 @@ export interface FuelLog {
   vehicleType: VehicleType;
   driverId?: string;
   driverName: string;
+  helperId?: string;
+  helperName?: string;
+  branchId?: string;
   date: string; // YYYY-MM-DD
   fuelType: FuelType;
   liters: number;
@@ -669,9 +758,16 @@ export interface DriverShiftCheckin {
   id: string; // e.g. 'SHIFT-20261008-001'
   driverId: string;
   driverName: string;
+  checkinRole?: 'driver' | 'helper';
+  selectedArea?: string;
   fleetId?: string;
+  fleetInitialCode?: string;
   plateNumber?: string;
   vehicleType?: string;
+  helper1Id?: string;
+  helper1Name?: string;
+  helper2Id?: string;
+  helper2Name?: string;
   date: string; // YYYY-MM-DD
   checkinTime: string; // ISO string
   checkinTimeFormatted: string; // e.g. "07:15 WIB"
@@ -686,8 +782,54 @@ export interface DriverShiftCheckin {
   shiftName: string; // 'Shift Pagi (06:00 - 15:00 WIB)' | 'Shift Siang' | 'Shift Khusus Antar-Kota'
   odometerStartKm?: number;
   notes?: string;
+  checklistCompletedAt?: string;
+  securityValidatedAt?: string;
+  securityValidatedBy?: string;
+  gateOutAt?: string;
+  arrivedAtWarehouseAt?: string;
   synced: boolean;
   createdAt: string;
+}
+
+export interface PortalValidationSnapshot {
+  id: string;
+  validationDate: string;
+  branchId: string;
+  cocokCount: number;
+  tidakCocokCount: number;
+  totalCount: number;
+  rows: any[];
+  validatedBy?: string;
+  updatedAt: string;
+}
+
+export interface LiveGpsTripPoint {
+  lat: number;
+  lng: number;
+  timestamp: string;
+  locationName?: string;
+  speedKmh?: number;
+}
+
+export interface LiveGpsTripRecord {
+  id: string;
+  tripDate: string;
+  branchId: string;
+  fleetId?: string;
+  plateNumber: string;
+  initialCode?: string;
+  vehicleType?: string;
+  driverName: string;
+  helper1Name?: string;
+  helper2Name?: string;
+  areaName: string;
+  status: 'active' | 'completed';
+  startedAt: string;
+  endedAt?: string;
+  currentLat?: number;
+  currentLng?: number;
+  points: LiveGpsTripPoint[];
+  updatedAt?: string;
 }
 
 export interface SwapShiftRequest {

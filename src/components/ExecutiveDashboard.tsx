@@ -52,6 +52,7 @@ import {
 } from '../types';
 import { NavTab } from './Sidebar';
 import { DriverLoadBalancing } from './DriverLoadBalancing';
+import { B2BLogisticsAnalyticsSection } from './B2BLogisticsAnalyticsSection';
 
 interface ExecutiveDashboardProps {
   onNavigate: (tab: NavTab) => void;
@@ -779,6 +780,11 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({ onNaviga
           </div>
         </div>
       </div>
+
+      {/* ============================================================ */}
+      {/* ROW 3.5: B2B LOGISTICS PERFORMANCE & DEEP ANALYTICS (RECHARTS) */}
+      {/* ============================================================ */}
+      <B2BLogisticsAnalyticsSection schedules={schedules} fleets={fleets} />
 
       {/* ============================================================ */}
       {/* ROW 4: TEAM TASKS (7 COLS) & RECENT ACTIVITIES (5 COLS)      */}

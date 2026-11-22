@@ -44,15 +44,24 @@ import {
   ArrowUpFromLine,
   ClipboardCheck,
   Map as MapIcon,
-  Clock
+  Clock,
+  QrCode,
+  DollarSign,
+  Link2,
+  Receipt,
+  FileCheck2,
+  Navigation
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
-import { driverReportService } from '../services/driverReportService';
 import { canAccess } from '../utils/rbac';
+import { preloadTabModule } from '../utils/tabLoaders';
+
+const AndroidApkDownloadModal = React.lazy(() =>
+  import('./AndroidApkDownloadModal').then(m => ({ default: m.AndroidApkDownloadModal }))
+);
 
 export type NavTab =
   | 'dashboard'
@@ -61,16 +70,23 @@ export type NavTab =
   | 'analytics_reports'
   | 'operational_dashboard'
   | 'schedules'
+  | 'portal_validation'
   | 'fleets'
   | 'spareparts'
+  | 'maintenance_costs'
   | 'fuel_efficiency'
   | 'crew_history'
+  | 'live_trips'
   | 'tracking_eval'
   | 'fleet_forms'
   | 'sales_dashboard'
   | 'sales_activities'
   | 'sales_schedules'
   | 'sales_loading_duration'
+  | 'sales_invoice_so'
+  | 'sales_form_kirim'
+  | 'sales_rfid_scanner'
+  | 'sales_muat_validation'
   | 'sales_skill_matrix'
   | 'sales_jobdesk'
   | 'sales_kpi'
@@ -82,13 +98,19 @@ export type NavTab =
   | 'purchasing_dashboard'
   | 'purchasing_stock_overview'
   | 'purchasing_stock_forecast'
+  | 'purchasing_stok_opname'
+  | 'purchasing_kartu_stok'
   | 'hr_dashboard'
   | 'ga_security'
   | 'ga_hk'
   | 'ga_aset'
   | 'training_videos'
   | 'training_karyawan'
+  | 'finance_overview'
   | 'finance_dashboard'
+  | 'finance_customer_mapping'
+  | 'finance_validasi_form_kirim'
+  | 'finance_billing_app'
   | 'warehouse_dashboard'
   | 'warehouse_inventory'
   | 'warehouse_inbound'
@@ -100,6 +122,10 @@ export type NavTab =
   | 'warehouse_fleet_cubication'
   | 'marketing_online'
   | 'marketing_offline'
+  | 'marketing_to_vo_ro'
+  | 'marketing_invoice_validation'
+  | 'marketing_sales_mapping'
+  | 'marketing_billing_app'
   | 'activity_log'
   | 'users'
   | 'branches'
@@ -114,7 +140,7 @@ interface SidebarProps {
   onToggleMinimize?: () => void;
 }
 
-// Simple Dropdown navigation data structures
+// Multi-level Nested Dropdown navigation data structures
 export interface SimpleDropdownItem {
   tab: NavTab;
   label: string;
@@ -124,7 +150,9 @@ export interface SimpleDropdownItem {
 }
 
 export interface SimpleDropdownGroup {
+  groupId: string;
   groupTitle?: string;
+  groupIcon?: React.ReactNode;
   items: SimpleDropdownItem[];
 }
 
@@ -139,7 +167,7 @@ export interface NavCategory {
   checkAccess: (user: UserProfile) => boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
+const SidebarComponent: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   onOpenAuth,
@@ -152,9 +180,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
 
-  // Active category dropdown state (Simple Dropdown pattern)
+  // Active category dropdown state (Multi-Level Nested Dropdown)
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [dropdownTop, setDropdownTop] = useState<number>(80);
+  const [expandedSubGroups, setExpandedSubGroups] = useState<Record<string, boolean>>({});
 
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -166,21 +195,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [mobileExpandedCat, setMobileExpandedCat] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     const updateReports = () => {
-      try {
-        const reps = driverReportService.getReports();
-        setPendingReportsCount(reps.filter(r => r.status === 'pending').length);
-      } catch {}
+      void import('../services/driverReportService')
+        .then(({ driverReportService }) => {
+          if (!active) return;
+          const reps = driverReportService.getReports();
+          setPendingReportsCount(reps.filter(r => r.status === 'pending').length);
+        })
+        .catch(() => {});
     };
-    updateReports();
+    const initTimer = setTimeout(updateReports, 400);
     window.addEventListener('driver-report-updated', updateReports);
-    return () => window.removeEventListener('driver-report-updated', updateReports);
+    return () => {
+      active = false;
+      clearTimeout(initTimer);
+      window.removeEventListener('driver-report-updated', updateReports);
+    };
   }, []);
 
   useEffect(() => {
     const syncUser = () => {
-      setCurrentUser({ ...logisticsStore.getCurrentUser() });
-      setPendingUsersCount(logisticsStore.getPendingUsersCount());
+      const nextUser = logisticsStore.getCurrentUser();
+      setCurrentUser(prev => {
+        if (
+          prev.id === nextUser.id &&
+          prev.fullName === nextUser.fullName &&
+          prev.role === nextUser.role &&
+          prev.status === nextUser.status &&
+          prev.email === nextUser.email &&
+          JSON.stringify(prev.permissions) === JSON.stringify(nextUser.permissions)
+        ) {
+          return prev;
+        }
+        return { ...nextUser };
+      });
+      const nextPending = logisticsStore.getPendingUsersCount();
+      setPendingUsersCount(prev => (prev === nextPending ? prev : nextPending));
     };
     const unsub = logisticsStore.subscribe(syncUser);
     window.addEventListener('akk-branch-updated', syncUser);
@@ -211,8 +262,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const btn = categoryRefs.current[catId];
     if (btn) {
       const rect = btn.getBoundingClientRect();
-      // Clamp so dropdown fits comfortably inside viewport without jumping
-      const clamped = Math.max(16, Math.min(rect.top, window.innerHeight - 440));
+      const cat = categories.find(c => c.id === catId);
+      const totalItems = cat ? cat.groups.reduce((acc, g) => acc + g.items.length, 0) : 5;
+      const totalGroups = cat ? cat.groups.length : 1;
+      const estimatedHeight = Math.min(
+        window.innerHeight - 24,
+        100 + totalGroups * 46 + Math.min(totalItems, 6) * 44
+      );
+      const clamped = Math.max(12, Math.min(rect.top, window.innerHeight - estimatedHeight - 12));
       setDropdownTop(clamped);
     }
   };
@@ -291,7 +348,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Define Navigation Schema with "Dashboard Operasional" & "Analitik Armada & Kru" in Logistik & Pengiriman
+  // Define Navigation Schema with detailed multi-level nested groups
   const categories: NavCategory[] = [
     {
       id: 'dashboard',
@@ -299,9 +356,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       shortLabel: 'Overview',
       icon: <LayoutDashboard className="w-5 h-5" />,
       defaultTab: 'dashboard',
-      checkAccess: (user) => canAccess(user, 'dashboard') || canAccess(user, 'logistics', 'dashboard_logistik'),
+      checkAccess: (user) => canAccess(user, 'dashboard'),
       groups: [
         {
+          groupId: 'dashboard-exec',
           items: [
             {
               tab: 'dashboard',
@@ -318,38 +376,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Logistik & Pengiriman',
       shortLabel: 'Logistik',
       icon: <Truck className="w-5 h-5" />,
+      defaultTab: 'operational_dashboard',
       badge: pendingReportsCount > 0 ? (
         <span className="text-[10px] font-bold bg-rose-500 text-white px-1.5 py-0.2 rounded-full">
           {pendingReportsCount}
         </span>
       ) : undefined,
-      checkAccess: (user) =>
-        canAccess(user, 'logistics', 'portal_driver') ||
-        canAccess(user, 'logistics', 'monitoring_sla') ||
-        canAccess(user, 'logistics', 'dashboard_logistik') ||
-        canAccess(user, 'logistics', 'rencana_rute') ||
-        canAccess(user, 'logistics', 'armada_ceklis'),
+      checkAccess: (user) => canAccess(user, 'logistics'),
       groups: [
         {
-          groupTitle: 'Dashboard & Analitik Logistik',
+          groupId: 'logistik-dashboard-jadwal',
+          groupTitle: 'Dashboard & Penjadwalan',
+          groupIcon: <Calendar className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'operational_dashboard',
-              label: 'Dashboard Operasional',
-              icon: <Truck className="w-4 h-4 text-blue-500" />,
-              description: 'Monitoring armada & status pengiriman real-time'
+              label: 'Dashboard Logistik & Pengiriman',
+              icon: <BarChart3 className="w-4 h-4 text-blue-500" />,
+              description: 'Analitik performa armada, kru & ketepatan waktu kirim'
             },
-            {
-              tab: 'analytics_reports',
-              label: 'Analitik Armada & Kru',
-              icon: <BarChart3 className="w-4 h-4 text-indigo-500" />,
-              description: 'Metrik produktivitas supir dan utilitas kendaraan'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Jadwal & Distribusi',
-          items: [
             {
               tab: 'schedules',
               label: 'Jadwal & Penugasan Armada',
@@ -361,17 +406,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               label: 'Portal Driver Mobile',
               icon: <Smartphone className="w-4 h-4 text-emerald-500" />,
               description: 'Tampilan antarmuka khusus mobile supir'
+            },
+            {
+              tab: 'portal_validation',
+              label: 'Validasi Portal',
+              icon: <FileCheck2 className="w-4 h-4 text-indigo-500" />,
+              description: 'Validasi kesesuaian jadwal admin dengan check-in portal kru'
             }
           ]
         },
         {
-          groupTitle: 'Monitoring & Rute GPS',
+          groupId: 'logistik-monitoring',
+          groupTitle: 'Monitoring, GPS & Laporan',
+          groupIcon: <MapPin className="w-4 h-4 text-emerald-500" />,
           items: [
             {
-              tab: 'fleet_forms',
-              label: 'Formulir & Ceklis Muat',
-              icon: <FileText className="w-4 h-4 text-amber-500" />,
-              description: 'Checklist sebelum jalan & surat jalan'
+              tab: 'live_trips',
+              label: 'Live Trips & Playback Rute',
+              icon: <Navigation className="w-4 h-4 text-blue-500" />,
+              description: 'Pantau armada live di jalan, riwayat rute & playback perjalanan'
             },
             {
               tab: 'driver_reports',
@@ -382,7 +435,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {pendingReportsCount} baru
                 </span>
               ) : undefined,
-              description: 'Kendala perjalanan, penyerahan & foto bukti'
+              description: 'Kendala perjalanan, penyerahan & riwayat GPS'
             },
             {
               tab: 'tracking_eval',
@@ -391,15 +444,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               description: 'Unggah file Excel tracking GPS vendor'
             },
             {
-              tab: 'customer_map',
-              label: 'Jaringan Toko & Wilayah Mitra',
-              icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
-              description: 'Peta sebaran retail store Jawa Timur & Bali'
+              tab: 'fleet_forms',
+              label: 'Formulir Pengadaan Armada',
+              icon: <FileText className="w-4 h-4 text-amber-500" />,
+              description: 'Formulir pengadaan armada, servis & surat jalan'
             }
           ]
         },
         {
-          groupTitle: 'Armada & Perawatan',
+          groupId: 'logistik-armada',
+          groupTitle: 'Armada, Kru & Perawatan',
+          groupIcon: <Truck className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'fleets',
@@ -420,16 +475,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               description: 'Jadwal servis berkala dan stok sparepart'
             },
             {
+              tab: 'maintenance_costs',
+              label: 'Biaya Servis & Pemeliharaan',
+              icon: <Receipt className="w-4 h-4 text-emerald-500" />,
+              description: 'Catat pengeluaran servis rutin, perbaikan, ban, KIR & nota bengkel'
+            },
+            {
               tab: 'fuel_efficiency',
               label: 'Efisiensi Bahan Bakar (BBM)',
               icon: <Fuel className="w-4 h-4 text-rose-500" />,
               description: 'Analisis rasio km/liter dan konsumsi armada'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Simulasi Muatan Armada',
-          items: [
+            },
             {
               tab: 'warehouse_fleet_cubication',
               label: 'Simulasi Box Muatan Armada',
@@ -450,38 +506,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           WMS
         </span>
       ),
-      checkAccess: (user) =>
-        canAccess(user, 'warehouse', 'stok_barang') ||
-        canAccess(user, 'warehouse', 'permintaan_barang') ||
-        canAccess(user, 'warehouse', 'opname_stok') ||
-        canAccess(user, 'warehouse', 'ceklis_muat'),
+      checkAccess: (user) => canAccess(user, 'warehouse'),
       groups: [
         {
-          groupTitle: 'Spesifikasi & Kubikasi',
+          groupId: 'warehouse-master',
+          groupTitle: 'Master Barang & Denah Rak',
+          groupIcon: <Database className="w-4 h-4 text-emerald-500" />,
           items: [
             {
-              tab: 'warehouse_cubication',
-              label: 'Dimensi & Kubikasi Barang',
-              icon: <Layers className="w-4 h-4 text-emerald-500" />,
-              badge: <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">m³ & Kg</span>,
-              description: 'Master ukuran m³ & berat satuan kemasan'
-            }
-          ]
-        },
-        {
-          groupTitle: 'Inventori & Rak Gudang',
-          items: [
-            {
-              tab: 'warehouse_dashboard',
-              label: 'Ringkasan Gudang (WMS)',
-              icon: <Building2 className="w-4 h-4 text-blue-500" />,
-              description: 'Statistik okupansi ruang dan kapasitas'
-            },
-            {
-              tab: 'warehouse_inventory',
-              label: 'Master SKU & Stok Bin',
-              icon: <Package className="w-4 h-4 text-indigo-500" />,
-              description: 'Daftar produk, karton box, dan stok aktif'
+              tab: 'warehouse_scanner',
+              label: 'Database Barang',
+              icon: <Database className="w-4 h-4 text-emerald-500" />,
+              description: 'Nomor barang, dimensi, kubikasi & dokumentasi'
             },
             {
               tab: 'warehouse_slotting',
@@ -492,7 +528,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Operasi Muat & Inbound',
+          groupId: 'warehouse-ops',
+          groupTitle: 'Operasi Inbound & Outbound',
+          groupIcon: <Package className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'warehouse_inbound',
@@ -508,15 +546,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             },
             {
               tab: 'warehouse_opname',
-              label: 'Stok Opname & Kartu Stok',
+              label: 'Opname Gudang',
               icon: <ClipboardCheck className="w-4 h-4 text-purple-500" />,
-              description: 'Audit periodik fisik vs sistem'
-            },
-            {
-              tab: 'warehouse_scanner',
-              label: 'Pemindaian Barcode & AI',
-              icon: <Camera className="w-4 h-4 text-amber-500" />,
-              description: 'Scan label karton box menggunakan kamera'
+              description: 'Pencatatan hasil hitung fisik barang gudang'
             }
           ]
         }
@@ -527,34 +559,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Admin Penjualan',
       shortLabel: 'Admin Penjualan',
       icon: <Briefcase className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'sales_admin', 'dashboard_penjualan') ||
-        canAccess(user, 'sales_admin', 'aktivitas_harian') ||
-        canAccess(user, 'sales_admin', 'jadwal_admin') ||
-        canAccess(user, 'sales_admin', 'durasi_muat') ||
-        canAccess(user, 'sales_admin', 'matriks_skil') ||
-        canAccess(user, 'sales_admin', 'data_kpi'),
+      checkAccess: (user) => canAccess(user, 'sales_admin'),
       groups: [
         {
+          groupId: 'sales-aktivitas',
           groupTitle: 'Aktivitas Harian Admin',
+          groupIcon: <BarChart3 className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'sales_dashboard',
-              label: 'Dashboard Sales Hub',
-              icon: <Briefcase className="w-4 h-4 text-blue-500" />,
-              description: 'Monitoring aktivitas terpadu sales admin'
-            },
-            {
-              tab: 'sales_activities',
-              label: 'Checklist Aktivitas Harian',
-              icon: <Activity className="w-4 h-4 text-blue-500" />,
-              description: 'Input dan verifikasi checklist tugas'
+              label: 'Dashboard Admin Penjualan',
+              icon: <BarChart3 className="w-4 h-4 text-blue-500" />,
+              description: 'Grafik & analitik performa seluruh modul Admin Penjualan'
             },
             {
               tab: 'sales_schedules',
-              label: 'Jadwal Admin & Produksi',
+              label: 'Jadwal & Penugasan Admin',
               icon: <Calendar className="w-4 h-4 text-indigo-500" />,
-              description: 'Sinkronisasi pesanan kirim dengan pabrik'
+              description: 'Jadwal penugasan harian admin penjualan'
             },
             {
               tab: 'sales_loading_duration',
@@ -565,46 +587,77 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Kompetensi & Jobdesk',
+          groupId: 'sales-muat',
+          groupTitle: 'Faktur, Form Kirim & Scan Muat',
+          groupIcon: <FileText className="w-4 h-4 text-indigo-500" />,
           items: [
             {
-              tab: 'sales_skill_matrix',
-              label: 'Matriks Skill Admin',
-              icon: <Award className="w-4 h-4 text-emerald-500" />,
-              description: 'Level keahlian dan sertifikasi admin'
+              tab: 'sales_invoice_so',
+              label: 'Input Faktur / Sales Order (SO)',
+              icon: <FileText className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  Order Muat
+                </span>
+              ),
+              description: 'Input faktur & daftar item barang muatan armada box'
             },
             {
-              tab: 'sales_jobdesk',
-              label: 'Pengaturan SOP & Jobdesk',
-              icon: <Settings className="w-4 h-4 text-slate-500" />,
-              description: 'Pembagian wewenang dan alur kerja'
+              tab: 'sales_form_kirim',
+              label: 'Form Kirim',
+              icon: <Truck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                  Finance & Driver
+                </span>
+              ),
+              description: 'Pengajuan Form Kirim terintegrasi Validasi Finance & Portal Driver'
+            },
+            {
+              tab: 'sales_rfid_scanner',
+              label: 'Aplikasi Scan & Foto Muat',
+              icon: <QrCode className="w-4 h-4 text-emerald-500" />,
+              description: 'Foto item sesuai faktur, deteksi otomatis YOLO & verifikasi muat'
+            },
+            {
+              tab: 'sales_muat_validation',
+              label: 'Validasi Muat & Retur',
+              icon: <ShieldCheck className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  Driver &amp; Helper
+                </span>
+              ),
+              description: 'Validasi laporan salah muat, kurang muat & barang retur dari Portal Driver & Helper'
             }
           ]
         },
         {
+          groupId: 'sales-kpi',
           groupTitle: 'Data KPI Penjualan',
+          groupIcon: <Award className="w-4 h-4 text-amber-500" />,
           items: [
             {
               tab: 'sales_kpi_individual',
-              label: '1. KPI Individu Staf',
+              label: 'KPI Individu Staff',
               icon: <User className="w-4 h-4 text-blue-500" />,
               description: 'Skor performa dan pemenuhan target'
             },
             {
               tab: 'sales_kpi_fines',
-              label: '2. Akumulasi Denda',
+              label: 'Akumulasi Denda',
               icon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
               description: 'Pinalti keterlambatan atau ketidaksesuaian'
             },
             {
               tab: 'sales_kpi_nusantara',
-              label: '3. Persentase Kiriman',
+              label: 'Persentase Kiriman',
               icon: <Percent className="w-4 h-4 text-indigo-500" />,
               description: 'Tingkat keberhasilan distribusi nusantara'
             },
             {
               tab: 'sales_kpi_omset',
-              label: '4. Omset Admin Penjualan',
+              label: 'Omset Admin Penjualan',
               icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
               description: 'Akumulasi omset kiriman terverifikasi'
             }
@@ -617,14 +670,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Adm Pembelian',
       shortLabel: 'Pembelian',
       icon: <ShoppingBag className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'purchasing', 'permintaan_pembelian') ||
-        canAccess(user, 'purchasing', 'po_vendor') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+      checkAccess: (user) => canAccess(user, 'purchasing'),
       groups: [
         {
-          groupTitle: 'Admin Pembelian (PO)',
+          groupId: 'purchasing-po',
+          groupTitle: 'Pembelian & Analisis Stok',
+          groupIcon: <ShoppingBag className="w-4 h-4 text-purple-500" />,
           items: [
             {
               tab: 'purchasing_dashboard',
@@ -645,6 +696,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
               description: 'Perhitungan titik reorder point (ROP)'
             }
           ]
+        },
+        {
+          groupId: 'purchasing-opname',
+          groupTitle: 'Stok Opname & Kartu Stok',
+          groupIcon: <ClipboardCheck className="w-4 h-4 text-indigo-500" />,
+          items: [
+            {
+              tab: 'purchasing_stok_opname',
+              label: 'Stok Opname',
+              icon: <ClipboardCheck className="w-4 h-4 text-indigo-500" />,
+              description: 'Analisa dan pencatatan hasil stok opname barang'
+            },
+            {
+              tab: 'purchasing_kartu_stok',
+              label: 'Kartu Stok',
+              icon: <FileText className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  Analisa Hari
+                </span>
+              ),
+              description: 'Kartu stok digital & analisa otomatis selisih hari pengisian stok'
+            }
+          ]
         }
       ]
     },
@@ -653,32 +728,151 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Marketing',
       shortLabel: 'Marketing',
       icon: <Megaphone className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'marketing', 'kampanye') ||
-        canAccess(user, 'finance_tax', 'kas_bank') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+      checkAccess: (user) => canAccess(user, 'marketing'),
       groups: [
         {
-          groupTitle: 'Marketing & Keuangan',
+          groupId: 'marketing-online-grp',
+          groupTitle: 'Marketing Online',
+          groupIcon: <Globe className="w-4 h-4 text-cyan-500" />,
           items: [
             {
               tab: 'marketing_online',
               label: 'Marketing Online & Ads',
               icon: <Globe className="w-4 h-4 text-cyan-500" />,
               description: 'Kampanye digital dan inbound leads'
-            },
+            }
+          ]
+        },
+        {
+          groupId: 'marketing-offline-grp',
+          groupTitle: 'Marketing Offline & Faktur',
+          groupIcon: <Megaphone className="w-4 h-4 text-amber-500" />,
+          items: [
             {
               tab: 'marketing_offline',
               label: 'Marketing Offline / Kunjungan',
               icon: <Megaphone className="w-4 h-4 text-amber-500" />,
-              description: 'Pipeline prospek pabrik dan industri'
+              description: 'Pipeline prospek pabrik, laporan penjualan & input tagihan'
+            },
+            {
+              tab: 'marketing_invoice_validation',
+              label: 'Validasi Faktur',
+              icon: <ClipboardCheck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  WA Sales
+                </span>
+              ),
+              description: 'Validasi faktur kirim esok hari & integrasi WA Sales'
+            },
+            {
+              tab: 'marketing_sales_mapping',
+              label: 'Mapping Nama Sales',
+              icon: <Link2 className="w-4 h-4 text-indigo-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
+                  2 Master
+                </span>
+              ),
+              description: 'Mapping 1 Sales = 2 Master Nama Sales (Integrasi Validasi Faktur & Aplikasi Penagihan)'
+            }
+          ]
+        },
+        {
+          groupId: 'marketing-analytics-grp',
+          groupTitle: 'Analisa Pelanggan & Penagihan',
+          groupIcon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
+          items: [
+            {
+              tab: 'marketing_to_vo_ro',
+              label: 'Prosentase TO, VO & RO',
+              icon: <Percent className="w-4 h-4 text-emerald-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
+                  TO/VO/RO
+                </span>
+              ),
+              description: 'Analisa prosentase Take Order (TO), Visit Order (VO) & Repeat Order (RO)'
+            },
+            {
+              tab: 'customer_map',
+              label: 'Jaringan Toko & Wilayah Mitra',
+              icon: <MapIcon className="w-4 h-4 text-indigo-500" />,
+              description: 'Peta sebaran retail store Jawa Timur & Bali'
+            },
+            {
+              tab: 'marketing_billing_app',
+              label: 'Aplikasi Penagihan Pelanggan',
+              icon: <DollarSign className="w-4 h-4 text-amber-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                  Kolektor
+                </span>
+              ),
+              description: 'Aplikasi HP penagihan ke pelanggan, foto bukti, kendala & lunas'
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: 'finance_tax',
+      label: 'Finance & Tax',
+      shortLabel: 'Finance',
+      icon: <FileText className="w-5 h-5" />,
+      checkAccess: (user) => canAccess(user, 'finance_tax'),
+      groups: [
+        {
+          groupId: 'finance-master',
+          groupTitle: 'Ringkasan, Tagihan & Master Pelanggan',
+          groupIcon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
+          items: [
+            {
+              tab: 'finance_overview',
+              label: 'Dashboard',
+              icon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
+              description: 'Ringkasan piutang, jatuh tempo, limit kredit & validasi form kirim'
             },
             {
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
               icon: <FileText className="w-4 h-4 text-emerald-500" />,
-              description: 'Faktur penjualan dan konfirmasi piutang'
+              description: 'Monitoring buku besar tagihan & piutang pelanggan per wilayah'
+            },
+            {
+              tab: 'finance_customer_mapping',
+              label: 'Mapping Master Pelanggan',
+              icon: <Users className="w-4 h-4 text-indigo-500" />,
+              description: 'Pengkategorian pelanggan Tempo & COD, sisa limit & umur jatuh tempo'
+            }
+          ]
+        },
+        {
+          groupId: 'finance-validasi',
+          groupTitle: 'Validasi & Penagihan Lapangan',
+          groupIcon: <ShieldCheck className="w-4 h-4 text-blue-500" />,
+          items: [
+            {
+              tab: 'finance_validasi_form_kirim',
+              label: 'Validasi Form Kirim',
+              icon: <ShieldCheck className="w-4 h-4 text-blue-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                  Integrasi
+                </span>
+              ),
+              description: 'Validasi Form Kirim Admin Penjualan sebelum masuk Portal Driver'
+            },
+            {
+              tab: 'finance_billing_app',
+              label: 'Aplikasi Penagihan Pelanggan',
+              icon: <DollarSign className="w-4 h-4 text-amber-500" />,
+              badge: (
+                <span className="text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                  Kolektor
+                </span>
+              ),
+              description: 'Aplikasi HP penagihan ke pelanggan, foto bukti, kendala & lunas'
             }
           ]
         }
@@ -690,82 +884,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
       shortLabel: 'HR',
       icon: <Users className="w-5 h-5" />,
       checkAccess: (user) =>
-        canAccess(user, 'hr', 'hr_data_karyawan') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+        canAccess(user, 'hr') ||
+        canAccess(user, 'hr', 'hr_dashboard') ||
+        canAccess(user, 'hr', 'ga_security') ||
+        canAccess(user, 'hr', 'ga_hk') ||
+        canAccess(user, 'hr', 'ga_aset') ||
+        canAccess(user, 'hr', 'training_videos') ||
+        canAccess(user, 'hr', 'training_karyawan'),
       groups: [
         {
-          groupTitle: 'Personalia & Presensi',
+          groupId: 'hr-personalia',
+          groupTitle: 'Data, Rolling & History Karyawan',
+          groupIcon: <Users className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'hr_dashboard',
-              label: 'Dashboard SDM & Presensi',
+              label: 'HR',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
-              description: 'Data karyawan, presensi kru & rekap kehadiran'
+              description: 'Data karyawan, rolling posisi & history departemen'
             }
           ]
-        }
-      ]
-    },
-    {
-      id: 'ga',
-      label: 'GA',
-      shortLabel: 'GA',
-      icon: <ShieldAlert className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'hr', 'ga_security') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
-      groups: [
+        },
         {
-          groupTitle: 'General Affair (GA)',
+          groupId: 'hr-ga',
+          groupTitle: 'General Affairs (GA) & Keamanan',
+          groupIcon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
           items: [
             {
               tab: 'ga_security',
-              label: 'Security & Keamanan',
+              label: 'GA',
               icon: <ShieldAlert className="w-4 h-4 text-rose-500" />,
-              description: 'Log buku tamu dan jadwal patroli gerbang'
-            },
-            {
-              tab: 'ga_hk',
-              label: 'Housekeeping (Sanitasi)',
-              icon: <Brush className="w-4 h-4 text-cyan-500" />,
-              description: 'Ceklis kebersihan gudang dan kantor'
-            },
-            {
-              tab: 'ga_aset',
-              label: 'Manajemen Aset Pabrik',
-              icon: <Building2 className="w-4 h-4 text-amber-500" />,
-              description: 'Inventaris mesin, forklift, dan perlengkapan'
+              description: 'Security pos gerbang, housekeeping 5R & manajemen aset pabrik'
             }
           ]
-        }
-      ]
-    },
-    {
-      id: 'training_dev',
-      label: 'Training Development',
-      shortLabel: 'Training',
-      icon: <Award className="w-5 h-5" />,
-      checkAccess: (user) =>
-        canAccess(user, 'hr', 'td_video_training') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
-      groups: [
+        },
         {
-          groupTitle: 'Pelatihan & SOP',
+          groupId: 'hr-training',
+          groupTitle: 'Pengembangan & Training',
+          groupIcon: <Award className="w-4 h-4 text-emerald-500" />,
           items: [
             {
               tab: 'training_videos',
-              label: 'Video Training SOP',
-              icon: <Video className="w-4 h-4 text-blue-500" />,
-              description: 'Video panduan muat dan keselamatan kerja'
-            },
-            {
-              tab: 'training_karyawan',
-              label: 'Modul Pelatihan Karyawan',
+              label: 'Training & Development',
               icon: <Award className="w-4 h-4 text-emerald-500" />,
-              description: 'Ujian pemahaman dan sertifikasi internal'
+              description: 'Video training SOP & pelatihan sertifikasi karyawan'
             }
           ]
         }
@@ -781,14 +943,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {pendingUsersCount}
         </span>
       ) : undefined,
-      checkAccess: (user) =>
-        canAccess(user, 'sistem_pengguna', 'daftar_pengguna') ||
-        canAccess(user, 'sistem_pengguna', 'log_aktivitas_sistem') ||
-        user.role === 'super_admin' ||
-        user.role === 'spv_logistik',
+      checkAccess: (user) => canAccess(user, 'sistem_pengguna'),
       groups: [
         {
+          groupId: 'sys-org',
           groupTitle: 'Organisasi & Hak Akses',
+          groupIcon: <Users className="w-4 h-4 text-blue-500" />,
           items: [
             {
               tab: 'users',
@@ -810,7 +970,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ]
         },
         {
-          groupTitle: 'Audit & Arsitektur',
+          groupId: 'sys-audit',
+          groupTitle: 'Audit, Pengujian & Arsitektur',
+          groupIcon: <Database className="w-4 h-4 text-cyan-500" />,
           items: [
             {
               tab: 'activity_log',
@@ -860,11 +1022,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
     })
     .filter(cat => cat.groups.length > 0);
 
+  const isNavItemActive = (itemTab: NavTab): boolean => {
+    if (currentTab === itemTab) return true;
+    if (itemTab === 'operational_dashboard' && currentTab === 'analytics_reports') return true;
+    if (itemTab === 'ga_security' && (currentTab === 'ga_hk' || currentTab === 'ga_aset')) return true;
+    if (itemTab === 'training_videos' && currentTab === 'training_karyawan') return true;
+    return false;
+  };
+
   // Determine if a category contains the currently active tab
   const isCategoryActive = (cat: NavCategory): boolean => {
     if (cat.defaultTab === currentTab) return true;
+    if (cat.id === 'logistik' && (currentTab === 'operational_dashboard' || currentTab === 'analytics_reports')) return true;
+    if (
+      cat.id === 'hr' &&
+      ['hr_dashboard', 'ga_security', 'ga_hk', 'ga_aset', 'training_videos', 'training_karyawan'].includes(currentTab)
+    ) {
+      return true;
+    }
     for (const group of cat.groups) {
-      if (group.items.some(item => item.tab === currentTab)) return true;
+      if (group.items.some(item => isNavItemActive(item.tab))) return true;
     }
     return false;
   };
@@ -872,12 +1049,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Determine active category object
   const activeCategory = visibleCategories.find(c => c.id === activeCategoryId);
 
+  const isSubGroupExpanded = (cat: NavCategory, group: SimpleDropdownGroup): boolean => {
+    const key = `${cat.id}::${group.groupId}`;
+    return Boolean(expandedSubGroups[key]);
+  };
+
+  const toggleSubGroup = (catId: string, groupId: string, currentlyExpanded: boolean) => {
+    const key = `${catId}::${groupId}`;
+    setExpandedSubGroups(currentlyExpanded ? {} : { [key]: true });
+  };
+
   return (
     <>
       {/* ============================================================== */}
       {/* MOBILE TOP BAR (lg:hidden)                                     */}
       {/* ============================================================== */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-[1100] h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between">
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
           className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition active:scale-95"
@@ -906,7 +1093,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside
         ref={asideRef}
         onMouseLeave={handleMouseLeaveCat}
-        className={`hidden lg:block fixed inset-y-0 left-0 z-30 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] overflow-visible ${
+        className={`hidden lg:block fixed inset-y-0 left-0 z-[1100] transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] overflow-visible ${
           isMinimized ? 'w-20' : 'w-72'
         }`}
       >
@@ -991,7 +1178,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
                         : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                     }`}
-                    title={isMinimized ? cat.label : undefined}
+                    title={isMinimized && activeCategoryId !== cat.id ? cat.label : undefined}
                   >
                     <div className={`flex items-center min-w-0 ${isMinimized ? 'gap-0' : 'gap-3'}`}>
                       <span className={`shrink-0 transition-colors ${
@@ -1018,11 +1205,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }`} />
                       </div>
                     )}
-
-                    {/* Small badge dot for minimized mode */}
-                    {isMinimized && cat.badge && (
-                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
-                    )}
                   </button>
                 </div>
               );
@@ -1030,8 +1212,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </nav>
 
           {/* ========================================================== */}
-          {/* SIMPLE DROPDOWN CARD (Style inspired by Lumen Dropdown)    */}
-          {/* Single clean card right beside the sidebar without jitter  */}
+          {/* MULTI-LEVEL NESTED DROPDOWN CARD                           */}
+          {/* Level 1 (Category) -> Level 2 (Sub-Group Accordion) ->     */}
+          {/* Level 3 (Sub-Menu Items)                                   */}
           {/* ========================================================== */}
           {activeCategory && activeCategoryId && (
             <div
@@ -1042,13 +1225,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 position: 'fixed',
                 left: isMinimized ? '88px' : '296px',
                 top: `${dropdownTop}px`,
-                zIndex: 60
+                zIndex: 1200
               }}
               className="hidden lg:block animate-in fade-in zoom-in-95 duration-150 before:absolute before:-left-6 before:top-0 before:bottom-0 before:w-8 before:bg-transparent"
             >
-              <div className="w-80 max-h-[calc(100vh-80px)] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 text-left">
-                {/* Clean Category Header */}
-                <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800/80 mb-1.5 flex items-center justify-between">
+              <div
+                style={{ maxHeight: `calc(100vh - ${dropdownTop + 16}px)` }}
+                className="w-[340px] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/15 dark:shadow-slate-950/70 p-2.5 pb-3.5 text-left"
+              >
+                {/* Level 1 Category Header + Expand/Collapse All */}
+                <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800/80 mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-blue-600 dark:text-blue-400 shrink-0">
                       {activeCategory.icon}
@@ -1057,72 +1243,137 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {activeCategory.label}
                     </span>
                   </div>
-                  {activeCategory.badge}
+                  {activeCategory.badge && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {activeCategory.badge}
+                    </div>
+                  )}
                 </div>
 
-                {/* Vertical Grouped List of Items (Simple Dropdown) */}
-                <div className="space-y-2">
-                  {activeCategory.groups.map((group, groupIdx) => (
-                    <div key={groupIdx} className="space-y-0.5">
-                      {group.groupTitle && (
-                        <div className="px-2.5 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {group.groupTitle}
-                        </div>
-                      )}
-                      {group.items.map((item) => {
-                        const isItemActive = currentTab === item.tab;
+                {/* Level 2 Nested Sub-Group Dropdowns -> Level 3 Items */}
+                <div className="space-y-1.5">
+                  {activeCategory.groups.map((group) => {
+                    const hasGroupActiveItem = group.items.some(item => isNavItemActive(item.tab));
+                    const isGroupOpen = isSubGroupExpanded(activeCategory, group);
 
-                        return (
-                          <button
-                            key={item.tab}
-                            type="button"
-                            onClick={() => handleTabClick(item.tab)}
-                            className={`w-full flex items-start gap-2.5 px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
-                              isItemActive
-                                ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                                : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
-                            }`}
-                          >
-                            <span className={`mt-0.5 shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
-                              {item.icon}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs truncate font-medium">
+                    if (!group.groupTitle) {
+                      return (
+                        <div key={group.groupId} className="space-y-0.5">
+                          {group.items.map((item) => {
+                            const isItemActive = isNavItemActive(item.tab);
+                            return (
+                              <button
+                                key={item.tab}
+                                type="button"
+                                onMouseEnter={() => preloadTabModule(item.tab)}
+                                onFocus={() => preloadTabModule(item.tab)}
+                                onClick={() => handleTabClick(item.tab)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                                  isItemActive
+                                    ? 'bg-blue-600 text-white font-semibold shadow-xs'
+                                    : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
+                                  {item.icon}
+                                </span>
+                                <span className="text-xs truncate font-medium flex-1">
                                   {item.label}
                                 </span>
-                                {item.badge}
-                              </div>
-                              {item.description && (
-                                <div className={`text-[10px] leading-tight truncate mt-0.5 ${
-                                  isItemActive ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'
-                                }`}>
-                                  {item.description}
-                                </div>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
+                                {item.badge && !isItemActive && <span className="shrink-0">{item.badge}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={group.groupId}
+                        className={`rounded-xl border transition-colors ${
+                          isGroupOpen
+                            ? 'border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/35'
+                            : 'border-transparent hover:border-slate-200/70 dark:hover:border-slate-800/80 bg-transparent'
+                        }`}
+                      >
+                        {/* Level 2 Group Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => toggleSubGroup(activeCategory.id, group.groupId, isGroupOpen)}
+                          className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                            hasGroupActiveItem
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-6 h-6 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-center shrink-0 shadow-2xs">
+                              {group.groupIcon || <Layers className="w-3.5 h-3.5 text-slate-500" />}
+                            </span>
+                            <span className="text-[11.5px] font-bold tracking-tight truncate">
+                              {group.groupTitle}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {hasGroupActiveItem && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
+                            )}
+                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-slate-200/70 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300">
+                              {group.items.length}
+                            </span>
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                                isGroupOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''
+                              }`}
+                            />
+                          </div>
+                        </button>
+
+                        {/* Level 3 Nested Sub-Menu Items */}
+                        {isGroupOpen && (
+                          <div className="pl-4 pr-1.5 pb-2 pt-0.5 space-y-0.5 ml-4 border-l-2 border-slate-200 dark:border-slate-700/90">
+                            {group.items.map((item) => {
+                              const isItemActive = isNavItemActive(item.tab);
+                              return (
+                                <button
+                                  key={item.tab}
+                                  type="button"
+                                  onMouseEnter={() => preloadTabModule(item.tab)}
+                                  onFocus={() => preloadTabModule(item.tab)}
+                                  onClick={() => handleTabClick(item.tab)}
+                                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                    isItemActive
+                                      ? 'bg-blue-600 text-white font-semibold shadow-xs'
+                                      : 'hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  <span className={`shrink-0 ${isItemActive ? 'text-white' : 'text-slate-400 dark:text-slate-400'}`}>
+                                    {item.icon}
+                                  </span>
+                                  <span className="text-[11.5px] truncate font-medium flex-1">
+                                    {item.label}
+                                  </span>
+                                  {item.badge && !isItemActive && (
+                                    <span className="shrink-0">{item.badge}</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Sidebar Bottom Footer (Aksi Cepat removed) */}
+          {/* Sidebar Bottom Footer */}
           {isMinimized ? (
             <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col items-center gap-2 shrink-0">
               <ThemeSwitcher variant="icon-only" />
-
-              <button
-                onClick={() => setIsApkModalOpen(true)}
-                className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
-                title="Unduh Berkas APK Driver Mobile"
-              >
-                <Smartphone className="w-4 h-4" />
-              </button>
 
               <button
                 onClick={() => logisticsStore.logoutUser()}
@@ -1138,25 +1389,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <ThemeSwitcher />
                 <button
                   type="button"
-                  onClick={() => setIsApkModalOpen(true)}
-                  className="py-1.5 px-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                  title="Unduh Berkas APK Driver Mobile"
+                  onClick={() => logisticsStore.logoutUser()}
+                  className="py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:border-rose-300 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="Keluar Sesi"
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>APK Driver</span>
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Keluar Sesi</span>
                 </button>
               </div>
-
-              {/* Keluar atau Log Out */}
-              <button
-                type="button"
-                onClick={() => logisticsStore.logoutUser()}
-                className="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:border-rose-300 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-                title="Keluar Sesi"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Keluar Sesi</span>
-              </button>
             </div>
           )}
         </div>
@@ -1166,7 +1406,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* MOBILE ACCORDION DRAWER (lg:hidden)                            */}
       {/* ============================================================== */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-[1200] flex">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity duration-300"
             onClick={() => setIsMobileOpen(false)}
@@ -1218,36 +1458,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
 
                     {isCatExpanded && (
-                      <div className="p-2 space-y-2 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
-                        {cat.groups.map((group, gIdx) => (
-                          <div key={gIdx} className="space-y-1">
-                            {group.groupTitle && (
-                              <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                                {group.groupTitle}
+                      <div className="p-2 space-y-1.5 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+                        {cat.groups.map((group) => {
+                          const hasGroupActiveItem = group.items.some(item => isNavItemActive(item.tab));
+                          const isGroupOpen = isSubGroupExpanded(cat, group);
+
+                          if (!group.groupTitle) {
+                            return (
+                              <div key={group.groupId} className="space-y-0.5">
+                                {group.items.map((item) => {
+                                  const isCur = isNavItemActive(item.tab);
+                                  return (
+                                    <button
+                                      key={item.tab}
+                                      onClick={() => handleTabClick(item.tab)}
+                                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-left transition ${
+                                        isCur
+                                          ? 'bg-blue-600 text-white font-semibold'
+                                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
+                                        <span className="truncate">{item.label}</span>
+                                      </div>
+                                      {item.badge && !isCur && <span className="shrink-0 ml-1">{item.badge}</span>}
+                                    </button>
+                                  );
+                                })}
                               </div>
-                            )}
-                            {group.items.map((item) => {
-                              const isCur = currentTab === item.tab;
-                              return (
-                                <button
-                                  key={item.tab}
-                                  onClick={() => handleTabClick(item.tab)}
-                                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-left transition ${
-                                    isCur
-                                      ? 'bg-blue-600 text-white font-semibold'
-                                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
-                                    <span>{item.label}</span>
-                                  </div>
-                                  {item.badge}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ))}
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={group.groupId}
+                              className={`rounded-xl border transition-colors ${
+                                isGroupOpen
+                                  ? 'border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40'
+                                  : 'border-slate-100 dark:border-slate-800/60 bg-transparent'
+                              }`}
+                            >
+                              {/* Mobile Level 2 Group Header */}
+                              <button
+                                type="button"
+                                onClick={() => toggleSubGroup(cat.id, group.groupId, isGroupOpen)}
+                                className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left text-[11.5px] font-bold transition ${
+                                  hasGroupActiveItem
+                                    ? 'text-blue-600 dark:text-blue-400'
+                                    : 'text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="shrink-0">{group.groupIcon || <Layers className="w-3.5 h-3.5 text-slate-400" />}</span>
+                                  <span className="truncate">{group.groupTitle}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    {group.items.length}
+                                  </span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isGroupOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : 'text-slate-400'}`} />
+                                </div>
+                              </button>
+
+                              {/* Mobile Level 3 Items */}
+                              {isGroupOpen && (
+                                <div className="pl-3 pr-1.5 pb-2 pt-0.5 space-y-0.5 ml-3.5 border-l-2 border-slate-200 dark:border-slate-700">
+                                  {group.items.map((item) => {
+                                    const isCur = isNavItemActive(item.tab);
+                                    return (
+                                      <button
+                                        key={item.tab}
+                                        onClick={() => handleTabClick(item.tab)}
+                                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[11.5px] font-medium text-left transition ${
+                                          isCur
+                                            ? 'bg-blue-600 text-white font-semibold'
+                                            : 'text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className={isCur ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
+                                          <span className="truncate">{item.label}</span>
+                                        </div>
+                                        {item.badge && !isCur && <span className="shrink-0 ml-1">{item.badge}</span>}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1269,13 +1570,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Android APK Modal */}
-      <AndroidApkDownloadModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-      />
+      {/* Android APK Modal (lazy-loaded only when opened) */}
+      {isApkModalOpen && (
+        <React.Suspense fallback={null}>
+          <AndroidApkDownloadModal
+            isOpen={isApkModalOpen}
+            onClose={() => setIsApkModalOpen(false)}
+          />
+        </React.Suspense>
+      )}
     </>
   );
 };
 
+export const Sidebar = React.memo(SidebarComponent);
 export default Sidebar;
+

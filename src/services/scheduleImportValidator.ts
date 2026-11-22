@@ -347,20 +347,31 @@ export const scheduleImportValidator = {
     // Track existing items in DB
     const existingPoMap = new Map<string, Schedule>();
     const existingDriverDateSet = new Set<string>(); // `${driver.toUpperCase()}_${YYYY-MM-DD}`
+    const existingFleetDateMap = new Map<string, { area: string; driver: string }>();
 
     existingSchedules.forEach(sch => {
       if (sch.trackingNumber) {
         existingPoMap.set(sch.trackingNumber.trim().toUpperCase(), sch);
       }
-      if (sch.crew?.name && sch.departureDate) {
-        const dateKey = sch.departureDate.substring(0, 10);
-        existingDriverDateSet.add(`${sch.crew.name.trim().toUpperCase()}_${dateKey}`);
+      const calIso = logisticsStore.getScheduleCalendarIso(sch) || (sch.departureDate ? sch.departureDate.substring(0, 10) : '');
+      if (sch.crew?.name && calIso) {
+        existingDriverDateSet.add(`${sch.crew.name.trim().toUpperCase()}_${calIso}`);
+      }
+      const rawFleetRef = sch.armada || sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId || '';
+      const resolvedFleet = logisticsStore.findFleetByCodeOrPlate(rawFleetRef);
+      const canonicalFleetKey = (resolvedFleet?.id || resolvedFleet?.initialCode || rawFleetRef).trim().toUpperCase();
+      if (canonicalFleetKey && calIso) {
+        existingFleetDateMap.set(`${canonicalFleetKey}_${calIso}`, {
+          area: sch.areaName || sch.store?.storeName || '-',
+          driver: sch.crew?.name || '-'
+        });
       }
     });
 
     // Track internal duplicates within this batch
     const batchPoCount = new Map<string, number>();
     const batchDriverDateSet = new Set<string>();
+    const batchFleetDateSet = new Set<string>();
 
     const items: ValidatedImportItem[] = [];
 
@@ -408,6 +419,8 @@ export const scheduleImportValidator = {
       let depDateIso = defaultDate.toISOString();
       let arrDateIso = new Date(defaultDate.getTime() + 8.5 * 3600000).toISOString();
       let dateDisplay = defaultDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+      const effectiveDateForKey = parsedDate || defaultDate;
+      const localDateKey = `${effectiveDateForKey.getFullYear()}-${String(effectiveDateForKey.getMonth() + 1).padStart(2, '0')}-${String(effectiveDateForKey.getDate()).padStart(2, '0')}`;
 
       if (dateError || !parsedDate) {
         depDateIso = defaultDate.toISOString();
@@ -450,8 +463,7 @@ export const scheduleImportValidator = {
 
       // 5. Driver Assignment Check (Rotating Schedule System)
       if (cleanDriver && parsedDate) {
-        const dateKey = parsedDate.toISOString().substring(0, 10);
-        const driverKey = `${cleanDriver.toUpperCase()}_${dateKey}`;
+        const driverKey = `${cleanDriver.toUpperCase()}_${localDateKey}`;
 
         if (existingDriverDateSet.has(driverKey) || batchDriverDateSet.has(driverKey)) {
           issues.push({
@@ -464,9 +476,40 @@ export const scheduleImportValidator = {
         }
       }
 
+      // 6. Strict Same-Day Armada Uniqueness Check (1 Armada = Maksimal 1 Pengiriman per Tanggal)
+      if (cleanArmada && cleanArmada !== 'Truk Reguler' && localDateKey) {
+        const matchedFleet = logisticsStore.findFleetByCodeOrPlate(cleanArmada);
+        const fleetCanonical = (matchedFleet?.id || matchedFleet?.initialCode || cleanArmada).trim().toUpperCase();
+        const fleetDateKey = `${fleetCanonical}_${localDateKey}`;
+        if (batchFleetDateSet.has(fleetDateKey)) {
+          isDuplicate = true;
+          duplicateCount++;
+          duplicateDetails = `Armada "${cleanArmada}" ganda dalam file upload pada tanggal ${dateDisplay}.`;
+          issues.push({
+            severity: 'error',
+            field: 'armada',
+            message: `Armada Ganda: Unit "${cleanArmada}" muncul lebih dari 1 kali pada tanggal ${dateDisplay}.`
+          });
+        } else {
+          batchFleetDateSet.add(fleetDateKey);
+          const existingFleetInfo = existingFleetDateMap.get(fleetDateKey);
+          if (existingFleetInfo) {
+            issues.push({
+              severity: 'warning',
+              field: 'armada',
+              message: `Bentrok Jadwal: Armada "${cleanArmada}" sudah terjadwal pada ${dateDisplay} (${existingFleetInfo.area} • ${existingFleetInfo.driver}).`
+            });
+          }
+        }
+      }
+
       const isValidItem = issues.filter(iss => iss.severity === 'error').length === 0;
-      validCount++;
-      status = 'valid';
+      if (isValidItem) {
+        validCount++;
+        status = 'valid';
+      } else {
+        status = 'duplicate_assignment';
+      }
 
       items.push({
         index: idx,

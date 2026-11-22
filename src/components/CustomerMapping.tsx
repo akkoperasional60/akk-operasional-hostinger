@@ -4,6 +4,7 @@ import { RetailStore, UserRole } from '../types';
 import { CENTRAL_WAREHOUSE } from '../data/mockData';
 import { LeafletMap } from './LeafletMap';
 import { logisticsStore } from '../services/store';
+import { canEdit as checkCanEdit } from '../utils/rbac';
 import {
   extractCoordinatesFromObject,
   getStoreLocationType,
@@ -57,19 +58,22 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
   onCreateScheduleForStore,
   onScheduleForStore,
   onAddStore,
-  currentRole = 'super_admin'
+  currentRole: _currentRole = 'super_admin'
 }) => {
   const [storeList, setStoreList] = useState<RetailStore[]>(propStores || logisticsStore.getStores());
+  const [activeUser, setActiveUser] = useState(() => logisticsStore.getCurrentUser());
 
   React.useEffect(() => {
+    const unsub = logisticsStore.subscribe(() => {
+      if (!propStores) {
+        setStoreList(logisticsStore.getStores());
+      }
+      setActiveUser(logisticsStore.getCurrentUser());
+    });
     if (propStores) {
       setStoreList(propStores);
-    } else {
-      const unsub = logisticsStore.subscribe(() => {
-        setStoreList(logisticsStore.getStores());
-      });
-      return unsub;
     }
+    return unsub;
   }, [propStores]);
 
   const stores = storeList;
@@ -82,11 +86,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
     }
   };
 
-  const canEdit =
-    currentRole === 'super_admin' ||
-    currentRole === 'spv_logistik' ||
-    currentRole === 'operasional' ||
-    currentRole === 'dispatcher';
+  const canEdit = checkCanEdit(activeUser, 'customer_map');
   const excelInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedRegionType, setSelectedRegionType] = useState<'all' | StoreLocationType>('all');
@@ -118,9 +118,12 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [address, setAddress] = useState('');
+  const [catatanInput, setCatatanInput] = useState('');
   const [contactPerson, setContactPerson] = useState('');
   const [phone, setPhone] = useState('');
   const [deliveryWindow, setDeliveryWindow] = useState('08:00 - 16:00');
+  const [isEditingSelectedNote, setIsEditingSelectedNote] = useState(false);
+  const [selectedNoteDraft, setSelectedNoteDraft] = useState('');
 
   const activeRadiusCenter: [number, number] = useMemo(() => {
     if (radiusPivotType === 'warehouse') {
@@ -153,6 +156,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         const resolvedKecamatan =
           (st.kecamatan || ((st.city || '').match(/\((.*?)\)/)?.[1]) || '-')
             .trim();
+        const resolvedCatatan = (st.catatan ?? st.notes ?? '').trim();
 
         return {
           ...st,
@@ -161,6 +165,8 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
           kabupaten: resolvedKabupaten,
           latitude: coords.latitude,
           longitude: coords.longitude,
+          catatan: resolvedCatatan,
+          notes: resolvedCatatan,
           locType
         };
       });
@@ -207,16 +213,24 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
     return Array.from(set).sort();
   }, [normalizedStores, selectedRegionType, selectedKabupaten]);
 
+  const [visibleStoreLimit, setVisibleStoreLimit] = useState<number>(80);
+
+  React.useEffect(() => {
+    setVisibleStoreLimit(80);
+  }, [selectedRegionType, selectedKabupaten, selectedKecamatan, searchQuery, isRadiusMode, radiusKm]);
+
   const filteredStores = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return normalizedStores
       .map(st => {
-        const distFromPivot = calculateHaversineDistanceKm(
-          activeRadiusCenter[0],
-          activeRadiusCenter[1],
-          st.latitude,
-          st.longitude
-        );
+        const distFromPivot = isRadiusMode
+          ? calculateHaversineDistanceKm(
+              activeRadiusCenter[0],
+              activeRadiusCenter[1],
+              st.latitude,
+              st.longitude
+            )
+          : 0;
         return {
           ...st,
           distanceFromPivotKm: distFromPivot
@@ -242,7 +256,8 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
           (st.kecamatan || '').toLowerCase().includes(q) ||
           (st.kabupaten || '').toLowerCase().includes(q) ||
           (st.storeCode || '').toLowerCase().includes(q) ||
-          (st.address || '').toLowerCase().includes(q)
+          (st.address || '').toLowerCase().includes(q) ||
+          (st.catatan || '').toLowerCase().includes(q)
         );
       })
       .sort((a, b) => {
@@ -250,6 +265,10 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         return Number(a.nomor || 0) - Number(b.nomor || 0);
       });
   }, [normalizedStores, selectedRegionType, selectedKabupaten, selectedKecamatan, searchQuery, isRadiusMode, radiusKm, activeRadiusCenter]);
+
+  const visibleStores = useMemo(() => {
+    return filteredStores.slice(0, visibleStoreLimit);
+  }, [filteredStores, visibleStoreLimit]);
 
   const getRegionBadgeClasses = (locType: StoreLocationType) => {
     if (locType === 'dalam_kota') {
@@ -289,43 +308,50 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         No: 1,
         'Nama Toko': 'TK HOLLY GENTENG',
         Latitude: -8.364532,
-        Longitude: 114.193750
+        Longitude: 114.193750,
+        Catatan: 'Akses truk box engkel, parkir depan ruko luas'
       },
       {
         No: 2,
         'Nama Toko': 'BU TIWI GENTENG',
         Latitude: -8.365165,
-        Longitude: 114.145370
+        Longitude: 114.145370,
+        Catatan: 'Bongkar muat pagi jam 08:00 - 10:00'
       },
       {
         No: 3,
         'Nama Toko': 'TOKO SUMBER PLASTIK JEMBER',
         Latitude: -8.168950,
-        Longitude: 113.714820
+        Longitude: 113.714820,
+        Catatan: 'Jalan utama kota, dekat lampu merah'
       },
       {
         No: 4,
         'Nama Toko': 'TOKO MAJU JAYA SITUBONDO',
         Latitude: -7.714850,
-        Longitude: 114.034920
+        Longitude: 114.034920,
+        Catatan: 'Gudang belakang toko, penerima Pak Bambang'
       },
       {
         No: 5,
         'Nama Toko': 'UD KEMASAN MAKMUR BONDOWOSO',
         Latitude: -7.913480,
-        Longitude: 113.821450
+        Longitude: 113.821450,
+        Catatan: 'Bongkar di lorong samping'
       },
       {
         No: 6,
         'Nama Toko': 'WARUNG JAWA MUSLIM RENA PULAU BUNGIN',
         Latitude: -8.676800,
-        Longitude: 115.204500
+        Longitude: 115.204500,
+        Catatan: 'Area Denpasar Selatan, rute Bali'
       },
       {
         No: 7,
         'Nama Toko': 'DISTRIBUSI KEMASAN SAMSAM TABANAN',
         Latitude: -8.532500,
-        Longitude: 115.098500
+        Longitude: 115.098500,
+        Catatan: 'Jalur bypass Tabanan'
       }
     ];
 
@@ -334,7 +360,8 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
       { wch: 8 },
       { wch: 38 },
       { wch: 16 },
-      { wch: 16 }
+      { wch: 16 },
+      { wch: 32 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Template_Pelanggan');
@@ -348,6 +375,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
       'Nama Toko': st.storeName,
       Latitude: st.latitude,
       Longitude: st.longitude,
+      Catatan: st.catatan || st.notes || '',
       'Kategori Wilayah':
         st.locType === 'dalam_kota'
           ? 'Dalam Kota (Biru)'
@@ -362,6 +390,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
       { wch: 38 },
       { wch: 16 },
       { wch: 16 },
+      { wch: 32 },
       { wch: 22 }
     ];
     const wb = XLSX.utils.book_new();
@@ -471,6 +500,10 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
           const kabPrefix = resolvedKabupaten.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'BWI';
           const nomorVal = rawNomor !== '' ? rawNomor : parsedStores.length + 1;
 
+          const rawCatatan = String(
+            findVal(['catatan', 'keterangan', 'note', 'notes', 'remark', 'remarks', 'deskripsi']) || ''
+          ).trim();
+
           parsedStores.push({
             id: `str-xls-${Date.now()}-${index}`,
             nomor: nomorVal,
@@ -487,7 +520,9 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
             contactPerson: 'PIC Toko',
             phone: '-',
             deliveryWindow: '08:00 - 16:00',
-            storeCategory: 'Mitra Distributor'
+            storeCategory: 'Mitra Distributor',
+            catatan: rawCatatan || undefined,
+            notes: rawCatatan || undefined
           });
         });
 
@@ -499,7 +534,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
             message:
               skippedInvalidCoords > 0
                 ? `Seluruh baris (${skippedInvalidCoords} baris) dilewati karena koordinat Latitude/Longitude kosong atau tidak valid.`
-                : 'Tidak ditemukan kolom "No, Nama Toko, Latitude, Longitude" yang valid. Gunakan Template Excel yang telah disediakan.'
+                : 'Tidak ditemukan kolom "No, Nama Toko, Latitude, Longitude, Catatan" yang valid. Gunakan Template Excel yang telah disediakan.'
           });
           return;
         }
@@ -579,6 +614,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
     const kabPrefix = kabupaten.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'BWI';
     const cleanNomor = nomorInput.trim() || String(stores.length + 1);
 
+    const cleanCatatan = catatanInput.trim();
     const newStorePayload: Omit<RetailStore, 'id'> = {
       nomor: cleanNomor,
       storeCode: `RET-${kabPrefix}-${String(cleanNomor).padStart(3, '0')}`,
@@ -594,7 +630,9 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
       contactPerson: contactPerson.trim() || 'PIC Toko',
       phone: phone.trim() || '-',
       deliveryWindow: deliveryWindow || '08:00 - 16:00',
-      storeCategory: 'Mitra Distributor'
+      storeCategory: 'Mitra Distributor',
+      catatan: cleanCatatan || undefined,
+      notes: cleanCatatan || undefined
     };
 
     if (onAddStore) {
@@ -605,6 +643,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
 
     setStoreName('');
     setAddress('');
+    setCatatanInput('');
     setContactPerson('');
     setPhone('');
     setNomorInput(String(stores.length + 2));
@@ -674,7 +713,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                 />
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Kolom yang dibaca otomatis: <strong className="text-slate-200">No, Nama Toko, Latitude, Longitude</strong>
+                Kolom yang dibaca otomatis: <strong className="text-slate-200">No, Nama Toko, Latitude, Longitude, Catatan</strong>
               </p>
             </div>
 
@@ -725,7 +764,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                   <span className="font-bold text-emerald-400">
                     Preview File: {selectedUploadFileName} ({parsedUploadStores.length} Baris Valid)
                   </span>
-                  <span className="text-slate-400">Kolom: No, Nama Toko, Latitude, Longitude</span>
+                  <span className="text-slate-400">Kolom: No, Nama Toko, Latitude, Longitude, Catatan</span>
                 </div>
                 <div className="max-h-72 overflow-y-auto">
                   <table className="w-full text-left border-collapse text-xs">
@@ -735,6 +774,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                         <th className="py-2.5 px-4">Nama Toko</th>
                         <th className="py-2.5 px-4 text-right">Latitude</th>
                         <th className="py-2.5 px-4 text-right">Longitude</th>
+                        <th className="py-2.5 px-4">Catatan</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
@@ -744,6 +784,22 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                           <td className="py-2 px-4 text-slate-200 font-semibold">{item.storeName}</td>
                           <td className="py-2 px-4 text-right font-mono text-emerald-400">{Number(item.latitude).toFixed(6)}</td>
                           <td className="py-2 px-4 text-right font-mono text-emerald-400">{Number(item.longitude).toFixed(6)}</td>
+                          <td className="py-1.5 px-4">
+                            <input
+                              type="text"
+                              value={item.catatan || item.notes || ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setParsedUploadStores(prev =>
+                                  prev.map((rowItem, rIdx) =>
+                                    rIdx === idx ? { ...rowItem, catatan: val, notes: val } : rowItem
+                                  )
+                                );
+                              }}
+                              placeholder="Tambah catatan..."
+                              className="w-full px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-amber-300 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                            />
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1157,14 +1213,29 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
               <span className="text-[11px] text-slate-500">Klik baris untuk detail & jadwal</span>
             </div>
 
-            <div className="overflow-y-auto space-y-2 pr-1 flex-1">
-              {filteredStores.map(store => {
+            <div
+              className="overflow-y-auto space-y-2 pr-1 flex-1"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (
+                  visibleStoreLimit < filteredStores.length &&
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 180
+                ) {
+                  setVisibleStoreLimit(prev => Math.min(filteredStores.length, prev + 80));
+                }
+              }}
+            >
+              {visibleStores.map(store => {
                 const isSelected = selectedStore?.id === store.id;
                 const badgeMeta = getRegionBadgeClasses(store.locType);
                 return (
                   <div
                     key={store.id}
-                    onClick={() => setSelectedStore(store)}
+                    onClick={() => {
+                      setSelectedStore(store);
+                      setIsEditingSelectedNote(false);
+                      setSelectedNoteDraft(store.catatan || store.notes || '');
+                    }}
                     className={`p-3 rounded-xl border transition cursor-pointer ${
                       isSelected
                         ? 'bg-blue-600/15 border-blue-500/60 shadow-sm'
@@ -1182,6 +1253,11 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                         <div className="text-[10px] text-slate-400 font-mono mt-1">
                           Lat: {store.latitude.toFixed(6)} | Lng: {store.longitude.toFixed(6)}
                         </div>
+                        {(store.catatan || store.notes) && (
+                          <div className="text-[11px] text-amber-300/90 mt-1 truncate">
+                            📝 Catatan: {store.catatan || store.notes}
+                          </div>
+                        )}
                       </div>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-md font-bold whitespace-nowrap border flex items-center gap-1 ${badgeMeta.badge}`}
@@ -1193,6 +1269,16 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                   </div>
                 );
               })}
+
+              {visibleStoreLimit < filteredStores.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleStoreLimit(prev => Math.min(filteredStores.length, prev + 120))}
+                  className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-blue-300 transition cursor-pointer"
+                >
+                  Tampilkan Lebih Banyak ({visibleStores.length} dari {filteredStores.length} Toko)
+                </button>
+              )}
 
               {filteredStores.length === 0 && (
                 <div className="text-center py-10 text-slate-500 text-xs">
@@ -1209,9 +1295,11 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
               nomor: selectedStore.nomor ?? '-',
               kecamatan: selectedStore.kecamatan || '-',
               kabupaten: selectedStore.kabupaten || selectedStore.city || 'Banyuwangi',
+              catatan: selectedStore.catatan || selectedStore.notes || '',
               locType: getStoreLocationType(selectedStore)
             };
             const badgeMeta = getRegionBadgeClasses(normSel.locType);
+            const currentNote = normSel.catatan || normSel.notes || '';
 
             return (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shrink-0">
@@ -1262,6 +1350,71 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                     <span className="text-[10px] text-slate-500 block">Longitude</span>
                     <strong className="text-blue-300 font-mono">{Number(normSel.longitude).toFixed(6)}</strong>
                   </div>
+                </div>
+
+                {/* Catatan Pelanggan / Toko */}
+                <div className="mt-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Catatan Toko
+                    </span>
+                    {canEdit && !isEditingSelectedNote && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedNoteDraft(currentNote);
+                          setIsEditingSelectedNote(true);
+                        }}
+                        className="text-[11px] font-bold text-amber-400 hover:text-amber-300 cursor-pointer"
+                      >
+                        {currentNote ? 'Ubah Catatan' : '+ Tambah Catatan'}
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditingSelectedNote ? (
+                    <div className="space-y-2 mt-1.5">
+                      <input
+                        type="text"
+                        value={selectedNoteDraft}
+                        onChange={e => setSelectedNoteDraft(e.target.value)}
+                        placeholder="Masukkan catatan toko (akses jalan, jam bongkar, PIC, dll.)..."
+                        className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingSelectedNote(false)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold cursor-pointer"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cleanNote = selectedNoteDraft.trim();
+                            logisticsStore.updateStore(normSel.id, {
+                              catatan: cleanNote,
+                              notes: cleanNote
+                            });
+                            setSelectedStore(prev =>
+                              prev && prev.id === normSel.id
+                                ? { ...prev, catatan: cleanNote, notes: cleanNote }
+                                : prev
+                            );
+                            setIsEditingSelectedNote(false);
+                          }}
+                          className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          Simpan Catatan
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className={currentNote ? 'text-amber-300 font-medium' : 'text-slate-500 italic'}>
+                      {currentNote || 'Belum ada catatan khusus untuk toko ini.'}
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -1366,6 +1519,17 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Catatan (Opsional)</label>
+                <input
+                  type="text"
+                  value={catatanInput}
+                  onChange={e => setCatatanInput(e.target.value)}
+                  placeholder="Contoh: Akses truk engkel, jam bongkar pagi, dsb."
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+                />
               </div>
 
               <div>

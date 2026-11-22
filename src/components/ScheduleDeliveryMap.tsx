@@ -37,7 +37,10 @@ export const ScheduleDeliveryMap: React.FC<ScheduleDeliveryMapProps> = ({
         center: CENTRAL_WAREHOUSE.coordinates,
         zoom: 8,
         zoomControl: true,
-        attributionControl: false
+        attributionControl: false,
+        zoomAnimation: false,
+        fadeAnimation: false,
+        markerZoomAnimation: false
       });
 
       // Add OpenStreetMap tile layer
@@ -155,10 +158,23 @@ export const ScheduleDeliveryMap: React.FC<ScheduleDeliveryMapProps> = ({
       }
     });
 
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    if (bounds.isValid() && (map as any)._mapPane) {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12, animate: false });
     }
   }, [schedule, schedules, stores]);
+
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.stop();
+          mapInstanceRef.current.off();
+          mapInstanceRef.current.remove();
+        } catch {}
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className={`relative rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 ${className}`}>

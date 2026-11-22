@@ -158,9 +158,9 @@ export function validateCrew(
   }
 
   // 2. Peran Tugas (Role)
-  const allowedRoles = ['Driver Utama', 'Driver Cadangan', 'Kernet / Helper'];
+  const allowedRoles = ['Driver', 'Helper', 'Driver Utama', 'Driver Cadangan', 'Kernet / Helper'];
   if (!crew.role || !allowedRoles.includes(crew.role)) {
-    errors.role = 'Pilih peran tugas yang valid (Driver Utama, Driver Cadangan, atau Kernet / Helper).';
+    errors.role = 'Pilih peran tugas yang valid (Driver atau Helper).';
   }
 
   // 3. Nomor Handphone / WhatsApp (Optional)

@@ -17,11 +17,15 @@ import {
   X,
   Check,
   MapPin,
-  ShieldCheck
+  ShieldCheck,
+  Trash2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { logisticsStore } from '../services/store';
 import { useToast } from '../context/ToastContext';
+import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
 
 interface CrewAttendanceReportViewProps {
   onBackToOperationalReports?: () => void;
@@ -31,15 +35,25 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   onBackToOperationalReports
 }) => {
   const { addNotification } = useToast();
-  const currentUser = logisticsStore.getCurrentUser();
+  const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
+
+  useEffect(() => {
+    const syncUser = () => setCurrentUser({ ...logisticsStore.getCurrentUser() });
+    const unsub = logisticsStore.subscribe(syncUser);
+    return () => unsub();
+  }, []);
 
   const isAuthorizedSpvOrAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase();
+    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
     const name = (currentUser?.fullName || '').toLowerCase();
     return (
-      r === 'super_admin' ||
-      r === 'spv_logistik' ||
+      r === 'superadmin' ||
+      r === 'spvlogistik' ||
       r === 'admin' ||
+      r === 'manager' ||
+      r === 'operasional' ||
+      r === 'pengiriman' ||
+      name.includes('super') ||
       name.includes('spv') ||
       name.includes('supervisor') ||
       name.includes('bayu') ||
@@ -47,12 +61,27 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     );
   }, [currentUser]);
 
+  const isSuperAdmin = useMemo(() => {
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
+  }, [currentUser]);
+
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'pending'>('all');
   const [dateFilterMode, setDateFilterMode] = useState<'single_date' | 'all'>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateStr());
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getLocalDateStr().slice(0, 7));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<DriverHelperReport | null>(null);
+  const [deleteConfirmReport, setDeleteConfirmReport] = useState<DriverHelperReport | null>(null);
+  const [deleteConfirmGroup, setDeleteConfirmGroup] = useState<{
+    groupKey: string;
+    areaName: string;
+    scheduleDate: string;
+    driverName: string;
+    plateNumber: string;
+    items: DriverHelperReport[];
+  } | null>(null);
 
   // Modal Input Absen Kiriman di Pelanggan Baru
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -90,6 +119,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
   useEffect(() => {
     loadAttendanceReports();
+    void driverReportService.syncWithServer(true);
     const handleUpdate = () => loadAttendanceReports();
     window.addEventListener('driver-report-updated', handleUpdate);
     return () => window.removeEventListener('driver-report-updated', handleUpdate);
@@ -99,6 +129,43 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   const allCustomerAttendanceReports = useMemo(() => {
     return reports.filter(r => r.category === 'istirahat');
   }, [reports]);
+
+  // Statistik Toko Kiriman dalam 1 Bulan (sesuai bulan terpilih)
+  const monthlyStoreStats = useMemo(() => {
+    const monthPrefix = selectedMonth || getLocalDateStr().slice(0, 7);
+    const inMonthReports = allCustomerAttendanceReports.filter(r => {
+      const d = getLocalDateStr(r.date || r.timestamp);
+      return d.startsWith(monthPrefix);
+    });
+    const uniqueStores = new Set<string>();
+    const uniqueAreas = new Set<string>();
+    inMonthReports.forEach(r => {
+      const storeName = (
+        r.customerOutletName ||
+        (r.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+        r.areaName ||
+        ''
+      )
+        .trim()
+        .toLowerCase();
+      if (storeName) uniqueStores.add(storeName);
+      const area = (r.areaName || '').trim().toLowerCase();
+      if (area) uniqueAreas.add(area);
+    });
+
+    const [y, m] = monthPrefix.split('-').map(Number);
+    const monthLabel =
+      y && m
+        ? new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+        : monthPrefix;
+
+    return {
+      uniqueStoreCount: uniqueStores.size,
+      totalVisitsCount: inMonthReports.length,
+      uniqueAreaCount: uniqueAreas.size,
+      monthLabel
+    };
+  }, [allCustomerAttendanceReports, selectedMonth]);
 
   const uniqueCustomerCount = useMemo(() => {
     const names = new Set(
@@ -135,7 +202,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
   // Helper untuk mencocokkan laporan absen ke jadwal pengiriman & Nama Area Kirim resmi
   const resolveScheduleAndArea = (rep: DriverHelperReport) => {
-    const rDate = rep.date || (rep.timestamp ? getLocalDateStr(new Date(rep.timestamp)) : '');
+    const rDate = getLocalDateStr(rep.date || rep.timestamp);
     const repPlateClean = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
     const repDriverClean = (rep.driverName || '').trim().toLowerCase();
 
@@ -144,7 +211,8 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       matchedSchedule = schedules.find(s => {
         const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
         const sDriver = (s.crew?.name || '').trim().toLowerCase();
-        return s.departureDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
+        const sDate = getLocalDateStr(s.departureDate);
+        return sDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
       });
     }
     if (!matchedSchedule && rep.areaName) {
@@ -212,7 +280,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     });
   }, [allCustomerAttendanceReports, dateFilterMode, selectedDate, selectedAreaFilter, statusFilter, searchQuery, schedules]);
 
-  // Pengelompokan terstruktur per Nama Area Kirim & Jadwal (agar tidak tercampur semua dalam 1 tabel tanggal)
+  // Pengelompokan terstruktur per Nama Area Kirim & Jadwal
   const groupedByAreaSchedule = useMemo(() => {
     const groupsMap = new Map<
       string,
@@ -231,7 +299,8 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
     filteredAttendance.forEach(rep => {
       const { scheduledAreaName, matchedSchedule, rDate } = resolveScheduleAndArea(rep);
-      const scheduleDate = matchedSchedule?.departureDate || rDate || '-';
+      const rawDateCandidate = rDate || rep.timestamp || matchedSchedule?.departureDate;
+      const scheduleDate = getLocalDateStr(rawDateCandidate);
       const groupKey = `${scheduledAreaName.toUpperCase()}__${scheduleDate}`;
 
       const matchedFleetObj = fleets.find(
@@ -259,6 +328,29 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       return a.areaName.localeCompare(b.areaName);
     });
   }, [filteredAttendance, schedules, fleets]);
+
+  // Pagination (Paging) State untuk Daftar Area Jadwal Kirim agar tidak memanjang ke bawah terus
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [groupsPerPage, setGroupsPerPage] = useState<number>(2);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, dateFilterMode, selectedDate, selectedAreaFilter, searchQuery, groupsPerPage]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(groupedByAreaSchedule.length / groupsPerPage)),
+    [groupedByAreaSchedule.length, groupsPerPage]
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedAreaGroups = useMemo(() => {
+    const startIdx = (safeCurrentPage - 1) * groupsPerPage;
+    return groupedByAreaSchedule.slice(startIdx, startIdx + groupsPerPage);
+  }, [groupedByAreaSchedule, safeCurrentPage, groupsPerPage]);
+
+  const pageStartNumber = groupedByAreaSchedule.length === 0 ? 0 : (safeCurrentPage - 1) * groupsPerPage + 1;
+  const pageEndNumber = Math.min(safeCurrentPage * groupsPerPage, groupedByAreaSchedule.length);
 
   const handleVerifyAttendance = (id: string) => {
     if (!isAuthorizedSpvOrAdmin) {
@@ -313,6 +405,11 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     }
 
     const cleanCustomer = formCustomerName.trim();
+    const cleanArea = formAreaName.trim() || '-';
+    const preciseGps = resolvePreciseCustomerGps({
+      customerName: cleanCustomer,
+      areaName: cleanArea
+    });
     const noteText = `[ABSEN KIRIMAN PELANGGAN: ${cleanCustomer}] ${
       formNotes.trim() || `Sudah tiba dan absen kiriman di pelanggan ${cleanCustomer}`
     }`;
@@ -324,10 +421,13 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       helperName: formHelperName.trim() && formHelperName !== '-' ? formHelperName.trim() : undefined,
       plateNumber: formPlateNumber.trim() || '-',
       category: 'istirahat',
-      areaName: formAreaName.trim() || '-',
+      areaName: cleanArea,
       customerOutletName: cleanCustomer,
       notes: noteText,
       photoUrl: formPhotoDataUrl,
+      latitude: preciseGps.latitude,
+      longitude: preciseGps.longitude,
+      gmapsUrl: preciseGps.gmapsUrl,
       status: 'verified',
       verifiedBy: currentUser?.fullName || 'Sistem Absen Kiriman'
     });
@@ -338,7 +438,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     addNotification(
       'delivery',
       'Absen Kiriman Pelanggan Tersimpan',
-      `Data absen kiriman ke pelanggan "${cleanCustomer}" berhasil dicatat.`
+      `Data absen kiriman ke pelanggan "${cleanCustomer}" (${preciseGps.coordsFormatted}) berhasil dicatat.`
     );
   };
 
@@ -354,21 +454,38 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       'Nama Driver',
       'Nama Helper',
       'Plat Armada',
+      'Titik Lokasi Spesifik',
+      'Koordinat GPS Presisi',
+      'Link Google Maps',
       'Keterangan Absen di Pelanggan',
       'Status Verifikasi'
     ];
 
     const rows = filteredAttendance.map(r => {
       const { scheduledAreaName } = resolveScheduleAndArea(r);
+      const customerName =
+        r.customerOutletName ||
+        (r.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+        r.areaName;
+      const preciseGps = resolvePreciseCustomerGps({
+        customerName,
+        areaName: scheduledAreaName,
+        rawLat: r.latitude,
+        rawLng: r.longitude,
+        rawGmapsUrl: r.gmapsUrl
+      });
       return [
         r.id,
-        r.date || new Date(r.timestamp).toISOString().slice(0, 10),
+        getLocalDateStr(r.date || r.timestamp),
         new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
         `"${scheduledAreaName}"`,
-        `"${r.customerOutletName || '-'}"`,
+        `"${customerName || '-'}"`,
         `"${r.driverName}"`,
         `"${r.helperName || '-'}"`,
         `"${r.plateNumber}"`,
+        `"${preciseGps.subAreaLabel}"`,
+        `"${preciseGps.coordsFormatted}"`,
+        `"${preciseGps.gmapsUrl}"`,
         `"${(r.notes || '').replace(/"/g, '""')}"`,
         r.status === 'verified' || r.status === 'resolved' ? 'Terverifikasi' : 'Menunggu Verifikasi'
       ];
@@ -439,101 +556,149 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
         </div>
       </div>
 
-      {/* 4 KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Area Kirim Terjadwal Aktif
-            </span>
-            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono mt-0.5">
-              {groupedByAreaSchedule.length}
-              <span className="text-xs text-slate-400 font-sans font-semibold ml-1.5">
-                Area Kirim
+      {/* 2 Unified Summary Cards: (1) Toko Kiriman Dalam 1 Bulan & (2) Ringkasan Absen, Foto Bukti & Verifikasi Pelanggan Dijadikan Satu */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
+        {/* Card 1: Rekap Toko Kiriman Dalam Satu Bulan */}
+        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                <Store className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-900 dark:text-white block">
+                  Total Toko Kiriman Dalam 1 Bulan
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Periode {monthlyStoreStats.monthLabel}
+                </span>
+              </div>
+            </div>
+
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+              title="Pilih Bulan Rekap Toko Kiriman"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Toko Kiriman (1 Bulan)
               </span>
+              <div className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono mt-0.5">
+                {monthlyStoreStats.uniqueStoreCount}
+                <span className="text-xs font-sans font-bold text-slate-500 dark:text-slate-400 ml-1">
+                  Toko
+                </span>
+              </div>
             </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Dikelompokkan sesuai jadwal rute
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-            <MapPin className="w-5 h-5" />
-          </div>
-        </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Total Absen di Pelanggan
-            </span>
-            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
-              {filteredAttendance.length}
-              <span className="text-xs text-slate-400 font-sans font-semibold ml-1.5">
-                ({uniqueCustomerCount} toko)
+            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Area Kirim Terjadwal
               </span>
+              <div className="text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
+                {groupedByAreaSchedule.length}
+                <span className="text-xs font-sans font-bold text-slate-500 dark:text-slate-400 ml-1">
+                  Area Kirim
+                </span>
+              </div>
             </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Titik pelanggan tujuan kiriman
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-            <Store className="w-5 h-5" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Foto Bukti Pelanggan
-            </span>
-            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
-              {withPhotoCount}
+        {/* Card 2: Total Absen di Pelanggan, Foto Bukti Pelanggan, & Absen Pelanggan Terverifikasi Dijadikan Satu */}
+        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-900 dark:text-white block">
+                  Rekap Terpadu Absen, Foto Bukti &amp; Verifikasi Pelanggan
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Ringkasan total absen di pelanggan, kelengkapan foto bukti &amp; status verifikasi
+                </span>
+              </div>
             </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Lengkap dengan dokumentasi foto
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
+              Terintegrasi
             </span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300">
-            <Camera className="w-5 h-5" />
-          </div>
-        </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-              Absen Pelanggan Terverifikasi
-            </span>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
-              {verifiedAttendanceCount}
+          <div className="grid grid-cols-3 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
+                  Total Absen di Pelanggan
+                </span>
+                <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
+                  {filteredAttendance.length}
+                  <span className="text-[11px] text-slate-400 font-sans font-semibold ml-1">
+                    ({uniqueCustomerCount} toko)
+                  </span>
+                </div>
+              </div>
+              <Store className="w-4 h-4 text-blue-500 shrink-0 hidden sm:block" />
             </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Diverifikasi SPV Logistik / Sistem
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-            <ShieldCheck className="w-5 h-5" />
+
+            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
+                  Foto Bukti Pelanggan
+                </span>
+                <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
+                  {withPhotoCount}
+                  <span className="text-[11px] text-slate-400 font-sans font-semibold ml-1">
+                    Foto
+                  </span>
+                </div>
+              </div>
+              <Camera className="w-4 h-4 text-slate-500 shrink-0 hidden sm:block" />
+            </div>
+
+            <div className="bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 block">
+                  Absen Terverifikasi
+                </span>
+                <div className="text-lg sm:text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                  {verifiedAttendanceCount}
+                  <span className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 font-sans font-semibold ml-1">
+                    Sah
+                  </span>
+                </div>
+              </div>
+              <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 hidden sm:block" />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Filter & Search Bar (Termasuk Filter Nama Area Kirim Sesuai Jadwal) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Status Filter Pills */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+      {/* Minimalist Filter & Search Bar (Satu Baris Ringkas Tanpa Tumpukan Tombol Area) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
+          {/* Status Filter Tabs (Minimalist) */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/80 dark:border-slate-800 shrink-0">
             {[
-              { key: 'all', label: `Semua Absen (${allCustomerAttendanceReports.length})` },
+              { key: 'all', label: `Semua (${allCustomerAttendanceReports.length})` },
               { key: 'verified', label: `Terverifikasi (${verifiedAttendanceCount})` },
-              { key: 'pending', label: `Menunggu Verifikasi (${pendingAttendanceCount})` }
+              { key: 'pending', label: `Menunggu (${pendingAttendanceCount})` }
             ].map(tab => (
               <button
                 key={tab.key}
                 type="button"
                 onClick={() => setStatusFilter(tab.key as any)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                   statusFilter === tab.key
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {tab.label}
@@ -541,19 +706,40 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             ))}
           </div>
 
-          {/* Area Kirim Dropdown & Date Filter Controls */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Search Input (Inline Minimalist) */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari toko pelanggan, area kirim, supir, helper, atau plat armada..."
+              className="w-full pl-9 pr-7 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Area Dropdown & Date Controls */}
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5">
               <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
               <select
                 value={selectedAreaFilter}
                 onChange={(e) => setSelectedAreaFilter(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer max-w-[190px] truncate"
               >
-                <option value="all" className="bg-white dark:bg-slate-900">Semua Area Kirim ({availableScheduledAreas.length})</option>
+                <option value="all" className="bg-white dark:bg-slate-900">Semua Area ({availableScheduledAreas.length})</option>
                 {availableScheduledAreas.map(area => (
                   <option key={area} value={area} className="bg-white dark:bg-slate-900">
-                    Area: {area}
+                    {area}
                   </option>
                 ))}
               </select>
@@ -578,7 +764,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 setSelectedDate(getLocalDateStr());
                 setDateFilterMode('single_date');
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
                 dateFilterMode === 'single_date' && selectedDate === getLocalDateStr()
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -590,7 +776,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             <button
               type="button"
               onClick={() => setDateFilterMode('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
                 dateFilterMode === 'all'
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -599,62 +785,6 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
               Semua Tanggal
             </button>
           </div>
-        </div>
-
-        {/* Quick Area Filter Pills */}
-        {availableScheduledAreas.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800/80">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">
-              Pilih Area Jadwal:
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedAreaFilter('all')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
-                selectedAreaFilter === 'all'
-                  ? 'bg-blue-600 text-white border-blue-500'
-                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Semua Area
-            </button>
-            {availableScheduledAreas.map(area => (
-              <button
-                key={area}
-                type="button"
-                onClick={() => setSelectedAreaFilter(area)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border flex items-center gap-1 ${
-                  selectedAreaFilter.toLowerCase() === area.toLowerCase()
-                    ? 'bg-blue-600 text-white border-blue-500'
-                    : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <MapPin className="w-3 h-3 shrink-0" />
-                <span>{area}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Search Input */}
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari nama area kirim, nama pelanggan / toko tujuan, nama supir, helper, atau plat nomor armada..."
-            className="w-full pl-10 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -672,19 +802,116 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {groupedByAreaSchedule.map((group, groupIdx) => {
+        <div className="space-y-3.5">
+          {/* Top Paging & Navigation Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 dark:text-slate-300">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/25 font-black text-[11px]">
+                Halaman {safeCurrentPage} dari {totalPages}
+              </span>
+              <span>
+                Menampilkan Area Jadwal <strong>#{pageStartNumber}–#{pageEndNumber}</strong> dari total{' '}
+                <strong>{groupedByAreaSchedule.length} Area Jadwal</strong>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Page Size Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1 text-[11px]">
+                <span className="text-slate-500 dark:text-slate-400 font-semibold">Tampilkan:</span>
+                <select
+                  value={groupsPerPage}
+                  onChange={(e) => setGroupsPerPage(Number(e.target.value))}
+                  className="bg-transparent font-black text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                >
+                  <option value={2} className="bg-white dark:bg-slate-900">2 Area / Hal</option>
+                  <option value={3} className="bg-white dark:bg-slate-900">3 Area / Hal</option>
+                  <option value={5} className="bg-white dark:bg-slate-900">5 Area / Hal</option>
+                  <option value={10} className="bg-white dark:bg-slate-900">10 Area / Hal</option>
+                </select>
+              </div>
+
+              {/* Page Numbers */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+
+                {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+                  .filter(page => {
+                    if (totalPages <= 7) return true;
+                    return (
+                      page === 1 ||
+                      page === totalPages ||
+                      Math.abs(page - safeCurrentPage) <= 1
+                    );
+                  })
+                  .map((page, idx, arr) => {
+                    const prevPage = arr[idx - 1];
+                    const showEllipsis = prevPage && page - prevPage > 1;
+                    return (
+                      <React.Fragment key={page}>
+                        {showEllipsis && (
+                          <span className="px-1.5 text-xs text-slate-400 font-bold">...</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage(page)}
+                          className={`w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center border ${
+                            safeCurrentPage === page
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {paginatedAreaGroups.map((group, localIdx) => {
+            const globalGroupIdx = (safeCurrentPage - 1) * groupsPerPage + localIdx;
             const verifiedInGroup = group.items.filter(
               i => i.status === 'verified' || i.status === 'resolved'
             ).length;
-            const formattedScheduleDate = group.scheduleDate && group.scheduleDate !== '-'
-              ? new Date(group.scheduleDate + 'T00:00:00').toLocaleDateString('id-ID', {
+            const safeIsoDate = getLocalDateStr(group.items[0]?.date || group.items[0]?.timestamp || group.scheduleDate);
+            const parsedScheduleDate = new Date(`${safeIsoDate}T00:00:00`);
+            const formattedScheduleDate = !isNaN(parsedScheduleDate.getTime())
+              ? parsedScheduleDate.toLocaleDateString('id-ID', {
                   weekday: 'short',
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric'
                 })
-              : '-';
+              : safeIsoDate;
+
+            // Deteksi apakah ada koordinat mentah yang duplikat antar toko berbeda dalam grup yang sama
+            const coordCounts = new Map<string, number>();
+            group.items.forEach(it => {
+              if (typeof it.latitude === 'number' && typeof it.longitude === 'number') {
+                const key = `${it.latitude.toFixed(4)},${it.longitude.toFixed(4)}`;
+                coordCounts.set(key, (coordCounts.get(key) || 0) + 1);
+              }
+            });
 
             return (
               <div
@@ -692,10 +919,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs"
               >
                 {/* Header Nama Area Kirim & Rincian Jadwal Rute */}
-                <div className="p-3.5 sm:p-4 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                  <div className="flex items-start sm:items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                      #{groupIdx + 1}
+                <div className="p-3 sm:p-3.5 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                      #{globalGroupIdx + 1}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -711,7 +938,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-3 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                      <div className="flex items-center gap-2.5 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
                         <span className="inline-flex items-center gap-1 font-semibold">
                           <User className="w-3.5 h-3.5 text-blue-500" />
                           Driver: <strong className="text-slate-900 dark:text-white">{group.driverName}</strong>
@@ -730,29 +957,49 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap shrink-0">
-                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-xs font-black">
+                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-[11px] font-black">
                       {group.items.length} Titik Pelanggan Dikunjungi
                     </span>
-                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-xs font-bold">
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-[11px] font-bold">
                       {verifiedInGroup}/{group.items.length} Terverifikasi
                     </span>
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeleteConfirmGroup({
+                            groupKey: group.groupKey,
+                            areaName: group.areaName,
+                            scheduleDate: formattedScheduleDate,
+                            driverName: group.driverName,
+                            plateNumber: group.plateNumber,
+                            items: group.items
+                          })
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
+                        title="Hapus Seluruh Verifikasi Jadwal Kirim Area Ini (Khusus Super Admin)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus Jadwal</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Tabel Pelanggan dalam Area Kirim Ini */}
+                {/* Tabel Pelanggan dalam Area Kirim Ini (Compact & Tanpa Scrollbar Horizontal Berlebih) */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100/70 dark:bg-slate-900 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-800">
                       <tr>
-                        <th className="py-2.5 px-3 whitespace-nowrap w-10 text-center">No</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Jam Absen</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Nama Pelanggan / Toko Tujuan</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Kru &amp; Armada</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Titik Lokasi GPS</th>
-                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Foto Bukti</th>
-                        <th className="py-2.5 px-3 whitespace-nowrap">Keterangan Kiriman</th>
-                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
+                        <th className="py-2 px-2.5 w-9 text-center">No</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">Jam Absen</th>
+                        <th className="py-2 px-2.5">Nama Pelanggan / Toko Tujuan</th>
+                        <th className="py-2 px-2.5">Kru &amp; Armada</th>
+                        <th className="py-2 px-2.5">Titik Lokasi GPS</th>
+                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Foto Bukti</th>
+                        <th className="py-2 px-2.5">Keterangan Kiriman</th>
+                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/70 text-slate-700 dark:text-slate-300">
@@ -766,15 +1013,34 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                           .replace(/\[ABSEN KIRIMAN PELANGGAN:[^\]]*\]\s*/i, '')
                           .trim();
 
+                        const coordKey =
+                          typeof item.latitude === 'number' && typeof item.longitude === 'number'
+                            ? `${item.latitude.toFixed(4)},${item.longitude.toFixed(4)}`
+                            : '';
+                        const isDuplicateCoordInGroup = coordKey ? (coordCounts.get(coordKey) || 0) > 1 : false;
+
+                        const preciseGps = resolvePreciseCustomerGps({
+                          customerName,
+                          areaName: group.areaName,
+                          rawLat: item.latitude,
+                          rawLng: item.longitude,
+                          rawGmapsUrl: item.gmapsUrl,
+                          isDuplicateCoordInGroup
+                        });
+
+                        const itemFleetObj = fleets.find(
+                          f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (item.plateNumber || '').replace(/\s+/g, '').toUpperCase()
+                        );
+
                         return (
                           <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                            <td className="py-2.5 px-3 align-middle text-center font-mono font-bold text-slate-400">
+                            <td className="py-2 px-2.5 align-middle text-center font-mono font-bold text-slate-400">
                               {idx + 1}
                             </td>
 
                             {/* Jam Absen */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">
+                            <td className="py-2 px-2.5 align-middle whitespace-nowrap">
+                              <div className="text-[11px] font-bold font-mono text-slate-900 dark:text-white">
                                 {new Date(item.timestamp).toLocaleTimeString('id-ID', {
                                   hour: '2-digit',
                                   minute: '2-digit'
@@ -784,48 +1050,55 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             </td>
 
                             {/* Nama Pelanggan / Toko Tujuan */}
-                            <td className="py-2.5 px-3 align-middle">
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
-                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span>{customerName}</span>
+                            <td className="py-2 px-2.5 align-middle max-w-[190px]">
+                              <div className="inline-flex items-start gap-1.5 px-2 py-1 rounded-lg text-[11px] font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
+                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                                <span className="line-clamp-2 leading-tight">{customerName}</span>
                               </div>
                             </td>
 
                             {/* Kru & Armada */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                              <div className="font-bold text-slate-900 dark:text-white text-xs">
+                            <td className="py-2 px-2.5 align-middle">
+                              <div className="font-bold text-slate-900 dark:text-white text-[11px] leading-snug">
                                 {item.driverName}
                                 {item.helperName && item.helperName !== '-' ? ` & ${item.helperName}` : ''}
                               </div>
                               <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
                                 {item.plateNumber}
+                                {itemFleetObj?.initialCode ? ` (${itemFleetObj.initialCode})` : ''}
                               </div>
                             </td>
 
-                            {/* Titik Lokasi GPS */}
-                            <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                              <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                            {/* Titik Lokasi GPS Presisi per Toko Pelanggan */}
+                            <td className="py-2 px-2.5 align-middle">
+                              <div className="text-[11px] font-bold text-slate-900 dark:text-white flex items-center gap-1">
                                 <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
-                                <span>{group.areaName}</span>
+                                <span className="truncate max-w-[180px]" title={preciseGps.subAreaLabel}>
+                                  {preciseGps.subAreaLabel}
+                                </span>
                               </div>
-                              {item.gmapsUrl && (
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700/80">
+                                  {preciseGps.coordsFormatted}
+                                </span>
                                 <a
-                                  href={item.gmapsUrl}
+                                  href={preciseGps.gmapsUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:underline mt-0.5"
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                                  title={`Buka titik lokasi presisi ${customerName} (${preciseGps.coordsFormatted}) di Google Maps`}
                                 >
                                   <Navigation className="w-2.5 h-2.5" />
                                   <span>Buka GPS Maps</span>
                                   <ExternalLink className="w-2.5 h-2.5" />
                                 </a>
-                              )}
+                              </div>
                             </td>
 
                             {/* Foto Bukti Absen */}
-                            <td className="py-2.5 px-3 align-middle text-center">
+                            <td className="py-2 px-2.5 align-middle text-center">
                               {item.photoUrl ? (
-                                <div className="relative group w-11 h-11 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
+                                <div className="relative group w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
                                   <img
                                     src={item.photoUrl}
                                     alt={customerName}
@@ -838,28 +1111,28 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                     className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
                                     title="Perbesar Foto Absen Pelanggan"
                                   >
-                                    <Eye className="w-4 h-4" />
+                                    <Eye className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               ) : (
-                                <span className="inline-block px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
+                                <span className="inline-block px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
                                   Tanpa Foto
                                 </span>
                               )}
                             </td>
 
                             {/* Keterangan Kiriman */}
-                            <td className="py-2.5 px-3 align-middle max-w-[240px]">
+                            <td className="py-2 px-2.5 align-middle max-w-[180px]">
                               <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug line-clamp-2">
                                 {cleanNotes || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}
                               </p>
                             </td>
 
-                            {/* Status & Verifikasi */}
-                            <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1.5">
+                            {/* Status & Verifikasi + Hapus (Super Admin) */}
+                            <td className="py-2 px-2.5 align-middle text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1">
                                 {isVerified ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
                                     <CheckCircle2 className="w-3 h-3 shrink-0" />
                                     <span>Terverifikasi</span>
                                   </span>
@@ -867,10 +1140,21 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   <button
                                     type="button"
                                     onClick={() => handleVerifyAttendance(item.id)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
                                   >
                                     <Check className="w-3 h-3" />
                                     <span>Verifikasi</span>
+                                  </button>
+                                )}
+                                {isSuperAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirmReport(item)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
+                                    title="Hapus Absen Pelanggan (Khusus Super Admin)"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Hapus</span>
                                   </button>
                                 )}
                               </div>
@@ -884,6 +1168,36 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
               </div>
             );
           })}
+
+          {/* Bottom Paging Bar */}
+          {totalPages > 1 && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                Halaman <strong>{safeCurrentPage}</strong> dari <strong>{totalPages}</strong> • Menampilkan Area Jadwal{' '}
+                <strong>#{pageStartNumber}–#{pageEndNumber}</strong> dari <strong>{groupedByAreaSchedule.length}</strong> Area
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Halaman Sebelumnya</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <span>Halaman Berikutnya</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1131,13 +1445,204 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 />
               )}
               <div className="w-full mt-4 bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5">
-                {selectedPhotoModal.customerOutletName && (
-                  <div className="font-bold text-blue-400">
-                    Nama Pelanggan: {selectedPhotoModal.customerOutletName}
-                  </div>
-                )}
+                {(() => {
+                  const modalCustomer =
+                    selectedPhotoModal.customerOutletName ||
+                    (selectedPhotoModal.notes?.match(/\[ABSEN KIRIMAN PELANGGAN:\s*([^\]]+)\]/i)?.[1] ?? '') ||
+                    selectedPhotoModal.areaName;
+                  const modalGps = resolvePreciseCustomerGps({
+                    customerName: modalCustomer,
+                    areaName: selectedPhotoModal.areaName,
+                    rawLat: selectedPhotoModal.latitude,
+                    rawLng: selectedPhotoModal.longitude,
+                    rawGmapsUrl: selectedPhotoModal.gmapsUrl
+                  });
+                  return (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-slate-800">
+                      <div>
+                        <div className="font-bold text-blue-400">
+                          Nama Pelanggan: {modalCustomer}
+                        </div>
+                        <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                          <MapPin className="w-3 h-3 text-blue-400 shrink-0" />
+                          <span>{modalGps.subAreaLabel} ({modalGps.coordsFormatted})</span>
+                        </div>
+                      </div>
+                      <a
+                        href={modalGps.gmapsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[10px] font-bold"
+                      >
+                        <Navigation className="w-3 h-3" />
+                        <span>Buka GPS Maps Presisi</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </div>
+                  );
+                })()}
                 <p className="text-slate-200 leading-relaxed">{selectedPhotoModal.notes}</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Absen Pelanggan (Khusus Super Admin) */}
+      {deleteConfirmReport && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    Hapus Absen Kiriman Pelanggan
+                  </h3>
+                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">
+                    Otorisasi Khusus Super Admin
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmReport(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 text-xs">
+              <p className="text-slate-300 leading-relaxed">
+                Apakah Anda yakin ingin menghapus data absen kiriman pelanggan ini secara permanen?
+              </p>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Kru Pengiriman:</span>
+                  <span className="font-bold text-white">{deleteConfirmReport.driverName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Armada:</span>
+                  <span className="font-mono font-bold text-amber-300">{deleteConfirmReport.plateNumber}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Pelanggan / Area:</span>
+                  <span className="font-semibold text-slate-200 truncate max-w-[200px]">
+                    {deleteConfirmReport.customerOutletName || deleteConfirmReport.areaName}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmReport(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  driverReportService.deleteReport(deleteConfirmReport.id);
+                  loadAttendanceReports();
+                  addNotification(
+                    'schedule',
+                    'Data Absen Berhasil Dihapus',
+                    `Data absen kiriman pelanggan (${deleteConfirmReport.driverName} • ${deleteConfirmReport.plateNumber}) telah dihapus oleh Super Admin.`
+                  );
+                  setDeleteConfirmReport(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Hapus Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Seluruh Jadwal Area Kirim (Khusus Super Admin) */}
+      {deleteConfirmGroup && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    Hapus Verifikasi Jadwal Kirim
+                  </h3>
+                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">
+                    Otorisasi Khusus Super Admin
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmGroup(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 text-xs">
+              <p className="text-slate-300 leading-relaxed">
+                Apakah Anda yakin ingin menghapus seluruh verifikasi jadwal kirim pada area ini ({deleteConfirmGroup.items.length} titik pelanggan) secara permanen?
+              </p>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Area Jadwal Kirim:</span>
+                  <span className="font-bold text-white">{deleteConfirmGroup.areaName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Tanggal Jadwal:</span>
+                  <span className="font-mono font-semibold text-slate-200">{deleteConfirmGroup.scheduleDate}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Kru &amp; Armada:</span>
+                  <span className="font-mono font-bold text-amber-300">
+                    {deleteConfirmGroup.driverName} • {deleteConfirmGroup.plateNumber}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmGroup(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteConfirmGroup.items.forEach(item => {
+                    driverReportService.deleteReport(item.id);
+                  });
+                  loadAttendanceReports();
+                  addNotification(
+                    'schedule',
+                    'Verifikasi Jadwal Kirim Dihapus',
+                    `Seluruh data absen pada Area Jadwal Kirim "${deleteConfirmGroup.areaName}" (${deleteConfirmGroup.items.length} titik) telah dihapus oleh Super Admin.`
+                  );
+                  setDeleteConfirmGroup(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Hapus Jadwal</span>
+              </button>
             </div>
           </div>
         </div>

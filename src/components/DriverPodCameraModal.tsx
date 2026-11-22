@@ -16,6 +16,13 @@ import {
 import { Schedule } from '../types';
 import { extractCoordinatesFromObject } from '../utils/coordinateParser';
 import { logisticsStore } from '../services/store';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
 
 function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
@@ -53,6 +60,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
   const [hasTorch, setHasTorch] = useState<boolean>(false);
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedExif, setCapturedExif] = useState<ExifTimestampMetadata | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isFlashActive, setIsFlashActive] = useState<boolean>(false);
   const [capturedTimestamp, setCapturedTimestamp] = useState<string>('');
@@ -323,13 +331,17 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     };
   }, [isOpen]);
 
-  // Watermark stamp rendering onto image
+  // Watermark stamp rendering onto image (disertai EXIF Timestamp Metadata Kunci)
   const stampWatermark = (
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    now: Date
+    now: Date,
+    exifInput?: ExifTimestampMetadata
   ) => {
+    const exif = exifInput || createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    drawExifMetadataOnCanvas(ctx, width, height, exif);
+
     const bannerHeight = Math.max(90, Math.floor(height * 0.16));
     const bannerY = height - bannerHeight;
 
@@ -344,22 +356,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     ctx.fillStyle = '#06b6d4'; // Cyan accent
     ctx.fillRect(0, bannerY, width, 3);
 
-    // Text formatting
-    const formattedDate = now.toLocaleDateString('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-    const formattedTime = now.toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }) + ' WIB';
-
     const storeName = delivery?.store?.storeName || 'Penerima Konsinyasi';
     const storeCity = delivery?.store?.city || 'Jawa Timur';
-    const trackingNo = delivery?.trackingNumber || 'PO-LOGISTICS';
     const cargoDesc = delivery?.cargoDescription || 'Karton Box AKK';
 
     const fontSizeTitle = Math.max(12, Math.floor(width * 0.024));
@@ -382,10 +380,14 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     ctx.font = `normal ${fontSizeBody}px system-ui, sans-serif`;
     ctx.fillText(`Muatan: ${cargoDesc} | Status: Serah Terima Selesai`, 16, bannerY + 14 + fontSizeTitle + fontSizeBody);
 
-    // Timestamp & Geotag
+    // Timestamp & EXIF Geotag
     ctx.fillStyle = '#f59e0b';
     ctx.font = `bold ${fontSizeBody}px monospace`;
-    ctx.fillText(`🕒 ${formattedDate}, ${formattedTime} | 📍 Dokumentasi Pengiriman Selesai`, 16, bannerY + 16 + fontSizeTitle + (fontSizeBody * 2));
+    ctx.fillText(
+      `🕒 EXIF DateTimeOriginal: ${exif.DateTimeOriginal}.${exif.SubSecTimeOriginal} (${exif.OffsetTimeOriginal}) | 📍 POD Terverifikasi`,
+      16,
+      bannerY + 16 + fontSizeTitle + (fontSizeBody * 2)
+    );
   };
 
   // Capture photo from live video element (with automated dimension scaling and compression for database storage efficiency)
@@ -399,8 +401,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     setTimeout(() => setIsFlashActive(false), 150);
 
     const canvas = document.createElement('canvas');
-    // Limit max resolution to 1024px for optimal DB storage & fast upload
-    const maxDim = 1024;
+    // Limit max resolution to 800px for compact payload & fast upload
+    const maxDim = 800;
     let w = video.videoWidth;
     let h = video.videoHeight;
     if (w > maxDim || h > maxDim) {
@@ -430,11 +432,13 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     }
 
     const now = new Date();
-    stampWatermark(ctx, w, h, now);
+    const exifMeta = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    stampWatermark(ctx, w, h, now, exifMeta);
 
-    // Compressed JPEG quality 0.72 (reduces file size by ~70-80% without losing watermark legibility)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    // Compressed JPEG quality 0.58 for compact size while keeping watermark sharp
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
     setCapturedImage(dataUrl);
+    setCapturedExif(exifMeta);
     setCapturedTimestamp(now.toISOString());
     stopCamera();
   };
@@ -509,10 +513,12 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
     // Watermark
     const now = new Date();
-    stampWatermark(ctx, 1024, 576, now);
+    const simExif = createExifMetadataFromDate(now, 'CAMERA_CAPTURE_SENSOR');
+    stampWatermark(ctx, 1024, 576, now, simExif);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
     setCapturedImage(dataUrl);
+    setCapturedExif(simExif);
     setCapturedTimestamp(now.toISOString());
     setIsProcessing(false);
     stopCamera();
@@ -531,53 +537,57 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     }
   };
 
-  // Fallback: handle file input / native camera capture with compression
+  // Fallback: handle file input / native camera capture with compression & EXIF extraction
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsProcessing(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        // Limit max dimension to 1024px for database storage efficiency
-        const maxDim = 1024;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+    extractExifFromFile(file).then(exifMeta => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Limit max dimension to 800px for compact storage & fast upload
+          const maxDim = 800;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
           }
-        }
-        canvas.width = w;
-        canvas.height = h;
+          canvas.width = w;
+          canvas.height = h;
 
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, w, h);
-          const now = new Date();
-          stampWatermark(ctx, w, h, now);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-          setCapturedImage(dataUrl);
-          setCapturedTimestamp(now.toISOString());
-          stopCamera();
-        }
-        setIsProcessing(false);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const now = new Date();
+            stampWatermark(ctx, w, h, now, exifMeta);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
+            setCapturedImage(dataUrl);
+            setCapturedExif(exifMeta);
+            setCapturedTimestamp(now.toISOString());
+            stopCamera();
+          }
+          setIsProcessing(false);
+        };
+        img.src = reader.result as string;
       };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
   };
 
   // Retake photo
   const handleRetake = () => {
     setCapturedImage(null);
+    setCapturedExif(null);
     setCapturedTimestamp('');
     startCamera(facingMode);
   };
@@ -603,14 +613,14 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
       {/* Top Header Controls */}
       <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+          <div className="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
             <Camera className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-black text-white flex items-center gap-1.5">
+            <h3 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
               <span>Kamera Full Screen • Bukti Foto (POD &amp; GPS)</span>
             </h3>
-            <p className="text-[10px] text-slate-300 font-semibold truncate max-w-[240px]">
+            <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate max-w-[240px]">
               {delivery?.areaName || delivery?.store?.storeName || 'Area Tujuan'}
             </p>
           </div>
@@ -620,7 +630,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && hasTorch && (
             <button
               onClick={toggleTorch}
-              className={`p-2.5 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800 text-white border border-slate-700'}`}
+              className={`p-2.5 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-700 dark:text-white border border-slate-700'}`}
               title="Flash / Torch"
             >
               {isTorchOn ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
@@ -630,7 +640,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && !cameraError && (
             <button
               onClick={handleFlipCamera}
-              className="p-2.5 rounded-full bg-slate-800 text-white border border-slate-700 hover:bg-slate-700 cursor-pointer transition"
+              className="p-2.5 rounded-full bg-slate-800 text-slate-700 dark:text-white border border-slate-700 hover:bg-slate-700 cursor-pointer transition"
               title="Balik Kamera (Depan/Belakang)"
             >
               <RefreshCw className="w-4 h-4" />
@@ -639,7 +649,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
           <button
             onClick={handleClose}
-            className="p-2.5 rounded-full bg-slate-800 text-white border border-slate-700 hover:bg-rose-600 hover:text-white cursor-pointer transition"
+            className="p-2.5 rounded-full bg-slate-800 text-slate-700 dark:text-white border border-slate-700 hover:bg-rose-600 hover:text-white cursor-pointer transition"
           >
             <X className="w-4 h-4" />
           </button>
@@ -661,14 +671,17 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
               alt="Bukti Foto POD Full Screen"
               className="w-full h-full object-contain rounded-xl"
             />
-            <div className="absolute top-3 left-4 right-4 bg-slate-900/95 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/50 flex items-center justify-between text-xs shadow-lg">
-              <div className="flex items-center gap-2 text-emerald-400">
-                <Check className="w-4 h-4 shrink-0" />
-                <span className="font-bold text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel GPS Aktif</span>
+            <div className="absolute top-3 left-4 right-4 bg-slate-900/95 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/50 space-y-2 text-xs shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span className="font-bold text-slate-900 dark:text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel EXIF + GPS Aktif</span>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                  {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                </span>
               </div>
-              <span className="text-[10px] font-mono font-bold text-emerald-300">
-                {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-              </span>
+              <ExifMetadataBadge exif={capturedExif} compact />
             </div>
           </div>
         ) : (
@@ -682,10 +695,10 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                     <CameraOff className="w-7 h-7" />
                   </div>
                   <div className="space-y-1.5">
-                    <h4 className="text-sm font-black text-white">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white">
                       Izin Akses Kamera Perangkat
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
                       {cameraError}
                     </p>
                   </div>
@@ -705,7 +718,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                       <button
                         type="button"
                         onClick={() => startCamera(facingMode)}
-                        className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer active:scale-95 transition"
+                        className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-700 dark:text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer active:scale-95 transition"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>Minta Izin Ulang</span>
@@ -714,7 +727,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                       <button
                         type="button"
                         onClick={generateSimulatedPhoto}
-                        className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-amber-500/40 cursor-pointer active:scale-95 transition"
+                        className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1.5 border border-amber-500/40 cursor-pointer active:scale-95 transition"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>Snapshot Instan</span>
@@ -722,25 +735,25 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 text-left space-y-2">
-                    <h5 className="font-extrabold text-amber-400">
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 text-left space-y-2">
+                    <h5 className="font-extrabold text-amber-700 dark:text-amber-400">
                       Panduan Mengatasi Kamera (Android / Browser):
                     </h5>
                     <ol className="list-decimal list-inside space-y-1 ml-1 font-medium">
-                      <li>Buka <span className="font-bold text-white">Pengaturan</span> di HP.</li>
-                      <li>Pilih <span className="font-bold text-white">Aplikasi</span> &gt; cari aplikasi browser.</li>
-                      <li>Klik <span className="font-bold text-white">Izin</span>.</li>
-                      <li>Pilih <span className="font-bold text-white">Kamera</span> &gt; pilih &quot;Izinkan&quot;.</li>
+                      <li>Buka <span className="font-bold text-slate-900 dark:text-white">Pengaturan</span> di HP.</li>
+                      <li>Pilih <span className="font-bold text-slate-900 dark:text-white">Aplikasi</span> &gt; cari aplikasi browser.</li>
+                      <li>Klik <span className="font-bold text-slate-900 dark:text-white">Izin</span>.</li>
+                      <li>Pilih <span className="font-bold text-slate-900 dark:text-white">Kamera</span> &gt; pilih &quot;Izinkan&quot;.</li>
                       <li>Segarkan ulang halaman ini.</li>
                     </ol>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 text-left space-y-1">
-                    <div className="font-extrabold text-white flex items-center gap-1">
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 text-left space-y-1">
+                    <div className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1">
                       <span>💡 Tips Cepat:</span>
                     </div>
                     <p className="font-medium">
-                      Ketuk ikon gembok/setelan di sebelah URL browser Anda, lalu klik <span className="font-bold text-white">&quot;Izinkan Kamera&quot;</span>.
+                      Ketuk ikon gembok/setelan di sebelah URL browser Anda, lalu klik <span className="font-bold text-slate-900 dark:text-white">&quot;Izinkan Kamera&quot;</span>.
                     </p>
                   </div>
                 </div>
@@ -766,7 +779,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
                   {/* Center Target Box */}
                   <div className="text-center px-4 py-2 bg-slate-900/90 backdrop-blur-xs rounded-xl border border-slate-700 max-w-[260px] shadow-lg">
-                    <p className="text-[11px] text-white font-bold">
+                    <p className="text-[11px] text-slate-900 dark:text-white font-bold">
                       Arahkan kamera ke armada / bukti di lokasi
                     </p>
                     <span className="text-[9px] text-cyan-600 dark:text-cyan-300 font-semibold block mt-0.5">
@@ -803,7 +816,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           <div className="flex items-center gap-3">
             <button
               onClick={handleRetake}
-              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
+              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Foto Ulang (Retake)</span>
@@ -822,11 +835,11 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
             {/* Native file upload button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex flex-col items-center justify-center text-slate-300 hover:text-blue-600 dark:hover:text-white transition cursor-pointer p-2"
+              className="flex flex-col items-center justify-center text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white transition cursor-pointer p-2"
               title="Pilih dari Galeri atau Kamera Bawaan"
             >
               <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1">
-                <Upload className="w-4 h-4 text-slate-200" />
+                <Upload className="w-4 h-4 text-slate-700 dark:text-slate-200" />
               </div>
               <span className="text-[10px] font-bold">Kamera HP / File</span>
             </button>
@@ -844,7 +857,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                   <Camera className="w-6 h-6 text-white" />
                 </div>
               </button>
-              <span className="text-[10px] text-slate-200 font-extrabold mt-1.5">
+              <span className="text-[10px] text-slate-800 dark:text-slate-200 font-extrabold mt-1.5">
                 {cameraError ? 'Buka Kamera HP' : 'Jepret Foto'}
               </span>
             </div>
@@ -852,10 +865,10 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
             {/* Cancel / Close button */}
             <button
               onClick={handleClose}
-              className="flex flex-col items-center justify-center text-slate-300 hover:text-rose-600 dark:hover:text-white transition cursor-pointer p-2"
+              className="flex flex-col items-center justify-center text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-white transition cursor-pointer p-2"
             >
               <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1">
-                <X className="w-4 h-4 text-slate-200" />
+                <X className="w-4 h-4 text-slate-700 dark:text-slate-200" />
               </div>
               <span className="text-[10px] font-bold">Batal</span>
             </button>

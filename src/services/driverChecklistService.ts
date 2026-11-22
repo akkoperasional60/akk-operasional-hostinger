@@ -3,169 +3,142 @@ import {
   VehicleChecklistItem,
   OverallChecklistStatus
 } from '../types';
+import { getLocalDateStr } from './driverReportService';
+import { safeSetItem } from './store';
 
-const STORAGE_KEY = 'akk_driver_vehicle_checklists_v2';
-const IS_PROD_BUILD = Boolean(import.meta.env.PROD);
+const STORAGE_KEY = 'akk_driver_vehicle_checklists_v4';
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
-  // 1. Mesin & Fluida
+  // 1. Oli Mesin
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Oli Mesin & Indikator Dipstick',
-    description: 'Volume oli berada di antara batas MIN dan MAX, tidak ada perubahan warna pekat terbakar'
+    name: 'Oli Mesin',
+    description: 'Periksa volume dan kondisi warna oli mesin pada dipstick berada di batas aman'
   },
+  // 2. Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Air Radiator (Coolant) & Reservoir',
-    description: 'Level tabung cadangan air radiator cukup dan tutup radiator terpasang rapat'
+    name: 'Air Radiator',
+    description: 'Periksa level air radiator (coolant) pada tabung reservoir dan pastikan tutup rapat'
   },
+  // 3. Foto Oli Mesin & Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Minyak Rem & Minyak Kopling',
-    description: 'Ketinggian minyak rem pada tangki cadangan aman, tidak ada kebocoran master silinder'
+    name: 'Foto Oli Mesin & Air Radiator',
+    description: 'Ambil foto bukti fisik pengecekan oli mesin dan air radiator armada'
   },
-  {
-    category: 'mesin_fluida',
-    categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Air Wiper Washer & Nozzle',
-    description: 'Cairan wiper terisi penuh dan semprotan nozzle kaca depan bekerja lancar'
-  },
-  {
-    category: 'mesin_fluida',
-    categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Pemeriksaan Kolong Mesin (Kebocoran)',
-    description: 'Tidak ada tetesan oli, solar, atau air pendingin di bawah kolong mesin/transmisi'
-  },
-
-  // 2. Rem, Roda & Kaki-kaki
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Rem Kaki (Pedal Rem Utama)',
-    description: 'Pedal rem padat dan tidak ambles saat ditekan, respons pengereman pakem'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Rem Parkir / Handbrake',
-    description: 'Mampu menahan kendaraan pada kemiringan dan tuas mengunci dengan presisi'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Tekanan & Kondisi Ban Depan',
-    description: 'Tekanan ban sesuai standar (60-70 PSI), alur kembang ban tidak gundul, tanpa robek samping'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Tekanan & Kondisi Ban Belakang / Gandar',
-    description: 'Tekanan ban belakang ganda (75-85 PSI), baut roda kencang lengkap, sela ban bersih dari batu'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Ban Serep & Tekanan Udara',
-    description: 'Ban cadangan terpasang kuat pada bracket pengunci dan memiliki tekanan udara siap pakai'
-  },
-
-  // 3. Lampu & Kelistrikan
+  // 4. Air Accu
   {
     category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Utama (Dekat & Jauh)',
-    description: 'Headlamp menyala terang di kedua sisi, sorot lampu fokus, kaca headlamp tidak pecah'
+    categoryLabel: 'Kelistrikan & Accu',
+    name: 'Air Accu',
+    description: 'Periksa batas level cairan air accu (aki) berada di antara garis Upper dan Lower'
   },
+  // 5. Rem Mobil & Minyak Rem
   {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Sein (L/R) & Hazard',
-    description: 'Lampu sein depan, samping, belakang berkedip normal; hazard darurat berfungsi serentak'
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Rem Mobil & Minyak Rem',
+    description: 'Periksa fungsi pijakan rem mobil pakem serta level minyak rem pada tabung master'
   },
+  // 6. Foto Minyak Rem
   {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Rem & Lampu Mundur',
-    description: 'Lampu rem menyala merah terang saat diinjak, lampu mundur putih & sirine buzzer aktif'
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Foto Minyak Rem',
+    description: 'Ambil foto bukti fisik level tabung minyak rem armada'
   },
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Klakson & Karet Wiper Depan',
-    description: 'Klakson bersuara lantang, bilah wiper fleksibel dan menyeka kaca depan dengan bersih'
-  },
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Baterai / Aki & Indikator Dashboard',
-    description: 'Terminal aki bersih kencang, alternator mengisi normal, tidak ada check-engine menyala'
-  },
-
-  // 4. Fisik, Bodi & Legalitas Dokumen
+  // 7. Kebersihan Kabin
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'STNK Asli & Masa Pajak Aktif',
-    description: 'STNK asli berada di dashboard dan masa berlaku pajak tahunan / 5 tahunan masih aktif'
+    categoryLabel: 'Kabin & Inventaris',
+    name: 'Kebersihan Kabin',
+    description: 'Pastikan ruang kabin pengemudi bersih, rapi, dan bebas dari sampah/kotoran'
   },
+  // 8. Inventaris Mobil
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Buku Uji KIR Dishub Aktif',
-    description: 'Buku uji berkala KIR Dishub valid, stempel tanggal uji berikutnya belum terlewat'
+    categoryLabel: 'Kabin & Inventaris',
+    name: 'Inventaris Mobil',
+    description: 'Periksa kelengkapan inventaris wajib mobil (dongkrak, kunci roda, dokumen jalan)'
   },
+  // 9. Ban Cadangan
   {
-    category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Kaca Spion & Kaca Depan',
-    description: 'Spion kiri-kanan-dalam kokoh dan bersih dari debu/retak, visibilitas pandangan jelas'
-  },
-  {
-    category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Pintu Boks & Engsel Pengunci',
-    description: 'Engsel dan tuas kunci pintu boks belakang rapat, karet penutup kedap air dan tidak bocor'
-  },
-
-  // 5. Keselamatan K3 & Perlengkapan Darurat
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'APAR (Alat Pemadam Api Ringan)',
-    description: 'APAR terpasang di kabin, jarum manometer berada di zona hijau, segel pengaman utuh'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Segitiga Pengaman & Kotak P3K',
-    description: 'Minimal 2 unit segitiga pengaman reflektor dan kotak P3K lengkap dengan kasa & antiseptik'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Dongkrak Hidrolik & Kunci Roda',
-    description: 'Kapasitas dongkrak sesuai tonase armada (min 5 ton) dan kunci roda pas dengan mur'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Terpal Cadangan & Tali Pengikat Muatan',
-    description: 'Terpal pelindung muatan anti air utuh dan tali tambang webbing pengikat koli siap pakai'
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Ban Cadangan',
+    description: 'Pastikan ban cadangan terpasang kuat dan memiliki tekanan angin siap pakai'
   }
 ];
 
+const LEGACY_NAME_ALIASES: Record<string, string> = {
+  'oli mesin & indikator dipstick': 'oli mesin',
+  'air radiator (coolant) & reservoir': 'air radiator',
+  'baterai / aki & indikator dashboard': 'air accu',
+  'minyak rem & minyak kopling': 'rem mobil & minyak rem',
+  'ban serep & tekanan udara': 'ban cadangan'
+};
+
 class DriverChecklistService {
+  private memoryChecklists: DriverVehicleChecklist[] | null = null;
+  private isSyncing: boolean = false;
+  private lastSyncAt: number = 0;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        const legacy = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3');
+        if (legacy) {
+          const parsed = JSON.parse(legacy);
+          if (Array.isArray(parsed)) {
+            this.memoryChecklists = parsed
+              .filter(chk => chk && chk.id && !String(chk.id).startsWith('CHK-INIT-'))
+              .map(chk => this.normalizeChecklist(chk));
+          }
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem('akk_driver_vehicle_checklists_v3');
+        }
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {}
+      setTimeout(() => {
+        void this.syncFromServer();
+      }, 150);
+    }
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        localStorage.getItem('akk_session_token') ||
+        localStorage.getItem('session_token') ||
+        sessionStorage.getItem('akk_session_token') ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
   public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
     const existingMap = new Map<string, VehicleChecklistItem>();
     if (Array.isArray(existingItems)) {
       existingItems.forEach(item => {
-        existingMap.set(item.name.toLowerCase(), item);
+        const lower = item.name.toLowerCase().trim();
+        existingMap.set(lower, item);
+        const mappedAlias = LEGACY_NAME_ALIASES[lower];
+        if (mappedAlias && !existingMap.has(mappedAlias)) {
+          existingMap.set(mappedAlias, item);
+        }
       });
     }
-
     return STANDARD_CHECKLIST_ITEMS.map((std, idx) => {
       const matched = existingMap.get(std.name.toLowerCase());
       return {
@@ -178,73 +151,116 @@ class DriverChecklistService {
     });
   }
 
-  private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
-    const today = new Date().toISOString().split('T')[0];
-    const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
-      id: `chk-item-${idx + 1}`,
-      ...item,
-      status: 'ok' as const,
-      note: ''
-    }));
+  private normalizeChecklist(chk: DriverVehicleChecklist): DriverVehicleChecklist {
+    const syncedItems = this.syncItemsWithStandard(chk.items);
+    const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+    return {
+      ...chk,
+      items: syncedItems,
+      overallStatus,
+      passedCount,
+      issueCount
+    };
+  }
 
-    return [
-      {
-        id: `CHK-INIT-${Date.now()}-1`,
-        driverId: 'crew-01',
-        driverName: 'Ach Taufiq',
-        fleetId: 'fl-01',
-        plateNumber: 'P 8848 U',
-        vehicleType: 'Engkel Long Box',
-        date: today,
-        time: '06:45',
-        odometerKm: 124580,
-        fuelLevelPercent: 85,
-        inspectionType: 'pre_trip',
-        overallStatus: 'passed',
-        passedCount: items.length,
-        issueCount: 0,
-        items,
-        notes: 'Pemeriksaan rutin pagi hari di pool DC Banyuwangi. Seluruh sistem mesin dan pengereman prima.',
-        driverSignature: 'Ach Taufiq (Digital Signed)',
-        checkerName: 'Rahmat Hidayat (Kepala Pool DC)',
-        checkerSigned: true,
-        synced: true,
-        createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
+  private loadAllChecklists(): DriverVehicleChecklist[] {
+    if (this.memoryChecklists !== null) {
+      return this.memoryChecklists;
+    }
+    this.memoryChecklists = [];
+    return this.memoryChecklists;
+  }
+
+  public async syncFromServer(force: boolean = false): Promise<DriverVehicleChecklist[]> {
+    if (typeof window === 'undefined' || this.isSyncing) {
+      return this.loadAllChecklists();
+    }
+    const nowMs = Date.now();
+    if (!force && this.lastSyncAt > 0 && nowMs - this.lastSyncAt < 8000) {
+      return this.loadAllChecklists();
+    }
+    this.isSyncing = true;
+    this.lastSyncAt = nowMs;
+    try {
+      const res = await fetch('/api/fleet-checklists', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) {
+        return this.loadAllChecklists();
       }
-    ];
+      const data = await res.json();
+      const rawServerList = Array.isArray(data?.checklists)
+        ? data.checklists
+        : Array.isArray(data?.data)
+        ? data.data
+        : [];
+      const serverList: DriverVehicleChecklist[] = rawServerList;
+      const localList = this.loadAllChecklists();
+
+      const mergedMap = new Map<string, DriverVehicleChecklist>();
+      serverList.forEach(chk => {
+        if (chk && chk.id && !String(chk.id).startsWith('CHK-INIT-')) {
+          mergedMap.set(String(chk.id), this.normalizeChecklist({ ...chk, synced: true }));
+        }
+      });
+
+      const unsyncedLocal: DriverVehicleChecklist[] = [];
+      localList.forEach(chk => {
+        if (chk && chk.id && !String(chk.id).startsWith('CHK-INIT-')) {
+          if (!mergedMap.has(String(chk.id))) {
+            mergedMap.set(String(chk.id), this.normalizeChecklist(chk));
+            if (!chk.synced) {
+              unsyncedLocal.push(chk);
+            }
+          }
+        }
+      });
+
+      // Push any unsynced local checklists to server
+      for (const localChk of unsyncedLocal.slice(0, 10)) {
+        try {
+          await fetch('/api/fleet-checklists', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ checklist: { ...localChk, synced: true } })
+          });
+        } catch {}
+      }
+
+      const merged = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      const prevSig = JSON.stringify(localList.map(c => `${c.id}:${c.overallStatus}:${c.passedCount}:${c.issueCount}`));
+      const nextSig = JSON.stringify(merged.map(c => `${c.id}:${c.overallStatus}:${c.passedCount}:${c.issueCount}`));
+      this.persistLocal(merged);
+      if (prevSig !== nextSig) {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+      }
+      return merged;
+    } catch {
+      return this.loadAllChecklists();
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  private persistLocal(list: DriverVehicleChecklist[]): void {
+    this.memoryChecklists = list.slice(0, 100);
   }
 
   public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) {
-        list = [];
-      }
-
-      list = list.map(chk => {
-        const syncedItems = this.syncItemsWithStandard(chk.items);
-        const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
-        return {
-          ...chk,
-          items: syncedItems,
-          overallStatus,
-          passedCount,
-          issueCount
-        };
-      });
-
-      if (driverId) {
-        list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(driverId.toLowerCase()));
-      }
-      if (fleetId) {
-        list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
-      }
-
-      return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    } catch {
-      return IS_PROD_BUILD ? [] : this.generateInitialSampleChecklists();
+    let list = [...this.loadAllChecklists()];
+    if (driverId) {
+      const lowerDriver = driverId.toLowerCase();
+      list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(lowerDriver));
     }
+    if (fleetId) {
+      list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
+    }
+    return list;
   }
 
   public getLatestChecklistForDriver(driverId: string): DriverVehicleChecklist | null {
@@ -254,15 +270,11 @@ class DriverChecklistService {
 
   public saveChecklist(checklist: DriverVehicleChecklist): boolean {
     try {
-      const syncedItems = this.syncItemsWithStandard(checklist.items);
-      const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
-      const normalizedChecklist: DriverVehicleChecklist = {
+      const normalizedChecklist = this.normalizeChecklist({
         ...checklist,
-        items: syncedItems,
-        overallStatus,
-        passedCount,
-        issueCount
-      };
+        synced: true,
+        createdAt: checklist.createdAt || new Date().toISOString()
+      });
       const all = this.getChecklists();
       const existingIdx = all.findIndex(c => c.id === normalizedChecklist.id);
       if (existingIdx >= 0) {
@@ -270,7 +282,17 @@ class DriverChecklistService {
       } else {
         all.unshift(normalizedChecklist);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      this.persistLocal(all);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+        void fetch('/api/fleet-checklists', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({ checklist: normalizedChecklist })
+        }).catch(err => console.warn('[DriverChecklistService] Sync to server failed:', err));
+      }
       return true;
     } catch (err) {
       console.error('Failed to save checklist:', err);
@@ -288,7 +310,7 @@ class DriverChecklistService {
     fuelPercent: number = 80
   ): DriverVehicleChecklist {
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = getLocalDateStr(now);
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const items: VehicleChecklistItem[] = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
@@ -339,6 +361,27 @@ class DriverChecklistService {
     }
 
     return { overallStatus, passedCount, issueCount };
+  }
+
+  public deleteChecklist(id: string): boolean {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return false;
+    try {
+      const list = this.loadAllChecklists();
+      const filtered = list.filter(c => c.id !== cleanId);
+      this.memoryChecklists = filtered;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
+        void fetch(`/api/fleet-checklists/${encodeURIComponent(cleanId)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: this.getAuthHeaders()
+        }).catch(() => {});
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

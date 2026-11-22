@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Users, UserCheck, UserX, Clock, ShieldAlert, CheckCircle2, XCircle, 
   Search, Filter, Plus, Shield, User, Building, Phone, Mail, Calendar, 
@@ -8,146 +9,39 @@ import {
 } from 'lucide-react';
 import { UserProfile, UserRole, UserApprovalStatus, UserPermissions } from '../types';
 import { logisticsStore } from '../services/store';
-import { getDefaultPermissionsForRole } from '../utils/rbac';
+import { canAccess, getDefaultPermissionsForRole, CANONICAL_SIDEBAR_MODULES, LEGACY_SUBMENU_KEY_MAP } from '../utils/rbac';
 import { branchStore, BranchRecord, UserBranchPermissionEntry } from '../services/branchStore';
 
-const MODULE_DEFINITIONS = [
-  {
-    id: 'logistics',
-    name: 'Logistik & Pengiriman',
-    description: 'Dashboard logistik, jadwal pengiriman, armada, simulasi kubikasi armada, dan portal driver per cabang.',
-    borderClass: 'border-blue-500/30',
-    iconBgClass: 'bg-blue-500/15 text-blue-400',
-    IconComp: Truck,
-    subMenus: [
-      { id: 'dashboard_logistik', name: 'Dashboard Logistik & Analitik Armada' },
-      { id: 'armada_ceklis', name: 'Data Armada & Simulasi Kubikasi Armada' },
-      { id: 'live_map', name: 'Live Map GPS' },
-      { id: 'monitoring_sla', name: 'Monitoring SLA, Kru & Evaluasi Jalur' },
-      { id: 'rencana_rute', name: 'Jadwal & Penugasan Pengiriman' },
-      { id: 'portal_driver', name: 'Portal Driver Mobile' }
-    ]
-  },
-  {
-    id: 'sales_admin',
-    name: 'Admin Penjualan',
-    description: 'Aktivitas harian admin, jadwal produksi, durasi muat, matriks skill, dan data KPI penjualan mengikuti cabang.',
-    borderClass: 'border-indigo-500/30',
-    iconBgClass: 'bg-indigo-500/15 text-indigo-400',
-    IconComp: Briefcase,
-    subMenus: [
-      { id: 'dashboard_penjualan', name: 'Dashboard Penjualan' },
-      { id: 'aktivitas_harian', name: 'Aktivitas Harian Admin' },
-      { id: 'jadwal_admin', name: 'Jadwal Admin & Produksi' },
-      { id: 'durasi_muat', name: 'Durasi Muat Admin' },
-      { id: 'matriks_skil', name: 'Matriks Skill Admin' },
-      { id: 'pengaturan_sop', name: 'Pengaturan SOP & Jobdesk' },
-      { id: 'data_kpi', name: 'Data KPI & Omset Penjualan' }
-    ]
-  },
-  {
-    id: 'warehouse',
-    name: 'Gudang (WMS)',
-    description: 'Dashboard gudang, master SKU & stok bin, inbound/outbound, denah rak, opname, dan kubikasi & berat barang per cabang.',
-    borderClass: 'border-emerald-500/30',
-    iconBgClass: 'bg-emerald-500/15 text-emerald-400',
-    IconComp: Package,
-    subMenus: [
-      { id: 'stok_barang', name: 'Master SKU, Denah Rak & Kubikasi Barang' },
-      { id: 'permintaan_barang', name: 'Inbound (Barang Masuk)' },
-      { id: 'opname_stok', name: 'Stok Opname & Kartu Stok' },
-      { id: 'ceklis_muat', name: 'Outbound (Picking & Muat)' }
-    ]
-  },
-  {
-    id: 'marketing',
-    name: 'Marketing',
-    description: 'Marketing online, laporan kunjungan & laporan penjualan marketing offline, serta pemetaan jaringan toko per cabang.',
-    borderClass: 'border-amber-500/30',
-    iconBgClass: 'bg-amber-500/15 text-amber-400',
-    IconComp: Megaphone,
-    subMenus: [
-      { id: 'kampanye', name: 'Marketing Online' },
-      { id: 'leads_pipeline', name: 'Marketing Offline (Laporan Kunjungan & Penjualan)' },
-      { id: 'laporan_kunjungan', name: 'Jaringan Toko & Mitra' }
-    ]
-  },
-  {
-    id: 'purchasing',
-    name: 'Admin Pembelian (Purchasing)',
-    description: 'Akses stok pembelian, ringkasan stok, dan analisa prediksi kebutuhan reorder mengikuti cabang.',
-    borderClass: 'border-purple-500/30',
-    iconBgClass: 'bg-purple-500/15 text-purple-400',
-    IconComp: ShoppingBag,
-    subMenus: [
-      { id: 'permintaan_pembelian', name: 'Dashboard Pembelian' },
-      { id: 'po_vendor', name: 'Analisa Stok & Prediksi Kebutuhan' },
-      { id: 'evaluasi_harga', name: 'Evaluasi Harga Supplier' }
-    ]
-  },
-  {
-    id: 'finance_tax',
-    name: 'Finance & Tax',
-    description: 'Monitoring tagihan pelanggan belum terlunasi, jatuh tempo piutang, dan pencatatan cicilan/pembayaran per cabang.',
-    borderClass: 'border-cyan-500/30',
-    iconBgClass: 'bg-cyan-500/15 text-cyan-400',
-    IconComp: DollarSign,
-    subMenus: [
-      { id: 'kas_bank', name: 'Tagihan Pelanggan Belum Terlunasi' },
-      { id: 'faktur_pajak', name: 'Faktur Pajak & E-Faktur' },
-      { id: 'rekonsiliasi', name: 'Rekonsiliasi Keuangan' },
-      { id: 'laba_rugi', name: 'Laporan Laba Rugi' }
-    ]
-  },
-  {
-    id: 'hr',
-    name: 'Human Resources & GA',
-    description: 'Data karyawan & presensi, General Affair (Security, Housekeeping, Aset), serta Training & Development per cabang.',
-    borderClass: 'border-rose-500/30',
-    iconBgClass: 'bg-rose-500/15 text-rose-400',
-    IconComp: Users,
-    subMenus: [
-      { id: 'hr_data_karyawan', name: 'HR - Dashboard & Presensi' },
-      { id: 'hr_gaji_kpi', name: 'HR - Gaji, Lembur & Penilaian Kinerja' },
-      { id: 'ga_security', name: 'GA - Security (Keamanan Pabrik)' },
-      { id: 'ga_hk', name: 'GA - HK (Housekeeping & Kebersihan)' },
-      { id: 'ga_aset', name: 'GA - Aset (Inventaris & Fasilitas)' },
-      { id: 'td_video_training', name: 'Training & Development - Video Training' },
-      { id: 'td_training_karyawan', name: 'Training & Development - Training Karyawan' }
-    ]
-  },
-  {
-    id: 'sistem_pengguna',
-    name: 'Sistem & Pengguna',
-    description: 'Master cabang, manajemen user & approval, log aktivitas sistem, pengujian E2E, dan skema database.',
-    borderClass: 'border-slate-600/40',
-    iconBgClass: 'bg-slate-700/40 text-slate-300',
-    IconComp: Settings,
-    subMenus: [
-      { id: 'daftar_pengguna', name: 'Master Cabang & Manajemen User' },
-      { id: 'manajemen_hak_akses', name: 'Manajemen Hak Akses & Skema SQL' },
-      { id: 'dashboard_eksekutif', name: 'Dashboard Eksekutif' },
-      { id: 'log_aktivitas_sistem', name: 'Log Aktivitas Sistem' },
-      { id: 'persetujuan_akun', name: 'Persetujuan Akun (Approval)' }
-    ]
-  }
-];
+const MODULE_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  logistics: Truck,
+  sales_admin: Briefcase,
+  warehouse: Package,
+  purchasing: ShoppingBag,
+  marketing: Megaphone,
+  finance_tax: DollarSign,
+  hr: Users,
+  sistem_pengguna: Settings,
+};
+
+const MODULE_DEFINITIONS = CANONICAL_SIDEBAR_MODULES.map(mod => ({
+  ...mod,
+  IconComp: MODULE_ICON_MAP[mod.id] || Settings,
+}));
 
 const DEPARTMENT_FILTER_OPTIONS = [
-  { id: 'all', label: 'Semua Role / Departemen', shortLabel: 'Semua', icon: '🌐' },
-  { id: 'logistics', label: 'Logistik & Pengiriman', shortLabel: 'Logistik', icon: '🚚' },
-  { id: 'sales', label: 'Admin Penjualan (Sales)', shortLabel: 'Sales', icon: '💼' },
-  { id: 'warehouse', label: 'Gudang (Warehouse)', shortLabel: 'Gudang', icon: '📦' },
-  { id: 'marketing', label: 'Marketing', shortLabel: 'Marketing', icon: '📢' },
-  { id: 'purchasing', label: 'Admin Pembelian', shortLabel: 'Pembelian', icon: '🛒' },
-  { id: 'finance', label: 'Finance & Tax', shortLabel: 'Finance', icon: '💰' },
-  { id: 'hr', label: 'Human Resources & GA', shortLabel: 'HR & GA', icon: '👥' },
-  { id: 'super_admin', label: 'Super Admin', shortLabel: 'Super Admin', icon: '👑' },
+  { id: 'all', label: 'Semua Role / Departemen', shortLabel: 'Semua', Icon: Users, tone: 'text-amber-400 bg-amber-500/15' },
+  { id: 'logistics', label: 'Logistik & Armada', shortLabel: 'Logistik', Icon: Truck, tone: 'text-blue-400 bg-blue-500/15' },
+  { id: 'sales', label: 'Admin Penjualan (Sales)', shortLabel: 'Sales', Icon: Briefcase, tone: 'text-violet-400 bg-violet-500/15' },
+  { id: 'warehouse', label: 'Gudang (Warehouse)', shortLabel: 'Gudang', Icon: Package, tone: 'text-emerald-400 bg-emerald-500/15' },
+  { id: 'marketing', label: 'Marketing', shortLabel: 'Marketing', Icon: Megaphone, tone: 'text-orange-400 bg-orange-500/15' },
+  { id: 'purchasing', label: 'Admin Pembelian', shortLabel: 'Pembelian', Icon: ShoppingBag, tone: 'text-pink-400 bg-pink-500/15' },
+  { id: 'finance', label: 'Adm Finance & Tax', shortLabel: 'Finance', Icon: DollarSign, tone: 'text-lime-400 bg-lime-500/15' },
+  { id: 'hr', label: 'HRD & Security', shortLabel: 'HR & GA', Icon: Shield, tone: 'text-rose-400 bg-rose-500/15' },
+  { id: 'super_admin', label: 'Super Admin', shortLabel: 'Super Admin', Icon: ShieldCheck, tone: 'text-amber-300 bg-amber-500/20' },
 ];
 
 const OFFICIAL_DEPARTMENT_OPTIONS = [
   'Logistik',
-  'Pengiriman',
   'Adm. Penjualan',
   'Adm. Pembelian',
   'Gudang',
@@ -156,6 +50,504 @@ const OFFICIAL_DEPARTMENT_OPTIONS = [
   'Human Resources',
   'Marketing'
 ];
+
+interface RoleDropdownOption {
+  value: UserRole;
+  label: string;
+  category: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  iconTone: string;
+}
+
+const ROLE_DROPDOWN_OPTIONS: RoleDropdownOption[] = [
+  { value: 'super_admin', label: 'Super Admin', category: 'Manajemen', Icon: ShieldCheck, iconTone: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  { value: 'spv_logistik', label: 'SPV Logistik', category: 'Logistik', Icon: Truck, iconTone: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  { value: 'operasional', label: 'SPV Operasional', category: 'Operasional', Icon: BarChart3, iconTone: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' },
+  { value: 'koordinator_driver', label: 'Koordinator Driver', category: 'Logistik', Icon: UserCog, iconTone: 'bg-sky-500/20 text-sky-400 border-sky-500/30' },
+  { value: 'driver', label: 'Driver', category: 'Logistik', Icon: Truck, iconTone: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  { value: 'crew_helper', label: 'Helper', category: 'Logistik', Icon: Users, iconTone: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' },
+  { value: 'koordinator_gudang', label: 'Koordinator Gudang', category: 'Gudang', Icon: Package, iconTone: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  { value: 'warehouse_admin', label: 'Gudang', category: 'Gudang', Icon: Package, iconTone: 'bg-teal-500/20 text-teal-400 border-teal-500/30' },
+  { value: 'spv_sales_admin', label: 'SPV Adm Penjualan', category: 'Penjualan', Icon: Briefcase, iconTone: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
+  { value: 'sales_admin', label: 'Adm. Penjualan', category: 'Penjualan', Icon: Briefcase, iconTone: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+  { value: 'spv_purchasing_admin', label: 'SPV Adm Pembelian', category: 'Pembelian', Icon: ShoppingBag, iconTone: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30' },
+  { value: 'purchasing_admin', label: 'Adm. Pembelian', category: 'Pembelian', Icon: ShoppingBag, iconTone: 'bg-pink-500/20 text-pink-400 border-pink-500/30' },
+  { value: 'spv_marketing_offline', label: 'SPV Marketing Offline', category: 'Marketing', Icon: Megaphone, iconTone: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  { value: 'marketing_offline', label: 'Marketing Offline', category: 'Marketing', Icon: Megaphone, iconTone: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  { value: 'marketing_online', label: 'Marketing Online', category: 'Marketing', Icon: BarChart3, iconTone: 'bg-sky-500/20 text-sky-400 border-sky-500/30' },
+  { value: 'finance_tax_admin', label: 'Adm Finance & Tax', category: 'Finance', Icon: DollarSign, iconTone: 'bg-lime-500/20 text-lime-400 border-lime-500/30' },
+  { value: 'hr_admin', label: 'Human Resource Development', category: 'HR & GA', Icon: Users, iconTone: 'bg-rose-500/20 text-rose-400 border-rose-500/30' },
+  { value: 'security', label: 'Security', category: 'Keamanan', Icon: Shield, iconTone: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
+  { value: 'unassigned', label: 'Perlu Diisi (Belum Ditentukan)', category: 'Belum Diatur', Icon: AlertTriangle, iconTone: 'bg-rose-500/20 text-rose-400 border-rose-500/30' }
+];
+
+const getDefaultDepartmentForRole = (role: UserRole, fallback = 'Logistik'): string => {
+  switch (role) {
+    case 'driver':
+    case 'crew_helper':
+    case 'spv_logistik':
+    case 'operasional':
+    case 'koordinator_driver':
+    case 'super_admin':
+      return 'Logistik';
+    case 'security':
+      return 'Satpam';
+    case 'sales_admin':
+    case 'spv_sales_admin':
+      return 'Adm. Penjualan';
+    case 'purchasing_admin':
+    case 'spv_purchasing_admin':
+      return 'Adm. Pembelian';
+    case 'warehouse_admin':
+    case 'koordinator_gudang':
+      return 'Gudang';
+    case 'finance_tax_admin':
+      return 'Finance & Tax';
+    case 'hr_admin':
+      return 'Human Resources';
+    case 'marketing_online':
+    case 'marketing_offline':
+    case 'spv_marketing_offline':
+      return 'Marketing';
+    default:
+      return fallback;
+  }
+};
+
+interface PortalMenuPosition {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+}
+
+function computePortalPosition(triggerEl: HTMLElement, minWidth = 220, desiredMaxHeight = 260): PortalMenuPosition {
+  const rect = triggerEl.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const margin = 12;
+  const gap = 6;
+  const width = Math.min(Math.max(rect.width, minWidth), vw - margin * 2);
+  let left = rect.left;
+  if (left + width > vw - margin) {
+    left = Math.max(margin, vw - margin - width);
+  }
+  const spaceBelow = vh - rect.bottom - margin - gap;
+  const spaceAbove = rect.top - margin - gap;
+  const openUp = spaceBelow < Math.min(220, desiredMaxHeight) && spaceAbove > spaceBelow;
+  const maxHeight = Math.max(140, Math.min(desiredMaxHeight, openUp ? spaceAbove : spaceBelow));
+
+  if (openUp) {
+    return {
+      bottom: vh - rect.top + gap,
+      left,
+      width,
+      maxHeight,
+      openUp: true
+    };
+  }
+  return {
+    top: rect.bottom + gap,
+    left,
+    width,
+    maxHeight,
+    openUp: false
+  };
+}
+
+interface CustomSelectOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+  dotClass?: string;
+  Icon?: React.ComponentType<{ className?: string }>;
+  iconTone?: string;
+}
+
+const CustomSelectDropdown: React.FC<{
+  value: string;
+  onChange: (val: string) => void;
+  options: CustomSelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  compact?: boolean;
+  minMenuWidth?: number;
+}> = ({
+  value,
+  onChange,
+  options,
+  placeholder = 'Pilih opsi...',
+  disabled = false,
+  searchable = false,
+  searchPlaceholder = 'Cari...',
+  compact = false,
+  minMenuWidth = 210
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<PortalMenuPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const selected = options.find(opt => opt.value === value) || null;
+  const filtered = query.trim()
+    ? options.filter(
+        opt =>
+          opt.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+          (opt.sublabel || '').toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : options;
+
+  const updatePos = () => {
+    if (!triggerRef.current) return;
+    setMenuPos(computePortalPosition(triggerRef.current, minMenuWidth, 260));
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    const t = searchable ? setTimeout(() => searchRef.current?.focus(), 40) : null;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    const handleReposition = () => updatePos();
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      if (t) clearTimeout(t);
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isOpen, searchable]);
+
+  const SelectedIcon = selected?.Icon;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setIsOpen(prev => !prev)}
+        className={`w-full ${
+          compact ? 'px-2.5 py-1.5 rounded-lg text-[11px]' : 'px-3 py-2 rounded-xl text-xs'
+        } bg-slate-950 border text-left flex items-center justify-between gap-2 transition ${
+          disabled
+            ? 'opacity-60 cursor-not-allowed border-slate-800'
+            : isOpen
+            ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-md shadow-amber-500/10 cursor-pointer'
+            : 'border-slate-800 hover:border-slate-600 cursor-pointer'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {selected?.dotClass && (
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${selected.dotClass}`} />
+          )}
+          {SelectedIcon && (
+            <span
+              className={`${
+                compact ? 'w-5 h-5 rounded-md' : 'w-6 h-6 rounded-lg'
+              } border flex items-center justify-center shrink-0 ${
+                selected?.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+              }`}
+            >
+              <SelectedIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
+            </span>
+          )}
+          <span className={`font-semibold truncate ${selected ? 'text-white' : 'text-slate-400'}`}>
+            {selected ? selected.label : placeholder}
+          </span>
+        </div>
+        <ChevronDown
+          className={`${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-slate-400 shrink-0 transition-transform duration-150 ${
+            isOpen ? 'rotate-180 text-amber-400' : ''
+          }`}
+        />
+      </button>
+
+      {isOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              bottom: menuPos.bottom,
+              left: menuPos.left,
+              width: menuPos.width,
+              zIndex: 9999
+            }}
+            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/75 overflow-hidden animate-in fade-in duration-150"
+          >
+            {searchable && (
+              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={searchPlaceholder}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{ maxHeight: Math.max(120, menuPos.maxHeight - (searchable ? 48 : 8)) }}
+              className="overflow-y-auto p-1.5 space-y-0.5"
+            >
+              {filtered.length === 0 ? (
+                <div className="py-4 text-center text-[11px] text-slate-500">Data tidak ditemukan.</div>
+              ) : (
+                filtered.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {opt.dotClass && (
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
+                        )}
+                        {OptIcon && (
+                          <span
+                            className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${
+                              opt.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            <OptIcon className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <div className={`text-xs truncate ${active ? 'text-amber-300 font-bold' : 'text-white font-semibold'}`}>
+                            {opt.label}
+                          </div>
+                          {opt.sublabel && (
+                            <div className="text-[10px] text-slate-400 truncate">{opt.sublabel}</div>
+                          )}
+                        </div>
+                      </div>
+                      {active && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
+
+const USER_STATUS_DROPDOWN_OPTIONS: CustomSelectOption[] = [
+  { value: 'approved', label: 'Aktif / Disetujui', sublabel: 'Akun aktif dan dapat mengakses sistem', dotClass: 'bg-emerald-400 ring-2 ring-emerald-500/30' },
+  { value: 'inactive', label: 'Nonaktif', sublabel: 'Akses ditutup, histori tetap tersimpan', dotClass: 'bg-slate-400 ring-2 ring-slate-500/30' },
+  { value: 'pending', label: 'Menunggu Approval', sublabel: 'Belum disetujui oleh Super Admin', dotClass: 'bg-amber-400 ring-2 ring-amber-500/30' },
+  { value: 'rejected', label: 'Ditolak / Dibekukan', sublabel: 'Permintaan akses dibekukan', dotClass: 'bg-rose-500 ring-2 ring-rose-500/30' }
+];
+
+const ACCESS_LEVEL_DROPDOWN_OPTIONS: CustomSelectOption[] = [
+  { value: 'full_access', label: 'Full Akses', sublabel: 'Bisa input & edit data', dotClass: 'bg-emerald-400' },
+  { value: 'read_only', label: 'Hanya Lihat', sublabel: 'Read only tanpa ubah data', dotClass: 'bg-amber-400' },
+  { value: 'none', label: 'Tidak Ada Akses', sublabel: 'Sub-menu dinonaktifkan', dotClass: 'bg-rose-500' }
+];
+
+const CustomRoleDropdown: React.FC<{
+  value: UserRole;
+  onChange: (role: UserRole) => void;
+  includeUnassigned?: boolean;
+}> = ({ value, onChange, includeUnassigned = false }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<PortalMenuPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const options = ROLE_DROPDOWN_OPTIONS.filter(opt => includeUnassigned || opt.value !== 'unassigned');
+  const selected = ROLE_DROPDOWN_OPTIONS.find(opt => opt.value === value) || options[0];
+  const filtered = query.trim()
+    ? options.filter(
+        opt =>
+          opt.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+          opt.category.toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : options;
+
+  const updatePos = () => {
+    if (!triggerRef.current) return;
+    setMenuPos(computePortalPosition(triggerRef.current, 270, 290));
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuery('');
+    const t = setTimeout(() => searchRef.current?.focus(), 40);
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    const handleReposition = () => updatePos();
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isOpen]);
+
+  const SelectedIcon = selected.Icon;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+          isOpen
+            ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-lg shadow-amber-500/10'
+            : 'border-slate-800 hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${selected.iconTone}`}>
+            <SelectedIcon className="w-3.5 h-3.5" />
+          </span>
+          <span className="text-xs font-bold text-white truncate">{selected.label}</span>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
+      </button>
+
+      {isOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              bottom: menuPos.bottom,
+              left: menuPos.left,
+              width: menuPos.width,
+              zIndex: 9999
+            }}
+            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/75 overflow-hidden animate-in fade-in duration-150"
+          >
+            <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cari role atau divisi..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div
+              style={{ maxHeight: Math.max(140, menuPos.maxHeight - 50) }}
+              className="overflow-y-auto p-1.5 space-y-0.5"
+            >
+              {filtered.length === 0 ? (
+                <div className="py-5 text-center text-[11px] text-slate-500">
+                  Role tidak ditemukan.
+                </div>
+              ) : (
+                filtered.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 ${opt.iconTone}`}>
+                          <OptIcon className="w-3.5 h-3.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className={`text-xs font-semibold truncate ${active ? 'text-amber-300 font-bold' : 'text-white'}`}>
+                            {opt.label}
+                          </div>
+                          <div className="text-[10px] text-slate-400">{opt.category}</div>
+                        </div>
+                      </div>
+                      {active && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
 
 export interface UserManagementProps {
   onNavigateToE2E?: () => void;
@@ -166,8 +558,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
   const [statusFilter, setStatusFilter] = useState<'all' | UserApprovalStatus>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const [isDeptFilterOpen, setIsDeptFilterOpen] = useState<boolean>(false);
+  const deptFilterRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isDeptFilterOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (deptFilterRef.current && !deptFilterRef.current.contains(e.target as Node)) {
+        setIsDeptFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [isDeptFilterOpen]);
 
   // Super Admin check
   const isSuperAdmin = currentUser.role === 'super_admin';
@@ -181,6 +586,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
   // Granular Access & Per-Branch Menu Permissions State
   const [branches, setBranches] = useState<BranchRecord[]>(branchStore.getBranches());
+  const prevLoadedUserIdRef = useRef<string | null>(null);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [editingPermissions, setEditingPermissions] = useState<UserPermissions['modules']>({});
@@ -194,12 +600,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  // Change Password Modal State
+  // Change Password Modal State (locked to explicit target user so it never switches to Super Admin)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordTargetUser, setPasswordTargetUser] = useState<UserProfile | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const openPasswordModalForUser = (targetUser: UserProfile) => {
+    setPasswordTargetUser(targetUser);
+    setSelectedUserId(targetUser.id);
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+    // Clear searchQuery if browser autofill previously injected currentUser's email
+    if (
+      searchQuery &&
+      currentUser?.email &&
+      searchQuery.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
+    ) {
+      setSearchQuery('');
+    }
+    setIsPasswordModalOpen(true);
+  };
+
+  const closePasswordModal = () => {
+    setIsPasswordModalOpen(false);
+    setPasswordTargetUser(null);
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+  };
 
   // View Password per user account state
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
@@ -216,7 +650,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     if (e) e.stopPropagation();
     setPageModalNotification({
       title: 'Password Tidak Dapat Ditampilkan',
-      message: 'Password disimpan sebagai hash scrypt di Hostinger MySQL. Gunakan menu Reset Password untuk menetapkan password baru.',
+      message: 'Password disimpan sebagai hash scrypt terenkripsi di server database. Gunakan menu Reset Password untuk menetapkan password baru.',
       type: 'info'
     });
   };
@@ -336,17 +770,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     return merged;
   };
 
-  // Whenever selectedUser changes, initialize editingPermissions and per-branch permissions
+  const handleExpandAllBranches = () => {
+    const next: Record<string, boolean> = {};
+    branches.forEach(b => {
+      next[b.id] = true;
+    });
+    setExpandedBranches(next);
+  };
+
+  const handleCollapseAllBranches = () => {
+    setExpandedBranches({});
+  };
+
+  // Whenever selectedUser changes to a DIFFERENT user, initialize editingPermissions, branchPermissions, and reset accordions
   useEffect(() => {
-    if (selectedUser) {
+    if (!selectedUser) {
+      prevLoadedUserIdRef.current = null;
+      return;
+    }
+
+    // Hanya reset dan muat ulang penuh saat berganti user (atau inisialisasi awal)
+    // Mengunci status accordion agar cabang/modul yang sedang diedit TIDAK tiba-tiba tertutup saat admin mencentang hak akses
+    if (prevLoadedUserIdRef.current !== selectedUser.id) {
+      prevLoadedUserIdRef.current = selectedUser.id;
+
       const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
-      const isLogisticsLead =
-        selectedUser.role === 'spv_logistik' ||
-        selectedUser.role === 'operasional' ||
-        selectedUser.role === 'pengiriman' ||
-        selectedUser.role === 'dispatcher';
-
       const isCrewRole = selectedUser.role === 'driver' || selectedUser.role === 'crew_helper';
 
       MODULE_DEFINITIONS.forEach(mod => {
@@ -359,28 +808,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           .filter(([, v]) => v === 'full_access' || v === 'read_only')
           .map(([k]) => k);
         const savedActiveCount = savedActiveKeys.length;
-        const shouldUseRoleDefaultForLogistics =
-          mod.id === 'logistics' && isLogisticsLead && savedActiveCount <= 1;
         const isLegacyCrewDefault =
           mod.id === 'logistics' &&
           isCrewRole &&
+          !selectedUser.permissions?.branchPermissions &&
           savedActiveCount === 2 &&
           savedActiveKeys.includes('portal_driver') &&
           savedActiveKeys.includes('monitoring_sla');
 
         mod.subMenus.forEach(sub => {
-          if (shouldUseRoleDefaultForLogistics) {
-            subMenuPerms[sub.id] = defaultMod?.subMenus?.[sub.id] || 'full_access';
-          } else if (isLegacyCrewDefault) {
-            subMenuPerms[sub.id] = sub.id === 'portal_driver' ? 'full_access' : 'none';
+          if (isLegacyCrewDefault) {
+            subMenuPerms[sub.id] = sub.id === 'driver_portal' || sub.id === 'portal_driver' ? 'full_access' : 'none';
           } else {
-            const savedVal = userMod?.subMenus?.[sub.id];
+            let savedVal = userMod?.subMenus?.[sub.id];
+            if (savedVal === undefined && userMod?.subMenus) {
+              const legacyKeys = LEGACY_SUBMENU_KEY_MAP[sub.id];
+              if (legacyKeys) {
+                for (const lk of legacyKeys) {
+                  if (userMod.subMenus[lk] !== undefined) {
+                    savedVal = userMod.subMenus[lk];
+                    break;
+                  }
+                }
+              }
+            }
             subMenuPerms[sub.id] = savedVal !== undefined ? savedVal : (defaultMod?.subMenus?.[sub.id] || 'none');
           }
         });
-        const isEnabled = shouldUseRoleDefaultForLogistics
-          ? true
-          : userMod !== undefined
+        const isEnabled = userMod !== undefined
           ? userMod.enabled
           : (defaultMod ? defaultMod.enabled : false);
         initialPerms[mod.id] = {
@@ -392,33 +847,39 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       const loadedBranchPerms = branchStore.getUserBranchPermissions(
         selectedUser.id,
         selectedUser.role,
-        initialPerms
+        initialPerms,
+        selectedUser.permissions?.branchPermissions
       );
+      const syncedMergedPerms = computeMergedModulesFromBranches(loadedBranchPerms, selectedUser.role);
       setBranchPermissions(loadedBranchPerms);
-      setEditingPermissions(initialPerms);
-      // Cabang tertutup default (sesuai gambar 2)
+      setEditingPermissions(syncedMergedPerms);
+      // Cabang tertutup default hanya saat beralih ke user baru
       setExpandedBranches({});
       setExpandedModules({});
     }
-  }, [selectedUser?.id, selectedUser?.role, selectedUser?.permissions, branches.length]);
+  }, [selectedUser?.id, selectedUser?.role, branches.length]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
-    super_admin: 'Super Admin / Manager',
-    dispatcher: 'Dispatcher / SPV Logistik',
+    super_admin: 'Super Admin',
+    dispatcher: 'SPV Logistik',
     spv_logistik: 'SPV Logistik',
-    operasional: 'Operasional (Operational Lead)',
-    pengiriman: 'Pengiriman',
-    security: 'Security (Pos Satpam & Keamanan)',
+    operasional: 'SPV Operasional',
+    koordinator_driver: 'Koordinator Driver',
+    security: 'Security',
     sales_admin: 'Adm. Penjualan',
+    spv_sales_admin: 'SPV Adm Penjualan',
     purchasing_admin: 'Adm. Pembelian',
-    hr_admin: 'HR Admin',
-    finance_tax_admin: 'Finance & Tax',
+    spv_purchasing_admin: 'SPV Adm Pembelian',
+    hr_admin: 'Human Resource Development',
+    finance_tax_admin: 'Adm Finance & Tax',
     warehouse_admin: 'Gudang',
-    driver: 'Kru Supir / Driver',
+    koordinator_gudang: 'Koordinator Gudang',
+    driver: 'Driver',
     marketing_online: 'Marketing Online',
     marketing_offline: 'Marketing Offline',
-    crew_helper: 'Kru Helper / Kernet',
-    unassigned: '⚠️ Perlu Diisi (Belum Ada Role)'
+    spv_marketing_offline: 'SPV Marketing Offline',
+    crew_helper: 'Helper',
+    unassigned: 'Perlu Diisi (Belum Ada Role)'
   };
 
   const toggleBranchExpansion = (branchId: string) => {
@@ -460,7 +921,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -506,7 +967,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -554,7 +1015,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -596,7 +1057,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         ...prev,
         [branchId]: {
           ...branchEntry,
-          enabled: activeModCount > 0 ? true : branchEntry.enabled,
+          enabled: activeModCount > 0,
           allAccess: activeModCount === MODULE_DEFINITIONS.length,
           modules: nextModules
         }
@@ -606,7 +1067,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       if (selectedUser) {
         branchStore.saveUserBranchPermissions(selectedUser.id, nextMap);
         logisticsStore.updateUserProfile(selectedUser.id, {
-          permissions: { modules: merged }
+          permissions: { modules: merged, branchPermissions: nextMap }
         });
       }
       return nextMap;
@@ -622,7 +1083,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
     const mergedModules = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
     const updatedPermissions: UserPermissions = {
-      modules: mergedModules
+      modules: mergedModules,
+      branchPermissions
     };
 
     branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
@@ -647,6 +1109,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('User Sumber Kosong', 'User sumber tidak memiliki konfigurasi akses khusus.', 'warning');
       return;
     }
+    const copiedBranchPerms = branchStore.getUserBranchPermissions(
+      sourceUser.id,
+      sourceUser.role,
+      sourceUser.permissions.modules,
+      sourceUser.permissions.branchPermissions
+    );
+    setBranchPermissions(JSON.parse(JSON.stringify(copiedBranchPerms)));
     setEditingPermissions(JSON.parse(JSON.stringify(sourceUser.permissions.modules)));
     setIsCopyModalOpen(false);
     setSourceUserIdForCopy('');
@@ -654,7 +1123,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   };
 
   const handleChangePassword = async () => {
-    if (!selectedUser) return;
+    const target = passwordTargetUser || selectedUser;
+    if (!target) return;
     if (!newPasswordInput || newPasswordInput.length < 8) {
       showNotification('Password Tidak Valid', 'Password baru minimal harus 8 karakter.', 'warning');
       return;
@@ -663,16 +1133,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('Password Tidak Cocok', 'Konfirmasi password tidak cocok dengan password baru. Harap periksa kembali kedua input.', 'error');
       return;
     }
-    const success = await logisticsStore.resetUserPassword(selectedUser.id, newPasswordInput);
+    const success = await logisticsStore.resetUserPassword(target.id, newPasswordInput);
     if (success) {
-      showNotification('Password Berhasil Diubah', `Password baru untuk akun "${selectedUser.fullName}" berhasil disimpan ke database.`, 'success');
-      setSaveSuccessMessage(`Password akun "${selectedUser.fullName}" berhasil diubah.`);
+      showNotification('Password Berhasil Diubah', `Password baru untuk akun "${target.fullName}" (${target.email}) berhasil disimpan ke database.`, 'success');
+      setSaveSuccessMessage(`Password akun "${target.fullName}" berhasil diubah.`);
       setTimeout(() => setSaveSuccessMessage(null), 4000);
-      setIsPasswordModalOpen(false);
-      setNewPasswordInput('');
-      setConfirmPasswordInput('');
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
+      closePasswordModal();
     }
   };
 
@@ -775,6 +1241,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       return;
     }
 
+    const roleChanged = editFormData.role !== editingUser.role;
     const success = logisticsStore.updateUserProfile(editingUser.id, {
       fullName: editFormData.fullName.trim(),
       email: editFormData.email.trim(),
@@ -787,6 +1254,28 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     });
 
     if (success) {
+      const updatedUserObj = logisticsStore.getUsers().find(u => u.id === editingUser.id);
+      if (updatedUserObj && roleChanged) {
+        const syncedBranchPerms = branchStore.getUserBranchPermissions(
+          updatedUserObj.id,
+          updatedUserObj.role,
+          updatedUserObj.permissions?.modules,
+          updatedUserObj.permissions?.branchPermissions
+        );
+        branchStore.saveUserBranchPermissions(updatedUserObj.id, syncedBranchPerms);
+        const mergedMods = computeMergedModulesFromBranches(syncedBranchPerms, updatedUserObj.role);
+        logisticsStore.updateUserProfile(updatedUserObj.id, {
+          permissions: {
+            modules: mergedMods,
+            branchPermissions: syncedBranchPerms
+          }
+        });
+        if (selectedUserId === updatedUserObj.id) {
+          prevLoadedUserIdRef.current = null;
+          setBranchPermissions(syncedBranchPerms);
+          setEditingPermissions(mergedMods);
+        }
+      }
       setSaveSuccessMessage(`Profil "${editFormData.fullName}" berhasil diperbarui.`);
       setTimeout(() => setSaveSuccessMessage(null), 4000);
       setEditingUser(null);
@@ -817,12 +1306,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       password: newUser.password,
       status: chosenRole !== 'unassigned' ? 'approved' : 'pending',
       notes: isCrewRole
-        ? `Akun ${chosenRole === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'} aktif & terintegrasi otomatis ke Daftar Jadwal Pengiriman`
+        ? `Akun ${chosenRole === 'driver' ? 'Driver' : 'Helper'} aktif`
         : chosenRole !== 'unassigned'
         ? `Akun aktif untuk role ${ROLE_LABELS[chosenRole] || chosenRole}`
         : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
     });
 
+    const initialBranchPerms = branchStore.getUserBranchPermissions(
+      created.id,
+      chosenRole,
+      created.permissions?.modules
+    );
+    branchStore.saveUserBranchPermissions(created.id, initialBranchPerms);
+    const mergedNewMods = computeMergedModulesFromBranches(initialBranchPerms, chosenRole);
+    logisticsStore.updateUserProfile(created.id, {
+      permissions: {
+        modules: mergedNewMods,
+        branchPermissions: initialBranchPerms
+      }
+    });
+
+    prevLoadedUserIdRef.current = null;
     setIsAddUserModalOpen(false);
     setSelectedUserId(created.id);
     setNewUser({
@@ -836,7 +1340,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     showNotification(
       isCrewRole ? 'Akun Kru Terdaftar & Sinkron ke Jadwal' : 'Akun Baru Terdaftar',
       isCrewRole
-        ? `Akun "${created.fullName}" (${ROLE_LABELS[chosenRole]}) berhasil dibuat dan otomatis masuk ke dalam daftar pilihan ${chosenRole === 'driver' ? 'Kru Supir Utama' : 'Kru Helper / Kernet'} pada menu Jadwal & Penugasan Pengiriman.`
+        ? `Akun "${created.fullName}" (${ROLE_LABELS[chosenRole]}) berhasil dibuat dan otomatis masuk ke dalam daftar pilihan ${chosenRole === 'driver' ? 'Driver' : 'Helper'} pada menu Jadwal & Penugasan Pengiriman.`
         : `Akun "${created.fullName}" berhasil dibuat dengan Role: ${ROLE_LABELS[chosenRole] || chosenRole}.`,
       'success'
     );
@@ -853,19 +1357,57 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     const role = (u.role || '').toLowerCase();
     switch (filterKey) {
       case 'logistics':
-        return role === 'spv_logistik' || role === 'operasional' || role === 'pengiriman' || role === 'driver' || role === 'crew_helper' || /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept);
+        return (
+          role === 'spv_logistik' ||
+          role === 'operasional' ||
+          role === 'koordinator_driver' ||
+          role === 'driver' ||
+          role === 'crew_helper' ||
+          /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'logistics'))
+        );
       case 'sales':
-        return role === 'sales_admin' || /sales|penjualan/i.test(dept);
+        return (
+          role === 'sales_admin' ||
+          role === 'spv_sales_admin' ||
+          /sales|penjualan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'sales_admin'))
+        );
       case 'warehouse':
-        return role === 'warehouse_admin' || /gudang|warehouse/i.test(dept);
+        return (
+          role === 'warehouse_admin' ||
+          role === 'koordinator_gudang' ||
+          /gudang|warehouse/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'warehouse'))
+        );
       case 'marketing':
-        return role === 'marketing_online' || role === 'marketing_offline' || /marketing|pemasaran/i.test(dept);
+        return (
+          role === 'marketing_online' ||
+          role === 'marketing_offline' ||
+          role === 'spv_marketing_offline' ||
+          /marketing|pemasaran/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'marketing'))
+        );
       case 'purchasing':
-        return role === 'purchasing_admin' || /pembelian|purchasing|pengadaan/i.test(dept);
+        return (
+          role === 'purchasing_admin' ||
+          role === 'spv_purchasing_admin' ||
+          /pembelian|purchasing|pengadaan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'purchasing'))
+        );
       case 'finance':
-        return role === 'finance_tax_admin' || /finance|tax|keuangan|pajak/i.test(dept);
+        return (
+          role === 'finance_tax_admin' ||
+          /finance|tax|keuangan|pajak/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'finance_tax'))
+        );
       case 'hr':
-        return role === 'hr_admin' || role === 'security' || /hr|human|ga|personalia|general affair|satpam|keamanan/i.test(dept);
+        return (
+          role === 'hr_admin' ||
+          role === 'security' ||
+          /hr|human|ga|personalia|general affair|satpam|keamanan/i.test(dept) ||
+          (role !== 'super_admin' && canAccess(u, 'hr'))
+        );
       case 'super_admin':
         return role === 'super_admin' || /super|direksi|manajemen/i.test(dept);
       default:
@@ -889,10 +1431,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     return matchesStatus && matchesDept && matchesQuery;
   });
 
-  // Auto-select first matching user if current selected user is filtered out
+  // Auto-select first matching user if current selected user is filtered out (only when no modal is open)
   useEffect(() => {
     if (!isSuperAdmin && statusFilter === 'inactive') {
       setStatusFilter('all');
+    }
+    if (isPasswordModalOpen || Boolean(editingUser) || isDeleteModalOpen || isCopyModalOpen) {
+      return;
     }
     if (filteredUsers.length > 0) {
       const isSelectedPresent = filteredUsers.some(u => u.id === selectedUserId);
@@ -900,7 +1445,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         setSelectedUserId(filteredUsers[0].id);
       }
     }
-  }, [departmentFilter, statusFilter, searchQuery, isSuperAdmin, visibleUsersForRole.length]);
+  }, [departmentFilter, statusFilter, searchQuery, isSuperAdmin, visibleUsersForRole.length, isPasswordModalOpen, editingUser, isDeleteModalOpen, isCopyModalOpen]);
 
   const activeDeptOption = DEPARTMENT_FILTER_OPTIONS.find(opt => opt.id === departmentFilter);
 
@@ -967,21 +1512,58 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <span>Tambah User Langsung</span>
           </button>
 
-          {/* Department / Role Filter Dropdown in Top Toolbar */}
-          <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
-            <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="text-slate-400 font-semibold text-[11px] hidden sm:inline">Role / Dept:</span>
-            <select
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="bg-transparent text-amber-400 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+          {/* Department / Role Filter Custom Dropdown in Top Toolbar */}
+          <div ref={deptFilterRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsDeptFilterOpen(prev => !prev)}
+              className={`flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border text-xs transition cursor-pointer ${
+                isDeptFilterOpen
+                  ? 'border-amber-500 ring-2 ring-amber-500/20'
+                  : 'border-slate-800 hover:border-slate-600'
+              }`}
             >
-              {DEPARTMENT_FILTER_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id} className="bg-slate-900 text-slate-200 font-medium">
-                  {opt.icon} {opt.label} ({countUsersInDept(opt.id)})
-                </option>
-              ))}
-            </select>
+              <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-slate-400 font-semibold text-[11px] hidden sm:inline">Role / Dept:</span>
+              <span className="text-amber-400 font-bold text-xs">
+                {activeDeptOption?.label || 'Semua Role / Departemen'} ({countUsersInDept(departmentFilter)})
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isDeptFilterOpen ? 'rotate-180 text-amber-400' : ''}`} />
+            </button>
+
+            {isDeptFilterOpen && (
+              <div className="absolute left-0 mt-1.5 w-72 z-[70] rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/70 p-1.5 space-y-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                {DEPARTMENT_FILTER_OPTIONS.map(opt => {
+                  const OptIcon = opt.Icon;
+                  const active = departmentFilter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setDepartmentFilter(opt.id);
+                        setIsDeptFilterOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300'
+                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${opt.tone}`}>
+                          <OptIcon className="w-3.5 h-3.5" />
+                        </span>
+                        <span className="text-xs font-semibold truncate">{opt.label}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold tabular-nums ${active ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>
+                        {countUsersInDept(opt.id)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1030,14 +1612,38 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           </div>
 
           <div className="relative flex-1 sm:w-64">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
             <input
-              type="text"
+              type="search"
+              name="akk_user_directory_search_filter"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               placeholder="Cari nama, email, divisi..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              onChange={(e) => {
+                // Ignore background browser credential autofill when input is not focused
+                if (document.activeElement !== e.currentTarget && e.target.value.includes('@')) {
+                  return;
+                }
+                setSearchQuery(e.target.value);
+              }}
+              className="w-full pl-9 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                title="Bersihkan pencarian"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1218,7 +1824,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                             const merged = computeMergedModulesFromBranches(branchPermissions, selectedUser.role);
                             branchStore.saveUserBranchPermissions(selectedUser.id, branchPermissions);
                             logisticsStore.updateUserProfile(selectedUser.id, {
-                              permissions: { modules: merged }
+                              permissions: { modules: merged, branchPermissions }
                             });
                           }
                           logisticsStore.switchCurrentUser(selectedUser.id);
@@ -1307,7 +1913,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   {isSuperAdmin && (
                     <button
                       type="button"
-                      onClick={() => setIsPasswordModalOpen(true)}
+                      onClick={() => openPasswordModalForUser(selectedUser)}
                       className="px-3.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer self-end sm:self-auto"
                     >
                       <Lock className="w-3.5 h-3.5" />
@@ -1426,18 +2032,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                   {/* AKSES CABANG & MENU WEBSITE SECTION — Matches image_22fe4cd6.png & image_a6bb64da.png */}
                   <div className="p-5 space-y-4 max-h-[68vh] overflow-y-auto text-xs bg-slate-950/30">
-                    {/* Top Header Row: AKSES CABANG & Copy Akses */}
+                    {/* Top Header Row: AKSES CABANG & Controls */}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
                           AKSES CABANG
                         </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                          🔒 Terkunci Saat Edit (Tidak Otomatis Tertutup)
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="px-3 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
-                          CABANG TERTUTUP DEFAULT
-                        </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleExpandAllBranches}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px] transition cursor-pointer"
+                          title="Buka semua kartu cabang"
+                        >
+                          Buka Semua
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCollapseAllBranches}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px] transition cursor-pointer"
+                          title="Tutup semua kartu cabang"
+                        >
+                          Tutup Semua
+                        </button>
                         <button
                           type="button"
                           onClick={() => setIsCopyModalOpen(true)}
@@ -1663,30 +2285,26 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                                                   {isSubActive && (
                                                     <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                                      <span className="text-[10px] text-slate-400">
+                                                      <span className="text-[10px] text-slate-400 shrink-0">
                                                         Akses Input:
                                                       </span>
-                                                      <select
-                                                        value={accessLevel}
-                                                        onChange={e =>
-                                                          handleBranchSubMenuPermissionChange(
-                                                            branch.id,
-                                                            mod.id,
-                                                            sub.id,
-                                                            e.target.value as 'none' | 'read_only' | 'full_access'
-                                                          )
-                                                        }
-                                                        disabled={!isSuperAdmin}
-                                                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
-                                                      >
-                                                        <option value="full_access">
-                                                          🟢 Full Akses (Bisa Input/Edit)
-                                                        </option>
-                                                        <option value="read_only">
-                                                          🟡 Hanya Lihat (Read Only)
-                                                        </option>
-                                                        <option value="none">🔴 Tidak Ada Akses</option>
-                                                      </select>
+                                                      <div className="w-36">
+                                                        <CustomSelectDropdown
+                                                          value={accessLevel}
+                                                          onChange={val =>
+                                                            handleBranchSubMenuPermissionChange(
+                                                              branch.id,
+                                                              mod.id,
+                                                              sub.id,
+                                                              val as 'none' | 'read_only' | 'full_access'
+                                                            )
+                                                          }
+                                                          options={ACCESS_LEVEL_DROPDOWN_OPTIONS}
+                                                          disabled={!isSuperAdmin}
+                                                          compact
+                                                          minMenuWidth={195}
+                                                        />
+                                                      </div>
                                                     </div>
                                                   )}
                                                 </div>
@@ -1713,7 +2331,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                         <>
                           <button
                             type="button"
-                            onClick={() => setIsPasswordModalOpen(true)}
+                            onClick={() => openPasswordModalForUser(selectedUser)}
                             className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-slate-700 text-xs shadow-xs"
                             title="Ubah password akun apabila user lupa password"
                           >
@@ -1768,18 +2386,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <p className="text-xs text-slate-400">
               Pilih akun pengguna sumber untuk menyalin seluruh konfigurasi hak akses modul dan sub-menu ke user saat ini ({selectedUser?.fullName}).
             </p>
-            <select
+            <CustomSelectDropdown
               value={sourceUserIdForCopy}
-              onChange={(e) => setSourceUserIdForCopy(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white"
-            >
-              <option value="">-- Pilih User Sumber --</option>
-              {visibleUsersForRole.filter(u => u.id !== selectedUser?.id && u.status !== 'inactive').map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName} ({ROLE_LABELS[u.role] || u.role})
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSourceUserIdForCopy(val)}
+              placeholder="Pilih User Sumber..."
+              searchable
+              searchPlaceholder="Cari nama atau role user..."
+              minMenuWidth={280}
+              options={visibleUsersForRole
+                .filter(u => u.id !== selectedUser?.id && u.status !== 'inactive')
+                .map(u => ({
+                  value: u.id,
+                  label: u.fullName,
+                  sublabel: ROLE_LABELS[u.role] || u.role,
+                  Icon: User,
+                  iconTone: 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                }))}
+            />
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setIsCopyModalOpen(false)}
@@ -1799,24 +2422,46 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       )}
 
       {/* ================= CHANGE PASSWORD SUB-MODAL ================= */}
-      {isPasswordModalOpen && (
+      {isPasswordModalOpen && (passwordTargetUser || selectedUser) && (
         <div className="fixed inset-0 z-60 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+          <form
+            autoComplete="off"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleChangePassword();
+            }}
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl"
+          >
+            {/* Hidden trap field so browser password managers never autofill the page search bar */}
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value={(passwordTargetUser || selectedUser)?.email || ''}
+              readOnly
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+            />
+
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h4 className="font-bold text-white text-sm flex items-center gap-2">
                 <Key className="w-4 h-4 text-amber-400" />
-                <span>Ubah Password Akun: {selectedUser?.fullName}</span>
+                <span>Ubah Password Akun: {(passwordTargetUser || selectedUser)?.fullName}</span>
               </h4>
               <button
-                onClick={() => { setIsPasswordModalOpen(false); setNewPasswordInput(''); setConfirmPasswordInput(''); }}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                type="button"
+                onClick={closePasswordModal}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-400">
-              Masukkan password baru untuk akun ini (digunakan apabila user lupa password).
-            </p>
+            <div className="text-xs text-slate-400 space-y-1">
+              <p>
+                Masukkan password baru untuk akun <strong className="text-white">{(passwordTargetUser || selectedUser)?.fullName}</strong> (<span className="text-amber-400">{(passwordTargetUser || selectedUser)?.email}</span>).
+              </p>
+            </div>
 
             <div className="space-y-3">
               <div>
@@ -1826,7 +2471,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <div className="relative">
                   <input
                     type={showNewPassword ? 'text' : 'password'}
-                    placeholder="Minimal 6 karakter"
+                    name="akk_reset_new_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    placeholder="Minimal 8 karakter"
                     value={newPasswordInput}
                     onChange={(e) => setNewPasswordInput(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white pr-9 focus:outline-none focus:border-amber-500"
@@ -1849,6 +2498,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
+                    name="akk_reset_confirm_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     placeholder="Ketik ulang password baru"
                     value={confirmPasswordInput}
                     onChange={(e) => setConfirmPasswordInput(e.target.value)}
@@ -1892,29 +2545,28 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => { setIsPasswordModalOpen(false); setNewPasswordInput(''); setConfirmPasswordInput(''); }}
+                onClick={closePasswordModal}
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition cursor-pointer"
               >
                 Batal
               </button>
               <button
-                type="button"
-                onClick={handleChangePassword}
+                type="submit"
                 disabled={!newPasswordInput || newPasswordInput.length < 8 || newPasswordInput !== confirmPasswordInput}
                 className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold text-xs transition cursor-pointer shadow-md shadow-amber-500/20 active:scale-95 disabled:cursor-not-allowed"
               >
                 Simpan Password Baru
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
       {/* Manual Add User Modal */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-visible shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 rounded-t-2xl flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-amber-400" />
                 Tambah Pengguna Baru AKK
@@ -1967,50 +2619,31 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-slate-300 font-bold block mb-1">Role Pengguna *</label>
-                  <select
+                  <CustomRoleDropdown
                     value={newUser.role}
-                    onChange={(e) => {
-                      const r = e.target.value as UserRole;
+                    onChange={(r) => {
                       setNewUser({
                         ...newUser,
                         role: r,
-                        department: r === 'pengiriman'
-                          ? 'Pengiriman'
-                          : (r === 'driver' || r === 'crew_helper' || r === 'spv_logistik' || r === 'operasional')
-                          ? 'Logistik'
-                          : newUser.department
+                        department: getDefaultDepartmentForRole(r, newUser.department)
                       });
                     }}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold cursor-pointer focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="driver">🚚 Kru Supir / Driver</option>
-                    <option value="crew_helper">🤝 Kru Helper / Kernet</option>
-                    <option value="spv_logistik">🚛 SPV Logistik</option>
-                    <option value="operasional">📋 Operasional</option>
-                    <option value="pengiriman">📦 Pengiriman</option>
-                    <option value="security">🛡️ Security</option>
-                    <option value="sales_admin">💼 Adm. Penjualan</option>
-                    <option value="purchasing_admin">🛒 Adm. Pembelian</option>
-                    <option value="warehouse_admin">📦 Gudang</option>
-                    <option value="finance_tax_admin">💰 Finance &amp; Tax</option>
-                    <option value="hr_admin">👥 HR Admin</option>
-                    <option value="marketing_online">🌐 Marketing Online</option>
-                    <option value="marketing_offline">📣 Marketing Offline</option>
-                    <option value="super_admin">👑 Super Admin</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
                   <label className="text-slate-300 font-bold block mb-1">Departemen / Divisi</label>
-                  <select
+                  <CustomSelectDropdown
                     value={newUser.department}
-                    onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer focus:outline-none focus:border-amber-500"
-                  >
-                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setNewUser({ ...newUser, department: val })}
+                    options={OFFICIAL_DEPARTMENT_OPTIONS.map(dept => ({
+                      value: dept,
+                      label: dept,
+                      Icon: Building,
+                      iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                    }))}
+                    minMenuWidth={220}
+                  />
                 </div>
               </div>
 
@@ -2046,38 +2679,39 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         </div>
       )}
 
-      {/* Edit User Profile Modal (Khusus Super Admin) */}
+      {/* Edit User Profile Modal (Khusus Super Admin) — Compact Single-Viewport Tanpa Double Scroll */}
       {editingUser && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl space-y-0">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl my-auto">
+            <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 rounded-t-2xl flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                   <UserCog className="w-4 h-4" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
-                    <span>Edit Pengguna: {editingUser.fullName}</span>
-                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    <span className="truncate">Edit Pengguna: {editingUser.fullName}</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
                       {ROLE_LABELS[editingUser.role] || editingUser.role}
                     </span>
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-400 truncate">
                     Perbarui data akun <strong className="text-slate-200">{editingUser.fullName}</strong> &bull; ID: <code className="text-amber-400 font-mono">{editingUser.id}</code>
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingUser(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div className="space-y-1.5 sm:col-span-2">
+            <form onSubmit={handleSaveEdit} className="p-4 space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-amber-400" />
                     <span>Nama Lengkap &amp; Gelar</span>
@@ -2092,7 +2726,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Mail className="w-3.5 h-3.5 text-blue-400" />
                     <span>Email Akun</span>
@@ -2107,7 +2741,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Phone className="w-3.5 h-3.5 text-emerald-400" />
                     <span>No. WhatsApp</span>
@@ -2120,71 +2754,65 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Shield className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Hak Akses (Role)</span>
+                    <span>Role / Jabatan User</span>
                     <span className="text-rose-400">*</span>
                   </label>
-                  <select
+                  <CustomRoleDropdown
                     value={editFormData.role}
-                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as UserRole })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="unassigned">⚠️ Perlu Diisi (Belum Ditentukan)</option>
-                    <option value="super_admin">👑 Super Admin / Manager</option>
-                    <option value="spv_logistik">🚛 SPV Logistik</option>
-                    <option value="operasional">📋 Operasional (Operational Lead)</option>
-                    <option value="pengiriman">📦 Pengiriman</option>
-                    <option value="security">🛡️ Security (Pos Satpam &amp; Keamanan)</option>
-                    <option value="driver">🚚 Kru Supir / Driver</option>
-                    <option value="crew_helper">🤝 Kru Helper / Kernet</option>
-                    <option value="sales_admin">💼 Adm. Penjualan</option>
-                    <option value="purchasing_admin">🛒 Adm. Pembelian</option>
-                    <option value="hr_admin">👥 HR Admin</option>
-                    <option value="finance_tax_admin">💰 Finance &amp; Tax</option>
-                    <option value="warehouse_admin">📦 Gudang</option>
-                    <option value="marketing_online">🌐 Marketing Online</option>
-                    <option value="marketing_offline">📣 Marketing Offline</option>
-                  </select>
+                    includeUnassigned={true}
+                    onChange={(r) =>
+                      setEditFormData({
+                        ...editFormData,
+                        role: r,
+                        department: getDefaultDepartmentForRole(r, editFormData.department)
+                      })
+                    }
+                  />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Status Akun</span>
                   </label>
-                  <select
+                  <CustomSelectDropdown
                     value={editFormData.status}
-                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as UserApprovalStatus })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="approved">🟢 Aktif / Disetujui (Approved)</option>
-                    <option value="inactive">⚫ Nonaktif (Hak Akses Ditutup, Histori Tersimpan)</option>
-                    <option value="pending">🟡 Menunggu Approval (Pending)</option>
-                    <option value="rejected">🔴 Ditolak / Dibekukan (Rejected)</option>
-                  </select>
+                    onChange={(val) => setEditFormData({ ...editFormData, status: val as UserApprovalStatus })}
+                    options={USER_STATUS_DROPDOWN_OPTIONS}
+                    minMenuWidth={240}
+                  />
                 </div>
 
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-slate-300 font-bold flex items-center gap-1.5">
                     <Building className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Departemen / Divisi</span>
                     <span className="text-rose-400">*</span>
                   </label>
-                  <select
-                    required
+                  <CustomSelectDropdown
                     value={editFormData.department}
-                    onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    {!OFFICIAL_DEPARTMENT_OPTIONS.includes(editFormData.department) && editFormData.department && (
-                      <option value={editFormData.department}>{editFormData.department}</option>
-                    )}
-                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setEditFormData({ ...editFormData, department: val })}
+                    options={[
+                      ...(!OFFICIAL_DEPARTMENT_OPTIONS.includes(editFormData.department) && editFormData.department
+                        ? [{
+                            value: editFormData.department,
+                            label: editFormData.department,
+                            Icon: Building,
+                            iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                          }]
+                        : []),
+                      ...OFFICIAL_DEPARTMENT_OPTIONS.map(dept => ({
+                        value: dept,
+                        label: dept,
+                        Icon: Building,
+                        iconTone: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                      }))
+                    ]}
+                    minMenuWidth={260}
+                  />
                 </div>
               </div>
 
