@@ -126,6 +126,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
   const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
+  const [formError, setFormError] = useState<string>('');
 
   // Modern Custom Popover Dropdown & Calendar States
   const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'helper' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
@@ -345,6 +346,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setAreaSearchFilter('');
     setActiveModalDropdown(null);
     setIsGasStationDropdownOpen(false);
+    setFormError('');
     setIsAddModalOpen(true);
   };
 
@@ -373,6 +375,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setAreaSearchFilter('');
     setActiveModalDropdown(null);
     setIsGasStationDropdownOpen(false);
+    setFormError('');
     setIsAddModalOpen(true);
   };
 
@@ -462,16 +465,34 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   const handleSaveFuelLog = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formFleetId || !formLiters || !formStartOdo || !formEndOdo || !formDriverName) {
+    setFormError('');
+    if (!formFleetId) {
+      setFormError('Silakan pilih Armada Truk terlebih dahulu.');
+      return;
+    }
+    if (!formDriverName) {
+      setFormError('Silakan pilih Nama Driver terlebih dahulu.');
+      return;
+    }
+    if (!formLiters || Number(formLiters) <= 0) {
+      setFormError('Volume BBM (Liter) harus lebih dari 0.');
+      return;
+    }
+    if (formStartOdo === '' || formEndOdo === '') {
+      setFormError('Kilometer Awal dan Kilometer Isi wajib diisi.');
       return;
     }
 
     const flt = fleets.find(f => f.id === formFleetId);
-    if (!flt) return;
+    if (!flt) {
+      setFormError('Data armada tidak ditemukan.');
+      return;
+    }
 
     const startKm = Number(formStartOdo);
     const endKm = Number(formEndOdo);
     if (endKm <= startKm) {
+      setFormError('Kilometer Isi (KM) harus lebih besar dari Kilometer Awal (KM).');
       return;
     }
 
@@ -505,6 +526,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
     setIsAddModalOpen(false);
     setEditingLogId(null);
+    setFormError('');
     setFormLiters('');
     setFormCostPerLiter('6800');
     setFormStartOdo('');
@@ -3349,6 +3371,13 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   />
                 </div>
               </div>
+
+              {formError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{formError}</span>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
                 <button

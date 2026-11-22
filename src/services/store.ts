@@ -546,6 +546,8 @@ class LogisticsStore {
   private spareParts: SparePart[] = [];
   private sparePartUsages: SparePartUsage[] = [];
   private fuelLogs: FuelLog[] = [];
+  private pendingFuelLogUpserts: Map<string, FuelLog> = new Map();
+  private pendingFuelLogDeletes: Set<string> = new Set();
   private imageRecords: ImageRecord[] = [];
   private scannedDocuments: ScannedDocumentLog[] = [];
   private securityLogs: SecurityGateLog[] = [];
@@ -3790,7 +3792,38 @@ class LogisticsStore {
                 ]);
                 let secondaryUpdated = false;
                 if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
-                  this.fuelLogs = fuelPayload.data;
+                  const serverLogs: FuelLog[] = (fuelPayload.data as FuelLog[]).filter(
+                    l => !this.pendingFuelLogDeletes.has(l.id)
+                  );
+                  const mergedMap = new Map<string, FuelLog>();
+                  serverLogs.forEach(l => mergedMap.set(l.id, l));
+
+                  // Preserve any locally created/edited fuel logs that haven't finished syncing yet
+                  this.pendingFuelLogUpserts.forEach((pendingLog, pendingId) => {
+                    if (!this.pendingFuelLogDeletes.has(pendingId)) {
+                      mergedMap.set(pendingId, pendingLog);
+                      if (!serverLogs.some(sl => sl.id === pendingId)) {
+                        void this.syncFuelLogToServer('POST', '/api/fuel-logs', pendingLog);
+                      }
+                    }
+                  });
+
+                  // Safety guard: if server fallback came back empty after container restart while memory has active logs, push them back
+                  if (
+                    fuelPayload.source !== 'hostinger_mysql' &&
+                    serverLogs.length === 0 &&
+                    this.fuelLogs.length > 0
+                  ) {
+                    this.fuelLogs.forEach(localLog => {
+                      if (!this.pendingFuelLogDeletes.has(localLog.id)) {
+                        mergedMap.set(localLog.id, localLog);
+                        this.pendingFuelLogUpserts.set(localLog.id, localLog);
+                        void this.syncFuelLogToServer('POST', '/api/fuel-logs', localLog);
+                      }
+                    });
+                  }
+
+                  this.fuelLogs = Array.from(mergedMap.values());
                   secondaryUpdated = true;
                 }
                 if (scanRes.ok && Array.isArray(scanPayload?.data)) {
@@ -6590,13 +6623,9 @@ class LogisticsStore {
     };
 
     this.fuelLogs = [newLog, ...this.fuelLogs];
-
-    fetch('/api/fuel-logs', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newLog)
-    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal simpan ke MySQL:', err));
+    this.pendingFuelLogDeletes.delete(newLog.id);
+    this.pendingFuelLogUpserts.set(newLog.id, newLog);
+    void this.syncFuelLogToServer('POST', '/api/fuel-logs', newLog);
 
     if (fleet && data.endOdometerKm > (fleet.odometerKm || 0)) {
       this.fleets = this.fleets.map(f =>
@@ -6657,13 +6686,9 @@ class LogisticsStore {
     };
 
     this.fuelLogs = this.fuelLogs.map(l => l.id === id ? updatedLog : l);
-
-    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(updatedLog)
-    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal update ke MySQL:', err));
+    this.pendingFuelLogDeletes.delete(id);
+    this.pendingFuelLogUpserts.set(id, updatedLog);
+    void this.syncFuelLogToServer('PUT', `/api/fuel-logs/${encodeURIComponent(id)}`, updatedLog);
 
     this.logActivity(
       'Edit Log Pengisian BBM',
@@ -6678,12 +6703,9 @@ class LogisticsStore {
   public deleteFuelLog(id: string) {
     const item = this.fuelLogs.find(l => l.id === id);
     this.fuelLogs = this.fuelLogs.filter(l => l.id !== id);
-
-    fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders()
-    }).catch(err => console.warn('[Hostinger FuelLogs] Gagal hapus di MySQL:', err));
+    this.pendingFuelLogUpserts.delete(id);
+    this.pendingFuelLogDeletes.add(id);
+    void this.deleteFuelLogOnServer(id);
 
     if (item) {
       this.logActivity(
@@ -6694,6 +6716,64 @@ class LogisticsStore {
       );
     }
     this.notify();
+  }
+
+  private async syncFuelLogToServer(method: 'POST' | 'PUT', url: string, log: FuelLog, attempt = 0): Promise<void> {
+    try {
+      const res = await fetch(url, {
+        method,
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(log)
+      });
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        if (json?.success !== false) {
+          this.pendingFuelLogUpserts.delete(log.id);
+          return;
+        }
+      }
+      if (attempt < 3 && (res.status === 429 || res.status >= 500 || res.status === 0)) {
+        setTimeout(() => {
+          void this.syncFuelLogToServer(method, url, log, attempt + 1);
+        }, 1500 * (attempt + 1));
+      } else {
+        console.warn('[FuelLogs] Gagal sinkron ke server:', res.status);
+      }
+    } catch (err) {
+      if (attempt < 3) {
+        setTimeout(() => {
+          void this.syncFuelLogToServer(method, url, log, attempt + 1);
+        }, 1500 * (attempt + 1));
+      } else {
+        console.warn('[FuelLogs] Gagal simpan ke server:', err);
+      }
+    }
+  }
+
+  private async deleteFuelLogOnServer(id: string, attempt = 0): Promise<void> {
+    try {
+      const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders()
+      });
+      if (res.ok) {
+        this.pendingFuelLogDeletes.delete(id);
+        return;
+      }
+      if (attempt < 3 && (res.status === 429 || res.status >= 500)) {
+        setTimeout(() => {
+          void this.deleteFuelLogOnServer(id, attempt + 1);
+        }, 1500 * (attempt + 1));
+      }
+    } catch {
+      if (attempt < 3) {
+        setTimeout(() => {
+          void this.deleteFuelLogOnServer(id, attempt + 1);
+        }, 1500 * (attempt + 1));
+      }
+    }
   }
 
   public getFleetFuelSummary(): FleetFuelSummary[] {
