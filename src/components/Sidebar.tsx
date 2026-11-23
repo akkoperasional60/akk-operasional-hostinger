@@ -305,7 +305,22 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
             <Search className="akk-clean-search-icon" size={17} />
             <input ref={searchRef} className="akk-clean-search" type="search" autoComplete="off"
               value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari menu..." aria-label="Cari menu" />
-            <kbd className="akk-clean-shortcut">Ctrl K</kbd>
+            {search ? (
+              <button
+                type="button"
+                className="akk-clean-search-clear"
+                onClick={() => {
+                  setSearch('');
+                  searchRef.current?.focus();
+                }}
+                aria-label="Bersihkan pencarian"
+                title="Bersihkan pencarian"
+              >
+                <X size={14} />
+              </button>
+            ) : (
+              <kbd className="akk-clean-shortcut">Ctrl K</kbd>
+            )}
           </div>
 
           <nav className="akk-clean-nav" aria-label="Navigasi AKK">
@@ -357,7 +372,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
           <span className="akk-clean-user-text"><strong>{user.fullName || 'Pengguna AKK'}</strong><small>AKK Workspace</small></span>
         </div>}
         <div className="akk-clean-footer-actions">
-          <ThemeSwitcher variant="icon-only" />
+          <ThemeSwitcher variant="icon-only" className="akk-clean-icon-button akk-clean-theme-btn" />
           <button type="button" className="akk-clean-icon-button" onClick={() => logisticsStore.logoutUser()} aria-label="Keluar akun" title="Keluar akun"><LogOut size={18} /></button>
         </div>
       </div>

@@ -1182,6 +1182,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [selectedDriverId]);
 
+  // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
+  const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
+  const spvCrewFilterRef = useRef<string>('all');
+  useEffect(() => {
+    spvCrewFilterRef.current = spvCrewFilter;
+  }, [spvCrewFilter]);
+
   // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin (Hanya tampil pada hari tersebut, otomatis hilang keesokan harinya)
   const [driverKendalaReports, setDriverKendalaReports] = useState<DriverHelperReport[]>([]);
   const [todayOfflineReports, setTodayOfflineReports] = useState<DriverHelperReport[]>([]);
@@ -1872,13 +1879,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     loadDeliveries(true);
     return targetF;
   };
-
-  // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
-  const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
-  const spvCrewFilterRef = useRef<string>('all');
-  useEffect(() => {
-    spvCrewFilterRef.current = spvCrewFilter;
-  }, [spvCrewFilter]);
 
   // Pembagian Cabang Portal Driver langsung sesuai hak akses pada Manajemen User (tanpa switcher manual)
   const [globalOriginBranchId, setGlobalOriginBranchId] = useState<string>(() => {

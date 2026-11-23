@@ -7420,4 +7420,3 @@ class LogisticsStore {
 }
 
 export const logisticsStore = new LogisticsStore();
-
