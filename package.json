@@ -34,7 +34,6 @@
     "@vitejs/plugin-react": "^6.1.1",
     "date-fns": "^4.4.0",
     "dotenv": "^17.2.3",
-    "esbuild": "^0.25.0",
     "express": "^4.21.2",
     "firebase": "10.14.1",
     "html2canvas": "^1.4.1",
@@ -63,5 +62,8 @@
     "onnxruntime-node": "^1.31.1",
     "sharp": "^0.35.5"
   },
-  "packageManager": "npm@10.9.2"
+  "packageManager": "npm@10.9.2",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }
