@@ -1158,13 +1158,27 @@ class DriverReportService {
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
     const outlet = params.customerOutletName || params.areaName || 'Customer / Toko Tujuan';
 
-    const existingIdx = list.findIndex(
-      r =>
-        r.category === 'kendala_jalan' &&
-        r.date === today &&
-        r.customerQueueStatus === 'sedang_mengantri' &&
-        (r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
-    );
+    const normalizeQueueKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const requestAreaKey = normalizeQueueKey(params.areaName);
+    const requestPlateKey = normalizeQueueKey(params.plateNumber);
+    const existingIdx = list.findIndex(r => {
+      if (
+        r.category !== 'kendala_jalan' ||
+        r.date !== today ||
+        r.customerQueueStatus !== 'sedang_mengantri' ||
+        !(r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
+      ) return false;
+      // ID schedule is authoritative. Never overwrite a different route's queue report
+      // merely because the same driver/helper or truck appears on both trips.
+      if (params.deliveryId) return r.deliveryId === params.deliveryId;
+      if (r.deliveryId) return false;
+      return normalizeQueueKey(r.areaName) === requestAreaKey &&
+        normalizeQueueKey(r.plateNumber) === requestPlateKey;
+    });
 
     const queueNote = params.notes?.trim()
       ? `[ANTRI DI CUSTOMER: ${outlet}] Mulai Mengantri: ${timeStr} (Status: Sedang Mengantri di Customer) — ${params.notes.trim()}`
@@ -1217,6 +1231,7 @@ class DriverReportService {
    */
   public completeCustomerQueueExit(params: {
     reportId?: string;
+    deliveryId?: string;
     driverId?: string;
     driverName?: string;
     simulatedExtraMinutes?: number;
@@ -1229,13 +1244,22 @@ class DriverReportService {
     if (params.reportId) {
       targetIdx = list.findIndex(r => r.id === params.reportId);
     }
-    if (targetIdx < 0) {
+    if (targetIdx < 0 && params.deliveryId) {
       targetIdx = list.findIndex(
-        r =>
+        r => r.customerQueueStatus === 'sedang_mengantri' && r.deliveryId === params.deliveryId
+      );
+    }
+    if (targetIdx < 0 && !params.deliveryId) {
+      const candidates = list
+        .map((r, index) => ({ r, index }))
+        .filter(({ r }) =>
           r.customerQueueStatus === 'sedang_mengantri' &&
+          !r.deliveryId &&
           ((params.driverId && r.driverId === params.driverId) ||
             (params.driverName && r.driverName.toLowerCase() === params.driverName.toLowerCase()))
-      );
+        );
+      // Do not close an arbitrary queue report if the same crew has multiple active trips.
+      if (candidates.length === 1) targetIdx = candidates[0].index;
     }
 
     if (targetIdx < 0) return null;

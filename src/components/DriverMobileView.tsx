@@ -377,6 +377,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   const [deliveries, setDeliveries] = useState<Schedule[]>([]);
+  const deliveriesRef = useRef<Schedule[]>([]);
+  deliveriesRef.current = deliveries;
   const [formKirimList, setFormKirimList] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -1177,14 +1179,84 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [todayOfflineReports, setTodayOfflineReports] = useState<DriverHelperReport[]>([]);
   const todayLocalStr = useMemo(() => getLocalDateStr(realtimeNow), [realtimeNow]);
 
+  const resolveReportAssignedDelivery = (report: DriverHelperReport): Schedule | null => {
+    const assigned = deliveriesRef.current;
+    if (!assigned.length) return null;
+
+    const normalizeKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const reportPlate = normalizeKey(report.plateNumber);
+    const reportArea = normalizeKey(report.areaName);
+    const reportPeople = [report.driverName, report.helperName].map(normalizeKey).filter(Boolean);
+    const reportId = normalizeKey(report.driverId).replace(/^(usr|crw)/, '');
+
+    const matchesCrew = (schedule: Schedule) => {
+      // Crew identity is the primary relationship. A schedule may be edited to use a
+      // different truck after a proof was submitted, so an old plate must not detach it.
+      const schedulePeople = [
+        schedule.crew?.name,
+        schedule.crewHelper?.name,
+        schedule.crewHelper2?.name,
+        schedule.backupCrewName,
+        schedule.backupTargetName
+      ].map(normalizeKey).filter(Boolean);
+      const crewNameMatches = reportPeople.some(name => schedulePeople.includes(name));
+
+      const scheduleIds = [
+        schedule.crewId, schedule.crewHelperId, schedule.crewHelper2Id,
+        schedule.backupCrewId, schedule.crew?.id, schedule.crewHelper?.id,
+        schedule.crewHelper2?.id
+      ].map(normalizeKey).filter(Boolean).map(id => id.replace(/^(usr|crw)/, ''));
+      // Prefer explicit names whenever present; old records can carry reused/stale crew IDs.
+      const crewIdMatches = reportPeople.length === 0 && Boolean(reportId) && scheduleIds.includes(reportId);
+      return crewNameMatches || crewIdMatches;
+    };
+
+    const areaMatches = (schedule: Schedule) => {
+      if (!reportArea) return false;
+      const area = normalizeKey(schedule.areaName || schedule.store?.storeName);
+      return Boolean(area && (area === reportArea || area.startsWith(reportArea) || reportArea.startsWith(area)));
+    };
+
+    const plateMatches = (schedule: Schedule) => {
+      const schedulePlate = normalizeKey(schedule.fleet?.plateNumber || schedule.armada);
+      return !reportPlate || !schedulePlate || reportPlate === schedulePlate;
+    };
+
+    // Prefer the report's saved schedule ID, but verify the actual assigned crew. Plate
+    // numbers are only a tie-breaker because a schedule can receive a replacement truck.
+    if (report.deliveryId) {
+      const linked = assigned.find(schedule => schedule.id === report.deliveryId);
+      if (linked && matchesCrew(linked)) return linked;
+
+      // Repair a stale/incorrect link only when the crew identifies one unique active trip.
+      const candidates = assigned.filter(matchesCrew);
+      const areaCandidates = candidates.filter(areaMatches);
+      if (areaCandidates.length === 1) return areaCandidates[0];
+      const plateCandidates = candidates.filter(plateMatches);
+      if (plateCandidates.length === 1) return plateCandidates[0];
+      return candidates.length === 1 ? candidates[0] : null;
+    }
+
+    // Legacy reports use crew + area first; the old vehicle plate is a tie-breaker only.
+    const candidates = assigned.filter(matchesCrew);
+    const areaCandidates = candidates.filter(areaMatches);
+    if (areaCandidates.length === 1) return areaCandidates[0];
+    const plateCandidates = candidates.filter(plateMatches);
+    if (plateCandidates.length === 1) return plateCandidates[0];
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+
+  const isReportBoundToAssignedDelivery = (report: DriverHelperReport): boolean =>
+    Boolean(resolveReportAssignedDelivery(report));
+
   const loadDriverKendalaReports = () => {
     try {
       const all = driverReportService.getReports();
-      const current = crews.find(c => c.id === selectedDriverId);
-      const displayLower = (portalDisplayName || '').toLowerCase();
-      const userFullLower = (currentUser?.fullName || '').toLowerCase();
       const spvFilterLower = (spvCrewFilterRef.current && spvCrewFilterRef.current !== 'all' ? spvCrewFilterRef.current : '').toLowerCase();
-      const activePlateClean = (deliveries[0]?.fleet?.plateNumber || activeShift?.plateNumber || '').replace(/\s+/g, '').toLowerCase();
       const isSpvOrAdminRole =
         currentUser?.role === 'super_admin' ||
         currentUser?.role === 'spv_logistik' ||
@@ -1194,28 +1266,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const filtered = all.filter(r => {
         const rDriverLower = (r.driverName || '').toLowerCase();
         const rHelperLower = (r.helperName || '').toLowerCase();
-        const currentCrewLower = (current?.name || '').toLowerCase();
-        const rPlateClean = (r.plateNumber || '').replace(/\s+/g, '').toLowerCase();
 
         if (spvFilterLower) {
           return rDriverLower.includes(spvFilterLower) || rHelperLower.includes(spvFilterLower) || spvFilterLower.includes(rDriverLower);
         }
         if (isSpvOrAdminRole) return true;
-        if (r.driverId === selectedDriverId) return true;
-        if (currentCrewLower && (rDriverLower.includes(currentCrewLower) || rHelperLower.includes(currentCrewLower) || currentCrewLower.includes(rDriverLower))) return true;
-        if (displayLower && (rDriverLower.includes(displayLower) || rHelperLower.includes(displayLower) || displayLower.includes(rDriverLower))) return true;
-        if (userFullLower && (rDriverLower.includes(userFullLower) || rHelperLower.includes(userFullLower) || userFullLower.includes(rDriverLower))) return true;
-        if (activePlateClean && rPlateClean && activePlateClean === rPlateClean) return true;
-        return false;
+        return isReportBoundToAssignedDelivery(r);
       });
-      const filteredSig = JSON.stringify(filtered.map(r => `${r.id}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
+      // Keep the report's author and notes as sent, but resolve its displayed route from
+      // the exact schedule ID. This repairs old mislabelled area cards without mutating
+      // the historical report stored on the server.
+      const displayReports = filtered.map(report => {
+        const linkedSchedule = resolveReportAssignedDelivery(report);
+        const linkedArea = linkedSchedule?.areaName || linkedSchedule?.store?.storeName;
+        return linkedSchedule && linkedArea && report.areaName !== linkedArea
+          ? { ...report, areaName: linkedArea }
+          : report;
+      });
+      const filteredSig = JSON.stringify(displayReports.map(r => `${r.id}:${r.areaName}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
       setDriverKendalaReports(prev => {
-        const prevSig = JSON.stringify(prev.map(r => `${r.id}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
-        return prevSig === filteredSig ? prev : filtered;
+        const prevSig = JSON.stringify(prev.map(r => `${r.id}:${r.areaName}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
+        return prevSig === filteredSig ? prev : displayReports;
       });
 
       // Jika ada solusi baru hari ini yang belum dikonfirmasi kru, pastikan langsung muncul pada banner atas tanpa menunggu
-      const latestUnackSol = filtered.find(r => {
+      const latestUnackSol = displayReports.find(r => {
         if (!r.solution || !r.solution.trim() || r.driverAcknowledged) return false;
         const solDate = r.solutionAt ? getLocalDateStr(new Date(r.solutionAt)) : getLocalDateStr(r.date || r.timestamp);
         return solDate === todayLocalStr;
@@ -1269,6 +1344,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       window.removeEventListener('driver-report-updated', handleUpdate);
     };
   }, [selectedDriverId, portalDisplayName, todayLocalStr]);
+
+  // Refresh the local report view whenever the assigned trip list changes, without
+  // launching an extra network sync for every schedule update.
+  useEffect(() => {
+    loadDriverKendalaReports();
+  }, [deliveries, selectedDriverId, spvCrewFilter]);
 
   const activeDriverSolutions = useMemo(() => {
     return driverKendalaReports
@@ -2890,21 +2971,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         : getLocalDateStr(updated.date || updated.timestamp);
       if (solDateStr !== todayStr) return;
 
-      const current = crews.find(c => c.id === selectedDriverId);
-      const displayLower = (portalDisplayName || '').toLowerCase();
-      const userFullLower = (currentUser?.fullName || '').toLowerCase();
       const isSpvOrAdminRole =
-        currentUser?.role === 'super_admin' || currentUser?.role === 'spv_logistik';
-      const uDriverLower = (updated.driverName || '').toLowerCase();
-      const uHelperLower = (updated.helperName || '').toLowerCase();
-      const currentCrewLower = (current?.name || '').toLowerCase();
-
-      const isForCurrentCrew =
-        updated.driverId === selectedDriverId ||
-        (currentCrewLower && (uDriverLower.includes(currentCrewLower) || uHelperLower.includes(currentCrewLower))) ||
-        (displayLower && (uDriverLower.includes(displayLower) || uHelperLower.includes(displayLower))) ||
-        (userFullLower && (uDriverLower.includes(userFullLower) || uHelperLower.includes(userFullLower))) ||
-        isSpvOrAdminRole;
+        currentUser?.role === 'super_admin' ||
+        currentUser?.role === 'spv_logistik' ||
+        currentUser?.role === 'operasional' ||
+        currentUser?.role === 'koordinator_driver';
+      const isForCurrentCrew = isSpvOrAdminRole || isReportBoundToAssignedDelivery(updated);
 
       if (isForCurrentCrew) {
         setLatestSolutionBanner({

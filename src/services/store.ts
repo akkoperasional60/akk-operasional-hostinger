@@ -2033,16 +2033,27 @@ class LogisticsStore {
       const cleanName = (u.fullName || '').trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
+      const normalizeIdentityName = (value: string) => value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      const exactNameKey = normalizeIdentityName(cleanName);
       if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
-      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
+      // User accounts are separate identities. Do not merge accounts just because one
+      // person's short name is contained in another person's full name (e.g. Nur Hadi
+      // vs Muhammad Nurhadi Muqorrobin).
+      if (syncedCrews.some(sc => normalizeIdentityName(sc.name) === exactNameKey)) continue;
 
-      const existingInStore = (this.crews || []).find(
-        c => c && c.name && (c.id === `crw-${u.id}` || this.isSameCrewPersonName(c.name, cleanName))
+      const existingAccountCrew = (this.crews || []).find(c => c && c.id === `crw-${u.id}`);
+      const existingExactNameCrew = (this.crews || []).find(
+        c => c && c.name && normalizeIdentityName(c.name) === exactNameKey
       );
+      const existingInStore = existingAccountCrew || existingExactNameCrew;
       const existingInInitial = INITIAL_CREWS.find(
-        c => this.isSameCrewPersonName(c.name, cleanName)
+        c => normalizeIdentityName(c.name) === exactNameKey
       );
-      const refCrew = existingInStore || existingInInitial;
+      const refCrew = existingAccountCrew || existingExactNameCrew || existingInInitial;
 
       const crewId = refCrew?.id || `crw-${u.id}`;
       const crewRole: Crew['role'] = u.role !== 'crew_helper'
@@ -4364,17 +4375,15 @@ class LogisticsStore {
     const expectedCrewId = `crw-${user?.id || 'usr'}`;
 
     // 1. Cari kru yang cocok berdasarkan ID atau kata nama lengkap (mencegah 'Budi' menimpa 'Budiono')
-    let matchedCrew = this.crews.find(c => {
-      if (c.id === expectedCrewId) return true;
-      const cName = (c.name || '').trim().toLowerCase();
-      if (cName === lowerName) return true;
-      const cTokens = cName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
-      const uTokens = lowerName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
-      if (cTokens.length > 0 && uTokens.length > 0) {
-        return cTokens.every(t => uTokens.includes(t)) || uTokens.every(t => cTokens.includes(t));
-      }
-      return false;
-    });
+    // Account ID is the primary identity. Only use an exact full-name match if the
+    // account-linked crew record does not exist.
+    const normalizeIdentityName = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    let matchedCrew = this.crews.find(c => c.id === expectedCrewId) ||
+      this.crews.find(c => normalizeIdentityName(c.name || '') === normalizeIdentityName(cleanUserName));
 
     if (matchedCrew) {
       let changed = false;
@@ -4635,14 +4644,29 @@ class LogisticsStore {
           merged.fleet ||
           this.fleets.find(f => f.id === merged.fleetId);
 
+        // Prefer an explicitly supplied crew snapshot when it belongs to the selected ID.
+        // This prevents a stale cached crew object from silently replacing a newly selected
+        // account (for example, Nur Hadi) with a similarly named legacy crew.
+        const explicitCrew = updatedSchedule.crew &&
+          (!updatedSchedule.crewId || updatedSchedule.crew.id === updatedSchedule.crewId)
+          ? updatedSchedule.crew
+          : undefined;
+        const explicitHelper = updatedSchedule.crewHelper &&
+          (!updatedSchedule.crewHelperId || updatedSchedule.crewHelper.id === updatedSchedule.crewHelperId)
+          ? updatedSchedule.crewHelper
+          : undefined;
+        const explicitHelper2 = updatedSchedule.crewHelper2 &&
+          (!updatedSchedule.crewHelper2Id || updatedSchedule.crewHelper2.id === updatedSchedule.crewHelper2Id)
+          ? updatedSchedule.crewHelper2
+          : undefined;
         const hydrated: Schedule = {
           ...merged,
           fleetId: resolvedFleet?.id || merged.fleetId,
           fleet: resolvedFleet,
           armada: updatedSchedule.armada || resolvedFleet?.initialCode || merged.armada || resolvedFleet?.plateNumber,
-          crew: this.crews.find(c => c.id === merged.crewId) || merged.crew,
-          crewHelper: merged.crewHelperId ? (this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
-          crewHelper2: merged.crewHelper2Id ? (this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
+          crew: explicitCrew || this.crews.find(c => c.id === merged.crewId) || merged.crew,
+          crewHelper: merged.crewHelperId ? (explicitHelper || this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
+          crewHelper2: merged.crewHelper2Id ? (explicitHelper2 || this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
         };
         newSch = hydrated;
         const isAutoRebalance = String(updatedSchedule.notes || '').includes('[Auto-Rebalanced:');

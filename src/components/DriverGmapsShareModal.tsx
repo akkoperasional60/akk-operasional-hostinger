@@ -143,6 +143,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   // Otomatis terisi nomor kendaraan sesuai data checklist
   const [autoPlateNumber, setAutoPlateNumber] = useState<string>(plateNumber);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>('');
 
   // Lookup inisial armada dari master data (hanya jika plat sudah terisi dari check-in & checklist)
   const fleets = logisticsStore.getFleets();
@@ -245,12 +246,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDelivery: Schedule | null = React.useMemo(() => {
     if (!deliveries || deliveries.length === 0) return null;
+    if (selectedDeliveryId) {
+      const manuallySelected = deliveries.find(d => d.id === selectedDeliveryId);
+      if (manuallySelected) return manuallySelected;
+    }
     const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
     if (inTransit) return inTransit;
     const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
     if (todayMatch) return todayMatch;
     return deliveries[0];
-  }, [deliveries, todayStr]);
+  }, [deliveries, todayStr, selectedDeliveryId]);
+
+  const selectableDeliveries = React.useMemo(() => {
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    return openTrips.length > 0 ? openTrips : deliveries;
+  }, [deliveries]);
+
+  useEffect(() => {
+    if (!isOpen || !activeDelivery) return;
+    const selectedPlate = selectedDeliveryId
+      ? (activeDelivery.fleet?.plateNumber || activeDelivery.armada || '')
+      : (plateNumber || activeDelivery.fleet?.plateNumber || activeDelivery.armada || '');
+    if (selectedPlate) setAutoPlateNumber(selectedPlate);
+  }, [isOpen, activeDelivery?.id, selectedDeliveryId, plateNumber]);
 
   const activeWaybill = React.useMemo(() => {
     if (!activeDelivery) return null;
@@ -292,16 +310,46 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const currentWaybillNo = activeWaybill?.waybillNumber || activeDelivery?.trackingNumber || 'SJ-OUT/AKK/AKTIF';
 
-  // Cek apakah ada antrean customer yang sedang aktif untuk kru ini
+  // Cari antrean berdasarkan ID ritase. Kru/armada yang sama dapat memiliki
+  // beberapa jadwal area dalam sehari, jadi nama atau plat saja tidak cukup.
   const refreshActiveQueue = () => {
     const allReports = driverReportService.getReports();
-    const found = allReports.find(
-      r =>
-        r.customerQueueStatus === 'sedang_mengantri' &&
-        ((driverId && r.driverId === driverId) ||
-          r.driverName.toLowerCase() === (driverName || '').toLowerCase() ||
-          r.plateNumber === autoPlateNumber)
-    );
+    const active = activeDelivery;
+    const normalizeKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const activeCrewNames = active
+      ? [
+          active.crew?.name,
+          active.crewHelper?.name,
+          active.crewHelper2?.name,
+          active.backupCrewName,
+          active.backupTargetName
+        ].map(normalizeKey).filter(Boolean)
+      : [];
+    const activeArea = normalizeKey(active?.areaName || active?.store?.storeName || currentAreaName);
+    const activeDriverKey = normalizeKey(driverName);
+    const matchesActiveCrew = (report: DriverHelperReport) => {
+      const reportNames = [report.driverName, report.helperName].map(normalizeKey).filter(Boolean);
+      return reportNames.some(name => activeCrewNames.includes(name) || name === activeDriverKey);
+    };
+    const found = active
+      ? allReports.find(r =>
+          r.customerQueueStatus === 'sedang_mengantri' &&
+          r.deliveryId === active.id &&
+          matchesActiveCrew(r)
+        ) ||
+        allReports.find(r => {
+          if (r.customerQueueStatus !== 'sedang_mengantri' || r.deliveryId) return false;
+          const reportArea = normalizeKey(r.areaName);
+          return Boolean(
+            activeArea && (reportArea === activeArea || reportArea.startsWith(activeArea) || activeArea.startsWith(reportArea)) &&
+            matchesActiveCrew(r)
+          );
+        })
+      : undefined;
     setActiveQueueReport(found || null);
     if (found && found.customerOutletName) {
       setCustomerOutletInput(found.customerOutletName);
@@ -326,9 +374,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       resetFormFields();
       setQueueCompletedToast(null);
       setCategory(initialCategory || 'isi_bbm');
+      setSelectedDeliveryId('');
       setAutoPlateNumber(plateNumber ? plateNumber.trim() : '');
-
-      refreshActiveQueue();
       requestFreshGpsLocation();
 
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
@@ -366,6 +413,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       }
     };
   }, [isOpen, driverId, plateNumber, userJobdeskRole, initialCategory]);
+
+  useEffect(() => {
+    if (isOpen) refreshActiveQueue();
+  }, [isOpen, activeDelivery?.id]);
 
   // Timer detikan real-time selama kru sedang mengantri di customer
   useEffect(() => {
@@ -1752,6 +1803,28 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 )}
               </div>
             </div>
+
+            {selectableDeliveries.length > 1 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Ritase yang Dilaporkan
+                </label>
+                <select
+                  value={activeDelivery?.id || ''}
+                  onChange={e => setSelectedDeliveryId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-blue-500"
+                >
+                  {selectableDeliveries.map(delivery => (
+                    <option key={delivery.id} value={delivery.id}>
+                      {(delivery.areaName || delivery.store?.storeName || delivery.trackingNumber)} • {(delivery.fleet?.plateNumber || delivery.armada || '-')}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Pilih area/ritase yang benar agar foto dan laporan tertaut ke jadwal yang tepat.
+                </p>
+              </div>
+            )}
 
             {/* NAMA AREA KIRIM */}
             <div className="space-y-1">
