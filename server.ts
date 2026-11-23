@@ -4285,12 +4285,44 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
   });
 
+  // Ringkasan dipakai oleh dashboard Live Trips agar polling tidak mengirim
+  // points_json berukuran besar untuk semua armada pada setiap refresh.
+  const mapDbTripSummaryRow = (r: any) => ({
+    id: r.id,
+    tripDate: String(r.trip_date || '').slice(0, 10),
+    branchId: r.branch_id || 'cab-banyuwangi',
+    fleetId: r.fleet_id || undefined,
+    plateNumber: r.plate_number || '-',
+    initialCode: r.initial_code || undefined,
+    vehicleType: r.vehicle_type || undefined,
+    driverName: r.driver_name || '-',
+    helper1Name: r.helper1_name || undefined,
+    helper2Name: r.helper2_name || undefined,
+    areaName: r.area_name || '-',
+    status: r.status === 'completed' ? 'completed' : 'active',
+    startedAt: r.started_at ? new Date(r.started_at).toISOString() : new Date().toISOString(),
+    endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : undefined,
+    currentLat: r.current_lat != null ? Number(r.current_lat) : undefined,
+    currentLng: r.current_lng != null ? Number(r.current_lng) : undefined,
+    points: [],
+    pointCount: Math.max(0, Number(r.point_count) || 0),
+    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+  });
+
   app.get("/api/gps-trips", async (req, res) => {
     const filterDate = String(req.query?.date || '').trim();
     const filterStatus = String(req.query?.status || '').trim();
+    const summaryOnly = String(req.query?.summary || '') === '1';
     if (isDatabaseConfigured()) {
       try {
-        let sql = "SELECT * FROM gps_live_trips WHERE 1=1";
+        let sql = summaryOnly
+          ? `SELECT id, trip_date, branch_id, fleet_id, plate_number, initial_code, vehicle_type,
+                    driver_name, helper1_name, helper2_name, area_name, status, started_at, ended_at,
+                    current_lat, current_lng,
+                    CASE WHEN JSON_VALID(points_json) THEN JSON_LENGTH(points_json) ELSE 0 END AS point_count,
+                    updated_at
+               FROM gps_live_trips WHERE 1=1`
+          : "SELECT * FROM gps_live_trips WHERE 1=1";
         const params: any[] = [];
         if (filterDate) {
           sql += " AND trip_date = ?";
@@ -4303,7 +4335,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         sql += " ORDER BY updated_at DESC LIMIT 120";
         const rows = await mysqlQuery<any[]>(sql, params);
         const mapped = (Array.isArray(rows) ? rows : []).map((r: any) => {
-          const t = mapDbTripRow(r);
+          const t = summaryOnly ? mapDbTripSummaryRow(r) : mapDbTripRow(r);
           return { ...t, plateNumber: sanitizeOperationalPlate(t.plateNumber) };
         });
         return res.json({ success: true, trips: mapped, source: 'mysql' });
@@ -4315,7 +4347,49 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       (!filterDate || t.tripDate === filterDate) &&
       (!filterStatus || filterStatus === 'all' || t.status === filterStatus)
     );
-    return res.json({ success: true, trips: filtered, source: 'memory' });
+    const memoryTrips = summaryOnly
+      ? filtered.map((trip: any) => ({ ...trip, points: [], pointCount: Array.isArray(trip.points) ? trip.points.length : 0 }))
+      : filtered;
+    return res.json({ success: true, trips: memoryTrips, source: 'memory' });
+  });
+
+  // Detail dipanggil hanya untuk armada yang sedang dipilih. Parameter `after`
+  // meminta titik GPS setelah timestamp terakhir yang sudah dimiliki browser.
+  app.get("/api/gps-trips/:id", async (req, res) => {
+    const id = String(req.params.id || '').slice(0, 96);
+    let trip: any = inMemoryGpsTrips.find(t => t.id === id);
+
+    if (isDatabaseConfigured()) {
+      try {
+        const rows = await mysqlQuery<any[]>("SELECT * FROM gps_live_trips WHERE id = ? LIMIT 1", [id]);
+        if (Array.isArray(rows) && rows.length > 0) trip = mapDbTripRow(rows[0]);
+      } catch (err: any) {
+        console.warn('[GPS Trip Detail Warning]', err?.message || err);
+      }
+    }
+
+    if (!trip) return res.status(404).json({ success: false, error: 'Trip tidak ditemukan' });
+
+    const allPoints = Array.isArray(trip.points) ? trip.points : [];
+    const afterTimestamp = String(req.query?.after || '').trim();
+    let responsePoints = allPoints;
+    let pointsMode: 'snapshot' | 'delta' = 'snapshot';
+    if (afterTimestamp) {
+      const previousIndex = allPoints.findIndex((point: any) => String(point?.timestamp || '') === afterTimestamp);
+      // Jika titik lama telah keluar dari jendela penyimpanan 500 titik,
+      // kirim ulang rute lengkap agar browser dapat menyinkronkan kembali.
+      if (previousIndex >= 0) {
+        responsePoints = allPoints.slice(previousIndex + 1);
+        pointsMode = 'delta';
+      }
+    }
+
+    return res.json({
+      success: true,
+      trip: { ...trip, points: responsePoints, pointCount: allPoints.length },
+      pointCount: allPoints.length,
+      pointsMode
+    });
   });
 
   app.post("/api/gps-trips", express.json({ limit: '5mb' }), async (req, res) => {
@@ -4332,11 +4406,24 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const helper2Name = b.helper2Name ? String(b.helper2Name).slice(0, 120) : null;
     const areaName = String(b.areaName || '-').slice(0, 160);
     const status = b.status === 'completed' ? 'completed' : 'active';
-    const points = Array.isArray(b.points) ? b.points : [];
+    const startedAtIso = b.startedAt || new Date().toISOString();
+    const points = Array.isArray(b.points) ? [...b.points] : [];
+    if (
+      points.length === 0 &&
+      b.lat != null && b.lng != null &&
+      Number.isFinite(Number(b.lat)) && Number.isFinite(Number(b.lng))
+    ) {
+      points.push({
+        lat: Number(b.lat),
+        lng: Number(b.lng),
+        timestamp: b.timestamp || startedAtIso,
+        locationName: b.locationName || undefined,
+        speedKmh: b.speedKmh != null ? Number(b.speedKmh) : undefined
+      });
+    }
     const lastPt = points[points.length - 1];
     const currentLat = b.currentLat != null ? Number(b.currentLat) : (lastPt?.lat ?? -8.1906);
     const currentLng = b.currentLng != null ? Number(b.currentLng) : (lastPt?.lng ?? 114.3708);
-    const startedAtIso = b.startedAt || new Date().toISOString();
     const endedAtIso = status === 'completed' ? (b.endedAt || new Date().toISOString()) : null;
 
     const record = {
@@ -4455,7 +4542,17 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         console.warn('[GPS Trip Ping Warning]', err?.message || err);
       }
     }
-    return res.json({ success: true, trip: updatedTrip });
+    // Client pemanggil ping tidak menggunakan objek trip lengkap. Kirim ACK
+    // ringkas agar riwayat 500 titik tidak terunduh ulang setiap ping GPS.
+    return res.json({
+      success: true,
+      id,
+      status: nextStatus,
+      currentLat: numLat,
+      currentLng: numLng,
+      updatedAt: updatedTrip.updatedAt,
+      pointCount: updatedPoints.length
+    });
   });
 
   app.get("/api/driver-reports/stream", (req, res) => {

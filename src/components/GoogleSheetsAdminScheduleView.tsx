@@ -223,9 +223,51 @@ const CrewCustomSelectDropdown: React.FC<{
   }, [isOpen]);
 
   const filteredOptions = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const normalize = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const editDistance = (a: string, b: string): number => {
+      if (a === b) return 0;
+      if (!a) return b.length;
+      if (!b) return a.length;
+      let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+      for (let i = 1; i <= a.length; i += 1) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j += 1) {
+          current[j] = Math.min(
+            current[j - 1] + 1,
+            previous[j] + 1,
+            previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+          );
+        }
+        previous = current;
+      }
+      return previous[b.length];
+    };
+
+    const q = normalize(search);
     if (!q) return options;
-    return options.filter(o => o.name.toLowerCase().includes(q));
+    const queryParts = q.split(' ').filter(Boolean);
+    return options
+      .map(option => {
+        const name = normalize(option.name);
+        const nameParts = name.split(' ').filter(Boolean);
+        const exactScore = name === q ? 100 : name.includes(q) ? 90 : 0;
+        const tokenScore = queryParts.every(part =>
+          nameParts.some(token => token === part || token.startsWith(part) || token.includes(part))
+        ) ? 80 : 0;
+        const fuzzyScore = queryParts.every(part =>
+          nameParts.some(token => token.length >= 3 && part.length >= 4 && editDistance(token, part) <= (part.length >= 7 ? 2 : 1))
+        ) ? 60 : 0;
+        return { option, score: Math.max(exactScore, tokenScore, fuzzyScore) };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.option.name.localeCompare(b.option.name))
+      .map(item => item.option);
   }, [options, search]);
 
   const isNoneSelected = !value || value === '-' || value === emptyValue;
@@ -1737,7 +1779,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeDriverAndHelperUsers = allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter)
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter))
       .sort((a, b) => {
         if (a.role === 'driver' && b.role !== 'driver') return -1;
         if (a.role !== 'driver' && b.role === 'driver') return 1;
@@ -1785,7 +1827,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeHelperAndDriverUsers = allUsers.filter(u =>
-      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter
+      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter)
     );
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
@@ -2101,7 +2143,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     // 1. Approved Driver & Helper accounts in Portal (strictly separated by effectiveActiveBranchId: Sidoarjo vs Nusantara)
     const allUsers = logisticsStore.getUsers();
     allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId) && branchStore.getCrewBranchId(u.id, u.fullName) === effectiveActiveBranchId)
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId))
       .forEach(u => {
         addCandidateToPool(
           u.id,
@@ -3358,20 +3400,74 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       return;
     }
 
-    const matchedDriver = crews.find(c => 
-      c.name.toLowerCase().includes(driver.toLowerCase()) || 
-      driver.toLowerCase().includes(c.name.toLowerCase())
-    ) || crews[0];
+    const normalizeCrewName = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const allUsers = logisticsStore.getUsers();
+    const resolveSelectedCrew = (selectedName: string, roleHint: 'Driver' | 'Helper'): Crew | undefined => {
+      const cleanName = (selectedName || '').trim();
+      if (!cleanName || cleanName === '-') return undefined;
+      const normalizedName = normalizeCrewName(cleanName);
+      const matchingUsers = allUsers.filter(u => normalizeCrewName(u.fullName || '') === normalizedName);
+      const matchedUser = matchingUsers.find(u => logisticsStore.isActiveDeliveryCrewUser(u, modalBranchId));
+      if (matchedUser) {
+        const fromStore = crews.find(c => c.id === `crw-${matchedUser.id}`) ||
+          (matchingUsers.length === 1 ? crews.find(c => normalizeCrewName(c.name) === normalizedName) : undefined);
+        if (fromStore) return fromStore;
+        // User Management is the source of truth for eligible portal users; create a schedule snapshot
+        // when the legacy crew cache has not caught up with the user record yet.
+        return {
+          id: `crw-${matchedUser.id}`,
+          name: (matchedUser.fullName || cleanName).trim(),
+          phone: matchedUser.phone || '',
+          role: roleHint === 'Driver' ? 'Driver Utama' : 'Kernet / Helper',
+          licenseNumber: '',
+          licenseType: roleHint === 'Driver' ? 'SIM B1/B2 Umum' : 'SIM A',
+          status: 'available',
+          tripsCompleted: 0,
+          rating: 0
+        };
+      }
+      // Akun dengan nama yang sama tetapi tanpa akses cabang yang sesuai tidak boleh
+      // diubah menjadi kru legacy untuk melewati validasi hak akses.
+      if (matchingUsers.length > 0 || allUsers.length > 0) return undefined;
+      return crews.find(c =>
+        normalizeCrewName(c.name) === normalizedName &&
+        c.status !== 'off' &&
+        branchStore.getCrewBranchId(c.id, c.name) === modalBranchId
+      );
+    };
 
-    const matchedHelper = helper && helper.trim() && helper !== '-' ? crews.find(c => 
-      c.name.toLowerCase().includes(helper.toLowerCase()) || 
-      helper.toLowerCase().includes(c.name.toLowerCase())
-    ) : undefined;
+    const selectedDriverIsAvailable = getIntegratedDrivers(modalBranchId)
+      .some(option => normalizeCrewName(option.name) === normalizeCrewName(driver));
+    const matchedDriver = selectedDriverIsAvailable ? resolveSelectedCrew(driver, 'Driver') : undefined;
+    if (!matchedDriver) {
+      const branchName = branchStore.getBranchById(modalBranchId)?.name || modalBranchId;
+      const driverErr = `Driver "${driver || '-'}" tidak ditemukan sebagai kru aktif dengan akses Portal Driver cabang ${branchName}. Periksa Hak Akses Cabang dan akses Portal Driver di Manajemen User.`;
+      setEditTripModalError(driverErr);
+      setUploadToast({ type: 'error', message: driverErr });
+      return;
+    }
 
-    const matchedHelper2 = helper2 && helper2.trim() && helper2 !== '-' ? crews.find(c => 
-      c.name.toLowerCase().includes(helper2.toLowerCase()) || 
-      helper2.toLowerCase().includes(c.name.toLowerCase())
-    ) : undefined;
+    const isHelperSelected = (name: string) => Boolean(name && name.trim() && name.trim() !== '-');
+    const selectedHelperIsAvailable = !isHelperSelected(helper) || getIntegratedHelpers(modalBranchId)
+      .some(option => normalizeCrewName(option.name) === normalizeCrewName(helper));
+    const selectedHelper2IsAvailable = !isHelperSelected(helper2) || getIntegratedHelpers(modalBranchId)
+      .some(option => normalizeCrewName(option.name) === normalizeCrewName(helper2));
+    const matchedHelper = isHelperSelected(helper) && selectedHelperIsAvailable
+      ? resolveSelectedCrew(helper, 'Helper')
+      : undefined;
+    const matchedHelper2 = isHelperSelected(helper2) && selectedHelper2IsAvailable
+      ? resolveSelectedCrew(helper2, 'Helper')
+      : undefined;
+    if ((isHelperSelected(helper) && !matchedHelper) || (isHelperSelected(helper2) && !matchedHelper2)) {
+      const helperErr = `Helper tidak ditemukan sebagai kru aktif dengan akses Portal Driver cabang ${branchStore.getBranchById(modalBranchId)?.name || modalBranchId}. Periksa Hak Akses Cabang di Manajemen User.`;
+      setEditTripModalError(helperErr);
+      setUploadToast({ type: 'error', message: helperErr });
+      return;
+    }
 
     const isBali = modalBranchId !== 'cab-sidoarjo' && (stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI'));
     const modalBranchInfo = branchStore.getBranchById(modalBranchId);
@@ -3509,24 +3605,43 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       // Editing existing
       let targetId = scheduleId;
       const storeSchedules = logisticsStore.getSchedules();
-
       const prevTrip = weeks
         .flatMap(w => w.days)
         .find(d => d.dayNumber === dayNumber)?.pengiriman[tripIndex];
 
-      if (!targetId) {
-        const found = storeSchedules.find(s => {
-          if (!s.departureDate) return false;
-          const d = new Date(s.departureDate);
-          const isSameDay = d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
-          if (!isSameDay) return false;
-          return s.fleet?.initialCode === armada || (s.trackingNumber && s.trackingNumber.includes(armada)) || s.crew?.name?.toLowerCase().includes(driver.toLowerCase());
-        }) || storeSchedules.find(s => {
-          if (!s.departureDate) return false;
-          const d = new Date(s.departureDate);
-          return d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
+      // Never fall back to an arbitrary schedule from the same date. Use the selected
+      // schedule ID, or a unique legacy identity (date + fleet + old driver/area).
+      if (!targetId || !storeSchedules.some(s => s.id === targetId)) {
+        const normalizeKey = (value?: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const oldDriverKey = normalizeKey(prevTrip?.driver || driver);
+        const oldAreaKey = normalizeKey(prevTrip?.area || area);
+        const oldFleetKey = normalizeKey(prevTrip?.armada || armada);
+        const candidates = storeSchedules.filter(s => {
+          if (!s.departureDate && !s.deliveryDate) return false;
+          const d = new Date(s.departureDate || s.deliveryDate || '');
+          const sameDay = !Number.isNaN(d.getTime()) &&
+            d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
+          if (!sameDay) return false;
+          const scheduleFleetKeys = [s.armada, s.fleet?.initialCode, s.fleet?.plateNumber]
+            .map(normalizeKey)
+            .filter(Boolean);
+          const fleetMatches = Boolean(oldFleetKey) && scheduleFleetKeys.includes(oldFleetKey);
+          if (!fleetMatches) return false;
+          const driverMatches = Boolean(oldDriverKey) && normalizeKey(s.crew?.name) === oldDriverKey;
+          const areaMatches = Boolean(oldAreaKey) && normalizeKey(s.areaName || s.store?.storeName) === oldAreaKey;
+          return driverMatches || areaMatches;
         });
-        if (found) targetId = found.id;
+        if (candidates.length === 1) {
+          targetId = candidates[0].id;
+        } else {
+          const identityError = candidates.length > 1
+            ? 'Ada lebih dari satu jadwal yang cocok dengan tanggal dan armada ini.'
+            : 'ID jadwal tidak ditemukan dan identitas jadwal lama tidak cocok.';
+          const message = `${identityError} Data tidak diubah untuk mencegah laporan atau ritase area lain ikut berubah. Muat ulang jadwal, lalu buka kembali rincian ritase yang benar.`;
+          setEditTripModalError(message);
+          setUploadToast({ type: 'error', message });
+          return;
+        }
       }
 
       if (targetId && storeSchedules.some(s => s.id === targetId)) {

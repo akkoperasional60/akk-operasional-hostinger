@@ -67,6 +67,12 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   }, [currentUser]);
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
+  const [storeTick, setStoreTick] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = logisticsStore.subscribe(() => setStoreTick(tick => tick + 1));
+    return unsubscribe;
+  }, []);
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'pending'>('all');
   const [dateFilterMode, setDateFilterMode] = useState<'single_date' | 'all'>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateStr());
@@ -94,8 +100,8 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   const [formPhotoDataUrl, setFormPhotoDataUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const crews = useMemo(() => logisticsStore.getCrews(), []);
-  const fleets = useMemo(() => logisticsStore.getFleets(), []);
+  const crews = useMemo(() => logisticsStore.getCrews(), [storeTick]);
+  const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
 
   const resetAddForm = () => {
     const defaultDriver = crews.find(c => c.role.includes('Driver'))?.name || crews[0]?.name || '';
@@ -198,42 +204,55 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   );
 
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
-  const schedules = useMemo(() => logisticsStore.getSchedules(), [reports]);
+  const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
-  // Helper untuk mencocokkan laporan absen ke jadwal pengiriman & Nama Area Kirim resmi
+  // Area pada laporan adalah snapshot saat bukti dikirim. Jadwal hanya dipakai untuk
+  // melengkapi metadata kru/armada, bukan untuk menimpa area historis ketika jadwal diedit.
   const resolveScheduleAndArea = (rep: DriverHelperReport) => {
     const rDate = getLocalDateStr(rep.date || rep.timestamp);
     const repPlateClean = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
     const repDriverClean = (rep.driverName || '').trim().toLowerCase();
+    const normalizeArea = (value?: string) => (value || '').replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+    const reportArea = (rep.areaName || '').trim();
+    const hasReportAreaSnapshot = Boolean(
+      reportArea &&
+      reportArea !== '-' &&
+      !/^(area kirim umum|area pengiriman|rute pengiriman aktif|rute pengiriman dc)$/i.test(reportArea)
+    );
 
-    let matchedSchedule = schedules.find(s => rep.deliveryId && s.id === rep.deliveryId);
+    // A schedule ID is the only unambiguous link. Legacy fallback requires same
+    // operational day and matching vehicle + driver; ambiguous matches are rejected.
+    let matchedSchedule = rep.deliveryId
+      ? schedules.find(s => s.id === rep.deliveryId)
+      : undefined;
+
     if (!matchedSchedule) {
-      matchedSchedule = schedules.find(s => {
+      const sameDayCandidates = schedules.filter(s => {
+        const depDate = getLocalDateStr(s.deliveryDate || s.departureDate);
+        const returnDate = getLocalDateStr(s.returnDate || s.estimatedArrival);
+        const scheduleCalendarDate = returnDate > depDate ? returnDate : depDate;
+        if (scheduleCalendarDate !== rDate) return false;
         const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
         const sDriver = (s.crew?.name || '').trim().toLowerCase();
-        const sDate = getLocalDateStr(s.departureDate);
-        return sDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
+        const plateMatches = !repPlateClean || !sPlate || sPlate === repPlateClean;
+        const driverMatches = !repDriverClean || !sDriver || sDriver === repDriverClean;
+        const hasIdentity = Boolean(repPlateClean || repDriverClean);
+        return hasIdentity && plateMatches && driverMatches;
       });
-    }
-    if (!matchedSchedule && rep.areaName) {
-      const cleanRepArea = rep.areaName.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-      matchedSchedule = schedules.find(
-        s => (s.areaName || s.store?.storeName || '').trim().toLowerCase() === cleanRepArea
-      );
+      const exactAreaCandidates = hasReportAreaSnapshot
+        ? sameDayCandidates.filter(s => normalizeArea(s.areaName || s.store?.storeName) === normalizeArea(reportArea))
+        : sameDayCandidates;
+      if (exactAreaCandidates.length === 1) matchedSchedule = exactAreaCandidates[0];
+      else if (!hasReportAreaSnapshot && sameDayCandidates.length === 1) matchedSchedule = sameDayCandidates[0];
     }
 
     const scheduledAreaName = (
-      matchedSchedule?.areaName ||
-      matchedSchedule?.store?.storeName ||
-      rep.areaName ||
-      'Area Kirim Umum'
+      hasReportAreaSnapshot
+        ? reportArea
+        : matchedSchedule?.areaName || matchedSchedule?.store?.storeName || reportArea || 'Area Kirim Umum'
     ).trim();
 
-    return {
-      scheduledAreaName,
-      matchedSchedule,
-      rDate
-    };
+    return { scheduledAreaName, matchedSchedule, rDate };
   };
 
   // Daftar Nama Area Kirim unik (disesuaikan dengan jadwal)
@@ -303,8 +322,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       const scheduleDate = getLocalDateStr(rawDateCandidate);
       const groupKey = `${scheduledAreaName.toUpperCase()}__${scheduleDate}`;
 
+      const reportPlate = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      const schedulePlate = (matchedSchedule?.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
       const matchedFleetObj = fleets.find(
-        f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '').replace(/\s+/g, '').toUpperCase()
+        f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (reportPlate || schedulePlate)
       );
 
       if (!groupsMap.has(groupKey)) {
@@ -312,10 +333,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
           groupKey,
           areaName: scheduledAreaName,
           scheduleDate,
-          driverName: matchedSchedule?.crew?.name || rep.driverName || '-',
-          helperName: matchedSchedule?.crewHelper?.name || rep.helperName || '-',
-          plateNumber: matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '-',
-          fleetInitial: matchedFleetObj?.initialCode || matchedSchedule?.fleet?.initialCode,
+          driverName: rep.driverName || matchedSchedule?.crew?.name || '-',
+          helperName: rep.helperName || matchedSchedule?.crewHelper?.name || '-',
+          plateNumber: rep.plateNumber || matchedSchedule?.fleet?.plateNumber || '-',
+          fleetInitial: matchedFleetObj?.initialCode || (reportPlate ? undefined : matchedSchedule?.fleet?.initialCode),
           trackingNumber: matchedSchedule?.trackingNumber,
           items: []
         });

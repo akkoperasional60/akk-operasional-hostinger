@@ -848,6 +848,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [gmapsModalRoleOverride, setGmapsModalRoleOverride] = useState<'driver' | 'helper' | undefined>(undefined);
   const [jobdeskRoleOverride, setJobdeskRoleOverride] = useState<'auto' | 'driver' | 'helper'>('auto');
   const lastGpsPingAtRef = useRef<number>(0);
+  const lastGpsPingLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastGpsPingTripIdRef = useRef<string>('');
 
   const openGmapsFeature = (cat?: GmapsReportCategory, roleForModal?: 'driver' | 'helper') => {
     setGmapsInitialCategory(cat);
@@ -3088,20 +3090,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     activeShift?.selectedArea
   ]);
 
-  // 🛰️ Kirim ping GPS berkala (heartbeat 15 detik + watchPosition real-time) ke Hostinger MySQL selama armada sedang dalam perjalanan
+  // 🛰️ Sinkronisasi GPS hemat data: kirim jika berpindah >=75 m (minimal jeda 30 dtk),
+  // atau kirim heartbeat maksimal setiap 2 menit bila posisi tidak berubah.
+  const activeGpsTrip = activeDeliveries.find(
+    d => d.status === 'in_transit' || d.status === 'picked_up'
+  );
+
   useEffect(() => {
-    const activeTrip = activeDeliveries.find(
-      d => d.status === 'in_transit' || d.status === 'picked_up'
-    );
-    if (!activeTrip) return;
+    if (!activeGpsTrip) return;
+
+    if (lastGpsPingTripIdRef.current !== activeGpsTrip.id) {
+      lastGpsPingTripIdRef.current = activeGpsTrip.id;
+      lastGpsPingAtRef.current = 0;
+      lastGpsPingLocationRef.current = null;
+    }
 
     const pushGpsPing = (lat: number, lng: number, speedKmh: number) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const nowMs = Date.now();
-      if (nowMs - lastGpsPingAtRef.current < 12000) return;
-      lastGpsPingAtRef.current = nowMs;
 
-      void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeTrip.id}`)}/ping`, {
+      const previousLocation = lastGpsPingLocationRef.current;
+      const elapsedMs = nowMs - lastGpsPingAtRef.current;
+      let movedMeters = Infinity;
+      if (previousLocation) {
+        const toRad = (value: number) => (value * Math.PI) / 180;
+        const dLat = toRad(lat - previousLocation.lat);
+        const dLng = toRad(lng - previousLocation.lng);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(previousLocation.lat)) * Math.cos(toRad(lat)) * Math.sin(dLng / 2) ** 2;
+        movedMeters = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      // Saat bergerak, kirim maksimal sekali per 30 detik dan setelah perpindahan
+      // bermakna. Saat berhenti, tetap kirim heartbeat setiap 120 detik.
+      if (previousLocation && elapsedMs < 30000) return;
+      if (previousLocation && elapsedMs < 120000 && movedMeters < 75) return;
+
+      lastGpsPingAtRef.current = nowMs;
+      lastGpsPingLocationRef.current = { lat, lng };
+
+      void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeGpsTrip.id}`)}/ping`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -3109,7 +3138,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           lat,
           lng,
           speedKmh: speedKmh || 0,
-          locationName: activeTrip.areaName || activeTrip.store?.storeName || 'Dalam Perjalanan'
+          locationName: activeGpsTrip.areaName || activeGpsTrip.store?.storeName || 'Dalam Perjalanan'
         })
       })
         .then(() => {
@@ -3121,8 +3150,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (deviceGps.source === 'native') {
       pushGpsPing(deviceGps.lat, deviceGps.lng, deviceGps.speedKmh);
     }
+  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, deviceGps.source, deviceGps.lastUpdated, activeGpsTrip?.id, activeGpsTrip?.areaName, activeGpsTrip?.store?.storeName]);
 
-    // Active 15-second GPS heartbeat polling agar track Live Trips tetap terekam meskipun perangkat sempat idle
+  // Heartbeat lokasi dipisah dari effect sinkronisasi agar timer tidak dibuat
+  // ulang setiap watchPosition memperbarui koordinat. GPS cache dipakai hingga 30 dtk.
+  useEffect(() => {
+    if (!activeGpsTrip || deviceGps.permissionState !== 'granted') return;
+
     const heartbeatTimer = window.setInterval(() => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition(
@@ -3142,15 +3176,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             permissionState: 'granted',
             errorMsg: null
           });
-          pushGpsPing(pos.coords.latitude, pos.coords.longitude, speedKmh);
         },
         () => {},
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
       );
-    }, 15000);
+    }, 60000);
 
     return () => window.clearInterval(heartbeatTimer);
-  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, deviceGps.source, activeDeliveries]);
+  }, [activeGpsTrip?.id, deviceGps.permissionState]);
 
   // 🧭 Deteksi Posisi Jobdesk Terjadwal (Driver vs Helper) untuk Jadwal Tertentu maupun Portal Utama
   const getScheduledJobdeskForDelivery = (delivery?: Schedule | null): 'driver' | 'helper' => {
@@ -4657,6 +4690,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips) dengan koordinat GPS asli yang baru terkunci
       const { driverName: tripDriver, helper1Name: tripHelper1, helper2Name: tripHelper2 } = getDeliveryCrewComposition(preparedSchedule);
+      // Titik Gate-Out sudah disimpan sebagai titik pertama; jadikan patokan
+      // ping agar koordinat yang sama tidak langsung dikirim dua kali.
+      lastGpsPingTripIdRef.current = delivery.id;
+      lastGpsPingAtRef.current = Date.now();
+      lastGpsPingLocationRef.current = { lat: lockedLat, lng: lockedLng };
       void fetch('/api/gps-trips', {
         method: 'POST',
         credentials: 'same-origin',

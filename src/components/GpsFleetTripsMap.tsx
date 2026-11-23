@@ -76,7 +76,9 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
   const [showTripListPanel, setShowTripListPanel] = useState<boolean>(true);
   const [showHistoricalPolyline, setShowHistoricalPolyline] = useState<boolean>(true);
   const [showWaypointNumbers, setShowWaypointNumbers] = useState<boolean>(true);
-  const [showCustomerStores, setShowCustomerStores] = useState<boolean>(true);
+  // Hindari membuat ribuan marker toko secara otomatis saat peta dibuka.
+  // Lapisan bisa diaktifkan sesuai kebutuhan dari tombol Toko Pelanggan.
+  const [showCustomerStores, setShowCustomerStores] = useState<boolean>(false);
 
   const validCustomerStores = useMemo(() => {
     return (stores || []).filter(
@@ -265,13 +267,25 @@ export const GpsFleetTripsMap: React.FC<GpsFleetTripsMapProps> = ({
     L.tileLayer(tileUrl, {
       maxZoom,
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      attribution
+      attribution,
+      // Tunda pengambilan tile sampai gerakan peta selesai dan batasi tile
+      // cadangan di luar viewport agar pemakaian data saat geser/zoom lebih irit.
+      updateWhenIdle: true,
+      updateWhenZooming: false,
+      keepBuffer: 1,
+      detectRetina: false
     }).addTo(map);
 
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 100);
-  }, [mapTheme, isFullscreen]);
+  }, [mapTheme]);
+
+  // Fullscreen hanya mengubah ukuran container, jadi jangan buat ulang tile layer
+  // (yang dapat mengunduh ulang beberapa tile pada jaringan seluler).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const timer = window.setTimeout(() => map.invalidateSize(), 150);
+    return () => window.clearTimeout(timer);
+  }, [isFullscreen, mapTheme]);
 
   // Render Integrated Customer Store Pins (Jaringan Toko & Mitra Pelanggan)
   useEffect(() => {

@@ -983,11 +983,12 @@ export default function App() {
           </div>
         )}
 
-        <main className={`flex-1 max-w-7xl w-full mx-auto ${
+        <main className={`flex-1 min-w-0 w-full max-w-none mx-0 ${
           currentTab === 'driver_portal' || currentTab === 'sales_rfid_scanner'
             ? 'px-0 pb-0 pt-14 lg:pt-0'
-            : `p-4 sm:p-6 lg:p-8 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'}`
+            : `px-3 sm:px-4 lg:px-5 pb-4 sm:pb-5 lg:pb-6 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-5' : 'pt-20 sm:pt-20 lg:pt-5'}`
         }`}>
+
           <ReadOnlyModuleBoundary user={currentUser} activeTab={currentTab}>
           <Suspense fallback={<ModuleLoaderFallback />}>
           {currentTab === 'dashboard' && (
@@ -1341,7 +1342,7 @@ export default function App() {
         {/* Enterprise AKK Footer (hidden on driver portal & sales rfid scanner to keep clean mobile bottom bar) */}
         {currentTab !== 'driver_portal' && currentTab !== 'sales_rfid_scanner' && (
           <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="w-full max-w-none mx-0 px-3 sm:px-4 lg:px-5 flex flex-col sm:flex-row items-center justify-between gap-2">
               <div className="text-slate-400">
                 <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
               </div>

@@ -832,6 +832,8 @@ export interface LiveGpsTripRecord {
   currentLat?: number;
   currentLng?: number;
   points: LiveGpsTripPoint[];
+  /** Number of stored route points (available from lightweight Live Trips summaries). */
+  pointCount?: number;
   updatedAt?: string;
 }
 
