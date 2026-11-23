@@ -11189,6 +11189,19 @@ Kembalikan HANYA JSON valid:
     );
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
+
+      // Never return the SPA HTML document for a missing JavaScript/CSS chunk.
+      // Doing so makes the browser report a vague dynamic-import error and sends
+      // Driver Portal into the old reload loop when a deployment is incomplete.
+      const isStaticAssetRequest =
+        req.path.startsWith('/assets/') ||
+        /\.(?:m?js|css|map|woff2?|ttf|otf|png|jpe?g|webp|gif|svg|ico|wasm|json)$/i.test(req.path);
+      if (isStaticAssetRequest) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('X-AKK-Asset-Status', 'missing-from-current-build');
+        return res.status(404).type('text/plain').send(`Asset aplikasi tidak ditemukan pada build aktif: ${req.path}`);
+      }
+
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');

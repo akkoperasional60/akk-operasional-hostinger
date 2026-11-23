@@ -111,6 +111,11 @@ const isPhantomOperationalPlate = (plate?: string): boolean => {
   return /^FLT-\d+$/i.test(clean) || clean === '*AKK';
 };
 
+// Legacy user/crew rows can be incomplete (for example, accounts without email).
+// Normalize unknown values defensively so one incomplete row cannot crash the whole portal.
+const normalizePortalIdentity = (value: unknown): string =>
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
 const getPortalAuthHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
@@ -194,7 +199,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }, [currentUser]);
 
   const portalInitials = useMemo(() => {
-    const name = portalDisplayName.trim();
+    const name = String(portalDisplayName || '').trim();
     if (!name) return 'DR';
     const parts = name.split(/\s+/).filter(Boolean);
     if (parts.length >= 2) {
@@ -221,11 +226,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Sinkronisasi Role dengan User Manajemen (Driver / Helper / Role lainnya)
   const syncedUserRoleInfo = useMemo(() => {
     const allUsers = logisticsStore.getUsers();
-    const matchedUser = allUsers.find(
-      u =>
+    const currentEmailKey = normalizePortalIdentity(currentUser?.email);
+    const currentNameKey = normalizePortalIdentity(portalDisplayName);
+    const matchedUser = (Array.isArray(allUsers) ? allUsers : []).find(
+      u => Boolean(u) && (
         (currentUser?.id && u.id === currentUser.id) ||
-        (currentUser?.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
-        (portalDisplayName && u.fullName.toLowerCase() === portalDisplayName.toLowerCase())
+        (currentEmailKey && normalizePortalIdentity(u.email) === currentEmailKey) ||
+        (currentNameKey && normalizePortalIdentity(u.fullName) === currentNameKey)
+      )
     );
     const rawRole = matchedUser?.role || currentUser?.role || loggedInDriver?.role || 'driver';
     const roleLower = String(rawRole).toLowerCase();
@@ -316,7 +324,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       return;
     }
 
-    const crewMatch = crews.find(c => c.name.toLowerCase() === user.fullName.toLowerCase())
+    const crewMatch = crews.find(c => normalizePortalIdentity(c?.name) === normalizePortalIdentity(user?.fullName))
       || logisticsStore.getActiveDriverCrew()
       || null;
     setLoggedInDriver(crewMatch);
@@ -1183,7 +1191,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const assigned = deliveriesRef.current;
     if (!assigned.length) return null;
 
-    const normalizeKey = (value?: string) => (value || '')
+    const normalizeKey = (value: unknown) => String(value ?? '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
@@ -2432,11 +2440,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const latestFleets = logisticsStore.getFleets();
       const latestActiveCrew = logisticsStore.getActiveDriverCrew();
       const latestUsersList = logisticsStore.getUsers();
-      const matchedUserInStore = latestUsersList.find(
-        u =>
+      const latestEmailKey = normalizePortalIdentity(latestUser?.email);
+      const latestNameKey = normalizePortalIdentity(latestUser?.fullName);
+      const matchedUserInStore = (Array.isArray(latestUsersList) ? latestUsersList : []).find(
+        u => Boolean(u) && (
           (latestUser?.id && u.id === latestUser.id) ||
-          (latestUser?.email && u.email.toLowerCase() === latestUser.email.toLowerCase()) ||
-          (latestUser?.fullName && u.fullName.toLowerCase() === latestUser.fullName.toLowerCase())
+          (latestEmailKey && normalizePortalIdentity(u.email) === latestEmailKey) ||
+          (latestNameKey && normalizePortalIdentity(u.fullName) === latestNameKey)
+        )
       );
       const effectiveRole = String(matchedUserInStore?.role || latestUser?.role || '').toLowerCase();
       const isManagerPortal = ['super_admin'].includes(effectiveRole);
@@ -3290,7 +3301,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
 
     if (canManageAllPortalSchedules && spvCrewFilter !== 'all') {
-      const matchedFilterUser = logisticsStore.getUsers().find(u => u.fullName.toLowerCase() === spvCrewFilter.toLowerCase());
+      const filterKey = normalizePortalIdentity(spvCrewFilter);
+      const matchedFilterUser = logisticsStore.getUsers().find(
+        u => Boolean(u) && normalizePortalIdentity(u.fullName) === filterKey
+      );
       if (matchedFilterUser?.role === 'crew_helper') return 'helper';
       if (matchedFilterUser?.role === 'driver') return 'driver';
     }

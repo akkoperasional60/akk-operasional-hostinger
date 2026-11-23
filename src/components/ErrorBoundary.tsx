@@ -1,142 +1,180 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Copy, Home, RefreshCw } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
 }
 
-const CACHE_KEYS_TO_PURGE_ON_ERROR = [
-  'akk_admin_schedules_v1',
-  'akk_daily_checklist_v1',
-  'akk_task_status_v1',
-  'akk_master_jobdesk_v2',
-  'akk_checklist_history',
-  'akk_loading_fleets_v2',
-  'akk_fines_data_v2',
-  'akk_user_branch_permissions_v1',
-  'akk_entity_branch_assignments_v1',
-  'akk_multi_store_branches_v1',
-  'akk_active_origin_branch_v1',
-  'akk_simulasi_weeks_v2',
-  'akk_notifications_v1',
-  'akk_system_activities_v1'
-];
+interface State {
+  hasError: boolean;
+  isRecovering: boolean;
+  error?: Error;
+  componentStack?: string;
+  errorStack?: string;
+}
 
-function purgeCorruptedCacheKeys() {
-  try {
-    CACHE_KEYS_TO_PURGE_ON_ERROR.forEach(k => {
-      try {
-        localStorage.removeItem(k);
-      } catch {}
-    });
-  } catch {}
+const CHUNK_RETRY_KEY = 'akk_chunk_recovery_attempt_v2';
+const CHUNK_RETRY_WINDOW_MS = 120_000;
+
+function errorMessage(error?: Error): string {
+  return String(error?.message || error || 'Kesalahan tidak diketahui').slice(0, 1200);
 }
 
 function isChunkLoadError(error?: Error): boolean {
-  const msg = String(error?.message || error || '').toLowerCase();
+  const msg = errorMessage(error).toLowerCase();
   return (
     msg.includes('failed to fetch dynamically imported module') ||
     msg.includes('importing a module script failed') ||
     msg.includes('error loading dynamically imported module') ||
-    msg.includes('loading chunk')
+    msg.includes('loading chunk') ||
+    msg.includes('chunkloaderror') ||
+    msg.includes('failed to load module script') ||
+    msg.includes('dynamically imported module')
   );
 }
 
-const SILENT_RELOAD_COUNT_KEY = 'akk_silent_reload_count_v1';
-const SILENT_RELOAD_TS_KEY = 'akk_silent_reload_ts_v1';
-const MAX_SILENT_RELOADS_WINDOW = 2;
-const RELOAD_WINDOW_MS = 30000;
-
-interface State {
-  hasError: boolean;
-  isAutoReloading: boolean;
-  error?: Error;
+function getFreshPageUrl(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('__akk_refresh', String(Date.now()));
+  return url.toString();
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
-    isAutoReloading: false
+    isRecovering: false
   };
 
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, isAutoReloading: true, error };
+  public static getDerivedStateFromError(error: Error): Partial<State> {
+    return { hasError: true, isRecovering: false, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught React Error:', error, errorInfo);
+    // Keep the full error in the browser console for diagnosis, but do not expose
+    // stack traces until the user opens the technical-details disclosure.
+    console.error('[AKK App ErrorBoundary]', error, errorInfo);
+    this.setState({
+      componentStack: errorInfo.componentStack || '',
+      errorStack: error?.stack || ''
+    });
 
-    const chunkErr = isChunkLoadError(error);
-    if (!chunkErr) {
-      purgeCorruptedCacheKeys();
-    }
-
-    try {
-      const now = Date.now();
-      const lastTs = Number(sessionStorage.getItem(SILENT_RELOAD_TS_KEY) || '0');
-      const prevCount = Number(sessionStorage.getItem(SILENT_RELOAD_COUNT_KEY) || '0');
-      const withinWindow = lastTs > 0 && now - lastTs < RELOAD_WINDOW_MS;
-      const nextCount = withinWindow ? prevCount + 1 : 1;
-
-      if (nextCount <= MAX_SILENT_RELOADS_WINDOW) {
-        sessionStorage.setItem(SILENT_RELOAD_TS_KEY, String(now));
-        sessionStorage.setItem(SILENT_RELOAD_COUNT_KEY, String(nextCount));
-        window.setTimeout(() => {
-          window.location.reload();
-        }, 80);
-        return;
+    // Only retry once for a likely stale/missing Vite chunk. Do not purge business
+    // data from localStorage when a regular React rendering error occurs.
+    if (isChunkLoadError(error) && typeof window !== 'undefined' && navigator.onLine) {
+      try {
+        const now = Date.now();
+        const previousAttempt = Number(sessionStorage.getItem(CHUNK_RETRY_KEY) || '0');
+        if (!previousAttempt || now - previousAttempt > CHUNK_RETRY_WINDOW_MS) {
+          sessionStorage.setItem(CHUNK_RETRY_KEY, String(now));
+          this.setState({ isRecovering: true });
+          window.setTimeout(() => window.location.replace(getFreshPageUrl()), 350);
+        }
+      } catch {
+        // Storage restrictions should never prevent the error screen from rendering.
       }
-    } catch {
-      window.setTimeout(() => {
-        window.location.reload();
-      }, 80);
-      return;
     }
-
-    this.setState({ isAutoReloading: false });
   }
 
   private handleReset = () => {
-    const chunkErr = isChunkLoadError(this.state.error);
-    if (!chunkErr) {
-      purgeCorruptedCacheKeys();
-    }
     try {
-      sessionStorage.removeItem(SILENT_RELOAD_COUNT_KEY);
-      sessionStorage.removeItem(SILENT_RELOAD_TS_KEY);
-      sessionStorage.removeItem('akk_auto_recover_ts');
-      sessionStorage.removeItem('akk_chunk_reload_ts');
+      sessionStorage.removeItem(CHUNK_RETRY_KEY);
     } catch {}
-    this.setState({ hasError: false, isAutoReloading: false, error: undefined });
-    window.location.reload();
+    window.location.replace(getFreshPageUrl());
+  };
+
+  private handleGoHome = () => {
+    window.location.assign('/');
+  };
+
+  private handleCopyDiagnostics = async () => {
+    const details = [
+      'AKK Portal diagnostic',
+      `URL: ${window.location.href}`,
+      `Waktu: ${new Date().toISOString()}`,
+      `Error: ${this.state.error?.name || 'Error'}: ${errorMessage(this.state.error)}`,
+      `JavaScript stack: ${this.state.errorStack || '(tidak tersedia)'}`,
+      `Component stack: ${this.state.componentStack || '(tidak tersedia)'}`,
+      `Build target: ${import.meta.env.VITE_BUILD_TARGET || 'dist'}`,
+      `User agent: ${navigator.userAgent}`
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(details);
+    } catch {
+      // If clipboard access is blocked, the details remain visible in the disclosure.
+      console.warn('[AKK diagnostics]', details);
+    }
   };
 
   public render() {
     if (this.state.hasError) {
-      if (this.state.isAutoReloading) {
+      if (this.state.isRecovering) {
         return (
-          <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-            <RefreshCw className="w-6 h-6 text-blue-600 dark:text-amber-400 animate-spin" />
+          <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+            <div className="text-center space-y-3">
+              <RefreshCw className="w-7 h-7 mx-auto text-blue-600 dark:text-amber-400 animate-spin" />
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Memuat ulang file aplikasi yang terbaru...</p>
+            </div>
           </div>
         );
       }
 
+      const chunkError = isChunkLoadError(this.state.error);
       return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6 text-center">
-          <div className="max-w-sm w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-lg space-y-4">
-            <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-amber-500/10 border border-blue-200 dark:border-amber-500/25 flex items-center justify-center text-blue-600 dark:text-amber-400 mx-auto">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-5">
+          <div className="max-w-lg w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-lg space-y-4">
+            <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/25 flex items-center justify-center text-amber-600 dark:text-amber-400 mx-auto">
               <AlertTriangle className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-              Halaman perlu dimuat ulang untuk melanjutkan.
+            <div className="text-center space-y-1">
+              <h1 className="text-base font-extrabold">Portal belum dapat dimuat</h1>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                {chunkError
+                  ? 'File modul aplikasi belum berhasil dimuat. Periksa koneksi atau pastikan seluruh file hasil build sudah terunggah.'
+                  : 'Aplikasi mengalami kesalahan saat menampilkan halaman. Detail teknis tersedia di bawah untuk membantu pemeriksaan.'}
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                onClick={this.handleReset}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer active:scale-[0.99] flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Muat Ulang Aman</span>
+              </button>
+              <button
+                onClick={this.handleGoHome}
+                className="py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Home className="w-4 h-4" />
+                <span>Halaman Utama</span>
+              </button>
+            </div>
+
+            <p className="text-[11px] text-center text-emerald-700 dark:text-emerald-300">
+              Data jadwal, laporan, dan akun tidak dihapus oleh proses pemulihan ini.
             </p>
-            <button
-              onClick={this.handleReset}
-              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 dark:bg-amber-500 dark:hover:bg-amber-400 text-white dark:text-slate-950 font-bold text-xs transition cursor-pointer active:scale-95 flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Muat Ulang</span>
-            </button>
+
+            <details open className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+              <summary className="cursor-pointer text-xs font-bold text-slate-600 dark:text-slate-300">Detail teknis untuk pengelola</summary>
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] break-all text-slate-500 dark:text-slate-400">URL: {typeof window !== 'undefined' ? window.location.href : '-'}</p>
+                <p className="text-xs font-semibold text-rose-600 dark:text-rose-300 break-words">{this.state.error?.name || 'Error'}: {errorMessage(this.state.error)}</p>
+                {this.state.errorStack && (
+                  <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] text-slate-500 dark:text-slate-400">{this.state.errorStack}</pre>
+                )}
+                {this.state.componentStack && (
+                  <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] text-slate-500 dark:text-slate-400">{this.state.componentStack}</pre>
+                )}
+                <button
+                  onClick={this.handleCopyDiagnostics}
+                  className="w-full py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center justify-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  <Copy className="w-3.5 h-3.5" /> Salin detail error
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       );
