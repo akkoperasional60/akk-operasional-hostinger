@@ -247,9 +247,17 @@ export async function updateFleetInSupabase(id: string, updates: Partial<Fleet>)
   } catch (err: any) { return { success: false, error: err?.message }; }
 }
 
-export async function deleteFleetInSupabase(id: string, plateNumber?: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteFleetInSupabase(
+  id: string,
+  plateNumber?: string,
+  keepSiblingPlate: boolean = false
+): Promise<{ success: boolean; error?: string }> {
   try {
-    const query = plateNumber ? `?plateNumber=${encodeURIComponent(plateNumber)}` : '';
+    const params = new URLSearchParams();
+    if (plateNumber) params.set('plateNumber', plateNumber);
+    if (keepSiblingPlate) params.set('keepSiblingPlate', '1');
+    const queryStr = params.toString();
+    const query = queryStr ? `?${queryStr}` : '';
     await apiJson(`/api/fleets/${encodeURIComponent(id)}${query}`, { method: 'DELETE' });
     return { success: true };
   } catch (err: any) {

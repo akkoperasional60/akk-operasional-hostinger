@@ -112,13 +112,24 @@ export default defineConfig(() => {
         'react/jsx-dev-runtime',
         'react/jsx-runtime',
         'lucide-react',
+        'recharts',
+        'motion/react',
+        'firebase/app',
+        'firebase/auth',
+        'leaflet',
+        'leaflet.markercluster',
+        'xlsx',
+        'jspdf',
+        'html2canvas-pro',
+        'react-to-print',
       ],
       exclude: ['onnxruntime-web'],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var or K_SERVICE.
       hmr: process.env.DISABLE_HMR !== 'true' && !process.env.K_SERVICE,
-      watch: {},
+      ws: (process.env.DISABLE_HMR === 'true' || Boolean(process.env.K_SERVICE)) ? false : undefined,
+      watch: (process.env.DISABLE_HMR === 'true' || Boolean(process.env.K_SERVICE)) ? null : {},
     },
   };
 });

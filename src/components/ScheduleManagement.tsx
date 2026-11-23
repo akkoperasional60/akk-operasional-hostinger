@@ -741,32 +741,6 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
         ? ''
         : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-    const depDateStr = fmtYyyyMmDd(depDateObj);
-    const arrDateStr = fmtYyyyMmDd(arrDateObj);
-    const editSchId = (newSchedule as any).id as string | undefined;
-    const fleetConflict =
-      (depDateStr && logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, depDateStr, editSchId)) ||
-      (arrDateStr && arrDateStr !== depDateStr
-        ? logisticsStore.findFleetAssignmentConflict(newSchedule.fleetId, arrDateStr, editSchId)
-        : null);
-
-    if (fleetConflict) {
-      const conflictSch = fleetConflict.conflictSchedule;
-      const conflictCode =
-        fleetConflict.fleet?.initialCode ||
-        conflictSch.armada ||
-        selectedFleetObj?.initialCode ||
-        selectedFleetObj?.plateNumber ||
-        newSchedule.fleetId;
-      const conflictArea = conflictSch.areaName || conflictSch.store?.storeName || '-';
-      const conflictDriver = conflictSch.crew?.name || '-';
-      const conflictMsg = `Armada ${conflictCode} sudah terjadwal pada tanggal tersebut (${conflictArea} • Driver: ${conflictDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
-      addNotification('sla_warning', 'Bentrok Jadwal Armada', conflictMsg);
-      setAutoInitMessage(`⚠️ ${conflictMsg}`);
-      setTimeout(() => setAutoInitMessage(null), 6000);
-      return;
-    }
-
     const scheduleData = {
       ...newSchedule,
       areaName: targetAreaLabel,

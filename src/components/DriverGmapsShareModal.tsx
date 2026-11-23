@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Camera,
@@ -57,6 +58,9 @@ interface DriverGmapsShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   deliveries: Schedule[];
+  preferredDeliveryId?: string;
+  preferredAreaName?: string;
+  reporterName?: string;
   driverName?: string;
   plateNumber?: string;
   driverId?: string;
@@ -82,7 +86,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   isOpen,
   onClose,
   deliveries,
-  driverName = 'Supir AKK',
+  preferredDeliveryId,
+  preferredAreaName,
+  reporterName,
+  driverName = '',
   plateNumber = '',
   driverId,
   userJobdeskRole = 'driver',
@@ -242,7 +249,22 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       .slice(0, 80);
   }, [dbBarangItems, barangSearchQuery]);
 
-  // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini
+  const normCompactStr = (v?: string) =>
+    String(v || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const actualReporterName = (reporterName || driverName || 'Kru Pengiriman').trim();
+
+  // Sinkronkan pilihan ritase default ke jadwal aktif user saat modal dibuka
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedDeliveryId(preferredDeliveryId || '');
+  }, [isOpen, preferredDeliveryId]);
+
+  // Otomatis pilih jadwal / Surat Jalan Keluar yang paling tepat untuk kru pelapor
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDelivery: Schedule | null = React.useMemo(() => {
     if (!deliveries || deliveries.length === 0) return null;
@@ -250,12 +272,72 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       const manuallySelected = deliveries.find(d => d.id === selectedDeliveryId);
       if (manuallySelected) return manuallySelected;
     }
+    if (preferredDeliveryId) {
+      const preferred = deliveries.find(d => d.id === preferredDeliveryId);
+      if (preferred) return preferred;
+    }
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    const candidatePool = openTrips.length > 0 ? openTrips : deliveries;
+
+    if (preferredAreaName && preferredAreaName.trim() && preferredAreaName.trim() !== '-') {
+      const prefAreaNorm = normCompactStr(preferredAreaName);
+      const areaMatch = candidatePool.find(d => {
+        const dArea = normCompactStr(d.areaName || d.store?.storeName);
+        return dArea && (dArea === prefAreaNorm || dArea.includes(prefAreaNorm) || prefAreaNorm.includes(dArea));
+      });
+      if (areaMatch) return areaMatch;
+    }
+
+    const reporterNorm = normCompactStr(actualReporterName);
+    const crewInTransitMatch = candidatePool.find(d => {
+      if (d.status !== 'in_transit' && d.status !== 'picked_up') return false;
+      if (!reporterNorm) return true;
+      return [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+        .map(normCompactStr)
+        .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)));
+    });
+    if (crewInTransitMatch) return crewInTransitMatch;
+
+    const crewOpenMatch = reporterNorm
+      ? candidatePool.find(d =>
+          [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+            .map(normCompactStr)
+            .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)))
+        )
+      : undefined;
+    if (crewOpenMatch) return crewOpenMatch;
+
     const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
     if (inTransit) return inTransit;
     const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
     if (todayMatch) return todayMatch;
     return deliveries[0];
-  }, [deliveries, todayStr, selectedDeliveryId]);
+  }, [deliveries, todayStr, selectedDeliveryId, preferredDeliveryId, preferredAreaName, actualReporterName]);
+
+  // Driver & Helper identitas terpisah agar nama Helper tidak menggantikan nama Driver
+  const isHelperJobdesk = userJobdeskRole === 'helper';
+  const resolvedTripDriverName = React.useMemo(() => {
+    const schedDriver = (activeDelivery?.crew?.name || '').trim();
+    if (schedDriver && schedDriver !== '-') return schedDriver;
+    const propDriver = (driverName || '').trim();
+    if (propDriver && propDriver !== '-' && (!isHelperJobdesk || normCompactStr(propDriver) !== normCompactStr(actualReporterName))) {
+      return propDriver;
+    }
+    return isHelperJobdesk ? '-' : actualReporterName;
+  }, [activeDelivery?.crew?.name, driverName, isHelperJobdesk, actualReporterName]);
+
+  const resolvedTripHelperName = React.useMemo(() => {
+    const driverNorm = normCompactStr(resolvedTripDriverName);
+    const helpers = [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name]
+      .map(s => (s || '').trim())
+      .filter(s => s && s !== '-' && (!driverNorm || normCompactStr(s) !== driverNorm));
+    if (isHelperJobdesk && actualReporterName && (!driverNorm || normCompactStr(actualReporterName) !== driverNorm)) {
+      if (!helpers.some(h => normCompactStr(h) === normCompactStr(actualReporterName))) {
+        helpers.unshift(actualReporterName);
+      }
+    }
+    return helpers.join(', ');
+  }, [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name, isHelperJobdesk, actualReporterName, resolvedTripDriverName]);
 
   const selectableDeliveries = React.useMemo(() => {
     const openTrips = deliveries.filter(d => d.status !== 'delivered');
@@ -649,7 +731,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         : category === 'isi_bbm'
         ? `Lokasi BBM: ${fuelLocation}`
         : `Area: ${currentAreaName}`;
-    ctx.fillText(`${targetCustomerLabel} | Driver: ${driverName} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
+    const crewWatermarkText = isHelperJobdesk
+      ? `Helper: ${actualReporterName}${resolvedTripDriverName && resolvedTripDriverName !== '-' ? ` | Driver: ${resolvedTripDriverName}` : ''}`
+      : `Driver: ${resolvedTripDriverName}${resolvedTripHelperName ? ` | Helper: ${resolvedTripHelperName}` : ''}`;
+    ctx.fillText(`${targetCustomerLabel} | ${crewWatermarkText} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
 
     ctx.fillStyle = '#cbd5e1';
     ctx.font = `bold ${fontSize - 2}px monospace`;
@@ -806,7 +891,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
     return encodeURIComponent(
       `*${categoryLabel}*\n` +
-      `*Driver:* ${driverName}\n` +
+      (isHelperJobdesk
+        ? `*Helper (Pelapor):* ${actualReporterName}\n${resolvedTripDriverName && resolvedTripDriverName !== '-' ? `*Driver:* ${resolvedTripDriverName}\n` : ''}`
+        : `*Driver:* ${resolvedTripDriverName}\n${resolvedTripHelperName ? `*Helper:* ${resolvedTripHelperName}\n` : ''}`) +
       `*Armada:* ${autoPlateNumber}${fleetInitial ? ` [Inisial: ${fleetInitial}]` : ''}\n` +
       `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
       customerLine +
@@ -903,8 +990,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
-      driverName: driverName,
-      userRole: userJobdeskRole === 'helper' ? 'Helper' : 'Driver',
+      driverName: resolvedTripDriverName,
+      helperName: resolvedTripHelperName || undefined,
+      reportedByName: actualReporterName,
+      userRole: isHelperJobdesk ? 'Helper' : 'Driver',
       plateNumber: autoPlateNumber || '-',
       category,
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
@@ -947,7 +1036,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     onClose();
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
   const cameraCategoryTitle =
     category === 'kendala_jalan' && reportSubMode === 'antri_customer'
@@ -968,7 +1057,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       ? 'AKHIR KIRIMAN'
       : 'ABSEN PELANGGAN';
 
-  return (
+  return createPortal(
     <>
       {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO (High-Contrast Header & Bottom Bar + Multi-Photo Support) */}
       {isCameraActive && (
@@ -1804,15 +1893,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             </div>
 
-            {selectableDeliveries.length > 1 && (
+            {selectableDeliveries.length > 0 && (
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Ritase yang Dilaporkan
+                  Ritase / Area Kirim yang Dilaporkan
                 </label>
                 <select
                   value={activeDelivery?.id || ''}
                   onChange={e => setSelectedDeliveryId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
                   {selectableDeliveries.map(delivery => (
                     <option key={delivery.id} value={delivery.id}>
@@ -1821,7 +1910,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   ))}
                 </select>
                 <p className="text-[10px] text-slate-500">
-                  Pilih area/ritase yang benar agar foto dan laporan tertaut ke jadwal yang tepat.
+                  Pastikan area kiriman sesuai jadwal Anda (Driver: {resolvedTripDriverName}{resolvedTripHelperName ? ` • Helper: ${resolvedTripHelperName}` : ''}).
                 </p>
               </div>
             )}
@@ -2007,43 +2096,34 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         </div>
                       ))}
 
-                      {/* Tombol Cepat + Tambah Foto di dalam Galeri */}
-                      <button
-                        type="button"
-                        onClick={() => startLiveCamera()}
+                      {/* Tombol Cepat + Ambil Foto di dalam Galeri */}
+                      <label
+                        htmlFor="gmaps-native-camera-input"
                         className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-500/50 hover:border-blue-500 bg-blue-500/10 text-blue-500 flex flex-col items-center justify-center gap-0.5 shrink-0 cursor-pointer transition"
-                        title="Tambah Foto Kamera"
+                        title="Ambil Foto"
                       >
-                        <Plus className="w-4 h-4" />
-                        <span className="text-[9px] font-black">Kamera</span>
-                      </button>
+                        <Camera className="w-4 h-4" />
+                        <span className="text-[9px] font-black text-center leading-tight">Ambil Foto</span>
+                      </label>
                     </div>
                   </div>
 
-                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Kamera / Galeri) */}
+                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Upload Foto / Ambil Foto) */}
                   <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => startLiveCamera()}
-                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Tambah Foto Kamera</span>
-                      </button>
-                      <label
-                        htmlFor="gmaps-native-camera-input"
-                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 font-bold text-[11px] border border-emerald-500/40 flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Kamera HP</span>
-                      </label>
                       <label
                         htmlFor="gmaps-gallery-input"
-                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
                       >
                         <Upload className="w-3.5 h-3.5" />
-                        <span>Tambah dari Galeri</span>
+                        <span>Upload Foto</span>
+                      </label>
+                      <label
+                        htmlFor="gmaps-native-camera-input"
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Ambil Foto</span>
                       </label>
                     </div>
 
@@ -2057,63 +2137,51 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => startLiveCamera()}
-                      disabled={isCapturing}
-                      className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
-                    >
-                      <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
-                        <Camera className="w-5 h-5" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    htmlFor="gmaps-gallery-input"
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Upload Foto
                       </div>
-                      <div className="text-left">
-                        <div className="font-black text-white text-sm">
-                          Buka Kamera
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                          {category === 'istirahat'
-                            ? 'Foto penyerahan kiriman (bisa >1 foto)'
-                            : category === 'isi_bbm'
-                            ? `Foto isi BBM (${fuelLocation})`
-                            : category === 'retur'
-                            ? 'Foto bukti barang retur (bisa >1 foto)'
-                            : category === 'kurang_muat'
-                            ? 'Foto bukti kurang muat (bisa >1 foto)'
-                            : category === 'lebih_muat'
-                            ? 'Foto bukti lebih muat (bisa >1 foto)'
-                            : category === 'salah_muat'
-                            ? 'Foto bukti salah muat (bisa >1 foto)'
-                            : 'Ambil foto bukti kamera (bisa >1 foto)'}
-                        </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        Pilih 1 atau beberapa foto galeri
                       </div>
-                    </button>
-
-                    <label
-                      htmlFor="gmaps-gallery-input"
-                      className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
-                    >
-                      <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <div className="text-left">
-                        <div className="font-black text-white text-sm">
-                          Upload Foto
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                          Pilih 1 atau beberapa foto galeri
-                        </div>
-                      </div>
-                    </label>
-                  </div>
+                    </div>
+                  </label>
 
                   <label
                     htmlFor="gmaps-native-camera-input"
-                    className="w-full py-2 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-[0.99]"
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
                   >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Atau Buka Kamera HP Bawaan Langsung</span>
+                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Ambil Foto
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        {category === 'istirahat'
+                          ? 'Foto penyerahan kiriman (bisa >1 foto)'
+                          : category === 'isi_bbm'
+                          ? `Foto isi BBM (${fuelLocation})`
+                          : category === 'retur'
+                          ? 'Foto bukti barang retur (bisa >1 foto)'
+                          : category === 'kurang_muat'
+                          ? 'Foto bukti kurang muat (bisa >1 foto)'
+                          : category === 'lebih_muat'
+                          ? 'Foto bukti lebih muat (bisa >1 foto)'
+                          : category === 'salah_muat'
+                          ? 'Foto bukti salah muat (bisa >1 foto)'
+                          : 'Ambil foto bukti kamera (bisa >1 foto)'}
+                      </div>
+                    </div>
                   </label>
                 </div>
               )}
@@ -2194,6 +2262,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 };

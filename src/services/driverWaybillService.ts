@@ -305,9 +305,7 @@ class DriverWaybillService {
       } else if (
         schedule.status === 'in_transit' ||
         schedule.status === 'picked_up' ||
-        schedule.status === 'delayed' ||
-        existing.status === 'in_transit' ||
-        existing.status === 'gate_out'
+        schedule.status === 'delayed'
       ) {
         if (existing.status !== 'in_transit' || existing.statusLabel !== 'Di Jalan (Keluar Gudang)') {
           existing.status = 'in_transit';

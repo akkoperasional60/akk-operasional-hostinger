@@ -163,10 +163,46 @@ class DriverShiftService {
         )
       );
       if (Array.isArray(data?.shifts)) {
+        const prevMap = new Map<string, DriverShiftCheckin>();
+        for (const prevS of this.memoryShifts || []) {
+          if (prevS && prevS.id) {
+            prevMap.set(String(prevS.id), normalizeShiftRecord(prevS));
+          }
+        }
         const mergedMap = new Map<string, DriverShiftCheckin>();
         for (const rawS of [...data.shifts, ...(this.memoryShifts || [])]) {
-          if (rawS && rawS.id && !mergedMap.has(String(rawS.id))) {
-            mergedMap.set(String(rawS.id), normalizeShiftRecord(rawS));
+          if (!rawS || !rawS.id) continue;
+          const sid = String(rawS.id);
+          const normIncoming = normalizeShiftRecord(rawS);
+          const prevLocal = prevMap.get(sid);
+          if (!mergedMap.has(sid)) {
+            if (prevLocal) {
+              const localIsCheckedOut = prevLocal.status === 'checked_out';
+              const incomingIsCheckedOut = normIncoming.status === 'checked_out';
+              if (localIsCheckedOut && !incomingIsCheckedOut) {
+                mergedMap.set(sid, {
+                  ...normIncoming,
+                  status: 'checked_out',
+                  arrivedAtWarehouseAt: prevLocal.arrivedAtWarehouseAt || normIncoming.arrivedAtWarehouseAt,
+                  gateOutAt: prevLocal.gateOutAt || normIncoming.gateOutAt,
+                  checklistCompletedAt: prevLocal.checklistCompletedAt || normIncoming.checklistCompletedAt,
+                  securityValidatedAt: prevLocal.securityValidatedAt || normIncoming.securityValidatedAt,
+                  securityValidatedBy: prevLocal.securityValidatedBy || normIncoming.securityValidatedBy,
+                  notes: prevLocal.notes || normIncoming.notes
+                });
+              } else {
+                mergedMap.set(sid, {
+                  ...normIncoming,
+                  arrivedAtWarehouseAt: normIncoming.arrivedAtWarehouseAt || prevLocal.arrivedAtWarehouseAt,
+                  gateOutAt: normIncoming.gateOutAt || prevLocal.gateOutAt,
+                  checklistCompletedAt: normIncoming.checklistCompletedAt || prevLocal.checklistCompletedAt,
+                  securityValidatedAt: normIncoming.securityValidatedAt || prevLocal.securityValidatedAt,
+                  securityValidatedBy: normIncoming.securityValidatedBy || prevLocal.securityValidatedBy
+                });
+              }
+            } else {
+              mergedMap.set(sid, normIncoming);
+            }
           }
         }
         this.memoryShifts = Array.from(mergedMap.values())
@@ -181,8 +217,8 @@ class DriverShiftService {
           s => `${s.id}:${s.status}:${s.checkinRole}:${s.driverName}:${s.pairedDriverName || ''}:${s.helper1Name || ''}:${s.helper2Name || ''}:${s.selectedArea || ''}:${s.plateNumber || ''}:${s.checklistCompletedAt || ''}:${s.gateOutAt || ''}:${s.arrivedAtWarehouseAt || ''}`
         )
       );
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: { changed: prevSig !== nextSig } }));
+      if (typeof window !== 'undefined' && prevSig !== nextSig) {
+        window.dispatchEvent(new CustomEvent('driver-shift-updated', { detail: { changed: true } }));
       }
     } catch {} finally {
       this.isSyncing = false;
@@ -320,6 +356,7 @@ class DriverShiftService {
     // Fallback: Reconstruct active shift from today's Laporan Kiriman Kru ('presensi_shift') if local shift storage was cleared
     try {
       const reports = driverReportService.getReports();
+      const schedules = logisticsStore.getSchedules();
       const matchingReport = reports.find(r => {
         if (r.category !== 'presensi_shift') return false;
         const hasCheckedOut = Boolean(
@@ -330,7 +367,54 @@ class DriverShiftService {
         if (hasCheckedOut) return false;
         const rDate = r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : '');
         if (rDate !== todayLocal && rDate !== todayUtc) return false;
-        return isSameDriverIdentity(r.driverId, r.driverName, driverId, driverName);
+        if (!isSameDriverIdentity(r.driverId, r.driverName, driverId, driverName)) return false;
+
+        const recId = r.shiftId || `SHIFT-REC-${r.id}`;
+        const reportMs = r.timestamp ? new Date(r.timestamp).getTime() : 0;
+
+        // Jangan bangkitkan lagi jika shift ini sudah berstatus checked_out atau sudah punya Tiba di Gudang hari ini
+        const alreadyCheckedOutSameId = shifts.some(
+          s =>
+            s &&
+            (s.id === recId || (r.shiftId && s.id === r.shiftId)) &&
+            (s.status === 'checked_out' || Boolean(s.arrivedAtWarehouseAt))
+        );
+        if (alreadyCheckedOutSameId) return false;
+
+        const hasNewerCheckedOutToday = shifts.some(s => {
+          if (!s || (s.status !== 'checked_out' && !s.arrivedAtWarehouseAt)) return false;
+          const sDate = s.checkinTime ? getLocalDateStr(new Date(s.checkinTime)) : s.date;
+          if (s.date !== todayLocal && s.date !== todayUtc && sDate !== todayLocal) return false;
+          const sameCrew =
+            isSameDriverIdentity(s.driverId, s.driverName, driverId, driverName) ||
+            (Boolean(s.helper1Id || s.helper1Name) && isSameDriverIdentity(s.helper1Id, s.helper1Name, driverId, driverName)) ||
+            (Boolean(s.helper2Id || s.helper2Name) && isSameDriverIdentity(s.helper2Id, s.helper2Name, driverId, driverName));
+          if (!sameCrew) return false;
+          const outMs = new Date(s.arrivedAtWarehouseAt || s.createdAt || s.checkinTime || 0).getTime();
+          return !reportMs || !outMs || outMs >= reportMs;
+        });
+        if (hasNewerCheckedOutToday) return false;
+
+        const hasDeliveredTripAfterReport = schedules.some(sch => {
+          if (!sch || sch.status !== 'delivered') return false;
+          const arrIso = sch.actualArrival || sch.departureDate || sch.createdAt || '';
+          const arrDate = arrIso ? getLocalDateStr(new Date(arrIso)) : '';
+          if (arrDate !== todayLocal && arrDate !== todayUtc && String(sch.departureDate || '').slice(0, 10) !== todayLocal) {
+            return false;
+          }
+          const samePerson =
+            isSameDriverIdentity(sch.crewId || sch.crew?.id, sch.crew?.name, driverId, driverName) ||
+            isSameDriverIdentity(sch.crewHelperId || sch.crewHelper?.id, sch.crewHelper?.name, driverId, driverName) ||
+            isSameDriverIdentity(sch.crewHelper2Id || sch.crewHelper2?.id, sch.crewHelper2?.name, driverId, driverName) ||
+            (Boolean(sch.backupCrewName) && isSameDriverIdentity(sch.backupCrewId, sch.backupCrewName, driverId, driverName));
+          if (!samePerson) return false;
+          const arrMs = sch.actualArrival ? new Date(sch.actualArrival).getTime() : 0;
+          if (reportMs && arrMs && arrMs < reportMs) return false;
+          return true;
+        });
+        if (hasDeliveredTripAfterReport) return false;
+
+        return true;
       });
 
       if (matchingReport) {

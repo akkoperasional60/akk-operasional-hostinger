@@ -63,7 +63,11 @@ export class ErrorBoundary extends Component<Props, State> {
     if (isChunkLoadError(error) && typeof window !== 'undefined' && navigator.onLine) {
       try {
         const now = Date.now();
-        const previousAttempt = Number(sessionStorage.getItem(CHUNK_RETRY_KEY) || '0');
+        const urlRefreshTs = Number(new URLSearchParams(window.location.search).get('__akk_refresh') || '0');
+        const previousAttempt = Math.max(
+          Number(sessionStorage.getItem(CHUNK_RETRY_KEY) || '0'),
+          Number.isFinite(urlRefreshTs) ? urlRefreshTs : 0
+        );
         if (!previousAttempt || now - previousAttempt > CHUNK_RETRY_WINDOW_MS) {
           sessionStorage.setItem(CHUNK_RETRY_KEY, String(now));
           this.setState({ isRecovering: true });

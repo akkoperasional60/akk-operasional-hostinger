@@ -26,12 +26,10 @@ import { logisticsStore } from '../services/store';
 
 interface TireWearPredictionModuleProps {
   onNavigateToSpareParts?: () => void;
-  onNavigateToTracksolid?: () => void;
 }
 
 export const TireWearPredictionModule: React.FC<TireWearPredictionModuleProps> = ({
-  onNavigateToSpareParts,
-  onNavigateToTracksolid
+  onNavigateToSpareParts
 }) => {
   const [predictions, setPredictions] = useState<FleetTireWearPrediction[]>(() =>
     logisticsStore.getFleetTireWearPredictions()
@@ -197,21 +195,11 @@ export const TireWearPredictionModule: React.FC<TireWearPredictionModuleProps> =
           <button
             onClick={refreshPredictions}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
-            title="Sinkronisasi ulang kalkulasi keausan ban dengan data Tracksolid GPS"
+            title="Sinkronisasi ulang kalkulasi keausan ban dengan data kilometer armada"
           >
             <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Sinkronkan Tracksolid</span>
+            <span>Perbarui Analisis Ban</span>
           </button>
-
-          {onNavigateToTracksolid && (
-            <button
-              onClick={onNavigateToTracksolid}
-              className="px-3 py-1.5 rounded-lg bg-cyan-600/15 hover:bg-cyan-600/25 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
-            >
-              <Radio className="w-3.5 h-3.5" />
-              <span>Pantau GPS &rarr;</span>
-            </button>
-          )}
         </div>
       </div>
 

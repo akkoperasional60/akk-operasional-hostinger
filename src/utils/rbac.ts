@@ -163,7 +163,6 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         schedules: isAll || isLogistikStaff ? 'full_access' : 'none',
         driver_portal: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none',
         portal_validation: isAll || isLogistikStaff ? 'full_access' : 'none',
-        live_trips: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none',
         fleet_forms: isAll || isLogistikStaff ? 'full_access' : 'none',
         driver_reports: isAll || isLogistikStaff ? 'full_access' : 'none',
         tracking_eval: isAll || isLogistikStaff ? 'full_access' : 'none',
@@ -176,7 +175,6 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         // Legacy keys preserved for backward compatibility
         dashboard_logistik: isAll || isLogistikStaff ? 'full_access' : 'none',
         armada_ceklis: isAll || isLogistikStaff ? 'full_access' : 'none',
-        live_map: isAll || isLogistikStaff ? 'full_access' : 'none',
         monitoring_sla: isAll || isLogistikStaff ? 'full_access' : 'none',
         rencana_rute: isAll || isLogistikStaff ? 'full_access' : 'none',
         portal_driver: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none'
@@ -339,7 +337,7 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
     title: 'Dispatcher / SPV Logistik',
     badgeColor: 'text-blue-400 border-blue-500/30 bg-blue-500/10',
     allowedModules: [
-      'Operational Dashboard & Live GPS Tracking',
+      'Operational Dashboard & Schedule Monitoring',
       'Schedule & Dispatch Management (Assign Driver & Fleet)',
       'Fleet, Sparepart, Fuel & Store Coordinate Registry',
       'Driver Delivery Reports & Issue Resolution'
@@ -356,7 +354,7 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
     allowedModules: [
       'Mobile Driver Portal (Assigned Deliveries Only)',
       'Delivery Status Updates (In Transit, Delivered + POD Photo, Delayed)',
-      'Live GPS Geolocation Sync & Outbound Waybill (58mm)',
+      'On-Demand Attendance GPS & Outbound Waybill (58mm)',
       'Vehicle Pre/Post-Trip Checklist & Shift PIN Check-In'
     ],
     databaseRlsSummary: [
@@ -371,7 +369,6 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   dashboard: { moduleId: 'sistem_pengguna', subMenuId: 'dashboard' },
   driver_portal: { moduleId: 'logistics', subMenuId: 'driver_portal' },
   portal_validation: { moduleId: 'logistics', subMenuId: 'portal_validation' },
-  live_trips: { moduleId: 'logistics', subMenuId: 'live_trips' },
   driver_reports: { moduleId: 'logistics', subMenuId: 'driver_reports' },
   operational_dashboard: { moduleId: 'logistics', subMenuId: 'operational_dashboard' },
   analytics_reports: { moduleId: 'logistics', subMenuId: 'operational_dashboard' },
@@ -465,7 +462,6 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   schedules: ['rencana_rute'],
   driver_portal: ['portal_driver'],
   portal_validation: ['schedules', 'rencana_rute'],
-  live_trips: ['tracking_eval', 'live_map'],
   fleet_forms: ['armada_ceklis'],
   fleets: ['armada_ceklis'],
   spareparts: ['armada_ceklis'],
@@ -531,7 +527,6 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'schedules', name: 'Jadwal & Penugasan Armada' },
       { id: 'driver_portal', name: 'Portal Driver Mobile' },
       { id: 'portal_validation', name: 'Validasi Portal (Jadwal vs Check-In)' },
-      { id: 'live_trips', name: 'Live Trips & Playback Rute' },
       { id: 'fleet_forms', name: 'Formulir Pengadaan Armada' },
       { id: 'driver_reports', name: 'Laporan Kiriman Kru' },
       { id: 'tracking_eval', name: 'Evaluasi Jalur GPS (Excel)' },

@@ -17,7 +17,7 @@ export type NavTab =
   | 'dashboard' | 'driver_portal' | 'driver_reports' | 'analytics_reports'
   | 'operational_dashboard' | 'schedules' | 'portal_validation' | 'fleets'
   | 'spareparts' | 'maintenance_costs' | 'fuel_efficiency' | 'crew_history'
-  | 'live_trips' | 'tracking_eval' | 'fleet_forms' | 'sales_dashboard'
+  | 'tracking_eval' | 'fleet_forms' | 'sales_dashboard'
   | 'sales_activities' | 'sales_schedules' | 'sales_loading_duration'
   | 'sales_invoice_so' | 'sales_form_kirim' | 'sales_rfid_scanner'
   | 'sales_muat_validation' | 'sales_skill_matrix' | 'sales_jobdesk'
@@ -86,7 +86,6 @@ const SECTIONS: MenuSection[] = [
     { tab: 'schedules', label: 'Jadwal Kirim', keywords: 'jadwal armada kru' },
     { tab: 'driver_portal', label: 'Portal Driver', keywords: 'supir hp' },
     { tab: 'portal_validation', label: 'Validasi Kiriman' },
-    { tab: 'live_trips', label: 'Live Trips', keywords: 'gps rute tracking playback' },
     { tab: 'driver_reports', label: 'Laporan Driver' },
     { tab: 'tracking_eval', label: 'Evaluasi GPS' },
     { tab: 'fleet_forms', label: 'Form Armada' },

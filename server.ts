@@ -277,7 +277,9 @@ async function startServer() {
 
       if (shouldBypassBuffering()) {
         restoreAndFlushRaw();
-        return origEnd(actualChunk, encoding, cb);
+        return typeof encoding === 'function'
+          ? origEnd(actualChunk, actualCb)
+          : origEnd(actualChunk, actualEncoding, actualCb);
       }
 
       if (actualChunk !== undefined && actualChunk !== null) {
@@ -5092,6 +5094,15 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             kirExpiryDate: rawLastMaint
           });
         })
+        .sort((a, b) => {
+          // Prefer canonical flt-* IDs and combined slash initials (e.g. N23 / DS2) before legacy records
+          const aIsCanon = /^flt-\d+$/i.test(String(a.id || '')) ? 0 : 1;
+          const bIsCanon = /^flt-\d+$/i.test(String(b.id || '')) ? 0 : 1;
+          if (aIsCanon !== bIsCanon) return aIsCanon - bIsCanon;
+          const aHasSlash = String(a.initialCode || '').includes('/') ? 0 : 1;
+          const bHasSlash = String(b.initialCode || '').includes('/') ? 0 : 1;
+          return aHasSlash - bHasSlash;
+        })
         .filter(f => {
           const cleanPlate = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
           if (!cleanPlate || isPhantomFltPlate(f.plateNumber)) return false;
@@ -5294,6 +5305,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.delete("/api/fleets/:id", requireLogisticsWrite, async (req, res) => {
     const id = String(req.params.id || '').trim();
     const queryPlate = String(req.query.plateNumber || '').trim();
+    const keepSiblingPlate = String(req.query.keepSiblingPlate || '') === '1' || String(req.query.keepSiblingPlate || '') === 'true';
     delete inMemoryFleetsFallback[id];
     try {
       let plateToDelete = queryPlate;
@@ -5303,15 +5315,30 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
       const cleanPlate = plateToDelete.replace(/\s+/g, '').toUpperCase();
 
+      // Always delete strictly by ID first so sibling canonical fleets with the same plate are never accidentally wiped
+      const result: any = await mysqlQuery(
+        "DELETE FROM fleets WHERE id = ?",
+        [id]
+      );
+
+      let remainingSiblings = 0;
+      if (cleanPlate) {
+        const sibRows = await mysqlQuery<any[]>(
+          "SELECT id FROM fleets WHERE UPPER(REPLACE(plate_number, ' ', '')) = ?",
+          [cleanPlate]
+        ).catch(() => []);
+        remainingSiblings = sibRows.length;
+      }
+
       const deletedState = await getDeletedFleetsState();
       const nextIds = Array.from(new Set([...deletedState.ids, id].filter(Boolean)));
-      const nextPlates = Array.from(new Set([...deletedState.plates, cleanPlate].filter(Boolean)));
+      // Only add cleanPlate to deletedPlates if caller is not preserving a sibling canonical unit and no sibling rows remain
+      const shouldBlacklistPlate = Boolean(cleanPlate) && !keepSiblingPlate && remainingSiblings === 0;
+      const nextPlates = shouldBlacklistPlate
+        ? Array.from(new Set([...deletedState.plates, cleanPlate].filter(Boolean)))
+        : deletedState.plates.filter(p => String(p).replace(/\s+/g, '').toUpperCase() !== cleanPlate || !keepSiblingPlate);
       await saveDeletedFleetsState({ ids: nextIds, plates: nextPlates });
 
-      const result: any = await mysqlQuery(
-        "DELETE FROM fleets WHERE id = ? OR (? <> '' AND UPPER(REPLACE(plate_number, ' ', '')) = ?)",
-        [id, cleanPlate, cleanPlate]
-      );
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 1) });
     } catch (err: any) {
       if (!(process.env.NODE_ENV === 'production' && !process.env.K_SERVICE)) {
@@ -11221,7 +11248,8 @@ Kembalikan HANYA JSON valid:
         server: {
           middlewareMode: true,
           hmr: disableHmr ? false : undefined,
-          watch: {},
+          ws: disableHmr ? false : undefined,
+          watch: disableHmr ? null : {},
         },
         appType: "spa",
       });

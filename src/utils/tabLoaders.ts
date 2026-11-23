@@ -161,11 +161,6 @@ export const loadSchedulePortalValidationReport = () =>
     import('../components/SchedulePortalValidationReport').then(m => ({ default: m.SchedulePortalValidationReport }))
   );
 
-export const loadLiveTripsMonitorPanel = () =>
-  loadOnce('LiveTripsMonitorPanel', () =>
-    import('../components/LiveTripsMonitorPanel').then(m => ({ default: m.LiveTripsMonitorPanel }))
-  );
-
 export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
   switch (tab) {
     case 'dashboard':
@@ -181,8 +176,6 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
       return loadScheduleManagement;
     case 'portal_validation':
       return loadSchedulePortalValidationReport;
-    case 'live_trips':
-      return loadLiveTripsMonitorPanel;
     case 'fleets':
     case 'crew_history':
       return loadFleetCrewManagement;

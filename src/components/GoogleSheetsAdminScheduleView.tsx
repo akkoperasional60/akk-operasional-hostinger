@@ -588,61 +588,24 @@ const FleetCustomSelectDropdown: React.FC<{
   }, [search, isOpen]);
 
   const attemptSelectFleet = (entry: (typeof filteredFleets)[number]) => {
-    if (!entry.isNotReady || entry.isSelected) {
+    // Izinkan langsung memilih armada meskipun sedang dipakai / di perjalanan / terjadwal di tanggal yang sama
+    if (!entry.isMaintenance || entry.isSelected) {
       onChange(entry.fleetCode);
       setIsOpen(false);
       return;
     }
 
-    // Armada belum ready -> tampilkan pop-up peringatan yang jelas
+    // Armada sedang servis / perbaikan -> tampilkan konfirmasi singkat
     setIsOpen(false);
-
-    if (entry.isMaintenance) {
-      setWarningModal({
-        fleet: entry.fleet,
-        fleetCode: entry.fleetCode,
-        reasonType: 'maintenance',
-        statusTitle: 'Sedang Servis / Perbaikan',
-        description:
-          'Status armada ini masih dalam proses servis atau perbaikan bengkel (Belum Ready). Pastikan kendaraan benar-benar sudah selesai diperbaiki sebelum dijadwalkan untuk pengiriman.',
-        areaName: entry.live.areaName || entry.liveNow.areaName,
-        driverName: entry.live.driverName || entry.liveNow.driverName,
-        targetDateIso: dateIso,
-        canForceProceed: true
-      });
-      return;
-    }
-
-    if (entry.isSameDateConflict) {
-      const activeArea = entry.live.areaName || entry.live.todayScheduledArea || 'Area Pengiriman';
-      const isActivelyOnRoad = entry.live.statusLabel === 'Kirim';
-      setWarningModal({
-        fleet: entry.fleet,
-        fleetCode: entry.fleetCode,
-        reasonType: 'same_date_conflict',
-        statusTitle: isActivelyOnRoad ? 'Sedang Kirim (Di Jalan)' : 'Sudah Terjadwal',
-        description: isActivelyOnRoad
-          ? `Armada ini sedang dalam pengiriman aktif pada tanggal tersebut (${activeArea}). 1 armada tidak dapat dijadwalkan dua kali di tanggal yang sama.`
-          : `Armada ini sudah memiliki jadwal pengiriman aktif pada tanggal tersebut (${activeArea}). 1 armada tidak dapat dijadwalkan dua kali di tanggal yang sama.`,
-        areaName: activeArea,
-        driverName: entry.live.driverName || entry.liveNow.driverName,
-        targetDateIso: dateIso,
-        canForceProceed: false
-      });
-      return;
-    }
-
-    // Sedang kirim di lapangan saat ini (belum kembali ke gudang)
-    const liveRoadArea = entry.liveNow.areaName || entry.liveNow.todayScheduledArea || 'Pengiriman Aktif';
     setWarningModal({
       fleet: entry.fleet,
       fleetCode: entry.fleetCode,
-      reasonType: 'currently_on_duty',
-      statusTitle: 'Sedang Kirim (Belum Kembali)',
+      reasonType: 'maintenance',
+      statusTitle: 'Sedang Servis / Perbaikan',
       description:
-        'Armada ini saat ini masih berstatus sedang melakukan pengiriman di jalan dan belum kembali ke gudang (Belum Ready). Pastikan armada sudah kembali sebelum jadwal keberangkatan berikutnya.',
-      areaName: liveRoadArea,
-      driverName: entry.liveNow.driverName,
+        'Status armada ini masih dalam proses servis atau perbaikan bengkel. Pastikan kendaraan sudah siap sebelum dijadwalkan untuk pengiriman.',
+      areaName: entry.live.areaName || entry.liveNow.areaName,
+      driverName: entry.live.driverName || entry.liveNow.driverName,
       targetDateIso: dateIso,
       canForceProceed: true
     });
@@ -1073,10 +1036,10 @@ const FleetCustomSelectDropdown: React.FC<{
                   className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition cursor-pointer ${
                     warningModal.reasonType === 'maintenance'
                       ? 'bg-rose-600 hover:bg-rose-500'
-                      : 'bg-blue-600 hover:bg-blue-500'
+                      : 'bg-amber-600 hover:bg-amber-500'
                   }`}
                 >
-                  Iya, Saya Yakin
+                  Tetap Pilih Armada Ini
                 </button>
               </div>
             </div>
@@ -2065,13 +2028,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [manualScheduleFormError, setManualScheduleFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!editingTripModal?.isOpen || typeof document === 'undefined') return;
+    if ((!editingTripModal?.isOpen && !isUploadConfigModalOpen) || typeof document === 'undefined') return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editingTripModal?.isOpen]);
+  }, [editingTripModal?.isOpen, isUploadConfigModalOpen]);
 
   const editingScheduledCrewMap = useMemo(() => {
     if (!editingTripModal) return new Map<string, { role: string; area: string }>();
@@ -3084,36 +3047,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const datesToCheck = depDateIso && depDateIso !== effectiveCalendarIso
         ? [effectiveCalendarIso, depDateIso]
         : [effectiveCalendarIso];
-
-      const hasBatchDuplicate = datesToCheck.some(dk => batchFleetDateKeys.has(`${canonicalFleetKey}__${dk}`));
-      let existingConflict: ReturnType<typeof logisticsStore.findFleetAssignmentConflict> = null;
-      if (!hasBatchDuplicate) {
-        for (const dk of datesToCheck) {
-          const found = logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaDisplay, dk);
-          if (found) {
-            if (mode === 'ganti') {
-              const conflictCalIso = logisticsStore.getScheduleCalendarIso(found.conflictSchedule);
-              const conflictMonth = conflictCalIso ? Number(conflictCalIso.split('-')[1]) - 1 : -1;
-              const willBeReplaced = conflictMonth === mo && !found.conflictSchedule.isManuallyEdited;
-              if (!willBeReplaced) {
-                existingConflict = found;
-                break;
-              }
-            } else {
-              existingConflict = found;
-              break;
-            }
-          }
-        }
-      }
-
-      if (hasBatchDuplicate || existingConflict) {
-        const conflictReason = existingConflict
-          ? `sudah dijadwalkan untuk ${existingConflict.conflictSchedule.areaName || existingConflict.conflictSchedule.store?.storeName || '-'} (${existingConflict.conflictSchedule.crew?.name || '-'})`
-          : 'terduplikasi dalam daftar input di tanggal yang sama';
-        skippedDuplicateArmadaList.push(`${resolvedArmadaDisplay} (${dateString}) - ${conflictReason}`);
-        return;
-      }
       datesToCheck.forEach(dk => batchFleetDateKeys.add(`${canonicalFleetKey}__${dk}`));
 
       const matchedDriver = driverCrews.find(c =>
@@ -3389,31 +3322,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
     // Validasi ketat: 1 Armada hanya boleh memiliki 1 penugasan pada tanggal yang sama
     const excludeSchId = isNew ? undefined : scheduleId;
-    const storeConflict =
-      logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaCode, effectiveCalendarIso, excludeSchId) ||
-      (depIsoDate !== effectiveCalendarIso
-        ? logisticsStore.findFleetAssignmentConflict(matchedFleet?.id || resolvedArmadaCode, depIsoDate, excludeSchId)
-        : null);
-
-    const targetWeekDay = (targetYr === selectedYear && targetMo === effectiveMonth)
-      ? weeksRef.current.flatMap(w => w.days).find(d => d.dayNumber === targetDayNum)
-      : undefined;
-    const legacyWeekConflict = (targetWeekDay?.pengiriman || []).find((row, rIdx) => {
-      if (!isNew && dayNumber === targetDayNum && rIdx === tripIndex) return false;
-      if (excludeSchId && row.id === excludeSchId) return false;
-      const rowFleet = logisticsStore.findFleetByCodeOrPlate(row.armada);
-      if (matchedFleet && rowFleet) return rowFleet.id === matchedFleet.id;
-      return (row.armada || '').trim().toUpperCase() === resolvedArmadaCode.trim().toUpperCase();
-    });
-
-    if (storeConflict || legacyWeekConflict) {
-      const cArea = storeConflict?.conflictSchedule.areaName || storeConflict?.conflictSchedule.store?.storeName || legacyWeekConflict?.area || '-';
-      const cDriver = storeConflict?.conflictSchedule.crew?.name || legacyWeekConflict?.driver || '-';
-      const dupErr = `Armada ${resolvedArmadaCode} sudah terjadwal pada tanggal ${targetDateString} (${cArea} • Driver: ${cDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
-      setEditTripModalError(dupErr);
-      setUploadToast({ type: 'error', message: dupErr });
-      return;
-    }
+    void excludeSchId;
 
     const normalizeCrewName = (value: string) => value
       .normalize('NFD')
@@ -7138,9 +7047,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
             <div className="text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
               {editTripModalError && (
-                <div className="mb-3 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{editTripModalError}</span>
+                <div className="mb-3 p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                    <span>{editTripModalError}</span>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
@@ -7310,9 +7221,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       )}
 
       {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}
-      {isUploadConfigModalOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center py-4 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[86vh] overflow-hidden">
+      {isUploadConfigModalOpen && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[10000] grid place-items-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200"
+          onClick={() => setIsUploadConfigModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)] overflow-hidden"
+          >
             {/* Modal Header (Sticky at Top so always visible at 80%-150% zoom) */}
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-3 shrink-0">
               <div className="flex items-center gap-3">
@@ -7338,11 +7255,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Form Body (Scrollable inside modal card) */}
-            <div className="space-y-3 text-xs flex-1 overflow-y-auto pr-1">
+            <div className="space-y-3 text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
               {manualScheduleFormError && (
-                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{manualScheduleFormError}</span>
+                <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col gap-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                    <span>{manualScheduleFormError}</span>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -7353,18 +7272,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     value={manualScheduleForm.dateIso}
                     onChange={(nextIso) => {
                       setManualScheduleFormError(null);
-                      const existingArmada = manualScheduleForm.armada.trim();
-                      const hasConflictOnNextDate = existingArmada
-                        ? Boolean(logisticsStore.findFleetAssignmentConflict(existingArmada, nextIso))
-                        : false;
                       setManualScheduleForm({
                         ...manualScheduleForm,
                         dateIso: nextIso,
                         returnDateIso: nextIso,
                         departureDateIso: (!manualScheduleForm.departureDateIso || manualScheduleForm.departureDateIso === manualScheduleForm.dateIso)
                           ? nextIso
-                          : manualScheduleForm.departureDateIso,
-                        armada: hasConflictOnNextDate ? '' : manualScheduleForm.armada
+                          : manualScheduleForm.departureDateIso
                       });
                     }}
                     accentColor="emerald"
@@ -7427,15 +7341,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       badgeText="Sesuai Tanggal Kirim"
                       value={manualScheduleForm.returnDateIso || manualScheduleForm.dateIso}
                       onChange={(nextRet) => {
-                        const existingArmada = manualScheduleForm.armada.trim();
-                        const hasConflictOnNextDate = existingArmada
-                          ? Boolean(logisticsStore.findFleetAssignmentConflict(existingArmada, nextRet))
-                          : false;
+                        setManualScheduleFormError(null);
                         setManualScheduleForm({
                           ...manualScheduleForm,
                           returnDateIso: nextRet,
-                          dateIso: nextRet,
-                          armada: hasConflictOnNextDate ? '' : manualScheduleForm.armada
+                          dateIso: nextRet
                         });
                       }}
                       accentColor="emerald"
@@ -7749,7 +7659,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     return;
                   }
                   if (!manualScheduleForm.armada.trim()) {
-                    setManualScheduleFormError('Mohon pilih Armada Truk yang berstatus Ready terlebih dahulu.');
+                    setManualScheduleFormError('Mohon pilih Armada Truk terlebih dahulu.');
                     return;
                   }
                   if (!manualScheduleForm.area.trim()) {
@@ -7776,39 +7686,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     const brErr = `Armada ${matchedFleetObj.initialCode || matchedFleetObj.plateNumber} bukan milik Cabang ${activeBranchRecord?.name || targetBranchId}.`;
                     setManualScheduleFormError(brErr);
                     setUploadToast({ type: 'error', message: brErr });
-                    return;
-                  }
-
-                  const fleetConflict =
-                    logisticsStore.findFleetAssignmentConflict(matchedFleetObj?.id || armadaVal, effectiveDateStr) ||
-                    (depIso !== effectiveDateStr
-                      ? logisticsStore.findFleetAssignmentConflict(matchedFleetObj?.id || armadaVal, depIso)
-                      : null);
-
-                  const calParts = effectiveDateStr.split('-').map(Number);
-                  const calYr = calParts[0];
-                  const calMo = calParts[1] ? calParts[1] - 1 : -1;
-                  const calDay = calParts[2];
-                  const effSelectedMo = selectedMonth === -1 ? new Date().getMonth() : selectedMonth;
-                  const legacyDayRowConflict = (calYr === selectedYear && calMo === effSelectedMo && calDay)
-                    ? weeksRef.current
-                        .flatMap(w => w.days)
-                        .find(d => d.dayNumber === calDay)
-                        ?.pengiriman.find(row => {
-                          const rowFleet = logisticsStore.findFleetByCodeOrPlate(row.armada);
-                          if (matchedFleetObj && rowFleet) return rowFleet.id === matchedFleetObj.id;
-                          return (row.armada || '').trim().toUpperCase() === armadaVal.toUpperCase();
-                        })
-                    : undefined;
-
-                  if (fleetConflict || legacyDayRowConflict) {
-                    const cSch = fleetConflict?.conflictSchedule;
-                    const cCode = fleetConflict?.fleet?.initialCode || cSch?.armada || legacyDayRowConflict?.armada || armadaVal;
-                    const cArea = cSch?.areaName || cSch?.store?.storeName || legacyDayRowConflict?.area || '-';
-                    const cDriver = cSch?.crew?.name || legacyDayRowConflict?.driver || '-';
-                    const dupMsg = `Armada ${cCode} sudah terjadwal pada tanggal ${effectiveDateStr} (${cArea} • Driver: ${cDriver}). 1 armada tidak dapat diinput 2 kali di tanggal yang sama.`;
-                    setManualScheduleFormError(dupMsg);
-                    setUploadToast({ type: 'error', message: dupMsg });
                     return;
                   }
 
@@ -7869,7 +7746,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Riwayat / Log Unggah & Perubahan Jadwal Modal (with User Name & Detailed Changes) */}

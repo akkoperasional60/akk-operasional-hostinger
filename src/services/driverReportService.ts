@@ -6,6 +6,7 @@ export interface DriverHelperReport {
   date?: string; // YYYY-MM-DD
   driverId: string;
   driverName: string;
+  reportedByName?: string;
   userRole?: string;
   helperName?: string;
   plateNumber: string;
@@ -123,8 +124,10 @@ const stripHelperSelfDuplicate = (driverName?: string, helperName?: string, user
   const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const driverCompact = normCompact(driverName);
   const roleLower = String(userRole || '').toLowerCase();
+  // When userRole is Helper and both fields hold the same name (legacy report bug),
+  // keep helperName intact so the Helper isn't erased and confused with the Driver.
   if (roleLower.includes('helper') && driverCompact && normCompact(cleanHelper) === driverCompact) {
-    return undefined;
+    return cleanHelper;
   }
   const filteredParts = cleanHelper
     .split(/[,&/]+/)
@@ -382,8 +385,17 @@ class DriverReportService {
         finalGmapsUrl = precise.gmapsUrl;
       }
 
+      const helperSelfFixed =
+        String(r.userRole || '').toLowerCase().includes('helper') &&
+        r.helperName &&
+        r.driverName &&
+        r.helperName.trim().toLowerCase() === r.driverName.trim().toLowerCase()
+          ? { reportedByName: r.reportedByName || r.helperName.trim() }
+          : {};
+
       return {
         ...r,
+        ...helperSelfFixed,
         id: uniqueId,
         plateNumber: sanitizeOperationalPlate(r.plateNumber),
         helperName: stripHelperSelfDuplicate(r.driverName, r.helperName, r.userRole),

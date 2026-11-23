@@ -1782,8 +1782,23 @@ class LogisticsStore {
       Number((boxCapacityM3 * (boxInnerMultiplierPercent / 100)).toFixed(2));
 
     const resolvedId = pickStr(f.id, localRef?.id, canonical?.id) || f.id;
-    const resolvedPlate = pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber;
-    const resolvedInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const rawPlate = pickStr(canonical?.plateNumber, f.plateNumber, localRef?.plateNumber) || f.plateNumber;
+    const resolvedPlate = String(rawPlate || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    const rawInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const normalizeCompactToken = (val?: string) =>
+      String(val || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+    const canonInitParts = canonical?.initialCode
+      ? canonical.initialCode.split(/[/]+/).map(p => normalizeCompactToken(p)).filter(Boolean)
+      : [];
+    const rawInitCompact = normalizeCompactToken(rawInitial);
+    // Standardize legacy single-alias or formatting variants (e.g. "DS2", "N23", "N23/DS2") to canonical "N23 / DS2"
+    const resolvedInitial =
+      canonical?.initialCode &&
+      (!rawInitCompact ||
+        normalizeCompactToken(canonical.initialCode) === rawInitCompact ||
+        canonInitParts.includes(rawInitCompact))
+        ? canonical.initialCode
+        : rawInitial;
     const explicitBranch = pickStr(f.branchId, localRef?.branchId, canonical?.branchId);
     const resolvedBranchId = branchStore.getFleetBranchId(resolvedId, resolvedPlate, resolvedInitial, explicitBranch);
     branchStore.syncFleetBranchIdSilent(resolvedId, resolvedBranchId);
@@ -3940,15 +3955,20 @@ class LogisticsStore {
           });
 
           if (fleetPayload.data.length > 0) {
+            const getCanonDedupKey = (flt: Partial<Fleet>) => {
+              const canon = resolveCanonicalFleetMeta(flt);
+              if (canon?.id) return canon.id.toLowerCase();
+              return String(flt.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+            };
             const localByPlate = new Map<string, Fleet>();
             baseFleets.forEach(bf => {
-              const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+              const cleanP = getCanonDedupKey(bf);
               if (cleanP && !localByPlate.has(cleanP)) localByPlate.set(cleanP, bf);
             });
             const mergedMap = new Map<string, Fleet>();
             if (!isMysqlSource) {
               baseFleets.forEach(bf => {
-                const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+                const cleanP = getCanonDedupKey(bf);
                 if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
               });
             }
@@ -3956,9 +3976,19 @@ class LogisticsStore {
               const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
               if (!cleanRemotePlate || isPhantomPlate(remoteF.plateNumber)) return;
               if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
-              const matchExisting = localByPlate.get(cleanRemotePlate);
-              const canonicalId = (remoteF.id && String(remoteF.id).trim()) || matchExisting?.id || remoteF.id;
-              mergedMap.set(cleanRemotePlate, this.enrichFleetItem({ ...remoteF, id: canonicalId }, matchExisting));
+              const dedupKey = getCanonDedupKey(remoteF);
+              const matchExisting = localByPlate.get(dedupKey);
+              const existingMerged = mergedMap.get(dedupKey);
+              const canonicalMatch = resolveCanonicalFleetMeta(remoteF);
+              const canonicalId =
+                canonicalMatch?.id ||
+                (remoteF.id && String(remoteF.id).trim()) ||
+                matchExisting?.id ||
+                remoteF.id;
+              const candidate = this.enrichFleetItem({ ...remoteF, id: canonicalId }, existingMerged || matchExisting);
+              if (!existingMerged || /^flt-\d+$/i.test(candidate.id)) {
+                mergedMap.set(dedupKey, candidate);
+              }
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
             this.cachedFleets = null;
@@ -5798,13 +5828,23 @@ class LogisticsStore {
 
   public deleteFleet(id: string) {
     const deletedFleet = this.fleets.find(f => f.id === id);
-    this.fleets = this.fleets.filter(f => f.id !== id);
+    const remainingFleets = this.fleets.filter(f => f.id !== id);
+    const cleanDeletedPlate = String(deletedFleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const hasSiblingPlate = Boolean(
+      cleanDeletedPlate &&
+      remainingFleets.some(f => String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanDeletedPlate)
+    );
+
+    this.fleets = remainingFleets;
+    this.cachedFleets = null;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     if (deletedFleet) {
-      this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.vehicleType})`);
-      
-      // Asynchronous backend integration with Supabase
-      deleteFleetInSupabase(id, deletedFleet.plateNumber).catch(err => console.warn('[Supabase Fleet Delete Sync Note]', err));
+      this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.initialCode || deletedFleet.vehicleType})`);
+
+      // Asynchronous backend integration: only blacklist plate if no sibling canonical row uses it
+      deleteFleetInSupabase(id, deletedFleet.plateNumber, hasSiblingPlate).catch(err =>
+        console.warn('[Supabase Fleet Delete Sync Note]', err)
+      );
 
       this.dispatchMiddleware({
         entityType: 'fleet',
@@ -5815,6 +5855,178 @@ class LogisticsStore {
       });
     }
     this.notify();
+  }
+
+  public findDuplicateFleetGroups(): Array<{
+    key: string;
+    primary: Fleet;
+    duplicates: Fleet[];
+    reason: string;
+  }> {
+    const currentFleets = this.getFleets();
+    const normPlate = (p?: string) => String(p || '').replace(/\s+/g, '').toUpperCase();
+    const extractInitTokens = (init?: string) =>
+      String(init || '')
+        .toUpperCase()
+        .split(/[\s\/\-_,()]+/)
+        .map(t => t.trim())
+        .filter(t => t.length >= 2 && !['TRUK', 'BOX', 'UNIT', 'MOBIL', 'ARMADA'].includes(t));
+
+    // Union-Find clustering across normalized plate, canonical identity, and overlapping initial tokens
+    const parent = currentFleets.map((_, idx) => idx);
+    const reasons = new Map<string, string>();
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const union = (i: number, j: number, reason: string) => {
+      const ri = find(i);
+      const rj = find(j);
+      if (ri !== rj) {
+        parent[rj] = ri;
+        reasons.set(`${Math.min(ri, rj)}_${Math.max(ri, rj)}`, reason);
+      }
+    };
+
+    for (let i = 0; i < currentFleets.length; i++) {
+      for (let j = i + 1; j < currentFleets.length; j++) {
+        const a = currentFleets[i];
+        const b = currentFleets[j];
+        const pa = normPlate(a.plateNumber);
+        const pb = normPlate(b.plateNumber);
+        if (pa && pb && pa !== '-' && pa === pb) {
+          const sameInit = String(a.initialCode || '').trim().toUpperCase() === String(b.initialCode || '').trim().toUpperCase();
+          union(i, j, sameInit ? 'Plat nomor sama persis' : 'Plat sama dengan inisial berbeda');
+          continue;
+        }
+        const ca = resolveCanonicalFleetMeta(a);
+        const cb = resolveCanonicalFleetMeta(b);
+        if (ca && cb && ca.id === cb.id) {
+          union(i, j, `Mengacu pada unit standar ${ca.plateNumber} (${ca.initialCode})`);
+          continue;
+        }
+        const tokA = extractInitTokens(a.initialCode);
+        const tokB = extractInitTokens(b.initialCode);
+        if (tokA.length > 0 && tokB.length > 0 && tokA.some(t => tokB.includes(t))) {
+          union(i, j, 'Inisial unit saling bertumpuk');
+        }
+      }
+    }
+
+    const clusters = new Map<number, number[]>();
+    for (let i = 0; i < currentFleets.length; i++) {
+      const root = find(i);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root)!.push(i);
+    }
+
+    const groups: Array<{ key: string; primary: Fleet; duplicates: Fleet[]; reason: string }> = [];
+    clusters.forEach((idxs, root) => {
+      if (idxs.length <= 1) return;
+      const members = idxs.map(idx => currentFleets[idx]);
+      const scoreFleet = (f: Fleet) => {
+        let score = 0;
+        if (/^flt-\d+$/i.test(f.id)) score += 100;
+        const canon = resolveCanonicalFleetMeta(f);
+        if (canon && canon.id === f.id) score += 80;
+        if (f.initialCode && f.initialCode.includes('/')) score += 40;
+        if (canon && canon.initialCode === f.initialCode) score += 30;
+        if (this.schedules.some(s => s.fleetId === f.id)) score += 20;
+        if (this.crews.some(c => c.currentFleetId === f.id)) score += 15;
+        return score;
+      };
+      const sorted = [...members].sort((a, b) => scoreFleet(b) - scoreFleet(a));
+      const [primary, ...duplicates] = sorted;
+      let reason = 'Data ganda armada terdeteksi';
+      for (const [k, r] of reasons.entries()) {
+        if (k.startsWith(`${root}_`) || k.endsWith(`_${root}`) || idxs.some(x => k.includes(String(x)))) {
+          reason = r;
+          break;
+        }
+      }
+      groups.push({
+        key: primary.id,
+        primary,
+        duplicates,
+        reason
+      });
+    });
+
+    return groups;
+  }
+
+  public deduplicateAndCleanupFleets(): { removedCount: number; cleanedPlates: string[] } {
+    const groups = this.findDuplicateFleetGroups();
+    if (groups.length === 0) return { removedCount: 0, cleanedPlates: [] };
+
+    const idsToRemove = new Set<string>();
+    const cleanedPlates: string[] = [];
+
+    groups.forEach(group => {
+      const canonicalMeta = resolveCanonicalFleetMeta(group.primary);
+      const mergedPrimary = this.enrichFleetItem(
+        {
+          ...group.primary,
+          plateNumber: canonicalMeta?.plateNumber || group.primary.plateNumber,
+          initialCode: canonicalMeta?.initialCode || group.primary.initialCode
+        },
+        group.primary
+      );
+
+      const dupIds = new Set(group.duplicates.map(d => d.id));
+      dupIds.forEach(dId => idsToRemove.add(dId));
+      cleanedPlates.push(`${mergedPrimary.plateNumber} (${mergedPrimary.initialCode || '-'})`);
+
+      // Reassign crews referencing any duplicate ID to primary fleet
+      let crewsModified = false;
+      this.crews = this.crews.map(c => {
+        if (c.currentFleetId && dupIds.has(c.currentFleetId)) {
+          crewsModified = true;
+          return { ...c, currentFleetId: mergedPrimary.id };
+        }
+        return c;
+      });
+      if (crewsModified) {
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      }
+
+      // Reassign schedules referencing any duplicate ID to primary fleet
+      let schedulesModified = false;
+      this.schedules = this.schedules.map(s => {
+        if (dupIds.has(s.fleetId) || (s.fleet?.id && dupIds.has(s.fleet.id))) {
+          schedulesModified = true;
+          return {
+            ...s,
+            fleetId: mergedPrimary.id,
+            fleet: mergedPrimary,
+            armada: mergedPrimary.initialCode || mergedPrimary.plateNumber
+          };
+        }
+        return s;
+      });
+      if (schedulesModified) {
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      }
+
+      // Update surviving primary record
+      this.fleets = this.fleets.map(f => (f.id === group.primary.id ? mergedPrimary : f));
+
+      // Remove duplicate IDs from backend while explicitly preserving the sibling canonical plate
+      group.duplicates.forEach(dup => {
+        deleteFleetInSupabase(dup.id, dup.plateNumber, true).catch(err =>
+          console.warn('[Store Deduplicate Fleet Delete Warning]', err)
+        );
+      });
+    });
+
+    this.fleets = sortFleetsByCanonicalOrder(this.fleets.filter(f => !idsToRemove.has(f.id)));
+    this.cachedFleets = null;
+    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+    this.logActivity(
+      'Bersihkan Data Double Armada',
+      `${idsToRemove.size} data ganda`,
+      `Membersihkan ${idsToRemove.size} data armada ganda dengan aman (${cleanedPlates.join(', ')})`
+    );
+    this.notify();
+
+    return { removedCount: idsToRemove.size, cleanedPlates };
   }
 
   public addCrew(crew: Omit<Crew, 'id' | 'tripsCompleted' | 'rating'>): Crew {

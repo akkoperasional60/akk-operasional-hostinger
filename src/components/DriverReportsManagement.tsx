@@ -2857,27 +2857,43 @@ export const DriverReportsManagement: React.FC = () => {
                           </td>
 
                           {/* 2. Kru */}
-                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                            <div className="font-bold text-white flex items-center gap-1.5">
-                              <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                              <span>{item.driverName}</span>
-                              <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
-                                (item.userRole || '').toLowerCase().includes('helper')
-                                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                              }`}>
-                                {item.userRole || 'Driver'}
-                              </span>
-                            </div>
-                            {item.helperName &&
-                              item.helperName !== '-' &&
-                              !String(item.userRole || '').toLowerCase().includes('helper') &&
-                              item.helperName.trim().toLowerCase() !== (item.driverName || '').trim().toLowerCase() && (
-                                <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
-                                  Helper: <strong className="text-slate-300">{item.helperName}</strong>
+                          {(() => {
+                            const isHelperSub = String(item.userRole || '').toLowerCase().includes('helper');
+                            const helperVal = item.helperName && item.helperName !== '-' ? item.helperName.trim() : '';
+                            const driverVal = item.driverName && item.driverName !== '-' ? item.driverName.trim() : '';
+                            const primaryName =
+                              (item.reportedByName && item.reportedByName.trim()) ||
+                              (isHelperSub ? (helperVal || driverVal) : (driverVal || helperVal));
+                            const primaryNorm = primaryName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            const companionLine = isHelperSub
+                              ? (driverVal && driverVal.toLowerCase().replace(/[^a-z0-9]/g, '') !== primaryNorm
+                                  ? `Driver: ${driverVal}`
+                                  : '')
+                              : (helperVal && helperVal.toLowerCase().replace(/[^a-z0-9]/g, '') !== primaryNorm
+                                  ? `Helper: ${helperVal}`
+                                  : '');
+
+                            return (
+                              <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                                <div className="font-bold text-white flex items-center gap-1.5">
+                                  <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span>{primaryName || '-'}</span>
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
+                                    isHelperSub
+                                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  }`}>
+                                    {item.userRole || 'Driver'}
+                                  </span>
                                 </div>
-                              )}
-                          </td>
+                                {companionLine && (
+                                  <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
+                                    <strong className="text-slate-300">{companionLine}</strong>
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })()}
 
                           {/* 3. Armada (Beserta Nama Inisial Armada) */}
                           <td className="py-2.5 px-3 align-middle whitespace-nowrap">

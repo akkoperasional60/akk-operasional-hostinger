@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Truck,
@@ -469,15 +469,13 @@ interface FleetCrewManagementProps {
   initialSubTab?: 'fleets' | 'fuel' | 'spareparts' | 'forms' | 'crews' | 'history';
   onNavigateToSpareParts?: () => void;
   onNavigateToFuelEfficiency?: () => void;
-  onNavigateToTracksolid?: () => void;
 }
 
 export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   initialTab = 'fleets',
   initialSubTab,
   onNavigateToSpareParts,
-  onNavigateToFuelEfficiency,
-  onNavigateToTracksolid
+  onNavigateToFuelEfficiency
 }) => {
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
@@ -1228,17 +1226,33 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const plate = fleetToDelete.plateNumber;
     const id = fleetToDelete.id;
     logisticsStore.deleteFleet(id);
-    setFleets(logisticsStore.getFleets());
+    setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
+    setCrews(logisticsStore.getCrews());
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
       message: `Data armada ${plate} berhasil dihapus dari sistem.`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
+  };
 
-    deleteFleetInSupabase(id, plate).catch(err => {
-      console.warn('[FleetCrewManagement] Background deleteFleet sync warning:', err);
-    });
+  const duplicateFleetGroups = useMemo(() => logisticsStore.findDuplicateFleetGroups(), [fleets]);
+  const redundantFleetIdSet = useMemo(
+    () => new Set(duplicateFleetGroups.flatMap(g => g.duplicates.map(d => d.id))),
+    [duplicateFleetGroups]
+  );
+
+  const handleCleanupDuplicateFleets = () => {
+    const result = logisticsStore.deduplicateAndCleanupFleets();
+    setFleets(sortFleetsByCanonicalOrder(logisticsStore.getFleets()));
+    setCrews(logisticsStore.getCrews());
+    if (result.removedCount > 0) {
+      setSyncFeedback({
+        type: 'success',
+        message: `Berhasil membersihkan ${result.removedCount} data armada ganda dengan inisial/duplikasi (${result.cleanedPlates.join(', ')}).`
+      });
+      setTimeout(() => setSyncFeedback(null), 6000);
+    }
   };
 
   const toggleFleetStatus = (fleet: Fleet) => {
@@ -1848,6 +1862,33 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         </div>
       )}
 
+      {/* Banner Peringatan Data Double Armada (Mendeteksi Plat Sama / Inisial Berbeda) */}
+      {activeTab === 'fleets' && duplicateFleetGroups.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <div className="text-xs font-black text-amber-300">
+                Terdeteksi {redundantFleetIdSet.size} Data Armada Double ({duplicateFleetGroups.length} Unit)
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Terdapat data ganda pada plat yang sama dengan variasi inisial (
+                {duplicateFleetGroups.map(g => `${g.primary.plateNumber}: ${[g.primary.initialCode || '-', ...g.duplicates.map(d => d.initialCode || '-')].join(' vs ')}`).join('; ')}
+                ). Klik bersihkan agar tidak membingungkan jadwal &amp; penghapusan data.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCleanupDuplicateFleets}
+            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shrink-0 shadow-sm transition cursor-pointer flex items-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Bersihkan Data Double ({redundantFleetIdSet.size})</span>
+          </button>
+        </div>
+      )}
+
       {/* 3 Indikator Status Kondisi Armada Terintegrasi (Filtered by Selected Branch) */}
       {activeTab === 'fleets' && (() => {
         const branchFilteredFleets = selectedBranchId === 'ALL'
@@ -1977,7 +2018,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                       <tr key={fleet.id} className="hover:bg-slate-850/50 transition">
                         <td className="py-2.5 px-2.5 text-center font-mono text-slate-500 font-bold">{index + 1}</td>
                         <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {fleet.initialCode && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 whitespace-nowrap shrink-0">
                                 {fleet.initialCode}
@@ -1986,6 +2027,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             <span className="font-bold text-white font-mono text-xs tracking-wide whitespace-nowrap">
                               {fleet.plateNumber}
                             </span>
+                            {redundantFleetIdSet.has(fleet.id) && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 whitespace-nowrap">
+                                Data Double
+                              </span>
+                            )}
                           </div>
                           {selectedBranchId === 'ALL' && (
                             <div className="mt-1 flex items-center gap-1">
@@ -2191,11 +2237,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <div key={fleet.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">PLAT NOMOR</span>
                       {fleet.initialCode && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                           {fleet.initialCode}
+                        </span>
+                      )}
+                      {redundantFleetIdSet.has(fleet.id) && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          Data Double
                         </span>
                       )}
                     </div>
