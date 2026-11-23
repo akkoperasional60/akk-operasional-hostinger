@@ -1,0 +1,239 @@
+name: AKK V60 - Mobile UI dan Pemisahan Cabang
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/akk-v60-mobile-cabang.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: akk-mobile-cabang-patch
+  cancel-in-progress: false
+
+jobs:
+  update-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout current GitHub main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Apply safe V60 code patch (no old files)
+        shell: bash
+        run: |
+          python3 - <<'AKK_PATCH_PY'
+          #!/usr/bin/env python3
+          """Generate an isolated, cumulative patch against the exact AKK AI Studio V60 source.
+
+          This script reads the user's CURRENT repository checkout and writes only modified
+          files, retaining original paths. It never changes the source checkout.
+          """
+          import argparse
+          import pathlib
+          import sys
+          import zipfile
+
+          class PatchError(RuntimeError):
+              pass
+
+          def replace_once(src, old, new, label):
+              count = src.count(old)
+              if count != 1:
+                  raise PatchError(f'{label}: expected exactly one match; found {count}. Source version may have changed.')
+              return src.replace(old, new, 1)
+
+          def patch_repo(root):
+              sources = {}
+              targets = [
+                  'src/services/branchStore.ts',
+                  'src/components/DriverMobileView.tsx',
+                  'src/components/ScheduleManagement.tsx',
+                  'src/components/GoogleSheetsAdminScheduleView.tsx',
+                  'src/index.css',
+                  'src/App.tsx',
+                  'index.html',
+              ]
+              for rel in targets:
+                  path = root / rel
+                  if not path.is_file():
+                      raise PatchError(f'Missing required latest source file: {rel}')
+                  sources[rel] = path.read_text(encoding='utf-8')
+              # Avoid transforming older snapshots by requiring markers introduced in V60.
+              if 'effectivePortalBranchRef' not in sources['src/components/DriverMobileView.tsx']:
+                  raise PatchError('DriverMobileView does not contain current V60 branch integration; refusing older baseline.')
+              if "getScheduleBranchId(scheduleId?: string, originName?: string, fleetId?: string)" not in sources['src/services/branchStore.ts']:
+                  raise PatchError('BranchStore source is not the expected version.')
+
+              # Make exact saved branch mapping available without the legacy Banyuwangi default.
+              branch = sources['src/services/branchStore.ts']
+              marker = '  public getScheduleBranchId(scheduleId?: string, originName?: string, fleetId?: string): string {'
+              accessor = '''  // Strict branch mapping: do not silently treat an unclassified schedule as Banyuwangi.\n  public getExplicitScheduleBranchId(scheduleId?: string): string | null {\n    if (!scheduleId) return null;\n    const mapped = this.entityBranches.schedules[scheduleId];\n    return mapped && this.branches.some(b => b.id === mapped) ? mapped : null;\n  }\n\n'''
+              branch = replace_once(branch, marker, accessor + marker, 'branch accessor')
+              sources['src/services/branchStore.ts'] = branch
+
+              # Use a single strict branch resolution rule in both Driver and Schedule views.
+              utility = '''import type { Schedule } from '../types';\nimport { branchStore } from '../services/branchStore';\n\ntype ScheduleWithBranch = Schedule & { branchId?: string };\n\n/**\n * Resolve only grounded origin branch assignments. A destination's location is\n * NOT an origin branch, and missing origins must never silently become Banyuwangi.\n */\nexport function resolveScheduleBranchStrict(schedule: Schedule): string | null {\n  const s = schedule as ScheduleWithBranch;\n  const direct = String(s.branchId || '').trim();\n  if (direct && branchStore.getBranchById(direct)) return direct;\n\n  const mapped = branchStore.getExplicitScheduleBranchId(s.id);\n  if (mapped) return mapped;\n\n  const explicitFleet = String(s.fleet?.branchId || '').trim();\n  if (explicitFleet && branchStore.getBranchById(explicitFleet)) return explicitFleet;\n\n  const origin = String(s.originName || '').toLowerCase();\n  const sidoarjo = /sidoarjo|surabaya/.test(origin);\n  const banyuwangi = /banyuwangi|nusantara|sukowidi/.test(origin);\n  if (sidoarjo && !banyuwangi) return 'cab-sidoarjo';\n  if (banyuwangi && !sidoarjo) return 'cab-banyuwangi';\n  return null;\n}\n\n/** Explicit snapshot branches must agree with the chosen cabang. */\nexport function resolveSnapshotBranchStrict(\n  snapshot: { branchId?: string; id?: string },\n  schedules: Schedule[]\n): string | null {\n  const direct = String(snapshot?.branchId || '').trim();\n  if (direct && branchStore.getBranchById(direct)) return direct;\n  const schedule = snapshot?.id ? schedules.find(s => s.id === snapshot.id) : undefined;\n  return schedule ? resolveScheduleBranchStrict(schedule) : null;\n}\n'''
+              sources['src/utils/scheduleBranchPolicy.ts'] = utility
+
+              driver = sources['src/components/DriverMobileView.tsx']
+              imp = "import { branchStore } from '../services/branchStore';"
+              driver = replace_once(driver, imp, imp + "\nimport { resolveScheduleBranchStrict, resolveSnapshotBranchStrict } from '../utils/scheduleBranchPolicy';", 'Driver import')
+              # All branch filters using notes / a fleet display code risk assigning wrong origins.
+              legacy_expr = 'branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber)'
+              count = driver.count(legacy_expr)
+              if count != 3:
+                  raise PatchError(f'Driver source branch filters: expected 3 exact matches, got {count}')
+              driver = driver.replace(legacy_expr, 'resolveScheduleBranchStrict(s)')
+              snapshot_expr = "p.branchId || (p.id ? branchStore.getScheduleBranchId(p.id, p.target, p.armada) : 'cab-banyuwangi')"
+              driver = replace_once(driver, snapshot_expr, 'resolveSnapshotBranchStrict(p, allStoreSchedules)', 'Driver snapshot branch')
+              # Safer mobile hierarchy without removing any existing actions.
+              heading = 'DRIVER AKK MOBILE'
+              driver = replace_once(driver, heading, 'Pengiriman AKK', 'mobile portal heading')
+              root_class = 'w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 pb-24 shadow-2xl relative border-x border-slate-900 flex flex-col overflow-x-hidden box-border'
+              driver = replace_once(driver, root_class, 'akk-driver-mobile ' + root_class, 'Driver mobile root')
+              sources['src/components/DriverMobileView.tsx'] = driver
+
+              schedule = sources['src/components/ScheduleManagement.tsx']
+              schedule_import = "import { branchStore, BranchRecord } from '../services/branchStore';"
+              schedule = replace_once(schedule, schedule_import, schedule_import + "\nimport { resolveScheduleBranchStrict } from '../utils/scheduleBranchPolicy';", 'ScheduleManagement import')
+              old = "  const filteredSchedules = schedules.filter(sch => {\n    // 1. Filter Status Pengiriman"
+              new = "  const filteredSchedules = schedules.filter(sch => {\n    // Never display a schedule in the wrong branch, including legacy unmatched records.\n    if (resolveScheduleBranchStrict(sch) !== selectedOriginBranchId) return false;\n    // 1. Filter Status Pengiriman"
+              schedule = replace_once(schedule, old, new, 'ScheduleManagement branch filter')
+              # Preserve explicit origin branch when saving a new schedule.
+              # Existing source calls setScheduleBranch after addSchedule; leave those intact.
+              sources['src/components/ScheduleManagement.tsx'] = schedule
+
+              admin = sources['src/components/GoogleSheetsAdminScheduleView.tsx']
+              # Avoid accidental crew duplication across cabang when accounts have multi-branch VIEW permissions.
+              # Scheduling dropdowns should rely on the crew's assigned home branch, not every accessible branch.
+              first = ".filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter))"
+              second = "const activeHelperAndDriverUsers = allUsers.filter(u =>\n      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter)\n    );"
+              admin = replace_once(admin, first, ".filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter)", 'Driver scheduling dropdown')
+              admin = replace_once(admin, second, "const activeHelperAndDriverUsers = allUsers.filter(u =>\n      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter\n    );", 'Helper scheduling dropdown')
+              pool_predicate = '.filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId))'
+              admin = replace_once(admin, pool_predicate,
+                  '.filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId) && branchStore.getCrewBranchId(u.id, u.fullName) === effectiveActiveBranchId)',
+                  'Admin pool branch filter')
+              sources['src/components/GoogleSheetsAdminScheduleView.tsx'] = admin
+
+              css = sources['src/index.css']
+              if '.akk-driver-mobile' in css:
+                  raise PatchError('Mobile stylesheet seems already patched, refusing duplicate injection')
+              css += '''\n\n/* AKK Driver Mobile: high-legibility field UI, scoped to the driver portal only. */\n@media (max-width: 600px) {\n  .akk-driver-mobile {\n    color-scheme: dark;\n    -webkit-text-size-adjust: 100%;\n  }\n  .akk-driver-mobile [class*="text-[9px]"],\n  .akk-driver-mobile [class*="text-[10px]"] {\n    font-size: 12px !important;\n    line-height: 1.45 !important;\n  }\n  .akk-driver-mobile [class*="text-[11px]"] {\n    font-size: 13px !important;\n    line-height: 1.45 !important;\n  }\n  .akk-driver-mobile input,\n  .akk-driver-mobile select,\n  .akk-driver-mobile textarea {\n    font-size: 16px; /* avoid zoom on mobile focus */\n  }\n  .akk-driver-mobile main {\n    scroll-padding-bottom: 100px;\n  }\n  .akk-driver-mobile nav {\n    padding-bottom: env(safe-area-inset-bottom, 0px);\n  }\n}\n'''
+              sources['src/index.css'] = css
+
+              app = sources['src/App.tsx']
+              needle_loader = '  const [logoImgFailed, setLogoImgFailed] = useState(false);\n\n  return ('
+              if needle_loader not in app:
+                  raise PatchError('AppShellSkeleton component layout changed')
+              custom_loader = '''  const [logoImgFailed, setLogoImgFailed] = useState(false);
+
+            // Portal Driver uses a compact mobile loader rather than a desktop dashboard skeleton.
+            if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
+              return (
+                <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-5">
+                  <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center space-y-5 shadow-xl">
+                    <div className="mx-auto h-16 w-16 rounded-2xl bg-white p-3 flex items-center justify-center">
+                      <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+                    </div>
+                    <div className="space-y-1">
+                      <h1 className="text-xl font-bold tracking-tight">Portal Kiriman</h1>
+                      <p className="text-sm text-slate-300">Menyiapkan jadwal Anda...</p>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                      <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+                    </div>
+                    <p className="text-xs text-slate-400">{statusLabel}</p>
+                  </div>
+                </div>
+              );
+            }
+
+            return ('''
+              app = replace_once(app, needle_loader, custom_loader, 'App mobile login loader')
+              fallback_start = 'const ModuleLoaderFallback: React.FC = () => ('
+              fallback_replacement = '''const ModuleLoaderFallback: React.FC = () => {
+            if (typeof window !== 'undefined' && /\\/portal-driver(?:\\/|$)/.test(window.location.pathname)) {
+              return (
+                <div className="mx-auto max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-5 text-center text-slate-100 space-y-3 mt-6">
+                  <div className="mx-auto h-12 w-12 rounded-xl bg-white p-2">
+                    <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+                  </div>
+                  <p className="font-bold">Menyiapkan kiriman...</p>
+                  <p className="text-xs text-slate-400">Harap periksa koneksi jika terlalu lama.</p>
+                </div>
+              );
+            }
+            return ('''
+              app = replace_once(app, fallback_start, fallback_replacement, 'Module loader start')
+              fallback_end = '  </div>\n);\n\nconst FLEET_MANAGEMENT_TABS'
+              app = replace_once(app, fallback_end, '  </div>\n  );\n};\n\nconst FLEET_MANAGEMENT_TABS', 'Module loader end')
+              sources['src/App.tsx'] = app
+
+              html = sources['index.html']
+              mobile_boot_css = '''
+                /* Keep the pre-React loading screen short on a 360px phone. */
+                @media (max-width: 600px) {
+                  #akk-boot-topbar { height: 58px; padding: 0 14px; }
+                  #akk-boot-topbar > div:last-child { display: none; }
+                  #akk-boot-main > main { padding: 14px !important; gap: 12px !important; }
+                  #akk-boot-banner { padding: 14px !important; }
+                  #akk-boot-grid4, #akk-boot-grid2 { display: none; }
+                }
+          '''
+              html = replace_once(html, '    </style>\n  </head>', mobile_boot_css + '    </style>\n  </head>', 'Mobile boot skeleton')
+              sources['index.html'] = html
+
+              return sources
+
+
+
+          # Pinned baseline. Never overwrite a newer file from another revision.
+          import subprocess
+          EXPECTED_BLOBS = {'src/services/branchStore.ts': '3442a6b7220bc33e0b1d00837c3487ccef9e8fb8', 'src/components/DriverMobileView.tsx': '97d3af44e8a67d458553725f384694a7047251cd', 'src/components/ScheduleManagement.tsx': 'af07e8c9fae65c3eaa9f73095338f4ac2fb4d723', 'src/components/GoogleSheetsAdminScheduleView.tsx': '53c4c20f1645008fa3f0267615103a0354a156c4', 'src/index.css': '815635b4ce88c42b0dc48f2be0039f2a39b16bd5', 'src/App.tsx': '036b9b53b705c29ebf91c6c2738223df0a06caa8', 'index.html': '2ae0383bbebc29c1d0f97419a66e9d738ed6ec05'}
+          for rel, expected in EXPECTED_BLOBS.items():
+              actual = subprocess.check_output(['git', 'hash-object', rel], text=True).strip()
+              if actual != expected:
+                  raise PatchError('STOP: '+rel+' has a newer revision ('+actual[:10]+'). No files modified. Rebuild the patch for the latest main.')
+
+          repo = pathlib.Path('.').resolve()
+          policy_path = repo / 'src/utils/scheduleBranchPolicy.ts'
+          if policy_path.exists():
+              raise PatchError('STOP: scheduleBranchPolicy.ts already exists. Prevented overwrite.')
+          files = patch_repo(repo)
+          for rel, content in sorted(files.items()):
+              destination = repo / rel
+              if destination.exists() and destination.read_text(encoding='utf-8') == content:
+                  continue
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_text(content, encoding='utf-8')
+              print('UPDATED:', rel)
+          print('AKK source patch applied to checked-out files. Run build before commit.')
+          AKK_PATCH_PY
+      - name: Install dependencies for clean build
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore exact dependencies
+        run: npm install --no-save --package-lock=false --no-audit --no-fund
+      - name: Verify production build before changing main
+        run: npm run build
+      - name: Commit only modified project files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html src/App.tsx src/index.css src/services/branchStore.ts src/components/DriverMobileView.tsx src/components/ScheduleManagement.tsx src/components/GoogleSheetsAdminScheduleView.tsx src/utils/scheduleBranchPolicy.ts
+          if git diff --cached --quiet; then
+            echo "No changes; already applied"
+            exit 0
+          fi
+          git commit -m "fix(driver): isolate branch schedules and simplify mobile UI"
+          git push origin HEAD:main

@@ -1198,3 +1198,32 @@ html.light .wms-handheld-dark select option {
 }
 
 
+
+
+/* AKK Driver Mobile: high-legibility field UI, scoped to the driver portal only. */
+@media (max-width: 600px) {
+  .akk-driver-mobile {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+  .akk-driver-mobile [class*="text-[9px]"],
+  .akk-driver-mobile [class*="text-[10px]"] {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+  .akk-driver-mobile [class*="text-[11px]"] {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+  }
+  .akk-driver-mobile input,
+  .akk-driver-mobile select,
+  .akk-driver-mobile textarea {
+    font-size: 16px; /* avoid zoom on mobile focus */
+  }
+  .akk-driver-mobile main {
+    scroll-padding-bottom: 100px;
+  }
+  .akk-driver-mobile nav {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}

@@ -504,6 +504,13 @@ class BranchStoreService {
     this.notify();
   }
 
+  // Strict branch mapping: do not silently treat an unclassified schedule as Banyuwangi.
+  public getExplicitScheduleBranchId(scheduleId?: string): string | null {
+    if (!scheduleId) return null;
+    const mapped = this.entityBranches.schedules[scheduleId];
+    return mapped && this.branches.some(b => b.id === mapped) ? mapped : null;
+  }
+
   public getScheduleBranchId(scheduleId?: string, originName?: string, fleetId?: string): string {
     if (scheduleId) {
       const mapped = this.entityBranches.schedules[scheduleId];

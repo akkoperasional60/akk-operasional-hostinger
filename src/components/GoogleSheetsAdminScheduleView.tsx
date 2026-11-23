@@ -1737,7 +1737,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeDriverAndHelperUsers = allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter))
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter)
       .sort((a, b) => {
         if (a.role === 'driver' && b.role !== 'driver') return -1;
         if (a.role !== 'driver' && b.role === 'driver') return 1;
@@ -1785,7 +1785,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeHelperAndDriverUsers = allUsers.filter(u =>
-      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter)
+      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter
     );
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
@@ -2101,7 +2101,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     // 1. Approved Driver & Helper accounts in Portal (strictly separated by effectiveActiveBranchId: Sidoarjo vs Nusantara)
     const allUsers = logisticsStore.getUsers();
     allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId))
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId) && branchStore.getCrewBranchId(u.id, u.fullName) === effectiveActiveBranchId)
       .forEach(u => {
         addCandidateToPool(
           u.id,

@@ -24,6 +24,7 @@ import { useToast } from '../context/ToastContext';
 import { getAreaScheduleTiming, calculateScheduleTimestamps } from '../utils/areaScheduleRules';
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { branchStore, BranchRecord } from '../services/branchStore';
+import { resolveScheduleBranchStrict } from '../utils/scheduleBranchPolicy';
 
 interface ScheduleManagementProps {
   preselectedStore?: RetailStore | null;
@@ -1068,6 +1069,8 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
   }, [schedules, stores]);
 
   const filteredSchedules = schedules.filter(sch => {
+    // Never display a schedule in the wrong branch, including legacy unmatched records.
+    if (resolveScheduleBranchStrict(sch) !== selectedOriginBranchId) return false;
     // 1. Filter Status Pengiriman (scheduled, in_transit, delivered, delayed)
     const matchesStatus = statusFilter === 'all' || sch.status === statusFilter;
 
