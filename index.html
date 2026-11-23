@@ -113,6 +113,15 @@
       @media (min-width: 1024px) {
         #akk-boot-grid2 { grid-template-columns: 2fr 1fr; }
       }
+
+      /* Keep the pre-React loading screen short on a 360px phone. */
+      @media (max-width: 600px) {
+        #akk-boot-topbar { height: 58px; padding: 0 14px; }
+        #akk-boot-topbar > div:last-child { display: none; }
+        #akk-boot-main > main { padding: 14px !important; gap: 12px !important; }
+        #akk-boot-banner { padding: 14px !important; }
+        #akk-boot-grid4, #akk-boot-grid2 { display: none; }
+      }
     </style>
   </head>
   <body class="antialiased font-sans" style="margin: 0; background: var(--boot-bg); color: var(--boot-text);">

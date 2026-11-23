@@ -90,6 +90,27 @@ const AppShellSkeleton: React.FC<{
 }> = ({ statusLabel = 'Memverifikasi sesi...' }) => {
   const [logoImgFailed, setLogoImgFailed] = useState(false);
 
+  // Portal Driver uses a compact mobile loader rather than a desktop dashboard skeleton.
+  if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-5">
+        <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center space-y-5 shadow-xl">
+          <div className="mx-auto h-16 w-16 rounded-2xl bg-white p-3 flex items-center justify-center">
+            <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold tracking-tight">Portal Kiriman</h1>
+            <p className="text-sm text-slate-300">Menyiapkan jadwal Anda...</p>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+          </div>
+          <p className="text-xs text-slate-400">{statusLabel}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
       {/* Top Progress Bar */}
@@ -249,7 +270,19 @@ const AppShellSkeleton: React.FC<{
   );
 };
 
-const ModuleLoaderFallback: React.FC = () => (
+const ModuleLoaderFallback: React.FC = () => {
+  if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
+    return (
+      <div className="mx-auto max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-5 text-center text-slate-100 space-y-3 mt-6">
+        <div className="mx-auto h-12 w-12 rounded-xl bg-white p-2">
+          <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+        </div>
+        <p className="font-bold">Menyiapkan kiriman...</p>
+        <p className="text-xs text-slate-400">Harap periksa koneksi jika terlalu lama.</p>
+      </div>
+    );
+  }
+  return (
   <div className="space-y-4">
     <div className="h-1 w-full bg-blue-500/15 rounded-full overflow-hidden relative">
       <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-blue-600 via-sky-400 to-indigo-500 rounded-full animate-[shimmer_1.1s_infinite]" />
@@ -283,7 +316,8 @@ const ModuleLoaderFallback: React.FC = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',

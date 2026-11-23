@@ -101,6 +101,7 @@ import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareMo
 import { getOfficialAreasForBranch, isSidoarjoArea, standardizeAreaName } from '../utils/areaNormalizer';
 import { formKirimStore, FormKirimRecord } from '../services/formKirimStore';
 import { branchStore } from '../services/branchStore';
+import { resolveScheduleBranchStrict, resolveSnapshotBranchStrict } from '../utils/scheduleBranchPolicy';
 import { getScheduleCalendarDateObj } from '../data/adminSchedule';
 import { DriverFormKirimPanel } from './DriverFormKirimPanel';
 
@@ -1937,7 +1938,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const otherSchedulesToday = logisticsStore.getSchedules().filter(s => {
       if (s.id === delivery.id) return false;
       if (!isScheduleMatchingTargetDate(s, targetIso)) return false;
-      const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+      const sBranch = resolveScheduleBranchStrict(s);
       return sBranch === effectivePortalBranchId;
     });
 
@@ -2360,7 +2361,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       const activeBranch = effectivePortalBranchRef.current;
       const branchFilteredSchedules = localSchedules.filter(s => {
-        const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+        const sBranch = resolveScheduleBranchStrict(s);
         return sBranch === activeBranch;
       });
 
@@ -3797,7 +3798,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const allStoreSchedules = logisticsStore.getSchedules();
     let daySchedules = allStoreSchedules.filter(s => {
       if (!isScheduleMatchingTargetDate(s, targetDateIso)) return false;
-      const sBranch = branchStore.getScheduleBranchId(s.id, s.notes, s.fleet?.initialCode || s.fleet?.plateNumber);
+      const sBranch = resolveScheduleBranchStrict(s);
       return sBranch === effectivePortalBranchId;
     });
 
@@ -3807,7 +3808,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       snapshot.pengiriman.length > 0 &&
       snapshot.dateIso === targetDateIso
         ? snapshot.pengiriman.filter((p: any) => {
-            const pBranch = p.branchId || (p.id ? branchStore.getScheduleBranchId(p.id, p.target, p.armada) : 'cab-banyuwangi');
+            const pBranch = resolveSnapshotBranchStrict(p, allStoreSchedules);
             return pBranch === effectivePortalBranchId;
           })
         : [];
@@ -5626,7 +5627,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 pb-24 shadow-2xl relative border-x border-slate-900 flex flex-col overflow-x-hidden box-border">
+    <div className="akk-driver-mobile w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 pb-24 shadow-2xl relative border-x border-slate-900 flex flex-col overflow-x-hidden box-border">
       {/* Top Mobile App Bar */}
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2.5 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between gap-1.5 min-w-0">
@@ -5636,7 +5637,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="text-xs sm:text-sm font-black text-white tracking-wide uppercase truncate">
-                DRIVER AKK MOBILE
+                Pengiriman AKK
               </h1>
             </div>
           </div>
