@@ -425,8 +425,8 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
         body: JSON.stringify({
           userId: currentUser.id,
           fullName: profileForm.fullName.trim(),
@@ -439,8 +439,11 @@ export default function App() {
       if (!res.ok) {
         throw new Error(json.error || 'Gagal menyimpan perubahan profil.');
       }
-      await logisticsStore.restoreServerSession().catch(() => {});
-      addNotification('schedule', 'Profil Diperbarui', 'Data profil akun berhasil disimpan ke database MySQL.');
+      await Promise.all([
+        logisticsStore.restoreServerSession().catch(() => {}),
+        logisticsStore.refreshUsersFromHostinger().catch(() => {})
+      ]);
+      addNotification('schedule', 'Profil Diperbarui', 'Data profil akun dan nomor WhatsApp berhasil disimpan ke database MySQL.');
       setIsAccountProfileOpen(false);
     } catch (err: any) {
       addNotification('sla_warning', 'Gagal Menyimpan', err?.message || 'Terjadi kesalahan saat menyimpan profil.');
@@ -463,8 +466,8 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
         body: JSON.stringify({
           userId: currentUser.id,
           currentPassword: passwordForm.currentPassword,

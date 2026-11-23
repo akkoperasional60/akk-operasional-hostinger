@@ -9,6 +9,81 @@ import { logisticsStore } from './store';
 const STORAGE_KEY = 'akk_driver_outbound_waybills_v3';
 
 class DriverWaybillService {
+  private memoryWaybills: Record<string, OutboundWaybill> = {};
+  private isSyncing = false;
+  private lastSyncAt = 0;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const legacyRaw = localStorage.getItem(STORAGE_KEY);
+          if (legacyRaw) {
+            const parsed = JSON.parse(legacyRaw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              this.memoryWaybills = parsed;
+            }
+            localStorage.removeItem(STORAGE_KEY);
+          }
+        }
+      } catch {}
+      setTimeout(() => {
+        void this.syncFromServer();
+      }, 200);
+    }
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
+  public async syncFromServer(force = false): Promise<Record<string, OutboundWaybill>> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return this.memoryWaybills;
+    if (this.isSyncing) return this.memoryWaybills;
+    const now = Date.now();
+    if (!force && this.lastSyncAt > 0 && now - this.lastSyncAt < 8000) return this.memoryWaybills;
+    this.isSyncing = true;
+    this.lastSyncAt = now;
+    try {
+      const res = await fetch('/api/driver-waybills', {
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return this.memoryWaybills;
+      const json = await res.json();
+      if (json?.waybills && typeof json.waybills === 'object' && !Array.isArray(json.waybills)) {
+        this.memoryWaybills = { ...this.memoryWaybills, ...json.waybills };
+        window.dispatchEvent(new CustomEvent('driver-waybill-updated'));
+      }
+    } catch {} finally {
+      this.isSyncing = false;
+    }
+    return this.memoryWaybills;
+  }
+
+  private pushWaybillToServer(waybill: OutboundWaybill) {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    void fetch('/api/driver-waybills', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ waybill })
+    }).catch(() => {});
+  }
+
   /**
    * Derive a structured Outbound Waybill (Surat Jalan Keluar) from a delivery Schedule
    */
@@ -150,22 +225,15 @@ class DriverWaybillService {
   }
 
   public getStoredWaybills(): Record<string, OutboundWaybill> {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
+    return this.memoryWaybills;
   }
 
   public saveWaybill(waybill: OutboundWaybill): void {
-    try {
-      const existing = this.getStoredWaybills();
-      existing[waybill.id] = waybill;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
-    } catch (err) {
-      console.error('Failed to save waybill to localStorage:', err);
+    this.memoryWaybills[waybill.id] = waybill;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
     }
+    this.pushWaybillToServer(waybill);
   }
 
   public getWaybillForSchedule(schedule: Schedule): OutboundWaybill {

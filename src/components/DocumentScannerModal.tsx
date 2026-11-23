@@ -66,22 +66,31 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const cameraSeqRef = useRef<number>(0);
+
+  isOpenRef.current = isOpen;
 
   const registeredFleets = logisticsStore.getFleets();
   const registeredCrews = logisticsStore.getCrews();
 
   // Reset state when modal opens
   useEffect(() => {
+    isOpenRef.current = isOpen;
     if (isOpen) {
       setStep('capture');
       setCapturedImage(null);
       setCameraError(null);
       setDocumentType(initialType);
+      setMode('camera');
       startCamera(facingMode);
     } else {
+      cameraSeqRef.current += 1;
       stopCamera();
     }
     return () => {
+      cameraSeqRef.current += 1;
       stopCamera();
     };
   }, [isOpen, initialType]);
@@ -106,9 +115,28 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
     } catch {}
   };
 
+  const stopCamera = () => {
+    const activeStream = streamRef.current || stream;
+    if (activeStream) {
+      activeStream.getTracks().forEach(track => {
+        try { track.stop(); } catch {}
+      });
+    }
+    streamRef.current = null;
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {}
+    }
+    setStream(null);
+    setHasTorch(false);
+    setIsTorchOn(false);
+  };
+
   // Start device camera with resilient 3-tier fallback
   const startCamera = async (facing: 'environment' | 'user') => {
     stopCamera();
+    const seq = ++cameraSeqRef.current;
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -134,7 +162,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
       }
 
       // Tier 2: Simple facingMode
-      if (!mediaStream) {
+      if (!mediaStream && isOpenRef.current && seq === cameraSeqRef.current) {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: facing },
@@ -147,7 +175,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
       }
 
       // Tier 3: Any video device
-      if (!mediaStream) {
+      if (!mediaStream && isOpenRef.current && seq === cameraSeqRef.current) {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: true,
@@ -159,10 +187,20 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
         }
       }
 
+      if (!isOpenRef.current || seq !== cameraSeqRef.current) {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(track => {
+            try { track.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
       if (!mediaStream) {
         throw lastErr || new Error('Tidak dapat membuka stream kamera peramban.');
       }
 
+      streamRef.current = mediaStream;
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -183,6 +221,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
         }
       }
     } catch (err: unknown) {
+      if (!isOpenRef.current || seq !== cameraSeqRef.current) return;
       console.warn('[DocScanner] Camera init error:', err);
       const msg = err instanceof Error ? err.message : String(err);
       if (
@@ -198,18 +237,10 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
     }
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => {
-        try { track.stop(); } catch {}
-      });
-      setStream(null);
-    }
-  };
-
   const toggleTorch = async () => {
-    if (!stream || !hasTorch) return;
-    const track = stream.getVideoTracks()[0];
+    const activeStream = streamRef.current || stream;
+    if (!activeStream || !hasTorch) return;
+    const track = activeStream.getVideoTracks()[0];
     if (track) {
       const next = !isTorchOn;
       try {
@@ -229,12 +260,15 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
 
   // Capture photo from video stream
   const capturePhoto = () => {
-    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+      setCameraError('Stream kamera belum siap menampilkan gambar. Tunggu sebentar atau gunakan tombol "Buka Kamera HP Langsung".');
+      return;
+    }
     playShutterSound();
     setIsFlashActive(true);
     setTimeout(() => setIsFlashActive(false), 200);
 
-    const video = videoRef.current;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
@@ -253,6 +287,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
     setCapturedImage(dataUrl);
+    cameraSeqRef.current += 1;
     stopCamera();
     processDocumentWithAI(dataUrl);
   };
@@ -260,16 +295,22 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
   // Handle uploaded file
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
+        setCameraError(null);
         setCapturedImage(dataUrl);
+        cameraSeqRef.current += 1;
         stopCamera();
         processDocumentWithAI(dataUrl);
       }
+    };
+    reader.onerror = () => {
+      setCameraError('Gagal membaca file foto dokumen. Silakan coba pilih ulang foto.');
     };
     reader.readAsDataURL(file);
   };
@@ -435,6 +476,25 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
           </button>
         </div>
 
+        {/* Always-mounted sr-only inputs for direct native camera & gallery access */}
+        <input
+          id="doc-scanner-file-input"
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileUpload}
+          className="sr-only"
+        />
+        <input
+          id="doc-scanner-camera-input"
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileUpload}
+          className="sr-only"
+        />
+
         {/* STEP 1: CAPTURE / UPLOAD SCREEN */}
         {step === 'capture' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-4">
@@ -459,6 +519,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
                 type="button"
                 onClick={() => {
                   setMode('upload');
+                  cameraSeqRef.current += 1;
                   stopCamera();
                 }}
                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -474,6 +535,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
                 type="button"
                 onClick={() => {
                   setMode('sample');
+                  cameraSeqRef.current += 1;
                   stopCamera();
                 }}
                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -527,14 +589,13 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
                       <p className="text-xs text-slate-300 leading-relaxed">{cameraError}</p>
                     </div>
                     <div className="flex flex-col gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => cameraInputRef.current?.click()}
+                      <label
+                        htmlFor="doc-scanner-camera-input"
                         className="w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95 transition"
                       >
                         <Camera className="w-4 h-4" />
                         <span>Buka Kamera HP Langsung</span>
-                      </button>
+                      </label>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -631,8 +692,8 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
 
             {/* MODE B: FILE UPLOAD */}
             {mode === 'upload' && (
-              <div
-                onClick={() => fileInputRef.current?.click()}
+              <label
+                htmlFor="doc-scanner-file-input"
                 className="flex-1 min-h-[300px] border-2 border-dashed border-slate-700 hover:border-amber-500 rounded-xl bg-slate-950/70 p-8 flex flex-col items-center justify-center text-center gap-3 transition cursor-pointer hover:bg-slate-950 group"
               >
                 <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
@@ -647,22 +708,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
                 <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30 mt-2">
                   Mendukung Gambar Kamera Ponsel &amp; Scanner
                 </span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </div>
+              </label>
             )}
 
             {/* MODE C: DEMO SAMPLES */}
@@ -916,13 +962,19 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
               <Check className="w-4 h-4" />
               <span>Simpan ke Log Dokumen Digital</span>
             </button>
+          ) : mode === 'upload' ? (
+            <label
+              htmlFor="doc-scanner-file-input"
+              className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 flex items-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Pilih File</span>
+            </label>
           ) : (
             <button
               type="button"
               onClick={() => {
-                if (mode === 'upload') {
-                  fileInputRef.current?.click();
-                } else if (mode === 'camera') {
+                if (mode === 'camera') {
                   capturePhoto();
                 } else {
                   loadDemoSample('slip');
@@ -931,7 +983,7 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
               className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 flex items-center gap-1.5 shadow-md cursor-pointer"
             >
               <Camera className="w-4 h-4" />
-              <span>{mode === 'upload' ? 'Pilih File' : mode === 'sample' ? 'Gunakan Sampel' : 'Ambil Foto'}</span>
+              <span>{mode === 'sample' ? 'Gunakan Sampel' : 'Ambil Foto'}</span>
             </button>
           )}
         </div>

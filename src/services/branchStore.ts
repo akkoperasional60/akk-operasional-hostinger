@@ -80,98 +80,191 @@ class BranchStoreService {
   };
   private listeners: Set<() => void> = new Set();
 
+  private isSyncingFromServer = false;
+  private lastServerSyncAt = 0;
+  private persistTimer: any = null;
+
   constructor() {
-    this.loadFromStorage();
+    this.clearLegacyLocalStorage();
+    this.branches = [...DEFAULT_BRANCHES];
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        void this.syncFromServer();
+      }, 150);
+    }
   }
 
-  private loadFromStorage() {
+  private clearLegacyLocalStorage() {
+    if (typeof localStorage === 'undefined') return;
     try {
-      const rawBranches = localStorage.getItem(LS_BRANCHES_KEY);
-      if (rawBranches) {
-        const parsed = JSON.parse(rawBranches);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filter out legacy NX / cab-jember and clean any legacy "Gudang Pusat" names
-          const cleaned = parsed
-            .filter(
-              (b: BranchRecord) =>
-                b &&
-                typeof b === 'object' &&
-                typeof b.id === 'string' &&
-                typeof b.name === 'string' &&
-                b.id !== 'cab-jember' &&
-                b.slug !== 'nx-jember' &&
-                (b.name || '').trim().toUpperCase() !== 'NX'
-            )
-            .map((b: BranchRecord, idx: number) => ({
-              ...b,
-              slug: b.slug || b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-              city: b.city || b.name,
-              sortOrder: typeof b.sortOrder === 'number' ? b.sortOrder : idx + 1,
-              isActive: b.isActive !== undefined ? Boolean(b.isActive) : true,
-              isFrontlineActive: b.isFrontlineActive !== undefined ? Boolean(b.isFrontlineActive) : true,
-              warehouseName: (b.warehouseName || `Gudang ${b.name}`).replace(/Gudang Pusat\s*/gi, 'Gudang ')
-            }));
-          // Always guarantee cab-sidoarjo and cab-banyuwangi exist
-          DEFAULT_BRANCHES.forEach(defBr => {
-            if (!cleaned.some(c => c.id === defBr.id)) {
-              cleaned.push({ ...defBr });
-            }
-          });
-          this.branches = cleaned.length > 0 ? cleaned : [...DEFAULT_BRANCHES];
-        } else {
-          this.branches = [...DEFAULT_BRANCHES];
-        }
-      } else {
-        this.branches = [...DEFAULT_BRANCHES];
-      }
-    } catch {
-      this.branches = [...DEFAULT_BRANCHES];
-    }
+      localStorage.removeItem(LS_BRANCHES_KEY);
+      localStorage.removeItem(LS_ACTIVE_BRANCH_KEY);
+      localStorage.removeItem(LS_USER_BRANCH_PERMS_KEY);
+      localStorage.removeItem(LS_ENTITY_BRANCH_MAP_KEY);
+    } catch {}
+  }
 
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const savedActive = localStorage.getItem(LS_ACTIVE_BRANCH_KEY);
-      if (savedActive && savedActive !== 'ALL' && this.branches.some(b => b.id === savedActive)) {
-        this.activeBranchId = savedActive;
-      } else {
-        this.activeBranchId = 'cab-banyuwangi';
-      }
-    } catch {
-      this.activeBranchId = 'cab-banyuwangi';
-    }
-
-    try {
-      const rawPerms = localStorage.getItem(LS_USER_BRANCH_PERMS_KEY);
-      if (rawPerms) {
-        const parsedPerms = JSON.parse(rawPerms);
-        this.userBranchPerms = parsedPerms && typeof parsedPerms === 'object' && !Array.isArray(parsedPerms) ? parsedPerms : {};
-      }
-    } catch {
-      this.userBranchPerms = {};
-    }
-
-    try {
-      const rawEntities = localStorage.getItem(LS_ENTITY_BRANCH_MAP_KEY);
-      if (rawEntities) {
-        const parsed = JSON.parse(rawEntities);
-        this.entityBranches = {
-          schedules: parsed?.schedules && typeof parsed.schedules === 'object' ? parsed.schedules : {},
-          fleets: parsed?.fleets && typeof parsed.fleets === 'object' ? parsed.fleets : {},
-          crews: parsed?.crews && typeof parsed.crews === 'object' ? parsed.crews : {},
-          inventory: parsed?.inventory && typeof parsed.inventory === 'object' ? parsed.inventory : {}
-        };
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
       }
     } catch {}
+    return headers;
+  }
 
-    this.saveToStorage();
+  public async syncFromServer(force = false): Promise<void> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (this.isSyncingFromServer) return;
+    const now = Date.now();
+    if (!force && this.lastServerSyncAt > 0 && now - this.lastServerSyncAt < 8000) return;
+    this.isSyncingFromServer = true;
+    this.lastServerSyncAt = now;
+    try {
+      const res = await fetch('/api/branch-state', {
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const st = json?.state;
+      if (!st || typeof st !== 'object') return;
+
+      if (Array.isArray(st.branches) && st.branches.length > 0) {
+        const cleaned = st.branches
+          .filter(
+            (b: BranchRecord) =>
+              b &&
+              typeof b === 'object' &&
+              typeof b.id === 'string' &&
+              typeof b.name === 'string' &&
+              b.id !== 'cab-jember' &&
+              b.slug !== 'nx-jember' &&
+              (b.name || '').trim().toUpperCase() !== 'NX'
+          )
+          .map((b: BranchRecord, idx: number) => ({
+            ...b,
+            slug: b.slug || b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            city: b.city || b.name,
+            sortOrder: typeof b.sortOrder === 'number' ? b.sortOrder : idx + 1,
+            isActive: b.isActive !== undefined ? Boolean(b.isActive) : true,
+            isFrontlineActive: b.isFrontlineActive !== undefined ? Boolean(b.isFrontlineActive) : true,
+            warehouseName: (b.warehouseName || `Gudang ${b.name}`).replace(/Gudang Pusat\s*/gi, 'Gudang ')
+          }));
+        DEFAULT_BRANCHES.forEach(defBr => {
+          if (!cleaned.some((c: BranchRecord) => c.id === defBr.id)) {
+            cleaned.push({ ...defBr });
+          }
+        });
+        if (cleaned.length > 0) this.branches = cleaned;
+      }
+
+      if (st.userBranchPerms && typeof st.userBranchPerms === 'object' && !Array.isArray(st.userBranchPerms)) {
+        this.userBranchPerms = {
+          ...st.userBranchPerms,
+          ...this.userBranchPerms
+        };
+      }
+
+      if (st.entityBranches && typeof st.entityBranches === 'object') {
+        this.entityBranches = {
+          schedules: { ...(st.entityBranches.schedules || {}), ...this.entityBranches.schedules },
+          fleets: { ...(st.entityBranches.fleets || {}), ...this.entityBranches.fleets },
+          crews: { ...(st.entityBranches.crews || {}), ...this.entityBranches.crews },
+          inventory: { ...(st.entityBranches.inventory || {}), ...this.entityBranches.inventory }
+        };
+      }
+
+      this.listeners.forEach(listener => listener());
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('akk-branch-updated'));
+      }
+    } catch {
+      // ignore network error
+    } finally {
+      this.isSyncingFromServer = false;
+    }
+  }
+
+  private scheduleServerPersist() {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      void this.persistToServerNow();
+    }, 250);
+  }
+
+  private async persistToServerNow(): Promise<void> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    try {
+      await fetch('/api/branch-state', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({
+          branches: this.branches,
+          userBranchPerms: this.userBranchPerms,
+          entityBranches: this.entityBranches
+        })
+      });
+    } catch {}
+  }
+
+  public hydrateUserBranchPermissionsFromUsers(
+    users: Array<{ id: string; fullName?: string; role: UserRole; permissions?: UserPermissions }>
+  ) {
+    if (!Array.isArray(users) || users.length === 0) return;
+    let updated = false;
+    users.forEach(u => {
+      if (!u?.id) return;
+      const bp = u.permissions?.branchPermissions;
+      if (bp && typeof bp === 'object' && Object.keys(bp).length > 0) {
+        this.userBranchPerms[u.id] = JSON.parse(JSON.stringify(bp));
+        const sdaEnabled = Boolean(bp['cab-sidoarjo']?.enabled);
+        const bwiEnabled = Boolean(bp['cab-banyuwangi']?.enabled);
+        const sdaDpFull =
+          sdaEnabled &&
+          Boolean(bp['cab-sidoarjo']?.modules?.logistics?.enabled) &&
+          (bp['cab-sidoarjo']?.modules?.logistics?.subMenus?.driver_portal === 'full_access' ||
+            bp['cab-sidoarjo']?.modules?.logistics?.subMenus?.portal_driver === 'full_access');
+        const bwiDpFull =
+          bwiEnabled &&
+          Boolean(bp['cab-banyuwangi']?.modules?.logistics?.enabled) &&
+          (bp['cab-banyuwangi']?.modules?.logistics?.subMenus?.driver_portal === 'full_access' ||
+            bp['cab-banyuwangi']?.modules?.logistics?.subMenus?.portal_driver === 'full_access');
+        const resolvedBranch =
+          sdaDpFull && !bwiDpFull
+            ? 'cab-sidoarjo'
+            : bwiDpFull && !sdaDpFull
+            ? 'cab-banyuwangi'
+            : sdaEnabled && !bwiEnabled
+            ? 'cab-sidoarjo'
+            : bwiEnabled && !sdaEnabled
+            ? 'cab-banyuwangi'
+            : '';
+        if (resolvedBranch) {
+          this.syncCrewBranchIdSilent(u.id, resolvedBranch, u.fullName);
+          this.syncCrewBranchIdSilent(`crw-${u.id}`, resolvedBranch, u.fullName);
+        }
+        updated = true;
+      }
+    });
+    if (updated) {
+      this.listeners.forEach(listener => listener());
+    }
   }
 
   private saveToStorage() {
-    try {
-      localStorage.setItem(LS_BRANCHES_KEY, JSON.stringify(this.branches));
-      localStorage.setItem(LS_ACTIVE_BRANCH_KEY, this.activeBranchId);
-      localStorage.setItem(LS_USER_BRANCH_PERMS_KEY, JSON.stringify(this.userBranchPerms));
-      localStorage.setItem(LS_ENTITY_BRANCH_MAP_KEY, JSON.stringify(this.entityBranches));
-    } catch {}
+    this.clearLegacyLocalStorage();
+    this.scheduleServerPersist();
   }
 
   private notify() {
@@ -366,6 +459,18 @@ class BranchStoreService {
     const rawUserId = (crewId || '').replace(/^crw-/, '');
     const userMap = this.userBranchPerms[rawUserId] || this.userBranchPerms[crewId];
     if (userMap && Object.keys(userMap).length > 0) {
+      const hasPortalFull = (entry?: UserBranchPermissionEntry) =>
+        Boolean(
+          entry?.enabled &&
+            entry?.modules?.logistics?.enabled &&
+            (entry.modules.logistics.subMenus?.driver_portal === 'full_access' ||
+              entry.modules.logistics.subMenus?.portal_driver === 'full_access')
+        );
+      const sdaPortal = hasPortalFull(userMap['cab-sidoarjo']);
+      const bwiPortal = hasPortalFull(userMap['cab-banyuwangi']);
+      if (sdaPortal && !bwiPortal) return 'cab-sidoarjo';
+      if (bwiPortal && !sdaPortal) return 'cab-banyuwangi';
+
       const sdaEnabled = Boolean(userMap['cab-sidoarjo']?.enabled);
       const bwiEnabled = Boolean(userMap['cab-banyuwangi']?.enabled);
       if (sdaEnabled && !bwiEnabled) return 'cab-sidoarjo';
@@ -640,11 +745,15 @@ class BranchStoreService {
     branchPerms: Record<string, UserBranchPermissionEntry>
   ) {
     this.userBranchPerms[userId] = JSON.parse(JSON.stringify(branchPerms));
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(LS_USER_BRANCH_PERMS_KEY, JSON.stringify(this.userBranchPerms));
-      }
-    } catch {}
+    const sdaEnabled = Boolean(branchPerms['cab-sidoarjo']?.enabled);
+    const bwiEnabled = Boolean(branchPerms['cab-banyuwangi']?.enabled);
+    if (sdaEnabled && !bwiEnabled) {
+      this.syncCrewBranchIdSilent(userId, 'cab-sidoarjo');
+      this.syncCrewBranchIdSilent(`crw-${userId}`, 'cab-sidoarjo');
+    } else if (bwiEnabled && !sdaEnabled) {
+      this.syncCrewBranchIdSilent(userId, 'cab-banyuwangi');
+      this.syncCrewBranchIdSilent(`crw-${userId}`, 'cab-banyuwangi');
+    }
     this.notify();
   }
 
@@ -702,7 +811,12 @@ class BranchStoreService {
       let count = 0;
       usersOrTotalCount.forEach(u => {
         if (u.status === 'rejected') return;
-        const perms = this.getUserBranchPermissions(u.id, u.role, u.permissions?.modules);
+        const perms = this.getUserBranchPermissions(
+          u.id,
+          u.role,
+          u.permissions?.modules,
+          u.permissions?.branchPermissions
+        );
         if (perms[branchId]?.enabled) {
           count++;
         }

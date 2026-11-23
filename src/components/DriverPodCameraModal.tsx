@@ -72,6 +72,14 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const cameraSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   // Perform Coordinate & Radius Verification on Open
   useEffect(() => {
@@ -146,9 +154,34 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     }
   }, [stream]);
 
+  // Stop camera tracks synchronously via streamRef
+  const stopCamera = () => {
+    cameraSeqRef.current += 1;
+    const activeStream = streamRef.current || stream;
+    if (activeStream) {
+      activeStream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch {
+          // ignore
+        }
+      });
+    }
+    streamRef.current = null;
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
+    setStream(null);
+  };
+
   // Start device camera with resilient multi-tier fallbacks
   const startCamera = async (mode: 'environment' | 'user') => {
     stopCamera();
+    const requestSeq = ++cameraSeqRef.current;
     setCameraError(null);
     setIsProcessing(true);
 
@@ -176,7 +209,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
       }
 
       // Tier 2: Simple facingMode constraint
-      if (!mediaStream) {
+      if (!mediaStream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: mode },
@@ -189,7 +222,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
       }
 
       // Tier 3: Any video device available (Laptop webcam, basic phone camera)
-      if (!mediaStream) {
+      if (!mediaStream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: true,
@@ -201,14 +234,25 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         }
       }
 
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
       if (!mediaStream) {
         throw lastErr || new Error('Tidak dapat membuka stream video.');
       }
 
+      streamRef.current = mediaStream;
       setStream(mediaStream);
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.muted = true;
         try {
           await videoRef.current.play();
         } catch (playErr) {
@@ -228,11 +272,12 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         }
       }
     } catch (err: unknown) {
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) return;
       console.warn('[DriverCamera] Camera access exception:', err);
       const errName = err instanceof Error ? err.name : '';
       const msg = err instanceof Error ? err.message : String(err);
 
-      // Log camera access error to Firebase / logisticsStore activity log in real-time
+      // Log camera access error to logisticsStore activity log
       try {
         logisticsStore.logActivity(
           'Akses Kamera Ditolak',
@@ -252,52 +297,43 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         msg.includes('SecurityError')
       ) {
         setCameraError(
-          'Akses kamera ditolak oleh Perangkat / OS. Buka Pengaturan HP (Settings -> Apps -> Browser -> Permissions -> Kamera) dan pilih "Izinkan", atau gunakan tombol "Buka Kamera Bawaan HP" di bawah.'
+          'Akses kamera ditolak oleh Perangkat / OS. Buka Pengaturan HP (Settings -> Apps -> Browser -> Permissions -> Kamera) dan pilih "Izinkan", atau gunakan tombol "Buka Kamera HP Langsung" di bawah.'
         );
       } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError' || msg.includes('NotFound')) {
         setCameraError(
-          'Hardware kamera tidak ditemukan di perangkat ini. Silakan gunakan tombol "Buka Kamera Bawaan HP".'
+          'Hardware kamera tidak ditemukan di perangkat ini. Silakan gunakan tombol "Buka Kamera HP Langsung".'
         );
       } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || msg.includes('NotReadable')) {
         setCameraError(
-          'Kamera sedang digunakan oleh aplikasi lain (seperti WhatsApp, Zoom, dll). Tutup aplikasi lain atau gunakan "Buka Kamera Bawaan HP".'
+          'Kamera sedang digunakan oleh aplikasi lain (seperti WhatsApp, Zoom, dll). Tutup aplikasi lain atau gunakan "Buka Kamera HP Langsung".'
         );
       } else if (errName === 'OverconstrainedError' || errName === 'ConstraintNotSatisfiedError') {
         setCameraError(
-          'Format resolusi kamera tidak didukung. Silakan gunakan tombol "Buka Kamera Bawaan HP".'
+          'Format resolusi kamera tidak didukung. Silakan gunakan tombol "Buka Kamera HP Langsung".'
         );
       } else if (msg.includes('NOT_SUPPORTED') || !navigator.mediaDevices) {
         setCameraError(
-          'Akses kamera WebRTC langsung tidak didukung peramban ini. Silakan gunakan tombol "Buka Kamera Bawaan HP".'
+          'Akses kamera WebRTC langsung tidak didukung peramban ini. Silakan gunakan tombol "Buka Kamera HP Langsung".'
         );
       } else {
         setCameraError(
-          'Akses kamera terkendala izin perangkat. Silakan gunakan tombol "Buka Kamera Bawaan HP" di bawah untuk mengambil foto secara langsung.'
+          'Akses kamera terkendala izin perangkat. Silakan gunakan tombol "Buka Kamera HP Langsung" di bawah untuk mengambil foto secara langsung.'
         );
       }
     } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Stop camera tracks
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => {
-        try {
-          track.stop();
-        } catch {
-          // ignore
-        }
-      });
-      setStream(null);
+      if (isOpenRef.current && cameraSeqRef.current === requestSeq) {
+        setIsProcessing(false);
+      } else {
+        setIsProcessing(false);
+      }
     }
   };
 
   // Toggle flash/torch
   const toggleTorch = async () => {
-    if (!stream || !hasTorch) return;
-    const videoTrack = stream.getVideoTracks()[0];
+    const activeStream = streamRef.current || stream;
+    if (!activeStream || !hasTorch) return;
+    const videoTrack = activeStream.getVideoTracks()[0];
     if (videoTrack) {
       try {
         const nextTorch = !isTorchOn;
@@ -316,17 +352,19 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
   const handleFlipCamera = () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
-    startCamera(nextMode);
+    void startCamera(nextMode);
   };
 
   // Mount/Unmount lifecycle
   useEffect(() => {
+    isOpenRef.current = isOpen;
     if (isOpen && !capturedImage) {
-      startCamera(facingMode);
+      void startCamera(facingMode);
     } else {
       stopCamera();
     }
     return () => {
+      isOpenRef.current = false;
       stopCamera();
     };
   }, [isOpen]);
@@ -526,7 +564,8 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
   // Safe Universal Shutter Click: Always operable even if browser WebRTC permission blocked
   const handleShutterClick = () => {
-    if (videoRef.current && videoRef.current.videoWidth > 0 && stream) {
+    const activeStream = streamRef.current || stream;
+    if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.readyState >= 2 && activeStream) {
       handleCaptureFromVideo();
       return;
     }
@@ -543,45 +582,57 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
     if (!file) return;
 
     setIsProcessing(true);
-    extractExifFromFile(file).then(exifMeta => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          // Limit max dimension to 800px for compact storage & fast upload
-          const maxDim = 800;
-          let w = img.width;
-          let h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
-            } else {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
-            }
-          }
-          canvas.width = w;
-          canvas.height = h;
-
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, w, h);
-            const now = new Date();
-            stampWatermark(ctx, w, h, now, exifMeta);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
-            setCapturedImage(dataUrl);
-            setCapturedExif(exifMeta);
-            setCapturedTimestamp(now.toISOString());
-            stopCamera();
-          }
+    setCameraError(null);
+    extractExifFromFile(file)
+      .catch(() => createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR'))
+      .then(exifMeta => {
+        const reader = new FileReader();
+        reader.onerror = () => {
           setIsProcessing(false);
+          setCameraError('Gagal membaca file foto dari perangkat. Silakan coba ulangi.');
         };
-        img.src = reader.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => {
+            setIsProcessing(false);
+            setCameraError('Format foto tidak didukung. Silakan pilih atau ambil foto ulang.');
+          };
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            // Limit max dimension to 800px for compact storage & fast upload
+            const maxDim = 800;
+            let w = img.width || 800;
+            let h = img.height || 600;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            canvas.width = w;
+            canvas.height = h;
+
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              const now = new Date();
+              stampWatermark(ctx, w, h, now, exifMeta);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
+              setCapturedImage(dataUrl);
+              setCapturedExif(exifMeta);
+              setCapturedTimestamp(now.toISOString());
+              stopCamera();
+            }
+            setIsProcessing(false);
+          };
+          img.src = reader.result as string;
+        };
+        reader.readAsDataURL(file);
+      });
+    e.target.value = '';
   };
 
   // Retake photo
@@ -703,16 +754,15 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
                     </p>
                   </div>
 
-                  {/* Direct Action Buttons - Always Operable */}
+                  {/* Direct Action Buttons - Always Operable via native <label> */}
                   <div className="space-y-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                    <label
+                      htmlFor="pod-native-camera-input"
                       className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-95 transition"
                     >
                       <Camera className="w-4 h-4 text-white" />
                       <span className="text-white">Buka Kamera HP Langsung (Aplikasi Kamera)</span>
-                    </button>
+                    </label>
 
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -799,14 +849,23 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         )}
       </div>
 
-      {/* Hidden File Input for Native Camera Snapshot or Upload Fallback */}
+      {/* Accessible Native Camera & Gallery File Inputs */}
       <input
+        id="pod-native-camera-input"
         ref={fileInputRef}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={handleFileChange}
-        className="hidden"
+        className="sr-only"
+      />
+      <input
+        id="pod-gallery-input"
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="sr-only"
       />
 
       {/* Bottom Action Footer Controls */}
@@ -832,17 +891,17 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
         ) : (
           /* Live Shutter & Alternate Capture Options */
           <div className="flex items-center justify-between px-4">
-            {/* Native file upload button */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
+            {/* Native camera / gallery upload trigger via accessible <label> */}
+            <label
+              htmlFor="pod-gallery-input"
               className="flex flex-col items-center justify-center text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white transition cursor-pointer p-2"
-              title="Pilih dari Galeri atau Kamera Bawaan"
+              title="Pilih dari Galeri atau File"
             >
               <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1">
                 <Upload className="w-4 h-4 text-slate-700 dark:text-slate-200" />
               </div>
-              <span className="text-[10px] font-bold">Kamera HP / File</span>
-            </button>
+              <span className="text-[10px] font-bold">Galeri / File</span>
+            </label>
 
             {/* Big Center Shutter Button - ALWAYS ACTIVE & OPERABLE */}
             <div className="flex flex-col items-center">

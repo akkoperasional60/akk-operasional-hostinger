@@ -110,6 +110,29 @@ export const getLocalDateStr = (input?: string | Date): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const sanitizeOperationalPlate = (plate?: string): string => {
+  const clean = String(plate || '').trim();
+  if (!clean || clean === '-') return '-';
+  if (/^FLT-\d+$/i.test(clean) || clean.toUpperCase().endsWith('AKK')) return '-';
+  return clean;
+};
+
+const stripHelperSelfDuplicate = (driverName?: string, helperName?: string, userRole?: string): string | undefined => {
+  const cleanHelper = String(helperName || '').trim();
+  if (!cleanHelper || cleanHelper === '-') return undefined;
+  const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const driverCompact = normCompact(driverName);
+  const roleLower = String(userRole || '').toLowerCase();
+  if (roleLower.includes('helper') && driverCompact && normCompact(cleanHelper) === driverCompact) {
+    return undefined;
+  }
+  const filteredParts = cleanHelper
+    .split(/[,&/]+/)
+    .map(p => p.trim())
+    .filter(p => p && p !== '-' && (!driverCompact || normCompact(p) !== driverCompact));
+  return filteredParts.length > 0 ? filteredParts.join(', ') : undefined;
+};
+
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
   private deletedReportIds: Set<string> = new Set<string>();
@@ -362,6 +385,8 @@ class DriverReportService {
       return {
         ...r,
         id: uniqueId,
+        plateNumber: sanitizeOperationalPlate(r.plateNumber),
+        helperName: stripHelperSelfDuplicate(r.driverName, r.helperName, r.userRole),
         photoUrl: r.photoUrl || photoUrls[0] || null,
         photoUrls,
         latitude: finalLat,
@@ -513,6 +538,8 @@ class DriverReportService {
       : [];
     const newReport: DriverHelperReport = {
       ...report,
+      plateNumber: sanitizeOperationalPlate(report.plateNumber),
+      helperName: stripHelperSelfDuplicate(report.driverName, report.helperName, report.userRole),
       id: uniqueId,
       photoUrl: report.photoUrl || photoUrls[0] || null,
       photoUrls,
@@ -552,9 +579,9 @@ class DriverReportService {
     const targetNameCompact = normCompact(params.driverName);
     const targetPlateNorm = normPlate(params.plateNumber);
 
+    const safePlate = sanitizeOperationalPlate(params.plateNumber);
     const resolveHelperText = (h?: string) => {
-      const clean = String(h || '').trim();
-      return clean && clean !== '-' ? clean : '';
+      return stripHelperSelfDuplicate(params.driverName, h, params.userRole) || '';
     };
 
     const matchesPersonOrShift = (r: DriverHelperReport) => {
@@ -579,7 +606,11 @@ class DriverReportService {
     if (existingIdx >= 0) {
       const existing = list[existingIdx];
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
-      const mergedHelperName = resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined;
+      const nextRole = params.userRole || existing.userRole;
+      const isHelperRole = String(nextRole || '').toLowerCase().includes('helper');
+      const mergedHelperName = isHelperRole
+        ? undefined
+        : (resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined);
       const helperSuffix = mergedHelperName ? ` | Helper: ${mergedHelperName}` : '';
       const mergedPin = '****';
       const updatedNotes = mergedCheckout
@@ -589,9 +620,9 @@ class DriverReportService {
       list[existingIdx] = {
         ...existing,
         driverName: params.driverName || existing.driverName,
-        userRole: params.userRole || existing.userRole,
+        userRole: nextRole,
         helperName: mergedHelperName,
-        plateNumber: params.plateNumber || existing.plateNumber,
+        plateNumber: safePlate !== '-' ? safePlate : sanitizeOperationalPlate(existing.plateNumber),
         areaName: params.areaName || existing.areaName,
         checkoutTimeFormatted: mergedCheckout,
         securityPin: mergedPin,
@@ -610,7 +641,8 @@ class DriverReportService {
       return list[existingIdx];
     }
 
-    const cleanHelper = resolveHelperText(params.helperName) || undefined;
+    const isHelperRole = String(params.userRole || '').toLowerCase().includes('helper');
+    const cleanHelper = isHelperRole ? undefined : (resolveHelperText(params.helperName) || undefined);
     const helperSuffix = cleanHelper ? ` | Helper: ${cleanHelper}` : '';
     const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
@@ -622,7 +654,7 @@ class DriverReportService {
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
       helperName: cleanHelper,
-      plateNumber: params.plateNumber || '-',
+      plateNumber: safePlate,
       category: 'presensi_shift',
       areaName: params.areaName || 'Presensi Operasional DC',
       notes: initialNotes,

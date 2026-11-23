@@ -82,7 +82,7 @@ import {
   UserProfile
 } from '../types';
 import { logisticsStore } from '../services/store';
-import { resolveCanonicalFleetMeta, INITIAL_FLEETS } from '../data/mockData';
+import { resolveCanonicalFleetMeta } from '../data/mockData';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverOfflineSyncService, OfflineTaskAction, DriverSyncState } from '../services/driverOfflineSyncService';
 import { driverChecklistService } from '../services/driverChecklistService';
@@ -98,11 +98,34 @@ import { DriverVehicleChecklistModal } from './DriverVehicleChecklistModal';
 import { DriverCheckinModal } from './DriverCheckinModal';
 import { AndroidApkDownloadModal } from './AndroidApkDownloadModal';
 import { DriverGmapsShareModal, GmapsReportCategory } from './DriverGmapsShareModal';
-import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../utils/areaNormalizer';
+import { getOfficialAreasForBranch, isSidoarjoArea, standardizeAreaName } from '../utils/areaNormalizer';
 import { formKirimStore, FormKirimRecord } from '../services/formKirimStore';
 import { branchStore } from '../services/branchStore';
 import { getScheduleCalendarDateObj } from '../data/adminSchedule';
 import { DriverFormKirimPanel } from './DriverFormKirimPanel';
+
+const isPhantomOperationalPlate = (plate?: string): boolean => {
+  const clean = String(plate || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!clean) return false;
+  return /^FLT-\d+$/i.test(clean) || clean === '*AKK';
+};
+
+const getPortalAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const token =
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+        : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+      '';
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['x-akk-session-token'] = token;
+    }
+  } catch {}
+  return headers;
+};
 
 interface DriverMobileViewProps {
   onBackToPortal?: () => void;
@@ -126,10 +149,10 @@ function getPortalTodayWibIso(): string {
 }
 
 function matchSamePerson(nameA?: string, nameB?: string): boolean {
-  const a = (nameA || '').trim().toLowerCase();
-  const b = (nameB || '').trim().toLowerCase();
+  const a = (nameA || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const b = (nameB || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (!a || !b || a === '-' || b === '-') return false;
-  if (a === b || a.includes(b) || b.includes(a)) return true;
+  if (a === b) return true;
   const compactA = a.replace(/[^a-z0-9]/g, '');
   const compactB = b.replace(/[^a-z0-9]/g, '');
   if (compactA && compactB && compactA === compactB) return true;
@@ -141,9 +164,17 @@ function matchSamePerson(nameA?: string, nameB?: string): boolean {
   ) {
     return true;
   }
-  const tokA = a.split(/\s+/).filter(t => t.length >= 4);
-  const tokB = b.split(/\s+/).filter(t => t.length >= 4);
-  return tokA.length > 0 && tokB.length > 0 && tokA[0] === tokB[0];
+  const tokensA = a.split(/\s+/).filter(Boolean);
+  const tokensB = b.split(/\s+/).filter(Boolean);
+  if (tokensA.length === 1 || tokensB.length === 1) {
+    const single = tokensA.length === 1 ? tokensA[0] : tokensB[0];
+    const multi = tokensA.length === 1 ? tokensB : tokensA;
+    // Hanya cocokkan nama tunggal panjang (>= 5 huruf) dengan bagian akhir/lengkap nama, bukan nama depan umum seperti "bayu"
+    return single.length >= 5 && multi.some(t => t === single || (t.length >= 5 && (t.startsWith(single) || single.startsWith(t))));
+  }
+  const shorter = tokensA.length <= tokensB.length ? tokensA : tokensB;
+  const longer = tokensA.length <= tokensB.length ? tokensB : tokensA;
+  return shorter.every(t => longer.includes(t));
 }
 
 export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
@@ -173,7 +204,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // State
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
-  const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+  const [fleets, setFleets] = useState<Fleet[]>(() =>
+    logisticsStore.getFleets().filter(f => !isPhantomOperationalPlate(f.plateNumber))
+  );
+  const [branchSyncTick, setBranchSyncTick] = useState<number>(0);
 
   const syncedCrew = useMemo(() => {
     return logisticsStore.getActiveDriverCrew();
@@ -349,25 +383,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'scheduled' | 'delivered'>('active');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState<boolean>(false);
-  const [bottomNav, setBottomNav] = useState<DriverPortalTab>(() => {
-    try {
-      const pendingTab = localStorage.getItem('akk_driver_portal_open_tab');
-      if (pendingTab === 'form_kirim') {
-        localStorage.removeItem('akk_driver_portal_open_tab');
-        return 'form_kirim';
-      }
-    } catch {}
-    return 'deliveries';
-  });
+  const [bottomNav, setBottomNav] = useState<DriverPortalTab>('deliveries');
 
   useEffect(() => {
-    try {
-      const pendingTab = localStorage.getItem('akk_driver_portal_open_tab');
-      if (pendingTab === 'form_kirim') {
-        localStorage.removeItem('akk_driver_portal_open_tab');
-        setBottomNav('form_kirim');
-      }
-    } catch {}
+    void logisticsStore.refreshUsersFromHostinger();
+    void branchStore.syncFromServer();
+    void driverWaybillService.syncFromServer();
+    void driverShiftService.syncFromServer();
     return formKirimStore.subscribe(() => {
       setFormKirimList(formKirimStore.getAll());
     });
@@ -764,13 +786,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return Array.from(scopes);
   };
 
+  const [portalScopedCrewState, setPortalScopedCrewState] = useState<Record<string, string>>({});
+  const portalScopedCrewStateRef = useRef<Record<string, string>>({});
+  const [standbyCrewSnapshotState, setStandbyCrewSnapshotState] = useState<any>(null);
+  const standbyCrewSnapshotRef = useRef<any>(null);
+  const [activeFormKirimIdState, setActiveFormKirimIdState] = useState<string>('');
+
+  const syncPortalFlowToMysql = (payload: {
+    sharedScheduleFlowMap?: Record<string, any>;
+    keluarArgoMap?: Record<string, string>;
+    sjKeluarSistemMap?: Record<string, string>;
+    activeFormKirimByCrew?: Record<string, string>;
+    activeScheduleByCrew?: Record<string, string>;
+    scopedCrewState?: Record<string, string>;
+    pendingTabByUser?: Record<string, string>;
+    standbyCrewSnapshot?: any;
+  }) => {
+    void fetch('/api/portal-flow-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getPortalAuthHeaders(),
+      body: JSON.stringify(payload)
+    }).catch(() => {});
+  };
+
   const readDriverScopedValue = (prefix: string): string => {
     try {
       for (const scope of getDriverStorageScopes()) {
-        const val =
-          (typeof localStorage !== 'undefined' ? localStorage.getItem(`${prefix}${scope}`) : null) ||
-          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`${prefix}${scope}`) : null);
-        if (val) return val;
+        const val = portalScopedCrewStateRef.current[`${prefix}${scope}`];
+        if (val !== undefined && val !== '') return val;
       }
     } catch {}
     return '';
@@ -778,9 +822,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   const writeDriverScopedValue = (prefix: string, value: string): void => {
     try {
+      const patch: Record<string, string> = {};
       for (const scope of getDriverStorageScopes()) {
-        if (typeof localStorage !== 'undefined') localStorage.setItem(`${prefix}${scope}`, value);
-        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(`${prefix}${scope}`, value);
+        patch[`${prefix}${scope}`] = value;
+      }
+      if (Object.keys(patch).length > 0) {
+        portalScopedCrewStateRef.current = { ...portalScopedCrewStateRef.current, ...patch };
+        setPortalScopedCrewState(portalScopedCrewStateRef.current);
+        syncPortalFlowToMysql({ scopedCrewState: patch });
       }
     } catch {}
   };
@@ -806,25 +855,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   // Alur Baru: Setelah Check-In -> Pilih/Kunci Armada -> Isi Checklist Armada -> Simpan -> Persiapan Keluar -> SJ Keluar & Gate-Out -> Konfirmasi Tiba di Gudang
-  const [selectedFleetId, setSelectedFleetId] = useState<string>(() => {
-    return readDriverScopedValue('akk_locked_fleet_');
-  });
-  const [isFleetLockedAfterCheckin, setIsFleetLockedAfterCheckin] = useState<boolean>(() => {
-    return readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
-  });
-  const [isChecklistCompletedAfterCheckin, setIsChecklistCompletedAfterCheckin] = useState<boolean>(() => {
-    const todayStr = getLocalDateStr();
-    const todayUtc = new Date().toISOString().slice(0, 10);
-    const val = readDriverScopedValue('akk_checklist_done_');
-    return val === todayStr || val === todayUtc;
-  });
-  const [isHelperPositionSkipped, setIsHelperPositionSkipped] = useState<boolean>(() => {
-    return readDriverScopedValue('akk_helper_skipped_') === 'true';
-  });
+  const [selectedFleetId, setSelectedFleetId] = useState<string>('');
+  const [isFleetLockedAfterCheckin, setIsFleetLockedAfterCheckin] = useState<boolean>(false);
+  const [isChecklistCompletedAfterCheckin, setIsChecklistCompletedAfterCheckin] = useState<boolean>(false);
+  const [isHelperPositionSkipped, setIsHelperPositionSkipped] = useState<boolean>(false);
   const [isPostCheckinFleetModalOpen, setIsPostCheckinFleetModalOpen] = useState<boolean>(false);
   const [waybillRefreshTick, setWaybillRefreshTick] = useState<number>(0);
 
-  // Sinkronisasi Status Bersama (Driver & Helper dalam 1 Armada / Jadwal yang sama)
+  // Sinkronisasi Status Bersama (Driver & Helper dalam 1 Armada / Jadwal yang sama) - Murni MySQL
   const [sharedScheduleFlowMap, setSharedScheduleFlowMap] = useState<Record<string, {
     scheduleId: string;
     date: string;
@@ -840,61 +878,89 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     gateOutTimestamp?: string;
     argoArrivalTimestamp?: string;
     argoArrivalBy?: string;
-  }>>(() => {
-    try {
-      const raw = localStorage.getItem('akk_shared_schedule_flow_v1');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const syncPortalFlowToMysql = (payload: {
-    sharedScheduleFlowMap?: Record<string, any>;
-    keluarArgoMap?: Record<string, string>;
-    sjKeluarSistemMap?: Record<string, string>;
-  }) => {
-    void fetch('/api/portal-flow-state', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }).catch(() => {});
-  };
+  }>>({});
 
   useEffect(() => {
+    // Hapus sisa data operasional lama di localStorage agar 100% bersumber dari MySQL
+    try {
+      if (typeof localStorage !== 'undefined') {
+        Object.keys(localStorage).forEach(k => {
+          if (
+            k === 'akk_driver_portal_open_tab' ||
+            k === 'akk_shared_schedule_flow_v1' ||
+            k === 'akk_driver_keluar_argo_v1' ||
+            k === 'akk_driver_sj_sistem_v1' ||
+            k === 'akk_portal_active_schedule_id' ||
+            k === 'akk_active_form_kirim_id' ||
+            k === 'akk_standby_crew_snapshot' ||
+            k === 'akk_admin_schedule_weeks_cache' ||
+            k.startsWith('akk_admin_schedule_cache_') ||
+            k.startsWith('akk_locked_fleet_') ||
+            k.startsWith('akk_fleet_locked_flag_') ||
+            k.startsWith('akk_checklist_done_') ||
+            k.startsWith('akk_helper_skipped_') ||
+            k.startsWith('akk_confirmed_arrival_')
+          ) {
+            localStorage.removeItem(k);
+          }
+        });
+      }
+    } catch {}
+
     let active = true;
-    void fetch('/api/portal-flow-state', { credentials: 'same-origin' })
+    void fetch('/api/portal-flow-state', {
+      credentials: 'same-origin',
+      headers: getPortalAuthHeaders()
+    })
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (!active || !data?.success || !data?.state) return;
         const st = data.state;
         if (st.sharedScheduleFlowMap && Object.keys(st.sharedScheduleFlowMap).length > 0) {
-          setSharedScheduleFlowMap(prev => {
-            const merged = { ...prev, ...st.sharedScheduleFlowMap };
-            try {
-              localStorage.setItem('akk_shared_schedule_flow_v1', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
+          setSharedScheduleFlowMap(prev => ({ ...prev, ...st.sharedScheduleFlowMap }));
         }
         if (st.keluarArgoMap && Object.keys(st.keluarArgoMap).length > 0) {
-          setKeluarArgoMap(prev => {
-            const merged = { ...prev, ...st.keluarArgoMap };
-            try {
-              localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
+          setKeluarArgoMap(prev => ({ ...prev, ...st.keluarArgoMap }));
         }
         if (st.sjKeluarSistemMap && Object.keys(st.sjKeluarSistemMap).length > 0) {
-          setSjKeluarSistemMap(prev => {
-            const merged = { ...prev, ...st.sjKeluarSistemMap };
-            try {
-              localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
+          setSjKeluarSistemMap(prev => ({ ...prev, ...st.sjKeluarSistemMap }));
+        }
+        if (st.scopedCrewState && Object.keys(st.scopedCrewState).length > 0) {
+          portalScopedCrewStateRef.current = { ...portalScopedCrewStateRef.current, ...st.scopedCrewState };
+          setPortalScopedCrewState(portalScopedCrewStateRef.current);
+          const todayStr = getLocalDateStr();
+          const todayUtc = new Date().toISOString().slice(0, 10);
+          const savedFleet = readDriverScopedValue('akk_locked_fleet_');
+          const savedLocked = readDriverScopedValue('akk_fleet_locked_flag_') === 'true';
+          const savedChecklistVal = readDriverScopedValue('akk_checklist_done_');
+          const savedHelperSkip = readDriverScopedValue('akk_helper_skipped_') === 'true';
+          const savedArrivalVal = readDriverScopedValue('akk_confirmed_arrival_');
+          if (savedFleet) setSelectedFleetId(savedFleet);
+          if (savedLocked) setIsFleetLockedAfterCheckin(true);
+          if (savedChecklistVal === todayStr || savedChecklistVal === todayUtc) {
+            setIsChecklistCompletedAfterCheckin(true);
+          }
+          if (savedHelperSkip) setIsHelperPositionSkipped(true);
+          if (savedArrivalVal === todayStr || savedArrivalVal === todayUtc) {
+            setHasConfirmedArrivalFlag(true);
+          }
+        }
+        if (st.standbyCrewSnapshot) {
+          standbyCrewSnapshotRef.current = st.standbyCrewSnapshot;
+          setStandbyCrewSnapshotState(st.standbyCrewSnapshot);
+        }
+        const crewKey = String(currentUser?.id || selectedDriverId || portalDisplayName || 'default').trim().toLowerCase();
+        const formIdFromServer = st.activeFormKirimByCrew?.[crewKey] || st.activeFormKirimByCrew?.default || '';
+        if (formIdFromServer) setActiveFormKirimIdState(formIdFromServer);
+        const schedIdFromServer = st.activeScheduleByCrew?.[crewKey] || '';
+        if (schedIdFromServer) {
+          portalActiveReplacedRef.current = schedIdFromServer;
+          setPortalActiveReplacedScheduleId(schedIdFromServer);
+        }
+        const pendingTab = st.pendingTabByUser?.[crewKey] || st.pendingTabByUser?.default;
+        if (pendingTab === 'form_kirim') {
+          setBottomNav('form_kirim');
+          syncPortalFlowToMysql({ pendingTabByUser: { [crewKey]: '', default: '' } });
         }
       })
       .catch(() => {});
@@ -935,9 +1001,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         next[id] = entry;
         changedSubset[id] = entry;
       });
-      try {
-        localStorage.setItem('akk_shared_schedule_flow_v1', JSON.stringify(next));
-      } catch {}
       syncPortalFlowToMysql({ sharedScheduleFlowMap: changedSubset });
       return next;
     });
@@ -1529,24 +1592,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return null;
   }, [fleets, activeShift, isFleetLockedAfterCheckin, selectedFleetId, primarySharedSchedule, sharedScheduleFlowMap]);
 
-  // Status Persiapan Keluar & SJ Keluar
-  const [keluarArgoMap, setKeluarArgoMap] = useState<Record<string, string>>(() => {
-    try {
-      const saved = localStorage.getItem('akk_driver_keluar_argo_v1');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const [sjKeluarSistemMap, setSjKeluarSistemMap] = useState<Record<string, string>>(() => {
-    try {
-      const saved = localStorage.getItem('akk_driver_sj_sistem_v1');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  // Status Persiapan Keluar & SJ Keluar (Disinkronkan dari MySQL /api/portal-flow-state)
+  const [keluarArgoMap, setKeluarArgoMap] = useState<Record<string, string>>({});
+  const [sjKeluarSistemMap, setSjKeluarSistemMap] = useState<Record<string, string>>({});
 
   // Latest vehicle checklist for current driver/helper or their shared fleet/schedule partner
   const latestChecklist = useMemo(() => {
@@ -1615,19 +1663,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
     const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
 
-    const matchingPreTrip = checklists.find(c => {
-      if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
-      const cName = (c.driverName || '').trim().toLowerCase();
-      if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
-      if (primarySharedSchedule) {
-        if (primarySharedSchedule.crewId && c.driverId === primarySharedSchedule.crewId) return true;
-        if (primarySharedSchedule.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) return true;
-        if (partnerDriverLower && cName === partnerDriverLower) return true;
-        if (partnerHelperLower && cName === partnerHelperLower) return true;
-        if (assignedFleet && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)) return true;
-      }
-      return false;
-    });
+    const matchingPreTrip = activeShift
+      ? checklists.find(c => {
+          if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
+          const cName = (c.driverName || '').trim().toLowerCase();
+          if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
+          if (primarySharedSchedule) {
+            if (primarySharedSchedule.crewId && c.driverId === primarySharedSchedule.crewId) return true;
+            if (primarySharedSchedule.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) return true;
+            if (partnerDriverLower && cName === partnerDriverLower) return true;
+            if (partnerHelperLower && cName === partnerHelperLower) return true;
+            if (assignedFleet && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)) return true;
+          }
+          return false;
+        })
+      : undefined;
 
     const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
     const isSameDayFlow = Boolean(sharedFlow?.date === todayStr || sharedFlow?.date === todayUtc);
@@ -1747,6 +1797,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const unsub = branchStore.subscribe(() => {
       const id = branchStore.getSelectedOriginBranchId();
       if (id && id !== 'ALL') setGlobalOriginBranchId(id);
+      setBranchSyncTick(t => t + 1);
     });
     return unsub;
   }, []);
@@ -1775,7 +1826,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (bwiAccess && !sdaAccess) return 'cab-banyuwangi';
 
     return logisticsStore.getCrewUserPrimaryBranchId(u);
-  }, [currentUser, spvCrewFilter, globalOriginBranchId]);
+  }, [currentUser, spvCrewFilter, globalOriginBranchId, branchSyncTick]);
 
   const effectivePortalBranchRef = useRef<string>(effectivePortalBranchId);
   useEffect(() => {
@@ -1783,13 +1834,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }, [effectivePortalBranchId]);
 
   // ID jadwal yang baru saja digantikan / di-rolling di portal hari ini agar kartu bawah ('Aktif (1)') langsung berubah sesuai area barunya
-  const [portalActiveReplacedScheduleId, setPortalActiveReplacedScheduleId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('akk_portal_active_schedule_id') || '';
-    } catch {
-      return '';
-    }
-  });
+  const [portalActiveReplacedScheduleId, setPortalActiveReplacedScheduleId] = useState<string>('');
   const portalActiveReplacedRef = useRef<string>(portalActiveReplacedScheduleId);
   useEffect(() => {
     portalActiveReplacedRef.current = portalActiveReplacedScheduleId;
@@ -1797,25 +1842,24 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Validasi agar ID jadwal aktif yang tersimpan tidak merembes ke akun driver/helper lain
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('akk_portal_active_schedule_id');
-      if (saved) {
-        const sch = logisticsStore.getSchedules().find(s => s.id === saved);
-        const accName = (portalDisplayName || currentUser?.fullName || '').trim().toLowerCase();
-        if (sch && accName) {
-          const isAssigned =
-            (sch.backupCrewName && sch.backupCrewName.toLowerCase().includes(accName)) ||
-            (sch.crew?.name && sch.crew.name.toLowerCase().includes(accName)) ||
-            (sch.crewHelper?.name && sch.crewHelper.name.toLowerCase().includes(accName)) ||
-            (sch.crewHelper2?.name && sch.crewHelper2.name.toLowerCase().includes(accName));
-          if (!isAssigned) {
-            localStorage.removeItem('akk_portal_active_schedule_id');
-            setPortalActiveReplacedScheduleId('');
-            portalActiveReplacedRef.current = '';
-          }
+    const saved = portalActiveReplacedRef.current;
+    if (saved) {
+      const sch = logisticsStore.getSchedules().find(s => s.id === saved);
+      const accName = (portalDisplayName || currentUser?.fullName || '').trim().toLowerCase();
+      if (sch && accName) {
+        const isAssigned =
+          (sch.backupCrewName && sch.backupCrewName.toLowerCase().includes(accName)) ||
+          (sch.crew?.name && sch.crew.name.toLowerCase().includes(accName)) ||
+          (sch.crewHelper?.name && sch.crewHelper.name.toLowerCase().includes(accName)) ||
+          (sch.crewHelper2?.name && sch.crewHelper2.name.toLowerCase().includes(accName));
+        if (!isAssigned) {
+          const crewKey = String(currentUser?.id || selectedDriverId || portalDisplayName || 'default').trim().toLowerCase();
+          setPortalActiveReplacedScheduleId('');
+          portalActiveReplacedRef.current = '';
+          syncPortalFlowToMysql({ activeScheduleByCrew: { [crewKey]: '' } });
         }
       }
-    } catch {}
+    }
   }, [currentUser?.id, currentUser?.fullName, portalDisplayName]);
 
   const isScheduleMatchingTargetDate = (s: Schedule, targetIso: string): boolean => {
@@ -1991,59 +2035,54 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         logisticsStore.updateSchedule(sourceDelivery.id, sourcePatch);
       }
 
-      // 3. Sinkronkan ke cache minggu Admin & snapshot agar langsung muncul di Jadwal & Penugasan Armada
+      // 3. Sinkronkan ke minggu Admin di logisticsStore (MySQL-backed)
       try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
-            const rawWeeks = localStorage.getItem(k);
-            if (!rawWeeks) continue;
-            const parsedWeeks = JSON.parse(rawWeeks);
-            if (Array.isArray(parsedWeeks)) {
-              const updatedWeeks = parsedWeeks.map((w: any) => ({
-                ...w,
-                days: Array.isArray(w.days)
-                  ? w.days.map((d: any) => ({
-                      ...d,
-                      pengiriman: Array.isArray(d.pengiriman)
-                        ? d.pengiriman.map((p: any) => {
-                            if (p.id === targetSchedule.id || (p.area === targetSchedule.areaName && d.dateString === standbyPortalInfo.dateString)) {
-                              return {
-                                ...p,
-                                backupCrewId: crewAObj.id,
-                                backupCrewName: crewAObj.name,
-                                backupPosition: urgentRollingModal.targetPosition,
-                                backupTargetName: crewBName
-                              };
-                            }
-                            if (
-                              urgentRollingModal.rollingMode === 'swap' &&
-                              (p.id === sourceDelivery.id || (p.area === sourceDelivery.areaName && d.dateString === standbyPortalInfo.dateString))
-                            ) {
-                              return {
-                                ...p,
-                                backupCrewId: crewBObj.id,
-                                backupCrewName: crewBObj.name,
-                                backupPosition: urgentRollingModal.sourcePosition,
-                                backupTargetName: crewAName
-                              };
-                            }
-                            return p;
-                          })
-                        : d.pengiriman
-                    }))
-                  : w.days
-              }));
-              localStorage.setItem(k, JSON.stringify(updatedWeeks));
-            }
-          }
+        const refDate = targetSchedule.departureDate ? new Date(targetSchedule.departureDate) : new Date();
+        const yr = !isNaN(refDate.getTime()) ? refDate.getFullYear() : new Date().getFullYear();
+        const mo = !isNaN(refDate.getTime()) ? refDate.getMonth() : new Date().getMonth();
+        const cachedWeeks = logisticsStore.getAdminScheduleWeeks(yr, mo);
+        if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0) {
+          const updatedWeeks = cachedWeeks.map((w: any) => ({
+            ...w,
+            days: Array.isArray(w.days)
+              ? w.days.map((d: any) => ({
+                  ...d,
+                  pengiriman: Array.isArray(d.pengiriman)
+                    ? d.pengiriman.map((p: any) => {
+                        if (p.id === targetSchedule.id || (p.area === targetSchedule.areaName && d.dateString === standbyPortalInfo.dateString)) {
+                          return {
+                            ...p,
+                            backupCrewId: crewAObj.id,
+                            backupCrewName: crewAObj.name,
+                            backupPosition: urgentRollingModal.targetPosition,
+                            backupTargetName: crewBName
+                          };
+                        }
+                        if (
+                          urgentRollingModal.rollingMode === 'swap' &&
+                          (p.id === sourceDelivery.id || (p.area === sourceDelivery.areaName && d.dateString === standbyPortalInfo.dateString))
+                        ) {
+                          return {
+                            ...p,
+                            backupCrewId: crewBObj.id,
+                            backupCrewName: crewBObj.name,
+                            backupPosition: urgentRollingModal.sourcePosition,
+                            backupTargetName: crewAName
+                          };
+                        }
+                        return p;
+                      })
+                    : d.pengiriman
+                }))
+              : w.days
+          }));
+          logisticsStore.saveAdminScheduleWeeks(yr, mo, updatedWeeks);
         }
       } catch {}
 
       // 4. Arahkan kartu aktif di bawah langsung ke Rute Tujuan (targetSchedule.id) tempat Kru A menggantikan
-      try {
-        localStorage.setItem('akk_portal_active_schedule_id', targetSchedule.id);
-      } catch {}
+      const crewKey = String(currentUser?.id || selectedDriverId || portalDisplayName || 'default').trim().toLowerCase();
+      syncPortalFlowToMysql({ activeScheduleByCrew: { [crewKey]: targetSchedule.id } });
       portalActiveReplacedRef.current = targetSchedule.id;
       setPortalActiveReplacedScheduleId(targetSchedule.id);
 
@@ -2086,7 +2125,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const newHelper2 = urgentRollingModal.helper2Id
       ? crews.find(c => c.id === urgentRollingModal.helper2Id)
       : undefined;
-    const fleetPool = fleets.length > 0 ? fleets : INITIAL_FLEETS;
+    const fleetPool = fleets.filter(f => !isPhantomOperationalPlate(f.plateNumber));
     const newFleetRaw =
       fleetPool.find(f => f.id === urgentRollingModal.fleetId) ||
       sourceDelivery.fleet ||
@@ -2465,19 +2504,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
         const sameDayHelperShifts = sameDayShifts.filter(s => {
           if (s.checkinRole !== 'helper') return false;
+          const sPlateNorm = normPlateStr(s.plateNumber);
+          const plateConflicts = Boolean(
+            shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm !== shiftPlateNorm
+          );
+          if (plateConflicts) return false;
           if (primaryDriverShift && s.pairedDriverId && s.pairedDriverId === primaryDriverShift.driverId) return true;
           if (primaryDriverShift && s.pairedDriverName && doesCrewNameMatch(s.pairedDriverName, primaryDriverShift.driverName)) return true;
           if (shiftItem.fleetId && s.fleetId && s.fleetId === shiftItem.fleetId) return true;
-          const sPlateNorm = normPlateStr(s.plateNumber);
           if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm === shiftPlateNorm) return true;
-          return Boolean(shiftAreaStd && standardizeAreaName(s.selectedArea || '') === shiftAreaStd);
+          return Boolean(
+            shiftAreaStd &&
+              standardizeAreaName(s.selectedArea || '') === shiftAreaStd &&
+              (!shiftItem.branchId || !s.branchId || shiftItem.branchId === s.branchId)
+          );
         });
 
         const isHelperCheckin = shiftItem.checkinRole === 'helper';
         const resolvedDriverName =
           primaryDriverShift?.driverName ||
           (isHelperCheckin && shiftItem.pairedDriverName ? shiftItem.pairedDriverName : '') ||
-          (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || portalDisplayName);
+          (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || '');
 
         const helperNamesPool: string[] = [];
         const pushHelperName = (n?: string) => {
@@ -2493,7 +2540,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         if (isHelperCheckin) {
           pushHelperName(shiftItem.driverName);
           pushHelperName(shiftItem.helper1Name);
-          pushHelperName(portalDisplayName);
         } else {
           pushHelperName(shiftItem.helper1Name);
           pushHelperName(shiftItem.helper2Name);
@@ -2508,14 +2554,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           if ((s.departureDate || s.createdAt || '').slice(0, 10) !== (shiftItem.date || todayIsoLocal)) return false;
           const areaMatch = standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd;
           const sPlateNorm = normPlateStr(s.fleet?.plateNumber);
-          const samePortalFleet = Boolean(
-            s.id.startsWith('PORTAL-') &&
-              shiftPlateNorm &&
-              shiftPlateNorm !== '-' &&
-              sPlateNorm === shiftPlateNorm
-          );
+          const plateMatch = Boolean(shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm === shiftPlateNorm);
+          const samePortalFleet = Boolean(s.id.startsWith('PORTAL-') && plateMatch);
           if (!areaMatch && !samePortalFleet) return false;
-          if (!isManagerPortal) return true;
+          if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && !plateMatch) return false;
+          if (plateMatch || (shiftFleetObj?.id && s.fleetId === shiftFleetObj.id)) return true;
           return (
             doesCrewNameMatch(s.crew?.name || '', resolvedDriverName) ||
             doesCrewNameMatch(s.crewHelper?.name || '', resolvedHelper1Name) ||
@@ -2576,6 +2619,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               ? 'delivered'
               : existing.status;
 
+          const shouldClearStaleDriverBackup = Boolean(
+            existing.backupCrewName &&
+              (!existing.backupPosition || existing.backupPosition === 'driver') &&
+              nextDriverCrew?.name &&
+              nextDriverCrew.name !== '-' &&
+              !doesCrewNameMatch(existing.backupCrewName, nextDriverCrew.name) &&
+              (Boolean(primaryDriverShift) ||
+                nextStatus === 'in_transit' ||
+                nextStatus === 'picked_up' ||
+                nextStatus === 'delivered' ||
+                (existing.backupTargetName && !doesCrewNameMatch(existing.backupTargetName, nextDriverCrew.name)))
+          );
+
           const enrichedExisting: Schedule = {
             ...existing,
             areaName: shiftItem.selectedArea,
@@ -2602,6 +2658,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   rating: 5
                 }
               : existing.crewHelper2,
+            ...(shouldClearStaleDriverBackup
+              ? {
+                  backupCrewId: undefined,
+                  backupCrewName: undefined,
+                  backupPosition: undefined,
+                  backupTargetName: undefined
+                }
+              : {}),
             status: nextStatus,
             actualArrival: existing.actualArrival || shiftItem.arrivedAtWarehouseAt
           };
@@ -2792,14 +2856,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         setIsDriverLoggedIn(true);
       }
       setCrews(logisticsStore.getCrews());
-      setFleets(logisticsStore.getFleets());
+      setFleets(logisticsStore.getFleets().filter(f => !isPhantomOperationalPlate(f.plateNumber)));
+      setBranchSyncTick(t => t + 1);
       setChecklists(driverChecklistService.getChecklists());
-      try {
-        const rawArgo = localStorage.getItem('akk_driver_keluar_argo_v1');
-        if (rawArgo) setKeluarArgoMap(JSON.parse(rawArgo));
-        const rawShared = localStorage.getItem('akk_shared_schedule_flow_v1');
-        if (rawShared) setSharedScheduleFlowMap(JSON.parse(rawShared));
-      } catch {}
       setWaybillRefreshTick(t => t + 1);
       loadDeliveriesRef.current(true);
     });
@@ -3232,10 +3291,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
 
     // Cek apakah baru saja klik "Simpan Form Kirim" dari halaman Form Kirim — WAJIB cocok dengan area aktif/hari ini kru!
-    let preferredId = '';
-    try {
-      preferredId = localStorage.getItem('akk_active_form_kirim_id') || '';
-    } catch {}
+    const preferredId = activeFormKirimIdState || '';
     if (preferredId) {
       const explicitRecord = formKirimList.find(
         fk => fk.id === preferredId && (fk.invoiceItems?.length || 0) > 0
@@ -3665,12 +3721,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Sistem Integrasi Kru Free / Stand By di Gudang (Sinkron dengan Tabel Jadwal & Penugasan Admin & Terpisah per Cabang)
   const standbyPortalInfo = useMemo(() => {
-    // 1. Cek apakah ada snapshot langsung dari Jadwal & Penugasan Admin
-    let snapshot: any = null;
-    try {
-      const raw = localStorage.getItem('akk_standby_crew_snapshot');
-      if (raw) snapshot = JSON.parse(raw);
-    } catch {}
+    // 1. Ambil snapshot langsung dari state tersinkronisasi MySQL (/api/portal-flow-state)
+    const snapshot: any = standbyCrewSnapshotState || standbyCrewSnapshotRef.current || null;
 
     // 2. Bangun total pool kru aktif (Driver & Helper) khusus sesuai cabang aktif (effectivePortalBranchId: Cabang Nusantara vs Cabang Sidoarjo)
     const pool: Array<{
@@ -4147,13 +4199,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     }
 
-    // Update snapshot & cached admin weeks in localStorage so Jadwal & Penugasan Admin (kolom BACK UP / MENGGANTIKAN & KRU FREE) langsung tersinkronisasi
+    // Update snapshot MySQL (/api/portal-flow-state) & cached admin weeks di logisticsStore
     try {
-      const rawSnap = localStorage.getItem('akk_standby_crew_snapshot');
-      if (rawSnap) {
-        const parsedSnap = JSON.parse(rawSnap);
-        if (Array.isArray(parsedSnap.pengiriman)) {
-          parsedSnap.pengiriman = parsedSnap.pengiriman.map((p: any, idx: number) => {
+      const currentSnap = standbyCrewSnapshotRef.current;
+      if (currentSnap && Array.isArray(currentSnap.pengiriman)) {
+        const nextSnap = {
+          ...currentSnap,
+          pengiriman: currentSnap.pengiriman.map((p: any, idx: number) => {
             const isTarget =
               (targetSch && p.id === targetSch.id) ||
               (targetSch && p.area === targetSch.areaName) ||
@@ -4175,51 +4227,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               backupPosition: standbyReplaceForm.replacePosition,
               backupTargetName: previousCrewName
             };
-          });
-          localStorage.setItem('akk_standby_crew_snapshot', JSON.stringify(parsedSnap));
-        }
+          })
+        };
+        standbyCrewSnapshotRef.current = nextSnap;
+        setStandbyCrewSnapshotState(nextSnap);
+        syncPortalFlowToMysql({ standbyCrewSnapshot: nextSnap });
       }
 
-      // Sinkronkan juga ke cache minggu Admin (akk_admin_schedule_weeks_cache & akk_admin_schedule_cache_*)
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
-          const rawWeeks = localStorage.getItem(k);
-          if (!rawWeeks) continue;
-          const parsedWeeks = JSON.parse(rawWeeks);
-          if (Array.isArray(parsedWeeks)) {
-            const updatedWeeks = parsedWeeks.map((w: any) => ({
-              ...w,
-              days: Array.isArray(w.days)
-                ? w.days.map((d: any) => ({
-                    ...d,
-                    pengiriman: Array.isArray(d.pengiriman)
-                      ? d.pengiriman.map((p: any) => {
-                          if (targetSch && (p.id === targetSch.id || (p.area === targetSch.areaName && d.dateString === standbyPortalInfo.dateString))) {
-                            return {
-                              ...p,
-                              backupCrewId: matchedCrewObj.id,
-                              backupCrewName: matchedCrewObj.name,
-                              backupPosition: standbyReplaceForm.replacePosition,
-                              backupTargetName: previousCrewName
-                            };
-                          }
-                          return p;
-                        })
-                      : d.pengiriman
-                  }))
-                : w.days
-            }));
-            localStorage.setItem(k, JSON.stringify(updatedWeeks));
-          }
-        }
+      const refDate = targetSch?.departureDate ? new Date(targetSch.departureDate) : new Date();
+      const yr = !isNaN(refDate.getTime()) ? refDate.getFullYear() : new Date().getFullYear();
+      const mo = !isNaN(refDate.getTime()) ? refDate.getMonth() : new Date().getMonth();
+      const cachedWeeks = logisticsStore.getAdminScheduleWeeks(yr, mo);
+      if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0) {
+        const updatedWeeks = cachedWeeks.map((w: any) => ({
+          ...w,
+          days: Array.isArray(w.days)
+            ? w.days.map((d: any) => ({
+                ...d,
+                pengiriman: Array.isArray(d.pengiriman)
+                  ? d.pengiriman.map((p: any) => {
+                      if (targetSch && (p.id === targetSch.id || (p.area === targetSch.areaName && d.dateString === standbyPortalInfo.dateString))) {
+                        return {
+                          ...p,
+                          backupCrewId: matchedCrewObj.id,
+                          backupCrewName: matchedCrewObj.name,
+                          backupPosition: standbyReplaceForm.replacePosition,
+                          backupTargetName: previousCrewName
+                        };
+                      }
+                      return p;
+                    })
+                  : d.pengiriman
+              }))
+            : w.days
+        }));
+        logisticsStore.saveAdminScheduleWeeks(yr, mo, updatedWeeks);
       }
     } catch {}
 
     if (targetSch?.id) {
-      try {
-        localStorage.setItem('akk_portal_active_schedule_id', targetSch.id);
-      } catch {}
+      const crewKey = String(currentUser?.id || selectedDriverId || portalDisplayName || 'default').trim().toLowerCase();
+      syncPortalFlowToMysql({ activeScheduleByCrew: { [crewKey]: targetSch.id } });
       portalActiveReplacedRef.current = targetSch.id;
       setPortalActiveReplacedScheduleId(targetSch.id);
     }
@@ -4284,18 +4332,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     });
 
-    // Update snapshot & cached admin weeks in localStorage so Jadwal & Penugasan Admin (kolom BACK UP / MENGGANTIKAN & KRU FREE) langsung tersinkronisasi
+    // Update snapshot di MySQL (/api/portal-flow-state) & weeks di logisticsStore
     try {
-      const rawSnap = localStorage.getItem('akk_standby_crew_snapshot');
-      if (rawSnap) {
-        const parsedSnap = JSON.parse(rawSnap);
-        if (Array.isArray(parsedSnap.pengiriman)) {
-          parsedSnap.pengiriman = parsedSnap.pengiriman.map((p: any) => {
+      const currentSnap = standbyCrewSnapshotRef.current;
+      if (currentSnap && Array.isArray(currentSnap.pengiriman)) {
+        const nextSnap = {
+          ...currentSnap,
+          pengiriman: currentSnap.pengiriman.map((p: any) => {
             if (
               p.backupCrewName &&
               (matchSamePerson(p.backupCrewName, standbyName) ||
-               p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
-               standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
+                p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
+                standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
             ) {
               return {
                 ...p,
@@ -4307,50 +4355,45 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               };
             }
             return p;
-          });
-          localStorage.setItem('akk_standby_crew_snapshot', JSON.stringify(parsedSnap));
-        }
+          })
+        };
+        standbyCrewSnapshotRef.current = nextSnap;
+        setStandbyCrewSnapshotState(nextSnap);
+        syncPortalFlowToMysql({ standbyCrewSnapshot: nextSnap });
       }
 
-      // Sinkronkan juga ke cache minggu Admin
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
-          const rawWeeks = localStorage.getItem(k);
-          if (!rawWeeks) continue;
-          const parsedWeeks = JSON.parse(rawWeeks);
-          if (Array.isArray(parsedWeeks)) {
-            const updatedWeeks = parsedWeeks.map((w: any) => ({
-              ...w,
-              days: Array.isArray(w.days)
-                ? w.days.map((d: any) => ({
-                    ...d,
-                    pengiriman: Array.isArray(d.pengiriman)
-                      ? d.pengiriman.map((p: any) => {
-                          if (
-                            p.backupCrewName &&
-                            (matchSamePerson(p.backupCrewName, standbyName) ||
-                             p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
-                             standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
-                          ) {
-                            return {
-                              ...p,
-                              backupCrewId: undefined,
-                              backupCrewName: undefined,
-                              backupPosition: undefined,
-                              backupTargetName: undefined,
-                              backup: undefined
-                            };
-                          }
-                          return p;
-                        })
-                      : d.pengiriman
-                  }))
-                : w.days
-            }));
-            localStorage.setItem(k, JSON.stringify(updatedWeeks));
-          }
-        }
+      const nowD = new Date();
+      const cachedWeeks = logisticsStore.getAdminScheduleWeeks(nowD.getFullYear(), nowD.getMonth());
+      if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0) {
+        const updatedWeeks = cachedWeeks.map((w: any) => ({
+          ...w,
+          days: Array.isArray(w.days)
+            ? w.days.map((d: any) => ({
+                ...d,
+                pengiriman: Array.isArray(d.pengiriman)
+                  ? d.pengiriman.map((p: any) => {
+                      if (
+                        p.backupCrewName &&
+                        (matchSamePerson(p.backupCrewName, standbyName) ||
+                          p.backupCrewName.toLowerCase().includes(standbyName.toLowerCase()) ||
+                          standbyName.toLowerCase().includes(p.backupCrewName.toLowerCase()))
+                      ) {
+                        return {
+                          ...p,
+                          backupCrewId: undefined,
+                          backupCrewName: undefined,
+                          backupPosition: undefined,
+                          backupTargetName: undefined,
+                          backup: undefined
+                        };
+                      }
+                      return p;
+                    })
+                  : d.pengiriman
+              }))
+            : w.days
+        }));
+        logisticsStore.saveAdminScheduleWeeks(nowD.getFullYear(), nowD.getMonth(), updatedWeeks);
       }
     } catch {}
 
@@ -4373,9 +4416,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       `${standbyName} tidak jadi menggantikan dan kembali ke status Stand By di Gudang.`
     );
 
-    try {
-      localStorage.removeItem('akk_portal_active_schedule_id');
-    } catch {}
+    const crewKey = String(currentUser?.id || selectedDriverId || portalDisplayName || 'default').trim().toLowerCase();
+    syncPortalFlowToMysql({ activeScheduleByCrew: { [crewKey]: '' } });
     portalActiveReplacedRef.current = '';
     setPortalActiveReplacedScheduleId('');
 
@@ -4508,10 +4550,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const nextMap = { ...keluarArgoMap, [delivery.id]: nowTime };
     setKeluarArgoMap(nextMap);
     setSjKeluarSistemMap(nextMap);
-    try {
-      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextMap));
-      localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextMap));
-    } catch {}
     syncPortalFlowToMysql({ keluarArgoMap: nextMap, sjKeluarSistemMap: nextMap });
 
     updateSharedScheduleFlow([delivery.id], {
@@ -4593,9 +4631,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
       const nextGateOutMap = { ...keluarArgoMap, [delivery.id]: nowTimeWib };
       setKeluarArgoMap(nextGateOutMap);
-      try {
-        localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextGateOutMap));
-      } catch {}
       syncPortalFlowToMysql({ keluarArgoMap: nextGateOutMap });
 
       if (activeShift) {
@@ -4685,10 +4720,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const nextMap = { ...keluarArgoMap, [delivery.id]: nowTime };
     setKeluarArgoMap(nextMap);
     setSjKeluarSistemMap(nextMap);
-    try {
-      localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextMap));
-      localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextMap));
-    } catch {}
     syncPortalFlowToMysql({ keluarArgoMap: nextMap, sjKeluarSistemMap: nextMap });
 
     updateSharedScheduleFlow([delivery.id], {
@@ -6833,7 +6864,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     helper2Name,
                     hasHelper2
                   } = getDeliveryCrewComposition(delivery);
-                  const isBackupMode = Boolean(delivery.backupCrewName);
+                  const hasActiveNonBackupDriver = Boolean(
+                    delivery.backupCrewName &&
+                      (!delivery.backupPosition || delivery.backupPosition === 'driver') &&
+                      driverCrewName &&
+                      driverCrewName !== '-' &&
+                      !matchSamePerson(driverCrewName, delivery.backupCrewName) &&
+                      (['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ||
+                        Boolean(delivery.backupTargetName && !matchSamePerson(driverCrewName, delivery.backupTargetName)))
+                  );
+                  const isBackupMode = Boolean(delivery.backupCrewName) && !hasActiveNonBackupDriver;
                   const backupPosLabel =
                     delivery.backupPosition === 'helper'
                       ? 'Helper 1'
@@ -9707,10 +9747,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               });
               setKeluarArgoMap(nextArgo);
               setSjKeluarSistemMap(nextArgo);
-              try {
-                localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextArgo));
-                localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextArgo));
-              } catch {}
+              syncPortalFlowToMysql({ keluarArgoMap: nextArgo, sjKeluarSistemMap: nextArgo });
 
               updateSharedScheduleFlow(activeScheduleIds, {
                 fleetId: saved.fleetId,
@@ -9862,13 +9899,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         areaName={activeShift?.selectedArea || ''}
         availableAreas={Array.from(
           new Set([
-            ...OFFICIAL_DESTINATION_AREAS,
-            ...deliveries.map(d => d.areaName || d.store?.city || '').filter(Boolean)
+            ...getOfficialAreasForBranch(effectivePortalBranchId),
+            ...deliveries
+              .map(d => d.areaName || d.store?.city || '')
+              .filter(a => {
+                if (!a) return false;
+                if (effectivePortalBranchId === 'cab-sidoarjo') return isSidoarjoArea(a);
+                if (effectivePortalBranchId === 'cab-banyuwangi') return !isSidoarjoArea(a);
+                return true;
+              })
           ])
         )}
         branchId={effectivePortalBranchId}
         availableFleets={fleets.filter(
-          f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === effectivePortalBranchId
+          f =>
+            !isPhantomOperationalPlate(f.plateNumber) &&
+            branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === effectivePortalBranchId
         )}
         availableCrews={crews.filter(c => {
           const allPortalUsers = logisticsStore.getUsers();
@@ -9983,6 +10029,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   }),
                   name: driverName
                 };
+                if (
+                  matchedSchedule.backupCrewName &&
+                  (!matchedSchedule.backupPosition || matchedSchedule.backupPosition === 'driver') &&
+                  !doesCrewNameMatch(matchedSchedule.backupCrewName, driverName)
+                ) {
+                  (patch as any).backupCrewId = undefined;
+                  (patch as any).backupCrewName = undefined;
+                  (patch as any).backupPosition = undefined;
+                  (patch as any).backupTargetName = undefined;
+                }
                 if (shift.helper1Name) {
                   patch.crewHelperId = shift.helper1Id || 'hlp-1';
                   patch.crewHelper = {
@@ -10122,7 +10178,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 Pilih Nomor Kendaraan Armada yang Digunakan:
               </label>
               <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
-                {fleets.map(f => {
+                {fleets
+                  .filter(
+                    f =>
+                      !isPhantomOperationalPlate(f.plateNumber) &&
+                      branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === effectivePortalBranchId
+                  )
+                  .map(f => {
                   const isSelected = (selectedFleetId || assignedFleet?.id) === f.id;
                   const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
                   const isMaintenance = liveInfo.effectiveStatus === 'maintenance';

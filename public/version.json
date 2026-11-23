@@ -1,9 +1,9 @@
 {
-  "versionCode": 10047,
-  "versionName": "1.0.47",
-  "updatedAt": "2026-11-22T18:10:00.000000",
+  "versionCode": 10048,
+  "versionName": "1.0.48",
+  "updatedAt": "2026-11-23T09:20:00.000000",
   "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V59: Resolusi Otomatis Foreign Key Armada (resolveOrEnsureMysqlFleetId) & Simpan/Edit/Hapus Async Langsung Log BBM ke MySQL, Sinkronisasi Ketat Daftar Driver/Helper dengan Status Akun User Aktif (Otomatis Hilang Saat Dinonaktifkan), serta Paginasi 10 Baris, Custom Popover Filter & Navigasi Keyboard Panah/Enter pada Modul Efisiensi BBM."
+  "releaseNotes": "Update V60: Pemulihan Kata Sandi (Lupa Password) dengan OTP Langsung ke WhatsApp User (Fonnte/Wablas/Meta/Webhook), Migrasi Penuh State Operasional (BranchConfig, Surat Jalan, Area Mapping, WMS, Finance, Simulasi Rute & Jobdesk Sales) dari localStorage ke MySQL, Pembersihan Sinkron Track Kamera pada 4 Modal Kamera, serta Sanitasi Duplikasi Nama Helper & Plat Phantom."
 }

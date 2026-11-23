@@ -126,16 +126,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     confirmPassword: ''
   });
 
-  // 🔑 State Pemulihan Kata Sandi (Lupa Password)
+  // 🔑 State Pemulihan Kata Sandi (OTP Langsung ke WhatsApp User)
   const [recoveryInput, setRecoveryInput] = useState('');
   const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify'>('request');
-  const [recoverySession, setRecoverySession] = useState<RecoverySession | null>(null);
+  const [recoveryMaskedPhone, setRecoveryMaskedPhone] = useState('');
+  const [recoveryAccountName, setRecoveryAccountName] = useState('');
+  const [recoveryExpiresIn, setRecoveryExpiresIn] = useState<number>(0);
+  const [recoveryResendCooldown, setRecoveryResendCooldown] = useState<number>(0);
   const [verificationCodeInput, setVerificationCodeInput] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
 
   const trimmedRecoveryInput = recoveryInput.trim();
   const recoveryInputType = useMemo<'empty' | 'email' | 'username'>(() => {
@@ -143,8 +146,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     return trimmedRecoveryInput.includes('@') ? 'email' : 'username';
   }, [trimmedRecoveryInput]);
 
+  useEffect(() => {
+    if (recoveryExpiresIn <= 0 && recoveryResendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setRecoveryExpiresIn(prev => (prev > 0 ? prev - 1 : 0));
+      setRecoveryResendCooldown(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [recoveryExpiresIn > 0, recoveryResendCooldown > 0]);
+
+  const formatMmSs = (totalSec: number) => {
+    const mins = Math.floor(Math.max(0, totalSec) / 60);
+    const secs = Math.max(0, totalSec) % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
   const handleOpenForgotPassword = () => {
     setTab('forgot');
+    setRecoveryStep('request');
     setErrorMsg('');
     setSuccessMsg('');
     if (trimmedInput) {
@@ -152,22 +171,105 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleRequestRecovery = (e: React.FormEvent) => {
+  const requestWhatsAppOtp = async (identifierValue: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    const cleanId = identifierValue.trim();
+    if (!cleanId) {
+      setErrorMsg('Silakan masukkan email, username, atau nomor WhatsApp akun Anda.');
+      return;
+    }
+
+    setIsSendingCode(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: cleanId })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        if (data?.retryAfterSec) setRecoveryResendCooldown(Number(data.retryAfterSec) || 60);
+        if (data?.maskedPhone) setRecoveryMaskedPhone(String(data.maskedPhone));
+        setErrorMsg(data?.error || 'Gagal mengirim kode verifikasi ke WhatsApp pengguna.');
+        return;
+      }
+
+      setRecoveryMaskedPhone(String(data.maskedPhone || ''));
+      setRecoveryAccountName(String(data.accountName || ''));
+      setRecoveryExpiresIn(Number(data.expiresInSeconds) || 600);
+      setRecoveryResendCooldown(Number(data.cooldownSeconds) || 60);
+      setVerificationCodeInput('');
+      setRecoveryStep('verify');
+      setSuccessMsg(
+        data.message || `Kode verifikasi 6-digit telah dikirim langsung ke WhatsApp ${data.maskedPhone || 'terdaftar Anda'}.`
+      );
+    } catch {
+      setErrorMsg('Gagal menghubungi server untuk pengiriman OTP WhatsApp.');
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
+
+  const handleRequestRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await requestWhatsAppOtp(recoveryInput);
+  };
+
+  const handleVerifyAndResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    if (!recoveryInput.trim()) {
-      setErrorMsg('Silakan masukkan email atau username akun Anda.');
+
+    const cleanCode = verificationCodeInput.replace(/\D/g, '').trim();
+    if (cleanCode.length !== 6) {
+      setErrorMsg('Masukkan 6 digit kode verifikasi yang dikirim ke WhatsApp Anda.');
       return;
     }
-    setRecoveryStep('request');
-    setRecoverySession(null);
-    setSuccessMsg('Reset password mandiri dinonaktifkan demi keamanan. Hubungi Super Admin untuk verifikasi identitas dan reset password dari User Management.');
-  };
+    if (!newPassword || newPassword.length < 8) {
+      setErrorMsg('Password baru minimal 8 karakter.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMsg('Konfirmasi password baru tidak cocok.');
+      return;
+    }
 
-  const handleVerifyAndResetPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('Kode pemulihan simulasi sudah dinonaktifkan. Hubungi Super Admin.');
+    setIsVerifyingCode(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: recoveryInput.trim(),
+          code: cleanCode,
+          newPassword
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        setErrorMsg(data?.error || 'Kode verifikasi tidak sesuai atau gagal memperbarui password.');
+        return;
+      }
+
+      const savedId = recoveryInput.trim();
+      setRecoveryStep('request');
+      setVerificationCodeInput('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setRecoveryMaskedPhone('');
+      setRecoveryAccountName('');
+      setRecoveryExpiresIn(0);
+      setRecoveryResendCooldown(0);
+      setLoginEmail(savedId);
+      setLoginPassword('');
+      setTab('login');
+      setSuccessMsg(data.message || 'Password berhasil diperbarui melalui verifikasi WhatsApp. Silakan masuk kembali.');
+    } catch {
+      setErrorMsg('Gagal menghubungi server untuk memverifikasi kode WhatsApp.');
+    } finally {
+      setIsVerifyingCode(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -597,22 +699,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </form>
           ) : (
-            /* Tab Lupa Password / Pemulihan Kata Sandi */
+            /* Tab Lupa Password / Pemulihan Kata Sandi via WhatsApp */
             <div className="space-y-4 text-xs">
               {recoveryStep === 'request' ? (
                 <form onSubmit={handleRequestRecovery} className="space-y-4">
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 text-xs">
+                  <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-slate-200 text-xs flex items-start gap-2.5">
+                    <Phone className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <p className="leading-relaxed">
-                      Lupa kata sandi akun Anda? Masukkan <strong>Email</strong> atau <strong>Username</strong> terdaftar. Sistem akan membuat token pemulihan aman dan mengirimkan kode verifikasi 6-digit ke email terdaftar via simulasi layanan AKK Mail.
+                      Lupa kata sandi akun Anda? Masukkan <strong>Email</strong>, <strong>Username</strong>, atau <strong>No. WhatsApp</strong> terdaftar. Sistem akan mengirim kode verifikasi 6-digit langsung ke WhatsApp akun Anda.
                     </p>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-slate-300 font-semibold">Email / Username Akun</label>
+                      <label className="text-slate-300 font-semibold">Email / Username / No. WhatsApp</label>
                       {recoveryInputType !== 'empty' && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                          {recoveryInputType === 'email' ? '📧 Mode Email' : '👤 Mode Username'}
+                          {recoveryInputType === 'email' ? 'Mode Email' : 'Mode Username / WA'}
                         </span>
                       )}
                     </div>
@@ -622,7 +725,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         type="text"
                         required
                         disabled={isSendingCode}
-                        placeholder="Contoh: budiono@gmail.com atau Budiono"
+                        placeholder="Contoh: Pipit Istiani atau 0812..."
                         value={recoveryInput}
                         onChange={(e) => {
                           setRecoveryInput(e.target.value);
@@ -637,7 +740,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="flex items-center gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
+                      onClick={() => {
+                        setTab('login');
+                        setRecoveryStep('request');
+                        setErrorMsg('');
+                        setSuccessMsg('');
+                      }}
                       className="flex-1 py-2.5 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800/60 font-semibold transition cursor-pointer"
                     >
                       Batal
@@ -645,17 +753,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <button
                       type="submit"
                       disabled={isSendingCode}
-                      className="flex-1 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      className="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
                       {isSendingCode ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Mengirim...</span>
+                          <span>Mengirim ke WA...</span>
                         </>
                       ) : (
                         <>
                           <Send className="w-4 h-4" />
-                          <span>Generate & Kirim Kode</span>
+                          <span>Kirim Kode ke WhatsApp</span>
                         </>
                       )}
                     </button>
@@ -663,76 +771,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : (
                 <form onSubmit={handleVerifyAndResetPassword} className="space-y-4">
-                  {/* Simulated Service Card */}
-                  {recoverySession && (
-                    <div className="p-3.5 rounded-xl bg-slate-950 border border-emerald-500/40 shadow-xl space-y-2.5">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                        <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
-                          <Mail className="w-4 h-4" />
-                          <span>Simulasi Layanan Email AKK</span>
-                        </div>
-                        <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
-                          SMTP 250 OK
-                        </span>
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-emerald-500/40 shadow-xl space-y-2">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                      <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>OTP Terkirim ke WhatsApp User</span>
                       </div>
+                      <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                        {recoveryExpiresIn > 0 ? `Berlaku ${formatMmSs(recoveryExpiresIn)}` : 'Kedaluwarsa'}
+                      </span>
+                    </div>
 
-                      <div className="space-y-1 text-[11px] text-slate-300">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Penerima Email:</span>
-                          <span className="font-mono text-white font-semibold">{recoverySession.emailSentTo}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Token Pemulihan Aman:</span>
-                          <span className="font-mono text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/30 text-[10px]">
-                            {recoverySession.token}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Masa Berlaku:</span>
-                          <span className="text-slate-400">15 Menit ({recoverySession.timestamp})</span>
-                        </div>
+                    <div className="space-y-1 text-[11px] text-slate-300">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Akun Terdaftar:</span>
+                        <span className="font-semibold text-white">{recoveryAccountName || recoveryInput}</span>
                       </div>
-
-                      {/* Verification Code Box with 1-click copy */}
-                      <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider block">
-                            Kode Verifikasi 6-Digit
-                          </span>
-                          <span className="text-xl font-black font-mono tracking-widest text-emerald-300">
-                            {recoverySession.code}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setVerificationCodeInput(recoverySession.code);
-                            setCopiedCode(true);
-                            setTimeout(() => setCopiedCode(false), 2000);
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95"
-                          title="Salin dan tempel ke kolom kode verifikasi"
-                        >
-                          {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedCode ? 'Tersalin' : 'Salin & Isi'}</span>
-                        </button>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">WhatsApp Tujuan:</span>
+                        <span className="font-mono text-emerald-300 font-bold">{recoveryMaskedPhone || '-'}</span>
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {/* Verification Input */}
                   <div>
                     <label className="text-slate-300 font-semibold block mb-1">
-                      Masukkan Kode Verifikasi 6-Digit
+                      Masukkan Kode Verifikasi WhatsApp (6-Digit)
                     </label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       required
                       maxLength={6}
+                      disabled={isVerifyingCode}
                       placeholder="Contoh: 123456"
                       value={verificationCodeInput}
                       onChange={(e) => {
-                        setVerificationCodeInput(e.target.value.replace(/\D/g, ''));
+                        setVerificationCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6));
                         if (errorMsg) setErrorMsg('');
                       }}
                       className="w-full text-center tracking-widest text-lg font-mono font-bold py-2 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 focus:outline-none focus:border-emerald-500 placeholder-slate-700"
@@ -746,7 +822,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <input
                         type={showNewPassword ? 'text' : 'password'}
                         required
-                        placeholder="Minimal 4 karakter"
+                        minLength={8}
+                        disabled={isVerifyingCode}
+                        placeholder="Minimal 8 karakter"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
@@ -757,6 +835,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <input
                         type={showNewPassword ? 'text' : 'password'}
                         required
+                        minLength={8}
+                        disabled={isVerifyingCode}
                         placeholder="Ulangi password baru"
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
@@ -775,21 +855,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="flex items-center gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setRecoveryStep('request');
-                        setErrorMsg('');
-                        setSuccessMsg('');
-                      }}
-                      className="py-2.5 px-3 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800/60 font-semibold transition cursor-pointer text-center"
+                      disabled={isSendingCode || recoveryResendCooldown > 0}
+                      onClick={() => requestWhatsAppOtp(recoveryInput)}
+                      className="py-2.5 px-3 rounded-lg border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800/60 font-semibold transition cursor-pointer text-center disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Kirim Ulang
+                      {recoveryResendCooldown > 0 ? `Kirim Ulang (${recoveryResendCooldown}s)` : 'Kirim Ulang WA'}
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20"
+                      disabled={isVerifyingCode}
+                      className="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Simpan Password Baru</span>
+                      {isVerifyingCode ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Memverifikasi...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Simpan Password Baru</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>

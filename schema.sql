@@ -376,3 +376,16 @@ ALTER TABLE `fuel_logs` ADD COLUMN IF NOT EXISTS `payload_json` LONGTEXT NULL AF
 -- Super Admin pertama tetap dibuat oleh server melalui BOOTSTRAP_ADMIN_* ENV.
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- Tabel Token OTP Pemulihan Kata Sandi (Lupa Password via WhatsApp)
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  otp_hash VARCHAR(128) NOT NULL,
+  target_phone VARCHAR(32) NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_prt_user_active (user_id, used_at, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

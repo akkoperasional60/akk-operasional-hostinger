@@ -69,34 +69,65 @@ export const JobdeskConfigTab: React.FC<JobdeskConfigTabProps> = ({
 
   const salesAdminUsers = useSalesAdminUsers();
   
-  // Admin assignments storage: adminKey -> string[]
-  const [assignments, setAssignments] = useState<Record<string, string[]>>(() => {
-    const saved = localStorage.getItem('akk_master_jobdesk_v2');
-    let config: Record<string, string[]> = {};
-    
-    if (saved) {
-      try {
-        config = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    
-    const defaultStructure: Record<string, string[]> = {
-      'SEMUA ADMIN': DEFAULT_CHECKED_FOR_ALL
+  const buildDefaultAssignments = (savedConfig: Record<string, string[]> = {}) => {
+    const config: Record<string, string[]> = {
+      'SEMUA ADMIN': DEFAULT_CHECKED_FOR_ALL,
+      ...savedConfig
     };
-    
-    config = { ...defaultStructure, ...config };
-    
     salesAdminUsers.forEach(user => {
       const key = (user.fullName || '').trim().toUpperCase();
       if (key && !config[key]) {
         config[key] = ['Membuat Pesanan Penjualan & Faktur (1)', 'Input Retur Toko'];
       }
     });
-    
     return config;
-  });
+  };
+
+  const getJobdeskAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  };
+
+  // Admin assignments storage: adminKey -> string[] (hydrated from MySQL /api/app-state)
+  const [savedServerAssignments, setSavedServerAssignments] = useState<Record<string, string[]> | null>(null);
+  const [assignments, setAssignments] = useState<Record<string, string[]>>(() => buildDefaultAssignments());
+
+  React.useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_master_jobdesk_v2');
+    } catch {}
+    let active = true;
+    fetch('/api/app-state?keys=akk_master_jobdesk_v2', {
+      credentials: 'same-origin',
+      headers: getJobdeskAuthHeaders()
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!active) return;
+        const remote = data?.entries?.akk_master_jobdesk_v2;
+        if (remote && typeof remote === 'object') {
+          const built = buildDefaultAssignments(remote);
+          setSavedServerAssignments(built);
+          setAssignments(built);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const currentAdminChecked = assignments[selectedAdmin] || [];
 
@@ -125,7 +156,13 @@ export const JobdeskConfigTab: React.FC<JobdeskConfigTabProps> = ({
   };
 
   const handleSave = () => {
-    localStorage.setItem('akk_master_jobdesk_v2', JSON.stringify(assignments));
+    setSavedServerAssignments(assignments);
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getJobdeskAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_master_jobdesk_v2: assignments } })
+    }).catch(() => {});
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2500);
   };
@@ -183,8 +220,8 @@ export const JobdeskConfigTab: React.FC<JobdeskConfigTabProps> = ({
 
           <button
             onClick={() => {
-              const saved = localStorage.getItem('akk_master_jobdesk_v2');
-              if (saved) setAssignments(JSON.parse(saved));
+              if (savedServerAssignments) setAssignments(savedServerAssignments);
+              else setAssignments(buildDefaultAssignments());
             }}
             className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer"
           >

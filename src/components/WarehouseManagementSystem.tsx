@@ -549,44 +549,79 @@ export const WarehouseManagementSystem: React.FC<{
 }> = ({ initialTab = 'overview', onNavigateTab }) => {
   const [activeTab, setActiveTab] = useState<WmsSubTab>(initialTab);
 
-  // Master SKU State (Kosong secara default, terpisah dari Database Barang penjualan)
-  const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>(() => {
+  // Master SKU, Kartu Stok & Lokasi State (tersimpan di Hostinger MySQL /api/app-state)
+  const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>([]);
+  const [kartuStokList, setKartuStokList] = useState<KartuStokAnalysisRecord[]>(() =>
+    INITIAL_KARTU_STOK_ANALYSIS.filter(item => !isLegacySeededBarang(item.kodeBarang))
+  );
+  const [lokasiList, setLokasiList] = useState<string[]>([
+    'Sidoarjo',
+    'Gudang Utama Banyuwangi',
+    'Farly',
+    'Gajah Mada',
+    'Denpasar'
+  ]);
+  const wmsStateHydratedRef = useRef(false);
+
+  const getWmsAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      localStorage.removeItem(LS_KEY_MASTER_SKU);
-      localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
     } catch {}
-    return [];
-  });
+    return headers;
+  };
 
-  // Kartu Stok Analysis State (persisted in localStorage)
-  const [kartuStokList, setKartuStokList] = useState<KartuStokAnalysisRecord[]>(() => {
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem(LS_KEY_KARTU_STOK);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.filter((item: any) => !isLegacySeededBarang(item?.kodeBarang));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LS_KEY_MASTER_SKU);
+        localStorage.removeItem(LS_KEY_MASTER_SKU_LEGACY);
+        localStorage.removeItem(LS_KEY_KARTU_STOK);
+        localStorage.removeItem(LS_KEY_LOKASI_LIST);
+      }
+    } catch {}
+
+    let active = true;
+    fetch(
+      `/api/app-state?keys=${encodeURIComponent(LS_KEY_MASTER_SKU)},${encodeURIComponent(LS_KEY_KARTU_STOK)},${encodeURIComponent(LS_KEY_LOKASI_LIST)}`,
+      {
+        credentials: 'same-origin',
+        headers: getWmsAuthHeaders()
+      }
+    )
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!active || !data?.entries) return;
+        const remoteSku = data.entries[LS_KEY_MASTER_SKU];
+        if (Array.isArray(remoteSku)) {
+          setSkuItems(remoteSku.filter((item: any) => !isLegacySeededBarang(item?.noBarang)));
         }
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_KARTU_STOK_ANALYSIS.filter(item => !isLegacySeededBarang(item.kodeBarang));
-  });
-
-  // Dynamic Lokasi Stock List
-  const [lokasiList, setLokasiList] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY_LOKASI_LIST);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return ['Sidoarjo', 'Gudang Utama Banyuwangi', 'Farly', 'Gajah Mada', 'Denpasar'];
-  });
+        const remoteKartu = data.entries[LS_KEY_KARTU_STOK];
+        if (Array.isArray(remoteKartu) && remoteKartu.length > 0) {
+          setKartuStokList(remoteKartu.filter((item: any) => !isLegacySeededBarang(item?.kodeBarang)));
+        }
+        const remoteLokasi = data.entries[LS_KEY_LOKASI_LIST];
+        if (Array.isArray(remoteLokasi) && remoteLokasi.length > 0) {
+          setLokasiList(remoteLokasi);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) wmsStateHydratedRef.current = true;
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Opname Gudang & Stok Opname State (persisted server-side via /api/warehouse/opname)
   const [opnameAuditList, setOpnameAuditList] = useState<WarehouseOpnameAuditItem[]>(INITIAL_OPNAME_AUDIT_ITEMS);
@@ -912,35 +947,40 @@ export const WarehouseManagementSystem: React.FC<{
   }, [opnameAuditList, opnameSessions]);
 
   useEffect(() => {
-    try {
-      const cleaned = skuItems.filter(item => !isLegacySeededBarang(item.noBarang));
-      if (cleaned.length <= 400) {
-        localStorage.setItem(LS_KEY_MASTER_SKU, JSON.stringify(cleaned));
-      } else {
-        localStorage.removeItem(LS_KEY_MASTER_SKU);
-      }
-    } catch {
-      try {
-        localStorage.removeItem(LS_KEY_MASTER_SKU);
-      } catch {}
-    }
+    if (!wmsStateHydratedRef.current) return;
+    const cleaned = skuItems.filter(item => !isLegacySeededBarang(item.noBarang));
+    const timer = setTimeout(() => {
+      fetch('/api/app-state', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: getWmsAuthHeaders(),
+        body: JSON.stringify({
+          entries: {
+            [LS_KEY_MASTER_SKU]: cleaned.slice(0, 400)
+          }
+        })
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
   }, [skuItems]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_KARTU_STOK, JSON.stringify(kartuStokList));
-    } catch {
-      // ignore
-    }
-  }, [kartuStokList]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY_LOKASI_LIST, JSON.stringify(lokasiList));
-    } catch {
-      // ignore
-    }
-  }, [lokasiList]);
+    if (!wmsStateHydratedRef.current) return;
+    const timer = setTimeout(() => {
+      fetch('/api/app-state', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: getWmsAuthHeaders(),
+        body: JSON.stringify({
+          entries: {
+            [LS_KEY_KARTU_STOK]: kartuStokList,
+            [LS_KEY_LOKASI_LIST]: lokasiList
+          }
+        })
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [kartuStokList, lokasiList]);
 
   useEffect(() => {
     if (initialTab) {

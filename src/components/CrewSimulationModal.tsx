@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { attendanceService } from '../services/attendanceService';
 import { 
   Users, 
@@ -253,26 +253,68 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
     });
   };
 
-  // State for all 4 weeks with week-specific requirements
-  const [allWeeksData, setAllWeeksData] = useState<Record<number, DailyScheduleRoute[]>>(() => {
+  const persistSimulationWeeksToServer = (data: Record<number, DailyScheduleRoute[]>) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const saved = localStorage.getItem('akk_simulasi_weeks_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed[1] && parsed[2] && parsed[3] && parsed[4]) {
-          return parsed;
-        }
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
       }
-    } catch {
-      // fallback
-    }
-    return {
-      1: buildWeekSchedule(1, crews, fleets),
-      2: buildWeekSchedule(2, crews, fleets),
-      3: buildWeekSchedule(3, crews, fleets),
-      4: buildWeekSchedule(4, crews, fleets)
+    } catch {}
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({ entries: { akk_simulasi_weeks_v2: data } })
+    }).catch(() => {});
+  };
+
+  // State for all 4 weeks with week-specific requirements (hydrated from MySQL /api/app-state)
+  const [allWeeksData, setAllWeeksData] = useState<Record<number, DailyScheduleRoute[]>>(() => ({
+    1: buildWeekSchedule(1, crews, fleets),
+    2: buildWeekSchedule(2, crews, fleets),
+    3: buildWeekSchedule(3, crews, fleets),
+    4: buildWeekSchedule(4, crews, fleets)
+  }));
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_simulasi_weeks_v2');
+    } catch {}
+    const headers: Record<string, string> = {};
+    try {
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    let active = true;
+    fetch('/api/app-state?keys=akk_simulasi_weeks_v2', { credentials: 'same-origin', headers })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!active || !data?.entries?.akk_simulasi_weeks_v2) return;
+        const parsed = data.entries.akk_simulasi_weeks_v2;
+        if (parsed[1] && parsed[2] && parsed[3] && parsed[4]) {
+          setAllWeeksData(parsed);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
-  });
+  }, []);
 
   const currentWeekRoutes = allWeeksData[selectedWeek] || allWeeksData[1];
   const weekConfig = WEEK_SIMULATION_CONFIGS[selectedWeek] || WEEK_SIMULATION_CONFIGS[1];
@@ -374,11 +416,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
         return route;
       });
       const newState = { ...prev, [selectedWeek]: updatedWeek };
-      try {
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
-      } catch {
-        // ignore
-      }
+      persistSimulationWeeksToServer(newState);
       return newState;
     });
   };
@@ -424,11 +462,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
         return item;
       });
       const newState = { ...prev, [selectedWeek]: merged };
-      try {
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
-      } catch {
-        // ignore
-      }
+      persistSimulationWeeksToServer(newState);
       return newState;
     });
     setNotificationMsg(`✅ Penugasan Luar Kota Minggu ${selectedWeek} (${weekConfig.theme}) berhasil diselaraskan 100%!`);
@@ -450,7 +484,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
             return r;
           });
           const newState = { ...prev, 1: updated };
-          localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
+          persistSimulationWeeksToServer(newState);
           return newState;
         }
         return prev;
@@ -469,7 +503,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
             return r;
           });
           const newState = { ...prev, 2: updated };
-          localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
+          persistSimulationWeeksToServer(newState);
           return newState;
         }
         return prev;
@@ -479,7 +513,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
       const compliant = buildWeekSchedule(3, crews, fleets);
       setAllWeeksData(prev => {
         const newState = { ...prev, 3: compliant };
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
+        persistSimulationWeeksToServer(newState);
         return newState;
       });
       setNotificationMsg('✅ Klaster Jember (Selatan, Barat, Kota) berhasil dialokasikan selang 1 hari dengan jeda istirahat penuh!');
@@ -487,7 +521,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
       const compliant = buildWeekSchedule(4, crews, fleets);
       setAllWeeksData(prev => {
         const newState = { ...prev, 4: compliant };
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
+        persistSimulationWeeksToServer(newState);
         return newState;
       });
       setNotificationMsg('✅ Rute Tapal Kuda & Bali Barat (Situbondo/Bondowoso, Susulan, Negara) berhasil diselaraskan!');
@@ -509,11 +543,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
         return item;
       });
       const newState = { ...prev, [selectedWeek]: updated };
-      try {
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
-      } catch {
-        // ignore
-      }
+      persistSimulationWeeksToServer(newState);
       return newState;
     });
     setNotificationMsg('✅ Kiriman sisa lokal Banyuwangi berhasil disesuaikan dengan kru & armada yang tersedia!');
@@ -525,11 +555,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
     const fresh = buildWeekSchedule(selectedWeek, crews, fleets);
     setAllWeeksData(prev => {
       const newState = { ...prev, [selectedWeek]: fresh };
-      try {
-        localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newState));
-      } catch {
-        // ignore
-      }
+      persistSimulationWeeksToServer(newState);
       return newState;
     });
     setNotificationMsg(`✅ Jadwal Minggu ${selectedWeek} di-reset ke alokasi resmi sesuai persyaratan!`);
@@ -538,11 +564,7 @@ export const CrewSimulationModal: React.FC<CrewSimulationModalProps> = ({
 
   // Save to database
   const handleSaveAndSyncToDatabase = () => {
-    try {
-      localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(allWeeksData));
-    } catch {
-      // ignore
-    }
+    persistSimulationWeeksToServer(allWeeksData);
     setNotificationMsg(`✅ Berhasil! Simulasi jadwal mingguan (${currentWeekRoutes.length} rute untuk ${weekConfig.title}) telah dikunci & disinkronkan ke sistem.`);
     setTimeout(() => setNotificationMsg(null), 4000);
   };

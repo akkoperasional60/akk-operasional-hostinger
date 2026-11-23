@@ -1455,26 +1455,46 @@ export const FINANCE_INVOICES_EVENT = 'akk-finance-invoices-updated';
 export const LS_KEY_FINANCE_CUSTOMERS = 'akk_finance_master_customers_v1';
 export const FINANCE_CUSTOMERS_EVENT = 'akk-finance-customers-updated';
 
-export function loadSharedCustomerMasters(): CustomerMasterRecord[] {
+let memorySharedCustomers: CustomerMasterRecord[] | null = null;
+let memorySharedInvoices: CustomerUnpaidInvoice[] | null = null;
+
+function getFinanceAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
-    const saved = localStorage.getItem(LS_KEY_FINANCE_CUSTOMERS);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const token =
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+        : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+      '';
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['x-akk-session-token'] = token;
     }
   } catch {}
-  return INITIAL_MASTER_CUSTOMERS;
+  return headers;
+}
+
+export function loadSharedCustomerMasters(): CustomerMasterRecord[] {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LS_KEY_FINANCE_CUSTOMERS);
+  } catch {}
+  return memorySharedCustomers && memorySharedCustomers.length > 0
+    ? memorySharedCustomers
+    : INITIAL_MASTER_CUSTOMERS;
 }
 
 export function saveSharedCustomerMasters(list: CustomerMasterRecord[]): void {
+  memorySharedCustomers = list;
   try {
-    localStorage.setItem(LS_KEY_FINANCE_CUSTOMERS, JSON.stringify(list));
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LS_KEY_FINANCE_CUSTOMERS);
   } catch {}
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(FINANCE_CUSTOMERS_EVENT));
     fetch('/api/app-state', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: getFinanceAuthHeaders(),
       body: JSON.stringify({
         entries: {
           [LS_KEY_FINANCE_CUSTOMERS]: list
@@ -1507,26 +1527,25 @@ export function normalizeInvoiceBillingTeam(inv: CustomerUnpaidInvoice, idx = 0)
 
 export function loadSharedCustomerInvoices(): CustomerUnpaidInvoice[] {
   try {
-    const saved = localStorage.getItem(LS_KEY_FINANCE_UNPAID);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((item, idx) => normalizeInvoiceBillingTeam(item, idx));
-      }
-    }
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LS_KEY_FINANCE_UNPAID);
   } catch {}
+  if (memorySharedInvoices && memorySharedInvoices.length > 0) {
+    return memorySharedInvoices.map((item, idx) => normalizeInvoiceBillingTeam(item, idx));
+  }
   return INITIAL_UNPAID_INVOICES.map((item, idx) => normalizeInvoiceBillingTeam(item, idx));
 }
 
 export function saveSharedCustomerInvoices(list: CustomerUnpaidInvoice[]): void {
+  memorySharedInvoices = list;
   try {
-    localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(list));
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LS_KEY_FINANCE_UNPAID);
   } catch {}
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(FINANCE_INVOICES_EVENT));
     fetch('/api/app-state', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: getFinanceAuthHeaders(),
       body: JSON.stringify({
         entries: {
           [LS_KEY_FINANCE_UNPAID]: list
@@ -1540,24 +1559,24 @@ export async function hydrateSharedCustomerInvoicesFromServer(): Promise<Custome
   if (typeof window === 'undefined') return null;
   try {
     const res = await fetch(
-      `/api/app-state?keys=${encodeURIComponent(LS_KEY_FINANCE_UNPAID)},${encodeURIComponent(LS_KEY_FINANCE_CUSTOMERS)}`
+      `/api/app-state?keys=${encodeURIComponent(LS_KEY_FINANCE_UNPAID)},${encodeURIComponent(LS_KEY_FINANCE_CUSTOMERS)}`,
+      {
+        credentials: 'same-origin',
+        headers: getFinanceAuthHeaders()
+      }
     );
     if (!res.ok) return null;
     const data = await res.json();
     const remoteCustomers = data?.entries?.[LS_KEY_FINANCE_CUSTOMERS];
     if (Array.isArray(remoteCustomers) && remoteCustomers.length > 0) {
-      try {
-        localStorage.setItem(LS_KEY_FINANCE_CUSTOMERS, JSON.stringify(remoteCustomers));
-      } catch {}
+      memorySharedCustomers = remoteCustomers;
       window.dispatchEvent(new CustomEvent(FINANCE_CUSTOMERS_EVENT));
     }
     const remoteList = data?.entries?.[LS_KEY_FINANCE_UNPAID];
     if (Array.isArray(remoteList) && remoteList.length > 0) {
-      try {
-        localStorage.setItem(LS_KEY_FINANCE_UNPAID, JSON.stringify(remoteList));
-      } catch {}
+      memorySharedInvoices = remoteList.map((item: any, idx: number) => normalizeInvoiceBillingTeam(item, idx));
       window.dispatchEvent(new CustomEvent(FINANCE_INVOICES_EVENT));
-      return remoteList;
+      return memorySharedInvoices;
     }
   } catch {}
   return null;

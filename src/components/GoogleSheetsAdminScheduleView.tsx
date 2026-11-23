@@ -1895,8 +1895,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     branchId: string;
     bypassChecklistDirectComplete: boolean;
   }>(() => {
-    const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status === 'approved');
-    const initHelpers = logisticsStore.getUsers().filter(u => (u.role === 'crew_helper' || u.role === 'driver') && u.status === 'approved');
     const today = getTodayIso();
     const initBranch = branchStore.getSelectedOriginBranchId() !== 'ALL'
       ? branchStore.getSelectedOriginBranchId()
@@ -2183,6 +2181,21 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         }
       }
 
+      const isStaleDriverBackup = Boolean(
+        backupCrewName &&
+          (!backupPosition || backupPosition === 'driver') &&
+          effectiveDriver &&
+          effectiveDriver !== '-' &&
+          !isSameCrewPerson(effectiveDriver, backupCrewName) &&
+          (Boolean(matchedSch && ['picked_up', 'in_transit', 'delivered'].includes(matchedSch.status)) ||
+            Boolean(backupTargetName && !isSameCrewPerson(effectiveDriver, backupTargetName)))
+      );
+      if (isStaleDriverBackup) {
+        backupCrewName = undefined;
+        backupPosition = undefined;
+        backupTargetName = undefined;
+      }
+
       if (backupCrewName && backupTargetName) {
         const pos = backupPosition || 'driver';
         if (pos === 'driver' && isSameCrewPerson(effectiveDriver, backupCrewName)) {
@@ -2323,28 +2336,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       scheduledCrews,
       freeStandbyCrews
     };
-
-    try {
-      if (dayObj) {
-        const effMo = selectedMonth === -1 ? 0 : selectedMonth;
-        const dateIso = `${selectedYear}-${String(effMo + 1).padStart(2, '0')}-${String(dayObj.dayNumber).padStart(2, '0')}`;
-        localStorage.setItem(
-          'akk_standby_crew_snapshot',
-          JSON.stringify({
-            dateIso,
-            dateString: dayObj.dateString,
-            dayNumber: dayObj.dayNumber,
-            month: effMo,
-            year: selectedYear,
-            freeStandbyCrews,
-            scheduledCrews,
-            pengiriman: pengirimanList
-          })
-        );
-      }
-    } catch {
-      // Ignore storage quota errors
-    }
 
     return resultBreakdown;
   };
@@ -2558,65 +2549,35 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
     });
 
-    // 3. Update akk_standby_crew_snapshot di localStorage
-    try {
-      const rawSnap = localStorage.getItem('akk_standby_crew_snapshot');
-      if (rawSnap) {
-        const parsedSnap = JSON.parse(rawSnap);
-        if (Array.isArray(parsedSnap.pengiriman)) {
-          parsedSnap.pengiriman = parsedSnap.pengiriman.map((p: any) => {
-            if (p.backupCrewName && isSameCrewPerson(p.backupCrewName, crewNameToCancel)) {
-              return {
-                ...p,
-                backupCrewId: undefined,
-                backupCrewName: undefined,
-                backupPosition: undefined,
-                backupTargetName: undefined,
-                backup: undefined
-              };
-            }
-            return p;
-          });
-          localStorage.setItem('akk_standby_crew_snapshot', JSON.stringify(parsedSnap));
-        }
-      }
-
-      // Bersihkan juga cache minggu Admin
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && (k === 'akk_admin_schedule_weeks_cache' || k.startsWith('akk_admin_schedule_cache_'))) {
-          const rawW = localStorage.getItem(k);
-          if (!rawW) continue;
-          const pW = JSON.parse(rawW);
-          if (Array.isArray(pW)) {
-            const upW = pW.map((w: any) => ({
-              ...w,
-              days: Array.isArray(w.days)
-                ? w.days.map((d: any) => ({
-                    ...d,
-                    pengiriman: Array.isArray(d.pengiriman)
-                      ? d.pengiriman.map((p: any) => {
-                          if (p.backupCrewName && isSameCrewPerson(p.backupCrewName, crewNameToCancel)) {
-                            return {
-                              ...p,
-                              backupCrewId: undefined,
-                              backupCrewName: undefined,
-                              backupPosition: undefined,
-                              backupTargetName: undefined,
-                              backup: undefined
-                            };
-                          }
-                          return p;
-                        })
-                      : d.pengiriman
-                  }))
-                : w.days
-            }));
-            localStorage.setItem(k, JSON.stringify(upW));
-          }
-        }
-      }
-    } catch {}
+    // 3. Perbarui week cache di logisticsStore & bersihkan legacy localStorage
+    const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
+    const cachedWeeks = logisticsStore.getAdminScheduleWeeks(selectedYear, effectiveMonth);
+    if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0) {
+      const cleanedWeeks = cachedWeeks.map((w: any) => ({
+        ...w,
+        days: Array.isArray(w.days)
+          ? w.days.map((d: any) => ({
+              ...d,
+              pengiriman: Array.isArray(d.pengiriman)
+                ? d.pengiriman.map((p: any) => {
+                    if (p.backupCrewName && isSameCrewPerson(p.backupCrewName, crewNameToCancel)) {
+                      return {
+                        ...p,
+                        backupCrewId: undefined,
+                        backupCrewName: undefined,
+                        backupPosition: undefined,
+                        backupTargetName: undefined,
+                        backup: undefined
+                      };
+                    }
+                    return p;
+                  })
+                : d.pengiriman
+            }))
+          : w.days
+      }));
+      logisticsStore.saveAdminScheduleWeeks(selectedYear, effectiveMonth, cleanedWeeks);
+    }
 
     updateWeeks(newWeeks);
     logisticsStore.syncSchedulesToCrewHistory();
@@ -2719,24 +2680,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     });
   };
 
-  // Real-Time Auto-Sync State (Persisted in localStorage, default: false)
-  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('akk_auto_sync_enabled');
-      return saved === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Real-Time Auto-Sync State (in-memory session toggle, default: false)
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(false);
 
   const toggleAutoSync = () => {
-    setIsAutoSyncEnabled(prev => {
-      const nextVal = !prev;
-      try {
-        localStorage.setItem('akk_auto_sync_enabled', String(nextVal));
-      } catch {}
-      return nextVal;
-    });
+    setIsAutoSyncEnabled(prev => !prev);
   };
 
   // Seed initial template weeks into logisticsStore if no operational schedules exist for this month yet
@@ -2853,15 +2801,21 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const selectedYearMonthRef = React.useRef({ year: selectedYear, month: selectedMonth });
   selectedYearMonthRef.current = { year: selectedYear, month: selectedMonth };
 
-  // On initial mount, load authoritative persisted schedules from server database without writing stale localStorage back to server
+  // On initial mount, clear legacy browser caches & load authoritative persisted schedules from MySQL
   useEffect(() => {
-    // Bersihkan cache template lama agar jadwal dummy tidak pernah bocor ke bulan baru
     try {
-      Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('akk_admin_schedule_cache_') || k === 'akk_admin_schedule_weeks_cache') {
-          localStorage.removeItem(k);
-        }
-      });
+      if (typeof localStorage !== 'undefined') {
+        Object.keys(localStorage).forEach(k => {
+          if (
+            k.startsWith('akk_admin_schedule_cache_') ||
+            k === 'akk_admin_schedule_weeks_cache' ||
+            k === 'akk_standby_crew_snapshot' ||
+            k === 'akk_auto_sync_enabled'
+          ) {
+            localStorage.removeItem(k);
+          }
+        });
+      }
     } catch {}
 
     logisticsStore
@@ -2952,17 +2906,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return () => window.removeEventListener('akk-new-schedule-added', handleNewScheduleAdded);
   }, [selectedYear, selectedMonth]);
 
-  // Background cache persistence timer (Google Sheets auto-sync removed)
+  // Background store persistence timer
   useEffect(() => {
     if (!isAutoSyncEnabled) return;
 
     const intervalId = setInterval(() => {
       const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
-      const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(weeksRef.current));
-        localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(weeksRef.current));
-      } catch {}
+      logisticsStore.saveAdminScheduleWeeks(selectedYear, effectiveMonth, weeksRef.current);
     }, 60000);
 
     return () => clearInterval(intervalId);
@@ -2971,13 +2921,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const updateWeeks = (newWeeks: AdminScheduleWeek[]) => {
     setWeeks(newWeeks);
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
-    const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(newWeeks));
-      localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(newWeeks));
-    } catch (e) {
-      console.warn('Failed to cache admin schedule weeks:', e);
-    }
+    logisticsStore.saveAdminScheduleWeeks(selectedYear, effectiveMonth, newWeeks);
   };
 
   // Merge new parsed trips (from Excel upload and/or manual schedule creation) into existing weeks & store
@@ -3863,31 +3807,48 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return result;
   }, [weeks, selectedWeekNum, effectiveActiveBranchId, selectedMonth, selectedYear]);
 
-  // Persist snapshot of Kru Free / Stand By Gudang for the selected calendar date to localStorage
+  // Persist snapshot of Kru Free / Stand By Gudang for the selected calendar date directly to MySQL (/api/portal-flow-state)
   useEffect(() => {
     const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
     const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate) || allDaysFlat[0];
     if (!activeDayObj) return;
     const standbyData = computeDayCrewStandbyBreakdown(activeDayObj);
+    const effMo = selectedMonth === -1 ? 0 : selectedMonth;
+    const dateIso = `${selectedYear}-${String(effMo + 1).padStart(2, '0')}-${String(activeDayObj.dayNumber).padStart(2, '0')}`;
+    const snapshotPayload = {
+      dateIso,
+      dateString: activeDayObj.dateString,
+      dayName: activeDayObj.dayName,
+      dayNumber: activeDayObj.dayNumber,
+      year: selectedYear,
+      month: effMo,
+      totalCrewCount: standbyData.totalCrewCount,
+      scheduledCrewCount: standbyData.scheduledCrewCount,
+      freeStandbyCount: standbyData.freeStandbyCount,
+      freeStandbyCrews: standbyData.freeStandbyCrews,
+      scheduledCrews: standbyData.scheduledCrews,
+      pengiriman: activeDayObj.pengiriman,
+      updatedAt: new Date().toISOString()
+    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      localStorage.setItem(
-        'akk_standby_crew_snapshot',
-        JSON.stringify({
-          dateString: activeDayObj.dateString,
-          dayName: activeDayObj.dayName,
-          dayNumber: activeDayObj.dayNumber,
-          year: selectedYear,
-          month: selectedMonth === -1 ? 0 : selectedMonth,
-          totalCrewCount: standbyData.totalCrewCount,
-          scheduledCrewCount: standbyData.scheduledCrewCount,
-          freeStandbyCount: standbyData.freeStandbyCount,
-          freeStandbyCrews: standbyData.freeStandbyCrews,
-          scheduledCrews: standbyData.scheduledCrews,
-          pengiriman: activeDayObj.pengiriman,
-          updatedAt: new Date().toISOString()
-        })
-      );
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
     } catch {}
+    void fetch('/api/portal-flow-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({ standbyCrewSnapshot: snapshotPayload })
+    }).catch(() => {});
   }, [filteredWeeks, selectedCalendarDate, selectedYear, selectedMonth]);
 
   // List of unique active days across filtered weeks
@@ -4826,12 +4787,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       source: 'schedule_management_upsert_147'
     }).catch(err => console.warn('[Persistent Upsert Note]', err));
 
-    // Cache current weeks state so it permanently survives offline / reloads
-    const cacheKey = `akk_admin_schedule_cache_${selectedYear}_${effectiveMonth}`;
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(weeks));
-      localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(weeks));
-    } catch {}
+    // Sinkronkan state minggu ke store (MySQL-backed)
+    logisticsStore.saveAdminScheduleWeeks(selectedYear, effectiveMonth, weeks);
 
     setTimeout(() => {
       setIsSyncing(false);
@@ -5729,7 +5686,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 return false;
                               });
 
-                              const backupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
+                              const rawBackupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
                               const backupPosition = p.backupPosition || matchedSch?.backupPosition || 'driver';
                               const backupTargetName =
                                 p.backupTargetName ||
@@ -5737,9 +5694,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 (backupPosition === 'helper' ? p.helper : backupPosition === 'helper2' ? p.helper2 : p.driver);
 
                               const displayDriver =
-                                backupCrewName && backupTargetName && backupPosition === 'driver' && isSameCrewPerson(p.driver, backupCrewName)
+                                rawBackupCrewName && backupTargetName && backupPosition === 'driver' && isSameCrewPerson(p.driver, rawBackupCrewName)
                                   ? backupTargetName
                                   : p.driver;
+
+                              const isStaleDriverBackupRow = Boolean(
+                                rawBackupCrewName &&
+                                  backupPosition === 'driver' &&
+                                  displayDriver &&
+                                  displayDriver !== '-' &&
+                                  !isSameCrewPerson(displayDriver, rawBackupCrewName) &&
+                                  (Boolean(matchedSch && ['picked_up', 'in_transit', 'delivered'].includes(matchedSch.status)) ||
+                                    Boolean(backupTargetName && !isSameCrewPerson(displayDriver, backupTargetName)))
+                              );
+                              const backupCrewName = isStaleDriverBackupRow ? undefined : rawBackupCrewName;
 
                               const driverInitials = getDriverInitials(displayDriver);
                               const avatarStyle = DRIVER_AVATAR_COLORS[displayDriver] || { 

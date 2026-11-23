@@ -798,12 +798,14 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       totalAllTrips: number;
     }>();
 
-    // Ambil HANYA user dengan role === 'driver' dan status === 'approved' (Aktif) dari Manajemen User
+    // Ambil user aktif (role Driver atau akun pengiriman aktif non-Helper) dari Manajemen User
     const activeDriverUsers = logisticsStore
       .getUsers()
       .filter(u => {
         const displayName = (u.fullName || (u as any).name || '').trim();
-        return u.role === 'driver' && u.status === 'approved' && displayName && displayName !== '-';
+        if (!displayName || displayName === '-' || u.status !== 'approved' || (u as any).isActive === false) return false;
+        if (u.role === 'driver') return true;
+        return u.role !== 'crew_helper' && logisticsStore.isActiveDeliveryCrewUser(u);
       });
 
     const findMatchingDriverKey = (rawName: string): string | null => {

@@ -1233,6 +1233,17 @@ async function startServer() {
         points_json LONGTEXT NOT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_gps_trips_date_status (trip_date, status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        otp_hash VARCHAR(128) NOT NULL,
+        target_phone VARCHAR(32) NOT NULL,
+        attempts INT NOT NULL DEFAULT 0,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_prt_user_active (user_id, used_at, expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -1633,8 +1644,665 @@ async function startServer() {
     }
   });
 
+  // ============================================================================
+  // WHATSAPP GATEWAY & OTP PEMULIHAN KATA SANDI (LUPA PASSWORD -> WA USER)
+  // ============================================================================
+  const normalizeWhatsAppPhone = (raw: any): string => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    let normalized = digits;
+    if (normalized.startsWith('620')) {
+      normalized = `62${normalized.slice(3)}`;
+    } else if (normalized.startsWith('0')) {
+      normalized = `62${normalized.slice(1)}`;
+    } else if (normalized.startsWith('8')) {
+      normalized = `62${normalized}`;
+    }
+    if (normalized.length < 10 || normalized.length > 15) return '';
+    return normalized;
+  };
+
+  const isPlaceholderWhatsAppPhone = (normalizedPhone: string): boolean => {
+    return normalizedPhone === '6281234567890' || normalizedPhone === '6281200000000';
+  };
+
+  const maskWhatsAppPhone = (normalizedPhone: string): string => {
+    const clean = normalizeWhatsAppPhone(normalizedPhone);
+    if (!clean) return '-';
+    if (clean.startsWith('62') && clean.length >= 9) {
+      const local = clean.slice(2);
+      const head = local.slice(0, 3);
+      const tail = local.slice(-4);
+      return `+62 ${head}-****-${tail}`;
+    }
+    const head = clean.slice(0, 4);
+    const tail = clean.slice(-3);
+    return `+${head}****${tail}`;
+  };
+
+  const isSafeExternalGatewayUrl = (rawUrl: string): boolean => {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'https:') return false;
+      const host = parsed.hostname.toLowerCase();
+      if (
+        !host ||
+        host === 'localhost' ||
+        host.endsWith('.local') ||
+        host === '::1' ||
+        host === '[::1]' ||
+        host.startsWith('127.') ||
+        host.startsWith('10.') ||
+        host.startsWith('192.168.') ||
+        host.startsWith('169.254.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+      ) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const getWhatsAppGatewayConfig = () => {
+    const waKey = String(process.env.WHATSAPP_API_KEY || '').trim();
+    const providerRaw = String(process.env.WHATSAPP_PROVIDER || '').trim().toLowerCase();
+    const gatewayUrlRaw = String(process.env.WHATSAPP_GATEWAY_URL || '').trim();
+    const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+    const keyValid = Boolean(waKey && waKey.toLowerCase() !== 'disabled');
+    const urlValid = gatewayUrlRaw ? isSafeExternalGatewayUrl(gatewayUrlRaw) : false;
+    const provider: 'fonnte' | 'wablas' | 'meta' | 'webhook' =
+      providerRaw === 'wablas' || providerRaw === 'meta' || providerRaw === 'webhook' || providerRaw === 'fonnte'
+        ? providerRaw
+        : gatewayUrlRaw
+        ? 'webhook'
+        : 'fonnte';
+
+    let endpoint = '';
+    if (provider === 'meta') {
+      if (phoneNumberId && /^[a-zA-Z0-9_-]{4,64}$/.test(phoneNumberId)) {
+        endpoint = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+      }
+    } else if (urlValid) {
+      endpoint = gatewayUrlRaw;
+    } else if (provider === 'wablas') {
+      endpoint = 'https://pati.wablas.com/api/send-message';
+    } else if (provider === 'fonnte') {
+      endpoint = 'https://api.fonnte.com/send';
+    }
+
+    return {
+      configured: Boolean(keyValid && endpoint && isSafeExternalGatewayUrl(endpoint)),
+      provider,
+      endpoint,
+      apiKey: waKey
+    };
+  };
+
+  const sendWhatsAppViaGateway = async (
+    rawPhone: string,
+    message: string
+  ): Promise<{ success: boolean; provider: string; statusCode?: number; error?: string }> => {
+    const cleanPhone = normalizeWhatsAppPhone(rawPhone);
+    if (!cleanPhone) {
+      return {
+        success: false,
+        provider: 'none',
+        statusCode: 400,
+        error: 'Nomor WhatsApp tujuan tidak valid (gunakan format 08xx atau 628xx).'
+      };
+    }
+
+    const cfg = getWhatsAppGatewayConfig();
+    if (!cfg.configured) {
+      return {
+        success: false,
+        provider: cfg.provider,
+        statusCode: 503,
+        error: 'Gateway WhatsApp belum dikonfigurasi pada server (WHATSAPP_API_KEY belum diisi).'
+      };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+      let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      let payload: any = { phone: cleanPhone, target: cleanPhone, message };
+
+      if (cfg.provider === 'fonnte') {
+        headers = {
+          'Content-Type': 'application/json',
+          Authorization: cfg.apiKey
+        };
+        payload = {
+          target: cleanPhone,
+          message,
+          countryCode: '62'
+        };
+      } else if (cfg.provider === 'wablas') {
+        headers = {
+          'Content-Type': 'application/json',
+          Authorization: cfg.apiKey
+        };
+        payload = {
+          phone: cleanPhone,
+          message
+        };
+      } else if (cfg.provider === 'meta') {
+        headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.apiKey}`
+        };
+        payload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanPhone,
+          type: 'text',
+          text: {
+            preview_url: false,
+            body: message
+          }
+        };
+      } else {
+        headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.apiKey}`,
+          'X-API-Key': cfg.apiKey
+        };
+        payload = {
+          phone: cleanPhone,
+          target: cleanPhone,
+          message
+        };
+      }
+
+      const gwRes = await fetch(cfg.endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      const rawText = await gwRes.text().catch(() => '');
+      let parsed: any = null;
+      try {
+        parsed = rawText ? JSON.parse(rawText) : null;
+      } catch {}
+
+      const explicitFailure =
+        parsed &&
+        (parsed.status === false ||
+          parsed.success === false ||
+          Boolean(parsed.error && !parsed.messages));
+
+      if (!gwRes.ok || explicitFailure) {
+        const gwErrMsg =
+          parsed?.reason ||
+          parsed?.message ||
+          parsed?.error?.message ||
+          (typeof parsed?.error === 'string' ? parsed.error : '') ||
+          `HTTP ${gwRes.status}`;
+        return {
+          success: false,
+          provider: cfg.provider,
+          statusCode: 502,
+          error: `Gateway WhatsApp (${cfg.provider}) gagal mengirim pesan: ${gwErrMsg}`
+        };
+      }
+
+      return { success: true, provider: cfg.provider, statusCode: 200 };
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError';
+      return {
+        success: false,
+        provider: cfg.provider,
+        statusCode: 502,
+        error: isAbort
+          ? 'Koneksi ke gateway WhatsApp timeout. Silakan coba lagi beberapa saat.'
+          : `Gagal menghubungi gateway WhatsApp: ${err?.message || 'Network error'}`
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  interface PreviewResetTokenRecord {
+    id: string;
+    userId: string;
+    otpHash: string;
+    targetPhone: string;
+    attempts: number;
+    expiresAtMs: number;
+    usedAtMs: number | null;
+    createdAtMs: number;
+  }
+  const previewResetTokens = new Map<string, PreviewResetTokenRecord>();
+  const forgotReqCooldownByUser = new Map<string, number>();
+  const forgotReqRateByIp = new Map<string, { count: number; windowStart: number }>();
+  const forgotVerifyRateByAccountIp = new Map<string, { count: number; windowStart: number }>();
+
+  const OTP_TTL_SECONDS = 600; // 10 menit
+  const OTP_RESEND_COOLDOWN_SECONDS = 60;
+  const OTP_MAX_ATTEMPTS = 5;
+
+  const hashRecoveryOtp = (userId: string, otp: string): string => {
+    const secret = getSessionSecret();
+    return crypto.createHmac('sha256', secret).update(`otp:${userId}:${otp}`).digest('hex');
+  };
+
+  const findApprovedUserForRecovery = async (rawIdentifier: string): Promise<{ user: any | null; source: 'mysql' | 'preview' }> => {
+    const clean = String(rawIdentifier || '').trim();
+    const lower = clean.toLowerCase();
+    const cleanDigits = normalizeWhatsAppPhone(clean);
+
+    if (isDatabaseConfigured()) {
+      try {
+        await ensureDatabaseSchema();
+        const rows = await mysqlQuery<any[]>(
+          `SELECT id, email, full_name, role, department, phone, status
+           FROM users
+           WHERE LOWER(email) = ?
+              OR LOWER(id) = ?
+              OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ?
+              OR LOWER(TRIM(full_name)) = ?
+              OR LOWER(SUBSTRING_INDEX(TRIM(full_name), ' ', 1)) = ?
+           ORDER BY
+             CASE WHEN status = 'approved' THEN 0 ELSE 1 END,
+             CASE WHEN LOWER(email) = ? OR LOWER(TRIM(full_name)) = ? THEN 0 ELSE 1 END,
+             created_at ASC
+           LIMIT 10`,
+          [lower, lower, lower, lower, lower, lower, lower]
+        );
+        if (Array.isArray(rows) && rows.length > 0) {
+          const approved = rows.find(r => String(r.status || '') === 'approved');
+          return { user: approved || rows[0], source: 'mysql' };
+        }
+        if (cleanDigits && !isPlaceholderWhatsAppPhone(cleanDigits)) {
+          const allWithPhone = await mysqlQuery<any[]>(
+            `SELECT id, email, full_name, role, department, phone, status FROM users WHERE phone IS NOT NULL AND phone <> ''`
+          );
+          const phoneMatches = (allWithPhone || []).filter(r => normalizeWhatsAppPhone(r.phone) === cleanDigits);
+          const approvedPhone = phoneMatches.find(r => String(r.status || '') === 'approved');
+          if (approvedPhone || phoneMatches[0]) {
+            return { user: approvedPhone || phoneMatches[0], source: 'mysql' };
+          }
+        }
+        return { user: null, source: 'mysql' };
+      } catch (err: any) {
+        const errMsg = String(err?.message || '');
+        const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+        if (
+          !isPreviewEnv ||
+          !(
+            errMsg.includes('ECONNREFUSED') ||
+            errMsg.includes('ENOTFOUND') ||
+            errMsg.includes('ETIMEDOUT') ||
+            errMsg.includes('circuit breaker') ||
+            errMsg.includes('belum dikonfigurasi')
+          )
+        ) {
+          throw err;
+        }
+      }
+    }
+
+    for (const u of previewSessionUsers.values()) {
+      const uEmail = String(u.email || '').trim().toLowerCase();
+      const uPrefix = uEmail.split('@')[0];
+      const uName = String(u.full_name || '').trim().toLowerCase();
+      const uFirst = uName.split(/\s+/)[0] || '';
+      const uPhone = normalizeWhatsAppPhone(u.phone);
+      if (
+        lower === uEmail ||
+        lower === String(u.id || '').trim().toLowerCase() ||
+        lower === uPrefix ||
+        lower === uName ||
+        (uFirst && lower === uFirst) ||
+        (cleanDigits && !isPlaceholderWhatsAppPhone(cleanDigits) && uPhone === cleanDigits)
+      ) {
+        return { user: u, source: 'preview' };
+      }
+    }
+    return { user: null, source: 'preview' };
+  };
+
+  // Langkah 1 Lupa Password: Kirim Kode Verifikasi OTP 6-digit langsung ke WhatsApp user terdaftar
+  app.post('/api/auth/forgot-password/request', async (req, res) => {
+    const cleanId = String(req.body?.identifier || req.body?.email || '').trim();
+    if (!cleanId || cleanId.length > 190) {
+      return res.status(400).json({
+        success: false,
+        error: 'Masukkan Email, Username, atau Nomor WhatsApp akun yang terdaftar.'
+      });
+    }
+
+    const clientIp = getClientIp(req);
+    const nowMs = Date.now();
+    const ipState = forgotReqRateByIp.get(clientIp);
+    if (ipState && nowMs - ipState.windowStart < 15 * 60 * 1000) {
+      if (ipState.count >= 15) {
+        return res.status(429).json({
+          success: false,
+          error: 'Terlalu banyak permintaan kode verifikasi dari perangkat ini. Silakan coba lagi dalam beberapa menit.'
+        });
+      }
+      ipState.count += 1;
+    } else {
+      forgotReqRateByIp.set(clientIp, { count: 1, windowStart: nowMs });
+    }
+
+    try {
+      const { user, source } = await findApprovedUserForRecovery(cleanId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          code: 'USER_NOT_FOUND',
+          error: 'Akun dengan Email / Username tersebut tidak ditemukan.'
+        });
+      }
+      if (String(user.status || '') !== 'approved') {
+        return res.status(403).json({
+          success: false,
+          code: 'ACCOUNT_NOT_ACTIVE',
+          error: `Akun berstatus ${user.status || 'pending'} dan belum aktif. Hubungi Super Admin.`
+        });
+      }
+
+      const targetWaPhone = normalizeWhatsAppPhone(user.phone);
+      if (!targetWaPhone || isPlaceholderWhatsAppPhone(targetWaPhone)) {
+        return res.status(400).json({
+          success: false,
+          code: 'NO_WHATSAPP_NUMBER',
+          error: 'Nomor WhatsApp akun ini belum diisi atau masih menggunakan nomor placeholder di User Management. Minta Super Admin melengkapi No. WhatsApp asli pada menu User Management → Edit Pengguna.'
+        });
+      }
+
+      const maskedPhone = maskWhatsAppPhone(targetWaPhone);
+      const userId = String(user.id);
+      const lastSentAt = forgotReqCooldownByUser.get(userId) || 0;
+      const elapsedSec = Math.floor((nowMs - lastSentAt) / 1000);
+      if (lastSentAt > 0 && elapsedSec < OTP_RESEND_COOLDOWN_SECONDS) {
+        const waitSec = OTP_RESEND_COOLDOWN_SECONDS - elapsedSec;
+        return res.status(429).json({
+          success: false,
+          code: 'COOLDOWN_ACTIVE',
+          retryAfterSec: waitSec,
+          maskedPhone,
+          error: `Kode verifikasi baru saja dikirim ke WhatsApp ${maskedPhone}. Tunggu ${waitSec} detik sebelum meminta kode ulang.`
+        });
+      }
+
+      const cfg = getWhatsAppGatewayConfig();
+      if (!cfg.configured) {
+        return res.status(503).json({
+          success: false,
+          code: 'WA_GATEWAY_UNCONFIGURED',
+          maskedPhone,
+          error: `Nomor WhatsApp user terdeteksi (${maskedPhone} dari User Management), tetapi gateway WhatsApp server belum terhubung (WHATSAPP_API_KEY belum diisi di konfigurasi server).`
+        });
+      }
+
+      const otp = String(crypto.randomInt(100000, 1000000));
+      const otpHash = hashRecoveryOtp(userId, otp);
+      const tokenId = `prt-${crypto.randomBytes(12).toString('hex')}`;
+      const expiresAtMs = nowMs + OTP_TTL_SECONDS * 1000;
+
+      if (source === 'mysql') {
+        await mysqlQuery(
+          `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL`,
+          [userId]
+        );
+        await mysqlQuery(
+          `INSERT INTO password_reset_tokens (id, user_id, otp_hash, target_phone, attempts, expires_at, used_at, created_at)
+           VALUES (?, ?, ?, ?, 0, ?, NULL, NOW())`,
+          [tokenId, userId, otpHash, targetWaPhone, toMysqlDateTime(new Date(expiresAtMs))]
+        );
+      } else {
+        for (const [k, v] of previewResetTokens.entries()) {
+          if (v.userId === userId && !v.usedAtMs) {
+            previewResetTokens.set(k, { ...v, usedAtMs: nowMs });
+          }
+        }
+        previewResetTokens.set(tokenId, {
+          id: tokenId,
+          userId,
+          otpHash,
+          targetPhone: targetWaPhone,
+          attempts: 0,
+          expiresAtMs,
+          usedAtMs: null,
+          createdAtMs: nowMs
+        });
+      }
+
+      const waMessage = [
+        '*[PT AKK - Portal Logistik Terintegrasi]*',
+        `Halo *${String(user.full_name || 'Pengguna').trim()}*,`,
+        '',
+        'Kode Verifikasi (OTP) pemulihan kata sandi akun Anda adalah:',
+        `*${otp}*`,
+        '',
+        `Berlaku selama *${Math.round(OTP_TTL_SECONDS / 60)} menit*.`,
+        'Demi keamanan, JANGAN bagikan kode ini kepada siapa pun termasuk pihak internal.'
+      ].join('\n');
+
+      const sendResult = await sendWhatsAppViaGateway(targetWaPhone, waMessage);
+      if (!sendResult.success) {
+        if (source === 'mysql') {
+          await mysqlQuery(`DELETE FROM password_reset_tokens WHERE id = ?`, [tokenId]).catch(() => {});
+        } else {
+          previewResetTokens.delete(tokenId);
+        }
+        return res.status(sendResult.statusCode || 502).json({
+          success: false,
+          code: 'WA_SEND_FAILED',
+          maskedPhone,
+          error: sendResult.error || 'Gagal mengirimkan kode verifikasi ke WhatsApp pengguna.'
+        });
+      }
+
+      forgotReqCooldownByUser.set(userId, nowMs);
+      return res.json({
+        success: true,
+        channel: 'whatsapp',
+        provider: sendResult.provider,
+        maskedPhone,
+        accountName: String(user.full_name || '').trim(),
+        expiresInSeconds: OTP_TTL_SECONDS,
+        cooldownSeconds: OTP_RESEND_COOLDOWN_SECONDS,
+        message: `Kode verifikasi 6-digit telah dikirim langsung ke WhatsApp ${maskedPhone}.`
+      });
+    } catch (err: any) {
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'Gagal memproses permintaan verifikasi WhatsApp.'
+      });
+    }
+  });
+
+  // Langkah 2 Lupa Password: Verifikasi Kode OTP dari WhatsApp & Simpan Password Baru ke MySQL
+  app.post('/api/auth/forgot-password/verify', async (req, res) => {
+    const cleanId = String(req.body?.identifier || req.body?.email || '').trim();
+    const cleanCode = String(req.body?.code || '').replace(/\D/g, '').trim();
+    const newPassword = String(req.body?.newPassword || '');
+
+    if (!cleanId) {
+      return res.status(400).json({ success: false, error: 'Email atau Username akun wajib diisi.' });
+    }
+    if (!/^\d{6}$/.test(cleanCode)) {
+      return res.status(400).json({ success: false, error: 'Masukkan 6 digit kode verifikasi yang dikirim ke WhatsApp Anda.' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Password baru minimal 8 karakter.' });
+    }
+
+    const clientIp = getClientIp(req);
+    const rateKey = `${cleanId.toLowerCase()}__${clientIp}`;
+    const nowMs = Date.now();
+    const vState = forgotVerifyRateByAccountIp.get(rateKey);
+    if (vState && nowMs - vState.windowStart < 15 * 60 * 1000 && vState.count >= 10) {
+      return res.status(429).json({
+        success: false,
+        error: 'Terlalu banyak percobaan verifikasi kode salah. Silakan minta kode baru setelah beberapa menit.'
+      });
+    }
+
+    const recordVerifyFail = () => {
+      const prev = forgotVerifyRateByAccountIp.get(rateKey);
+      if (prev && nowMs - prev.windowStart < 15 * 60 * 1000) {
+        prev.count += 1;
+      } else {
+        forgotVerifyRateByAccountIp.set(rateKey, { count: 1, windowStart: nowMs });
+      }
+    };
+
+    try {
+      const { user, source } = await findApprovedUserForRecovery(cleanId);
+      if (!user || String(user.status || '') !== 'approved') {
+        recordVerifyFail();
+        return res.status(400).json({
+          success: false,
+          error: 'Akun aktif tidak ditemukan atau kode verifikasi tidak valid.'
+        });
+      }
+
+      const userId = String(user.id);
+      const expectedHash = hashRecoveryOtp(userId, cleanCode);
+
+      if (source === 'mysql') {
+        const tokenRows = await mysqlQuery<any[]>(
+          `SELECT id, otp_hash, attempts, expires_at
+           FROM password_reset_tokens
+           WHERE user_id = ? AND used_at IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [userId]
+        );
+        if (!Array.isArray(tokenRows) || tokenRows.length === 0) {
+          recordVerifyFail();
+          return res.status(400).json({
+            success: false,
+            error: 'Belum ada kode verifikasi aktif atau kode sudah kedaluwarsa. Silakan kirim ulang kode ke WhatsApp.'
+          });
+        }
+        const tok = tokenRows[0];
+        if (new Date(tok.expires_at).getTime() <= nowMs) {
+          await mysqlQuery(`UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?`, [tok.id]).catch(() => {});
+          return res.status(400).json({
+            success: false,
+            error: 'Kode verifikasi WhatsApp sudah kedaluwarsa. Silakan kirim ulang kode baru.'
+          });
+        }
+        const currentAttempts = Number(tok.attempts || 0);
+        if (currentAttempts >= OTP_MAX_ATTEMPTS) {
+          await mysqlQuery(`UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?`, [tok.id]).catch(() => {});
+          return res.status(429).json({
+            success: false,
+            error: 'Batas salah input kode tercapai (5x). Silakan kirim ulang kode verifikasi baru ke WhatsApp.'
+          });
+        }
+
+        const storedBuf = Buffer.from(String(tok.otp_hash || ''), 'utf8');
+        const actualBuf = Buffer.from(expectedHash, 'utf8');
+        const matched = storedBuf.length === actualBuf.length && crypto.timingSafeEqual(storedBuf, actualBuf);
+        if (!matched) {
+          recordVerifyFail();
+          const nextAttempts = currentAttempts + 1;
+          if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+            await mysqlQuery(
+              `UPDATE password_reset_tokens SET attempts = ?, used_at = NOW() WHERE id = ?`,
+              [nextAttempts, tok.id]
+            );
+            return res.status(400).json({
+              success: false,
+              error: 'Kode verifikasi salah 5x berturut-turut dan telah hangus. Silakan minta kode baru ke WhatsApp.'
+            });
+          }
+          await mysqlQuery(`UPDATE password_reset_tokens SET attempts = ? WHERE id = ?`, [nextAttempts, tok.id]);
+          return res.status(400).json({
+            success: false,
+            error: `Kode verifikasi tidak sesuai (sisa percobaan: ${OTP_MAX_ATTEMPTS - nextAttempts}x).`
+          });
+        }
+
+        await mysqlQuery(
+          `UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?`,
+          [hashPassword(newPassword), userId]
+        );
+        await mysqlQuery(`UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL`, [userId]);
+        await revokeAllUserSessions(userId).catch(() => {});
+      } else {
+        const activePreviewTokens = Array.from(previewResetTokens.values())
+          .filter(t => t.userId === userId && t.usedAtMs === null)
+          .sort((a, b) => b.createdAtMs - a.createdAtMs);
+        const tok = activePreviewTokens[0];
+        if (!tok || tok.expiresAtMs <= nowMs) {
+          if (tok) previewResetTokens.set(tok.id, { ...tok, usedAtMs: nowMs });
+          recordVerifyFail();
+          return res.status(400).json({
+            success: false,
+            error: 'Kode verifikasi WhatsApp tidak ditemukan atau sudah kedaluwarsa. Silakan kirim ulang kode.'
+          });
+        }
+        if (tok.attempts >= OTP_MAX_ATTEMPTS) {
+          previewResetTokens.set(tok.id, { ...tok, usedAtMs: nowMs });
+          return res.status(429).json({
+            success: false,
+            error: 'Batas salah input kode tercapai (5x). Silakan kirim ulang kode baru.'
+          });
+        }
+        const storedBuf = Buffer.from(tok.otpHash, 'utf8');
+        const actualBuf = Buffer.from(expectedHash, 'utf8');
+        const matched = storedBuf.length === actualBuf.length && crypto.timingSafeEqual(storedBuf, actualBuf);
+        if (!matched) {
+          recordVerifyFail();
+          const nextAttempts = tok.attempts + 1;
+          previewResetTokens.set(tok.id, {
+            ...tok,
+            attempts: nextAttempts,
+            usedAtMs: nextAttempts >= OTP_MAX_ATTEMPTS ? nowMs : null
+          });
+          return res.status(400).json({
+            success: false,
+            error:
+              nextAttempts >= OTP_MAX_ATTEMPTS
+                ? 'Kode verifikasi salah 5x berturut-turut dan telah hangus. Silakan minta kode baru.'
+                : `Kode verifikasi tidak sesuai (sisa percobaan: ${OTP_MAX_ATTEMPTS - nextAttempts}x).`
+          });
+        }
+
+        const existingPreview = previewSessionUsers.get(userId);
+        if (existingPreview) {
+          previewSessionUsers.set(userId, { ...existingPreview, password_hash: hashPassword(newPassword) });
+        }
+        previewResetTokens.set(tok.id, { ...tok, usedAtMs: nowMs });
+        await revokeAllUserSessions(userId).catch(() => {});
+      }
+
+      forgotVerifyRateByAccountIp.delete(rateKey);
+      forgotReqCooldownByUser.delete(userId);
+      clearLoginFailure(cleanId, clientIp);
+
+      return res.json({
+        success: true,
+        message: 'Kata sandi baru berhasil disimpan melalui verifikasi WhatsApp. Silakan masuk dengan password baru Anda.'
+      });
+    } catch (err: any) {
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'Gagal memverifikasi kode dan memperbarui password.'
+      });
+    }
+  });
+
   // User Management is persisted in Hostinger MySQL; authenticated users can read sanitized user profiles for schedule/crew assignment.
   app.get('/api/users', requireAuth, async (req: any, res) => {
+    const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+    if (!isDatabaseConfigured() && isPreviewEnv) {
+      const isSuper = req.authUser?.role === 'super_admin';
+      const rows = Array.from(previewSessionUsers.values()).filter((r: any) => isSuper || r.status !== 'rejected');
+      return res.json({ success: true, source: 'preview_session', data: rows.map(publicUser) });
+    }
     try {
       await ensureBootstrapAdmin();
       const rows = await mysqlQuery<any[]>(`SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users ORDER BY created_at DESC, full_name ASC`);
@@ -1642,6 +2310,19 @@ async function startServer() {
       const filteredRows = isSuper ? rows : rows.filter((r: any) => r.status !== 'rejected');
       return res.json({ success: true, source: 'hostinger_mysql', data: filteredRows.map(publicUser) });
     } catch (err: any) {
+      const errMsg = String(err?.message || '');
+      if (
+        isPreviewEnv &&
+        (errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('ENOTFOUND') ||
+          errMsg.includes('ETIMEDOUT') ||
+          errMsg.includes('circuit breaker') ||
+          errMsg.includes('belum dikonfigurasi'))
+      ) {
+        const isSuper = req.authUser?.role === 'super_admin';
+        const rows = Array.from(previewSessionUsers.values()).filter((r: any) => isSuper || r.status !== 'rejected');
+        return res.json({ success: true, source: 'preview_session', data: rows.map(publicUser) });
+      }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca pengguna' });
     }
   });
@@ -1660,36 +2341,50 @@ async function startServer() {
     }
     const id = String(data.id || `usr-${crypto.randomBytes(6).toString('hex')}`);
     const permissionsJson = data.permissions ? JSON.stringify(data.permissions) : null;
+    const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+    const savePreviewUser = () => {
+      const previewUser = {
+        id,
+        email: cleanEmail,
+        password_hash: hashPassword(cleanPassword),
+        full_name: cleanName,
+        role,
+        department: String(data.department || 'Logistik'),
+        phone: String(data.phone || '').trim(),
+        status,
+        permissions_json: permissionsJson,
+        created_at: new Date().toISOString(),
+        approved_at: status === 'approved' ? new Date().toISOString() : null,
+        approved_by: status === 'approved' ? 'Super Admin' : null,
+        notes: data.notes || null
+      };
+      previewSessionUsers.set(id, previewUser);
+      return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
+    };
+
+    if (!isDatabaseConfigured() && isPreviewEnv) {
+      return savePreviewUser();
+    }
     try {
       await mysqlQuery(
         `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, permissions_json, approved_at, approved_by, notes, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-        [id, cleanEmail, hashPassword(cleanPassword), cleanName, role, String(data.department || 'Logistik'), String(data.phone || ''), status,
+        [id, cleanEmail, hashPassword(cleanPassword), cleanName, role, String(data.department || 'Logistik'), String(data.phone || '').trim(), status,
          permissionsJson, status === 'approved' ? new Date() : null, status === 'approved' ? (req.authUser?.full_name || 'Super Admin') : null, data.notes || null]
       );
       const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
       return res.status(201).json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
       const errMsg = String(err?.message || '');
-      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
-        const previewUser = {
-          id,
-          email: cleanEmail,
-          password_hash: hashPassword(cleanPassword),
-          full_name: cleanName,
-          role,
-          department: String(data.department || 'Logistik'),
-          phone: String(data.phone || ''),
-          status,
-          permissions_json: permissionsJson,
-          created_at: new Date().toISOString(),
-          approved_at: status === 'approved' ? new Date().toISOString() : null,
-          approved_by: status === 'approved' ? 'Super Admin' : null,
-          notes: data.notes || null
-        };
-        previewSessionUsers.set(id, previewUser);
-        return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
+      if (
+        isPreviewEnv &&
+        (errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('ENOTFOUND') ||
+          errMsg.includes('ETIMEDOUT') ||
+          errMsg.includes('circuit breaker') ||
+          errMsg.includes('belum dikonfigurasi'))
+      ) {
+        return savePreviewUser();
       }
       const duplicate = String(err?.code || '').includes('DUP_ENTRY') || errMsg.toLowerCase().includes('duplicate');
       return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal membuat pengguna') });
@@ -1813,6 +2508,12 @@ async function startServer() {
           `DELETE FROM crews WHERE id = ? OR LOWER(name) IN (?, ?, ?)`,
           [`crw-${targetUserId}`, lowerFull, altNameUllah, altNameUlloh]
         ).catch(() => {});
+      } else if (data.phone !== undefined) {
+        const cleanCrewPhone = String(data.phone || '').trim();
+        await mysqlQuery(
+          `UPDATE crews SET phone = ?, updated_at = NOW() WHERE id = ? OR LOWER(name) = ?`,
+          [cleanCrewPhone, `crw-${targetUserId}`, resolvedFullName.toLowerCase()]
+        ).catch(() => {});
       }
 
       // Jika status pengguna diubah menjadi non-aktif (inactive/rejected/pending), otomatis cabut seluruh sesi aktif di perangkatnya
@@ -1825,7 +2526,14 @@ async function startServer() {
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
+      if (
+        isPreviewEnv &&
+        (errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('ENOTFOUND') ||
+          errMsg.includes('ETIMEDOUT') ||
+          errMsg.includes('circuit breaker') ||
+          errMsg.includes('belum dikonfigurasi'))
+      ) {
         const existingPreview = previewSessionUsers.get(id) || {};
         const updatedPreview = {
           ...existingPreview,
@@ -1834,7 +2542,7 @@ async function startServer() {
           full_name: String(data.fullName ?? data.name ?? existingPreview.full_name ?? 'Pengguna').trim(),
           role: data.role ?? existingPreview.role ?? 'unassigned',
           department: data.department ?? existingPreview.department ?? 'Logistik',
-          phone: data.phone ?? existingPreview.phone ?? '',
+          phone: String(data.phone ?? existingPreview.phone ?? '').trim(),
           status: data.status ?? existingPreview.status ?? 'approved',
           permissions_json: data.permissions !== undefined ? JSON.stringify(data.permissions) : existingPreview.permissions_json,
           notes: data.notes ?? existingPreview.notes
@@ -2029,16 +2737,29 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // API route for WhatsApp notification.
-  // Jangan mengembalikan sukses palsu: bridge/provider harus benar-benar dikonfigurasi dan dihubungkan.
-  app.post("/api/notify-whatsapp", requireAuth, async (_req, res) => {
-    const waKey = String(process.env.WHATSAPP_API_KEY || '').trim();
-    if (!waKey || waKey.toLowerCase() === 'disabled') {
-      return res.status(503).json({ success: false, error: "WHATSAPP_API_KEY belum dikonfigurasi" });
+  // API route for WhatsApp notification via configured WhatsApp Gateway (Fonnte / Wablas / Meta / Custom HTTPS Webhook).
+  app.post("/api/notify-whatsapp", requireAuth, async (req, res) => {
+    const phoneNumber = String(req.body?.phoneNumber || req.body?.phone || req.body?.target || '').trim();
+    const message = String(req.body?.message || '').trim();
+    if (!phoneNumber || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nomor WhatsApp tujuan dan isi pesan wajib diisi.'
+      });
     }
-    return res.status(501).json({
-      success: false,
-      error: "Adapter WhatsApp provider belum dikonfigurasi pada hosting. Endpoint tidak mengklaim pesan terkirim sebelum provider/bridge benar-benar terhubung."
+    const result = await sendWhatsAppViaGateway(phoneNumber, message.slice(0, 2000));
+    if (!result.success) {
+      return res.status(result.statusCode || 502).json({
+        success: false,
+        provider: result.provider,
+        error: result.error
+      });
+    }
+    return res.json({
+      success: true,
+      provider: result.provider,
+      maskedPhone: maskWhatsAppPhone(phoneNumber),
+      message: 'Pesan WhatsApp berhasil dikirim via gateway.'
     });
   });
 
@@ -2594,6 +3315,43 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   let inMemoryDriverPins: Record<string, string> = {};
   let inMemoryShiftsLoadedFromDb = false;
 
+  const sanitizeOperationalPlate = (plate?: any): string => {
+    const clean = String(plate || '').trim();
+    if (!clean || /^FLT-\d+$/i.test(clean) || clean.toUpperCase().endsWith('AKK')) {
+      return '-';
+    }
+    return clean;
+  };
+
+  const sanitizeShiftRecord = (s: any) => {
+    if (!s || typeof s !== 'object') return s;
+    const cleanPlate = sanitizeOperationalPlate(s.plateNumber);
+    const isHelperRole = String(s.checkinRole || '').toLowerCase() === 'helper';
+    const dNameLower = String(s.driverName || '').trim().toLowerCase();
+    const h1Lower = String(s.helper1Name || '').trim().toLowerCase();
+    const clearDuplicateH1 = isHelperRole && h1Lower && dNameLower && h1Lower === dNameLower;
+    return {
+      ...s,
+      plateNumber: cleanPlate,
+      fleetId: cleanPlate === '-' && /^flt-\d+$/i.test(String(s.fleetId || '').trim()) ? undefined : s.fleetId,
+      ...(clearDuplicateH1 ? { helper1Id: undefined, helper1Name: undefined } : {})
+    };
+  };
+
+  const sanitizeReportRecord = (r: any) => {
+    if (!r || typeof r !== 'object') return r;
+    const cleanPlate = sanitizeOperationalPlate(r.plateNumber);
+    const isHelperRole = String(r.userRole || '').toLowerCase().includes('helper');
+    const dNameLower = String(r.driverName || '').trim().toLowerCase();
+    const hNameLower = String(r.helperName || '').trim().toLowerCase();
+    const clearSelfHelper = isHelperRole && hNameLower && dNameLower && hNameLower === dNameLower;
+    return {
+      ...r,
+      plateNumber: cleanPlate,
+      ...(clearSelfHelper ? { helperName: undefined } : {})
+    };
+  };
+
   const loadDriverShiftsFromDbIfNeeded = async (): Promise<{ shifts: any[]; pins: Record<string, string> }> => {
     if (inMemoryShiftsLoadedFromDb) {
       return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
@@ -2612,7 +3370,24 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ? JSON.parse(shiftRows[0].state_json)
           : shiftRows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryDriverShifts = parsed;
+          let changed = false;
+          inMemoryDriverShifts = parsed.map((s: any) => {
+            const next = sanitizeShiftRecord(s);
+            if (
+              next &&
+              (next.plateNumber !== s?.plateNumber || next.helper1Name !== s?.helper1Name)
+            ) {
+              changed = true;
+            }
+            return next;
+          });
+          if (changed) {
+            mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              ['driver_shifts_v2', JSON.stringify(inMemoryDriverShifts)]
+            ).catch(() => {});
+          }
         }
       }
       if (Array.isArray(pinRows) && pinRows.length > 0 && pinRows[0].state_json) {
@@ -2630,7 +3405,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   };
 
   const persistDriverShiftsToDb = async (shiftsList: any[], pinsMap?: Record<string, string>) => {
-    inMemoryDriverShifts = shiftsList.slice(0, 150);
+    inMemoryDriverShifts = shiftsList.slice(0, 150).map(sanitizeShiftRecord);
     if (pinsMap) {
       inMemoryDriverPins = { ...pinsMap };
     }
@@ -2683,7 +3458,23 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ? JSON.parse(rows[0].state_json)
           : rows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryDriverReports = parsed.filter((r: any) => !deletedDriverReportIds.has(String(r?.id || '')));
+          let changed = false;
+          inMemoryDriverReports = parsed
+            .filter((r: any) => !deletedDriverReportIds.has(String(r?.id || '')))
+            .map((r: any) => {
+              const next = sanitizeReportRecord(r);
+              if (next && (next.plateNumber !== r?.plateNumber || next.helperName !== r?.helperName)) {
+                changed = true;
+              }
+              return next;
+            });
+          if (changed) {
+            mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              ['driver_reports_payload', JSON.stringify(inMemoryDriverReports)]
+            ).catch(() => {});
+          }
         }
       }
     } catch (err: any) {
@@ -2769,18 +3560,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const map = new Map<string, any>();
       for (const s of [...shifts, ...nextShifts]) {
         if (s && s.id) {
-          map.set(String(s.id), s);
+          map.set(String(s.id), sanitizeShiftRecord(s));
         }
       }
       nextShifts = Array.from(map.values()).sort(
         (a, b) => new Date(b.checkinTime || b.createdAt || 0).getTime() - new Date(a.checkinTime || a.createdAt || 0).getTime()
       );
     } else if (shift && shift.id) {
-      const idx = nextShifts.findIndex((s: any) => s.id === shift.id);
+      const sanitizedShift = sanitizeShiftRecord(shift);
+      const idx = nextShifts.findIndex((s: any) => s.id === sanitizedShift.id);
       if (idx >= 0) {
-        nextShifts[idx] = { ...nextShifts[idx], ...shift };
+        nextShifts[idx] = { ...nextShifts[idx], ...sanitizedShift };
       } else {
-        nextShifts.unshift(shift);
+        nextShifts.unshift(sanitizedShift);
       }
     }
     const nextPins = pins && typeof pins === 'object' ? { ...inMemoryDriverPins, ...pins } : undefined;
@@ -2824,12 +3616,18 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     sjKeluarSistemMap: Record<string, string>;
     activeFormKirimByCrew?: Record<string, string>;
     activeScheduleByCrew?: Record<string, string>;
+    scopedCrewState?: Record<string, string>;
+    pendingTabByUser?: Record<string, string>;
+    standbyCrewSnapshot?: any;
   } = {
     sharedScheduleFlowMap: {},
     keluarArgoMap: {},
     sjKeluarSistemMap: {},
     activeFormKirimByCrew: {},
-    activeScheduleByCrew: {}
+    activeScheduleByCrew: {},
+    scopedCrewState: {},
+    pendingTabByUser: {},
+    standbyCrewSnapshot: null
   };
   let inMemoryPortalFlowLoaded = false;
 
@@ -2852,7 +3650,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             keluarArgoMap: parsed.keluarArgoMap || {},
             sjKeluarSistemMap: parsed.sjKeluarSistemMap || {},
             activeFormKirimByCrew: parsed.activeFormKirimByCrew || {},
-            activeScheduleByCrew: parsed.activeScheduleByCrew || {}
+            activeScheduleByCrew: parsed.activeScheduleByCrew || {},
+            scopedCrewState: parsed.scopedCrewState || {},
+            pendingTabByUser: parsed.pendingTabByUser || {},
+            standbyCrewSnapshot: parsed.standbyCrewSnapshot || null
           };
         }
       }
@@ -2890,7 +3691,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       activeScheduleByCrew: {
         ...(inMemoryPortalFlowState.activeScheduleByCrew || {}),
         ...(body.activeScheduleByCrew || {})
-      }
+      },
+      scopedCrewState: {
+        ...(inMemoryPortalFlowState.scopedCrewState || {}),
+        ...(body.scopedCrewState || {})
+      },
+      pendingTabByUser: {
+        ...(inMemoryPortalFlowState.pendingTabByUser || {}),
+        ...(body.pendingTabByUser || {})
+      },
+      standbyCrewSnapshot:
+        body.standbyCrewSnapshot !== undefined
+          ? body.standbyCrewSnapshot
+          : inMemoryPortalFlowState.standbyCrewSnapshot
     };
     if (isDatabaseConfigured()) {
       try {
@@ -2904,6 +3717,306 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
     }
     return res.json({ success: true, state: inMemoryPortalFlowState });
+  });
+
+  // =========================================================================
+  // MULTI-BRANCH & RBAC STATE SYNC (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryBranchState: {
+    branches: any[];
+    userBranchPerms: Record<string, any>;
+    entityBranches: {
+      schedules: Record<string, string>;
+      fleets: Record<string, string>;
+      crews: Record<string, string>;
+      inventory: Record<string, string>;
+    };
+    activeBranchByUser: Record<string, string>;
+  } = {
+    branches: [],
+    userBranchPerms: {},
+    entityBranches: { schedules: {}, fleets: {}, crews: {}, inventory: {} },
+    activeBranchByUser: {}
+  };
+  let inMemoryBranchStateLoaded = false;
+
+  const loadBranchStateIfNeeded = async () => {
+    if (inMemoryBranchStateLoaded) return inMemoryBranchState;
+    inMemoryBranchStateLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryBranchState;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['branch_store_state_v1']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryBranchState = {
+            branches: Array.isArray(parsed.branches) ? parsed.branches : [],
+            userBranchPerms: parsed.userBranchPerms && typeof parsed.userBranchPerms === 'object' ? parsed.userBranchPerms : {},
+            entityBranches: {
+              schedules: parsed.entityBranches?.schedules || {},
+              fleets: parsed.entityBranches?.fleets || {},
+              crews: parsed.entityBranches?.crews || {},
+              inventory: parsed.entityBranches?.inventory || {}
+            },
+            activeBranchByUser: parsed.activeBranchByUser && typeof parsed.activeBranchByUser === 'object' ? parsed.activeBranchByUser : {}
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Branch State Load Warning]', err?.message || err);
+    }
+    return inMemoryBranchState;
+  };
+
+  app.get("/api/branch-state", requireAuth, async (_req, res) => {
+    const state = await loadBranchStateIfNeeded();
+    return res.json({ success: true, source: 'hostinger_mysql', state });
+  });
+
+  app.put("/api/branch-state", requireAuth, express.json({ limit: '5mb' }), async (req: any, res) => {
+    await loadBranchStateIfNeeded();
+    const body = req.body || {};
+    const authRole = String(req.authUser?.role || '').toLowerCase();
+    const isSuper = authRole === 'super_admin';
+
+    if (isSuper && Array.isArray(body.branches) && body.branches.length > 0) {
+      inMemoryBranchState.branches = body.branches;
+    }
+    if (isSuper && body.userBranchPerms && typeof body.userBranchPerms === 'object') {
+      inMemoryBranchState.userBranchPerms = {
+        ...inMemoryBranchState.userBranchPerms,
+        ...body.userBranchPerms
+      };
+    }
+    if (body.entityBranches && typeof body.entityBranches === 'object') {
+      inMemoryBranchState.entityBranches = {
+        schedules: { ...inMemoryBranchState.entityBranches.schedules, ...(body.entityBranches.schedules || {}) },
+        fleets: { ...inMemoryBranchState.entityBranches.fleets, ...(body.entityBranches.fleets || {}) },
+        crews: { ...inMemoryBranchState.entityBranches.crews, ...(body.entityBranches.crews || {}) },
+        inventory: { ...inMemoryBranchState.entityBranches.inventory, ...(body.entityBranches.inventory || {}) }
+      };
+    }
+    if (body.activeBranchByUser && typeof body.activeBranchByUser === 'object') {
+      inMemoryBranchState.activeBranchByUser = {
+        ...inMemoryBranchState.activeBranchByUser,
+        ...body.activeBranchByUser
+      };
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['branch_store_state_v1', JSON.stringify(inMemoryBranchState)]
+        );
+      } catch (err: any) {
+        console.warn('[Branch State Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, state: inMemoryBranchState });
+  });
+
+  // =========================================================================
+  // DRIVER OUTBOUND WAYBILLS & AREA AUTO-MAPPER (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryDriverWaybills: Record<string, any> = {};
+  let inMemoryWaybillsLoaded = false;
+
+  const loadWaybillsIfNeeded = async () => {
+    if (inMemoryWaybillsLoaded) return inMemoryDriverWaybills;
+    inMemoryWaybillsLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryDriverWaybills;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['driver_outbound_waybills_v3']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          inMemoryDriverWaybills = parsed;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Waybills Load Warning]', err?.message || err);
+    }
+    return inMemoryDriverWaybills;
+  };
+
+  app.get("/api/driver-waybills", requireAuth, async (_req, res) => {
+    const waybills = await loadWaybillsIfNeeded();
+    return res.json({ success: true, waybills });
+  });
+
+  app.post("/api/driver-waybills", requireAuth, express.json({ limit: '10mb' }), async (req, res) => {
+    await loadWaybillsIfNeeded();
+    const body = req.body || {};
+    if (body.waybill && body.waybill.id) {
+      inMemoryDriverWaybills[String(body.waybill.id)] = body.waybill;
+    } else if (body.waybills && typeof body.waybills === 'object' && !Array.isArray(body.waybills)) {
+      inMemoryDriverWaybills = { ...inMemoryDriverWaybills, ...body.waybills };
+    }
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['driver_outbound_waybills_v3', JSON.stringify(inMemoryDriverWaybills)]
+        );
+      } catch (err: any) {
+        console.warn('[Waybills Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, waybills: inMemoryDriverWaybills });
+  });
+
+  let inMemoryAreaMappings: { customAreas: any[]; savedMappings: Record<string, string> } = {
+    customAreas: [],
+    savedMappings: {}
+  };
+  let inMemoryAreaMappingsLoaded = false;
+
+  const loadAreaMappingsIfNeeded = async () => {
+    if (inMemoryAreaMappingsLoaded) return inMemoryAreaMappings;
+    inMemoryAreaMappingsLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryAreaMappings;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['area_auto_mapper_state_v1']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryAreaMappings = {
+            customAreas: Array.isArray(parsed.customAreas) ? parsed.customAreas : [],
+            savedMappings: parsed.savedMappings && typeof parsed.savedMappings === 'object' ? parsed.savedMappings : {}
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Area Mappings Load Warning]', err?.message || err);
+    }
+    return inMemoryAreaMappings;
+  };
+
+  app.get("/api/area-mappings", requireAuth, async (_req, res) => {
+    const data = await loadAreaMappingsIfNeeded();
+    return res.json({ success: true, ...data });
+  });
+
+  app.post("/api/area-mappings", requireAuth, express.json({ limit: '5mb' }), async (req, res) => {
+    await loadAreaMappingsIfNeeded();
+    const body = req.body || {};
+    if (Array.isArray(body.customAreas)) {
+      const seen = new Set(inMemoryAreaMappings.customAreas.map((a: any) => String(a?.name || '').toUpperCase()));
+      for (const item of body.customAreas) {
+        const key = String(item?.name || '').toUpperCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          inMemoryAreaMappings.customAreas.push(item);
+        }
+      }
+    }
+    if (body.savedMappings && typeof body.savedMappings === 'object') {
+      inMemoryAreaMappings.savedMappings = {
+        ...inMemoryAreaMappings.savedMappings,
+        ...body.savedMappings
+      };
+    }
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['area_auto_mapper_state_v1', JSON.stringify(inMemoryAreaMappings)]
+        );
+      } catch (err: any) {
+        console.warn('[Area Mappings Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, ...inMemoryAreaMappings });
+  });
+
+  // =========================================================================
+  // GENERIC KEY-VALUE APP STATE PERSISTENCE (Hostinger MySQL app_state)
+  // =========================================================================
+  const inMemoryGenericAppState = new Map<string, any>();
+
+  app.get("/api/app-state", requireAuth, async (req, res) => {
+    const rawKeys = String(req.query?.keys || '').trim();
+    const keys = rawKeys
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0 && k.length <= 120)
+      .slice(0, 30);
+
+    const entries: Record<string, any> = {};
+    if (keys.length === 0) {
+      return res.json({ success: true, entries });
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        const placeholders = keys.map(() => '?').join(', ');
+        const rows = await mysqlQuery<any[]>(
+          `SELECT state_key, state_json FROM app_state WHERE state_key IN (${placeholders})`,
+          keys
+        ).catch(() => []);
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            if (!row?.state_key || row.state_json == null) continue;
+            try {
+              const parsed = typeof row.state_json === 'string'
+                ? JSON.parse(row.state_json)
+                : row.state_json;
+              entries[row.state_key] = parsed;
+              inMemoryGenericAppState.set(row.state_key, parsed);
+            } catch {}
+          }
+        }
+      } catch (err: any) {
+        console.warn('[App State GET Warning]', err?.message || err);
+      }
+    }
+
+    for (const k of keys) {
+      if (entries[k] === undefined && inMemoryGenericAppState.has(k)) {
+        entries[k] = inMemoryGenericAppState.get(k);
+      }
+    }
+
+    return res.json({ success: true, entries });
+  });
+
+  app.post("/api/app-state", requireAuth, express.json({ limit: '20mb' }), async (req, res) => {
+    const entriesObj = req.body?.entries;
+    if (!entriesObj || typeof entriesObj !== 'object') {
+      return res.status(400).json({ success: false, error: 'Payload entries tidak valid' });
+    }
+
+    const keys = Object.keys(entriesObj).filter(k => k.length > 0 && k.length <= 120);
+    for (const k of keys) {
+      const val = entriesObj[k];
+      inMemoryGenericAppState.set(k, val);
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [k, JSON.stringify(val ?? null)]
+          );
+        } catch (err: any) {
+          console.warn('[App State POST Warning]', k, err?.message || err);
+        }
+      }
+    }
+
+    return res.json({ success: true, savedKeys: keys });
   });
 
   // =========================================================================
@@ -3189,7 +4302,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         }
         sql += " ORDER BY updated_at DESC LIMIT 120";
         const rows = await mysqlQuery<any[]>(sql, params);
-        const mapped = (Array.isArray(rows) ? rows : []).map(mapDbTripRow);
+        const mapped = (Array.isArray(rows) ? rows : []).map((r: any) => {
+          const t = mapDbTripRow(r);
+          return { ...t, plateNumber: sanitizeOperationalPlate(t.plateNumber) };
+        });
         return res.json({ success: true, trips: mapped, source: 'mysql' });
       } catch (err: any) {
         console.warn('[GPS Trips GET Warning]', err?.message || err);
@@ -3208,7 +4324,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const tripDate = String(b.tripDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
     const branchId = String(b.branchId || 'cab-banyuwangi').slice(0, 64);
     const fleetId = b.fleetId ? String(b.fleetId).slice(0, 64) : null;
-    const plateNumber = String(b.plateNumber || '-').slice(0, 32);
+    const plateNumber = sanitizeOperationalPlate(b.plateNumber).slice(0, 32);
     const initialCode = b.initialCode ? String(b.initialCode).slice(0, 32) : null;
     const vehicleType = b.vehicleType ? String(b.vehicleType).slice(0, 64) : null;
     const driverName = String(b.driverName || 'Driver AKK').slice(0, 120);
@@ -3378,7 +4494,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const { report, reports } = req.body || {};
 
     if (report && typeof report === 'object' && String(report.id || '').trim()) {
-      const safeReport = { ...report, id: String(report.id).slice(0, 160) };
+      const safeReport = sanitizeReportRecord({ ...report, id: String(report.id).slice(0, 160) });
       if (deletedDriverReportIds.has(safeReport.id)) {
         return res.json({ success: true, ignoredDeleted: true, count: inMemoryDriverReports.length });
       }
@@ -3416,7 +4532,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         if (!r || !String(r.id || '').trim()) continue;
         const id = String(r.id).slice(0, 160);
         if (deletedDriverReportIds.has(id)) continue;
-        const normalized = { ...r, id };
+        const normalized = sanitizeReportRecord({ ...r, id });
         const existing = map.get(id);
         if (!existing) {
           map.set(id, normalized);
@@ -4115,12 +5231,16 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       if (rows.length > 0 && rows[0].state_json) {
         const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryFleetChecklists = parsed;
-          return parsed;
+          inMemoryFleetChecklists = parsed.map((c: any) =>
+            c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+          );
+          return inMemoryFleetChecklists;
         }
       }
     } catch {}
-    return inMemoryFleetChecklists;
+    return inMemoryFleetChecklists.map((c: any) =>
+      c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+    );
   };
 
   const savePersistedChecklists = async (list: any[]): Promise<void> => {
@@ -4147,7 +5267,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
     try {
       const current = await getPersistedChecklists();
-      const syncedItem = { ...incoming, synced: true };
+      const syncedItem = { ...incoming, plateNumber: sanitizeOperationalPlate(incoming.plateNumber), synced: true };
       const idx = current.findIndex((c: any) => c && c.id === syncedItem.id);
       if (idx >= 0) {
         current[idx] = syncedItem;

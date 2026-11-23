@@ -134,6 +134,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [cameraCaptureFlash, setCameraCaptureFlash] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const cameraSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   // Otomatis terisi nomor kendaraan sesuai data checklist
   const [autoPlateNumber, setAutoPlateNumber] = useState<string>(plateNumber);
@@ -391,8 +397,23 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   }, [isCameraActive]);
 
+  const stopLiveCamera = () => {
+    cameraSeqRef.current += 1;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+      });
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setIsCameraActive(false);
+  };
+
   const startLiveCamera = async (mode: 'environment' | 'user' = facingMode) => {
     stopLiveCamera();
+    const requestSeq = ++cameraSeqRef.current;
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -415,7 +436,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         lastErr = e1;
       }
 
-      if (!stream) {
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: mode },
@@ -426,7 +447,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         }
       }
 
-      if (!stream) {
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: true,
@@ -437,6 +458,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         }
       }
 
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) {
+        if (stream) {
+          stream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
       if (!stream) {
         throw lastErr || new Error('Tidak dapat membuka stream video.');
       }
@@ -445,6 +475,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       setIsCameraActive(true);
       setCameraError(null);
     } catch (err: unknown) {
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) return;
       const errName = err instanceof Error ? err.name : '';
       const msg = err instanceof Error ? err.message : String(err);
 
@@ -458,10 +489,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         // ignore
       }
 
-      if (cameraInputRef.current) {
-        cameraInputRef.current.click();
+      if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setCameraError('Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain atau tap "Kamera Bawaan HP" di bawah.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setCameraError('Perangkat kamera tidak ditemukan di browser. Silakan tap "Kamera Bawaan HP" di bawah.');
+      } else if (msg === 'NOT_SUPPORTED') {
+        setCameraError('Browser tidak mendukung kamera langsung. Silakan tap "Kamera Bawaan HP" di bawah untuk memotret.');
       } else {
-        setCameraError('Akses kamera terkendala izin perangkat. Silakan izinkan akses kamera pada browser Anda.');
+        setCameraError('Akses kamera langsung browser diblokir / terkendala izin. Tap "Kamera Bawaan HP" atau izinkan kamera di browser.');
       }
     }
   };
@@ -469,15 +504,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const handleFlipCamera = () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
-    startLiveCamera(nextMode);
-  };
-
-  const stopLiveCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    setIsCameraActive(false);
+    void startLiveCamera(nextMode);
   };
 
   const effectivePreciseGps = React.useMemo(() => {
@@ -590,8 +617,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const captureLivePhoto = (closeAfterCapture: boolean = false) => {
     if (!videoRef.current) return;
     const video = videoRef.current;
-    const rawW = video.videoWidth || 800;
-    const rawH = video.videoHeight || 450;
+    if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+      setCameraError('Kamera masih memuat gambar. Tunggu 1 detik atau gunakan Kamera Bawaan HP.');
+      return;
+    }
+    const rawW = video.videoWidth;
+    const rawH = video.videoHeight;
     const maxDim = 800;
     let w = rawW;
     let h = rawH;
@@ -610,7 +641,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    if (facingMode === 'user') {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, w, h);
+    if (facingMode === 'user') {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
     setCameraCaptureFlash(true);
     setTimeout(() => setCameraCaptureFlash(false), 180);
 
@@ -626,45 +664,59 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (!files || files.length === 0) return;
 
     setIsCapturing(true);
+    setCameraError(null);
     const fileArray = Array.from(files);
     let processedCount = 0;
+    const markProcessed = () => {
+      processedCount += 1;
+      if (processedCount >= fileArray.length) {
+        setIsCapturing(false);
+      }
+    };
 
     fileArray.forEach(file => {
-      extractExifFromFile(file).then(exifMeta => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const maxDim = 800;
-            let w = img.width;
-            let h = img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            canvas.width = w;
-            canvas.height = h;
-
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, w, h);
-              applyWatermarkToCanvas(canvas, exifMeta);
-            }
-            processedCount += 1;
-            if (processedCount >= fileArray.length) {
-              setIsCapturing(false);
-            }
+      extractExifFromFile(file)
+        .catch(() => createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR'))
+        .then(exifMeta => {
+          const reader = new FileReader();
+          reader.onerror = () => {
+            setCameraError('Gagal membaca file foto dari perangkat.');
+            markProcessed();
           };
-          img.src = reader.result as string;
-        };
-        reader.readAsDataURL(file);
-      });
+          reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => {
+              setCameraError('Format gambar tidak dapat diproses oleh browser.');
+              markProcessed();
+            };
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const maxDim = 800;
+              let w = img.width || 800;
+              let h = img.height || 600;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              canvas.width = w;
+              canvas.height = h;
+
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                applyWatermarkToCanvas(canvas, exifMeta);
+              }
+              markProcessed();
+            };
+            img.src = reader.result as string;
+          };
+          reader.readAsDataURL(file);
+        });
     });
 
     e.target.value = '';
@@ -1764,24 +1816,26 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 )}
               </div>
 
-              {/* Hidden Native Device Camera Trigger */}
+              {/* Accessible Native Device Camera Trigger */}
               <input
+                id="gmaps-native-camera-input"
                 type="file"
                 ref={cameraInputRef}
                 accept="image/*"
                 capture="environment"
                 onChange={handlePhotoUpload}
-                className="hidden"
+                className="sr-only"
               />
 
-              {/* Hidden Gallery / File Picker (Multiple Supported) */}
+              {/* Accessible Gallery / File Picker (Multiple Supported) */}
               <input
+                id="gmaps-gallery-input"
                 type="file"
                 ref={fileInputRef}
                 accept="image/*"
                 multiple
                 onChange={handlePhotoUpload}
-                className="hidden"
+                className="sr-only"
               />
 
               {/* ERROR ALERT IF CAMERA PERMISSION DENIED */}
@@ -1795,13 +1849,20 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
+                    <label
+                      htmlFor="gmaps-native-camera-input"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer active:scale-95 transition"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Kamera Bawaan HP</span>
+                    </label>
                     <button
                       type="button"
                       onClick={() => startLiveCamera()}
                       className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-blue-500 active:scale-95 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Buka Kamera</span>
+                      <span>Coba Live Camera</span>
                     </button>
                   </div>
                 </div>
@@ -1888,7 +1949,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
                   {/* Baris Bawah Kiri: Tombol Tambah Foto (Kamera / Galeri) */}
                   <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <button
                         type="button"
                         onClick={() => startLiveCamera()}
@@ -1897,14 +1958,20 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         <Plus className="w-3.5 h-3.5" />
                         <span>Tambah Foto Kamera</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                      <label
+                        htmlFor="gmaps-native-camera-input"
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 font-bold text-[11px] border border-emerald-500/40 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Kamera HP</span>
+                      </label>
+                      <label
+                        htmlFor="gmaps-gallery-input"
                         className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
                       >
                         <Upload className="w-3.5 h-3.5" />
                         <span>Tambah dari Galeri</span>
-                      </button>
+                      </label>
                     </div>
 
                     <button
@@ -1917,56 +1984,64 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startLiveCamera()}
-                    disabled={isCapturing}
-                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
-                  >
-                    <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
-                      <Camera className="w-5 h-5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-black text-white text-sm">
-                        Buka Kamera
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startLiveCamera()}
+                      disabled={isCapturing}
+                      className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                    >
+                      <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
+                        <Camera className="w-5 h-5" />
                       </div>
-                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        {category === 'istirahat'
-                          ? 'Foto penyerahan kiriman (bisa >1 foto)'
-                          : category === 'isi_bbm'
-                          ? `Foto isi BBM (${fuelLocation})`
-                          : category === 'retur'
-                          ? 'Foto bukti barang retur (bisa >1 foto)'
-                          : category === 'kurang_muat'
-                          ? 'Foto bukti kurang muat (bisa >1 foto)'
-                          : category === 'lebih_muat'
-                          ? 'Foto bukti lebih muat (bisa >1 foto)'
-                          : category === 'salah_muat'
-                          ? 'Foto bukti salah muat (bisa >1 foto)'
-                          : 'Ambil foto bukti kamera (bisa >1 foto)'}
+                      <div className="text-left">
+                        <div className="font-black text-white text-sm">
+                          Buka Kamera
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                          {category === 'istirahat'
+                            ? 'Foto penyerahan kiriman (bisa >1 foto)'
+                            : category === 'isi_bbm'
+                            ? `Foto isi BBM (${fuelLocation})`
+                            : category === 'retur'
+                            ? 'Foto bukti barang retur (bisa >1 foto)'
+                            : category === 'kurang_muat'
+                            ? 'Foto bukti kurang muat (bisa >1 foto)'
+                            : category === 'lebih_muat'
+                            ? 'Foto bukti lebih muat (bisa >1 foto)'
+                            : category === 'salah_muat'
+                            ? 'Foto bukti salah muat (bisa >1 foto)'
+                            : 'Ambil foto bukti kamera (bisa >1 foto)'}
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isCapturing}
-                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                    <label
+                      htmlFor="gmaps-gallery-input"
+                      className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                    >
+                      <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-black text-white text-sm">
+                          Upload Foto
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                          Pilih 1 atau beberapa foto galeri
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+
+                  <label
+                    htmlFor="gmaps-native-camera-input"
+                    className="w-full py-2 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-[0.99]"
                   >
-                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-black text-white text-sm">
-                        Upload Foto
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        Pilih 1 atau beberapa foto galeri
-                      </div>
-                    </div>
-                  </button>
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Atau Buka Kamera HP Bawaan Langsung</span>
+                  </label>
                 </div>
               )}
             </div>
