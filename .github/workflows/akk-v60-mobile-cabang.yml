@@ -222,7 +222,7 @@ jobs:
           node-version: '24'
           cache: npm
       - name: Restore exact dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-save --package-lock=false --no-audit --no-fund
       - name: Verify production build before changing main
         run: npm run build
       - name: Commit only modified project files
