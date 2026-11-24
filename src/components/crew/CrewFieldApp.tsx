@@ -14,6 +14,8 @@ import { canClaimLive, claimTrip, getTripsForUser, listenCrewChanged, markTask,
   moveTrip, recordKm, submitWorkReport } from './crewApi';
 import { TABS, REPORT_ICONS, shortDate, initials, roleName, Button, IconTile, Heading,
   Panel, Empty, TripCard, ActiveTrip, TaskRow, Journey, Dialog, BackButton, type Screen } from './CrewFieldUI';
+import { CrewLiveCamera, EvidencePreview } from './CrewLiveCamera';
+import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 import './crewFieldV66.css';
 
 interface CrewFieldAppProps {
@@ -45,15 +47,14 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [reportKind, setReportKind] = useState<WorkAction | null>(null);
   const [reportTripId, setReportTripId] = useState<string | null>(null);
   const [reportNote, setReportNote] = useState('');
-  const [reportPhoto, setReportPhoto] = useState<string | undefined>();
+  const [reportEvidence, setReportEvidence] = useState<CameraEvidence | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [kmValue, setKmValue] = useState('');
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const alive = useRef(true);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const mutationInFlight = useRef(false);
-  const reportFile = useRef<HTMLInputElement | null>(null);
   const main = useRef<HTMLElement | null>(null);
-  const reportGeneration = useRef(0);
 
   // A post-mutation refresh must not reuse a read started before the mutation.
   const refresh = useCallback(async (quiet = false, afterMutation = false) => {
@@ -104,15 +105,16 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const ids = Array.from(new Set(trips.map(t => t.branchId)));
     return ids.length === 1 ? (ids[0] === 'cab-sidoarjo' ? 'Sidoarjo' : ids[0] === 'cab-banyuwangi' ? 'Nusantara' : '') : '';
   }, [trips]);
-  const modalOpen = Boolean(claimId || taskConfirm || accountOpen);
+  const modalOpen = Boolean(claimId || taskConfirm || accountOpen || cameraOpen);
   useEffect(() => { main.current?.scrollTo({top:0, behavior:'instant'}); }, [screen, selectedId, reportKind]);
   useEffect(() => { setKmValue(''); }, [activeTrip?.id]);
+  useEffect(() => { if (!reportTrip || screen !== 'laporan') setCameraOpen(false); }, [reportTrip?.id, screen]);
   useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setMessage(''), 3500);
     return () => clearTimeout(timer);
   }, [message]);
-  const resetReport = () => { reportGeneration.current++; setReportKind(null); setReportTripId(null); setReportNote(''); setReportPhoto(undefined); };
+  const resetReport = () => { setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null); };
   const clearNotice = () => { setMessage(''); setFault(''); };
   const nav = (next: Screen) => { if (mutationInFlight.current) return; setScreen(next); resetReport(); clearNotice(); main.current?.scrollTo({top:0}); };
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
@@ -142,22 +144,14 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     if (kind === 'form_kirim' && !qa && onOpenClassic) { onOpenClassic(); return; }
     resetReport(); clearNotice(); setReportTripId(activeTrip.id); setReportKind(kind); setScreen('laporan');
   };
-  const onFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { setFault('File harus berupa foto.'); return; }
-    if (file.size > 2 * 1024 * 1024) {setFault('Foto maksimal 2 MB.'); return;}
-    const generation = reportGeneration.current;
-    const reader = new FileReader();
-    reader.onload = () => {if (generation === reportGeneration.current) setReportPhoto(String(reader.result || ''));};
-    reader.onerror = () => {if (generation === reportGeneration.current) setFault('Foto gagal dibaca.');};
-    reader.readAsDataURL(file);
-  };
+  const startCamera = () => { if (!reportTrip || !reportKind || busy) return; clearNotice(); setCameraOpen(true); };
   const sendReport = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reportTrip || !reportKind || !slotForUser(reportTrip,user) || reportNote.trim().length < 3) return;
-    const kind = reportKind;
-    void invoke(() => submitWorkReport(user, reportTrip.id, kind, reportNote, reportPhoto), 'Laporan tersimpan.', resetReport);
+    if (!reportTrip || !reportKind || !slotForUser(reportTrip,user) || reportNote.trim().length < 3 || busy || cameraOpen) return;
+    const invalid = validateCameraEvidence(reportEvidence);
+    if (!reportEvidence || invalid) { setFault(invalid || 'Ambil foto terlebih dahulu.'); return; }
+    const kind = reportKind, evidence = reportEvidence;
+    void invoke(() => submitWorkReport(user, reportTrip.id, kind, reportNote, evidence), 'Laporan tersimpan.', resetReport);
   };
   const saveKm = (e: React.FormEvent) => {
     e.preventDefault(); if (!activeTrip || activeSlot !== 'driver' || activeTrip.odometerStart) return;
@@ -180,7 +174,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
 
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <div id="akk-crew-v66" className="cv66-root" data-testid="akk-crew-field-v65" data-version="67">
+    <div id="akk-crew-v66" className="cv66-root" data-testid="akk-crew-field-v65" data-version="68">
       <div className="cv66-shell">
         <header className="cv66-header"><div className="cv66-brand"><span className="cv66-brand-icon"><Truck size={23}/></span><div className="cv66-brand-text"><span className="cv66-brand-title">AKK Pengiriman</span>{(qa || branchText) && <span className="cv66-brand-sub">{qa ? 'Simulasi' : branchText}</span>}</div></div>
           <div className="cv66-header-actions"><button type="button" aria-label="Muat ulang jadwal" disabled={refreshing || busy} onClick={()=>void refresh()} className="cv66-icon-button"><RefreshCw size={20} className={refreshing ? 'cv66-spin' : ''}/></button><button type="button" aria-label="Akun" disabled={busy} onClick={()=>{clearNotice();setAccountOpen(true);}} className="cv66-avatar">{initials(user.fullName)}</button></div>
@@ -218,10 +212,8 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                 {!activeTrip || !activeSlot ? <Empty icon={FileText} title="Belum ada kiriman aktif" action={{label:'Lihat Kiriman',run:()=>nav('kiriman')}}/>
                   : reportKind ? !reportTrip ? <Empty icon={FileText} title="Kiriman tidak lagi aktif" action={{label:'Kembali',run:resetReport}}/> : <Panel><BackButton onClick={()=>{if(!busy){resetReport();clearNotice();}}}/><h2 className="cv66-section-title cv66-report-title">{WORK_LABELS[reportKind]}</h2><p className="cv66-meta">{reportTrip.area} · {reportTrip.fleetLabel}</p>
                     <form className="cv66-form" onSubmit={sendReport}><label className="cv66-field"><span>Keterangan</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} minLength={3} maxLength={1200} required rows={4} placeholder="Tulis keterangan" disabled={busy}/></label>
-                      <input type="file" accept="image/*" capture="environment" onChange={onFile} ref={reportFile} hidden/>
-                      {reportPhoto ? <div className="cv66-photo"><img src={reportPhoto} alt="Foto laporan"/><button type="button" aria-label="Hapus foto" disabled={busy} onClick={()=>{reportGeneration.current++;setReportPhoto(undefined);if(reportFile.current)reportFile.current.value='';}}><X size={20}/></button></div> : <Button variant="secondary" disabled={busy} onClick={()=>reportFile.current?.click()}><Camera size={19}/>Tambah Foto</Button>}
-                      {!qa && <p className="cv66-meta">Aktifkan GPS sebelum menyimpan.</p>}
-                      <Button type="submit" disabled={busy || reportNote.trim().length<3} loading={busy}><Check size={18}/>Simpan Laporan</Button>
+                      {reportEvidence ? <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={startCamera}/> : <Button variant="secondary" disabled={busy} onClick={startCamera}><Camera size={20}/>Buka Kamera</Button>}
+                      <Button type="submit" disabled={busy || cameraOpen || !reportEvidence || reportNote.trim().length<3} loading={busy}><Check size={18}/>Simpan Laporan</Button>
                     </form></Panel> : <>{tripPicker}<Panel title={activeTrip.area} className="cv66-report-list">{WORK_FOR_SLOT[activeSlot].map(kind=><TaskRow key={kind} icon={REPORT_ICONS[kind]} label={WORK_LABELS[kind]} disabled={busy} onClick={()=>openReport(kind)}/>)}</Panel></>}
               </>}
               {screen === 'riwayat' && <>
@@ -236,6 +228,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         </main>
         <nav className="cv66-tabs" aria-label="Navigasi pekerjaan">{TABS.map(({id,label,icon:Icon})=><button type="button" key={id} disabled={busy} aria-current={screen===id?'page':undefined} className={`cv66-tab ${screen===id?'cv66-tab--active':''}`} onClick={()=>nav(id)}><Icon size={22} strokeWidth={screen===id?2.2:1.8}/><span>{label}</span></button>)}</nav>
       </div>
+      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
       <AnimatePresence>
         {claimId && <Dialog key="claim" title="Ambil Kiriman" busy={busy} onClose={()=>{setClaimId(null);clearNotice();}}>{notice}{claimTarget && <div className="cv66-dialog-trip"><span className="cv66-dialog-area">{claimTarget.area}</span><span className="cv66-meta">{claimTarget.fleetLabel} · {claimTarget.departureTime} WIB</span></div>}
           <div className="cv66-choice-grid">{(['driver','helper'] as const).map(slot=>{const occupied=Boolean(claimTarget?.[slot]);return <button type="button" className="cv66-choice" key={slot} disabled={busy || occupied || !claimTarget || claimTarget.phase!=='waiting' || !claimAllowed || Boolean(claimTarget && slotForUser(claimTarget,user))} onClick={()=>submitClaim(slot)}><IconTile icon={slot==='driver'?Truck:Users}/><span className="cv66-choice-title">{roleName(slot)}</span>{occupied && <span className="cv66-meta">Sudah terisi</span>}</button>})}</div>
