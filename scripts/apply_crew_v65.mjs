@@ -4,6 +4,7 @@
  * Run automatically via npm prebuild/predev/prestart; fail closed on incompatible source.
  */
 import './apply_crew_capture_v68.mjs';
+import './apply_crew_monitor_v70.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

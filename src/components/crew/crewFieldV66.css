@@ -308,3 +308,29 @@ html.dark #akk-crew-v66 .cv69-camera-entry{color:#b5d4ff!important}
 #akk-crew-v66 .cv69-action-panel{gap:6px}
 #akk-crew-v66 .cv69-actions:not(.cv69-actions--four) .cv69-action{min-height:59px;padding:6px}
 @media(max-width:360px){#akk-crew-v66 .cv69-active-art{width:63px;height:59px}#akk-crew-v66 .cv69-active-art .cv69-art-svg{width:65px;height:65px}}
+
+/* V70: admin workspace embedding. This does not affect the fullscreen crew app. */
+#akk-crew-v66.cv70-monitor{position:relative!important;inset:auto!important;z-index:1;width:100%;height:calc(100dvh - 76px);min-height:480px;overflow:hidden;isolation:isolate}
+#akk-crew-v66.cv70-monitor .cv66-shell{max-width:1120px;border-inline:0}
+#akk-crew-v66.cv70-monitor .cv66-main{container-type:inline-size;scrollbar-width:thin}
+#akk-crew-v66.cv70-monitor .cv66-main::-webkit-scrollbar{display:block;width:6px}
+#akk-crew-v66.cv70-monitor .cv66-main::-webkit-scrollbar-thumb{background:var(--cv-line);border-radius:8px}
+#akk-crew-v66.cv70-monitor .cv70-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#akk-crew-v66.cv70-monitor .cv70-filters:empty{display:none}
+#akk-crew-v66.cv70-monitor .cv70-toggle{display:flex;min-height:44px;gap:4px;padding:4px;background:var(--cv-surface);border:1px solid var(--cv-line);border-radius:12px;flex-wrap:wrap;max-width:100%}
+#akk-crew-v66.cv70-monitor .cv70-toggle button{flex:1;min-width:92px;border:0!important;background:transparent!important;color:var(--cv-muted)!important;padding:8px 14px;border-radius:8px;font-size:13px!important;font-weight:600!important}
+#akk-crew-v66.cv70-monitor .cv70-toggle button.cv70-selected{background:var(--cv-blue)!important;color:#fff!important}
+#akk-crew-v66.cv70-monitor .cv70-branch{flex:1;min-width:175px;max-width:320px}
+#akk-crew-v66.cv70-monitor .cv70-report-top{display:flex;gap:9px;align-items:flex-start;min-width:0}
+#akk-crew-v66.cv70-monitor .cv70-report-top>.cv66-meta{max-width:95px;text-align:right}
+#akk-crew-v66.cv70-monitor .cv70-report-note{font-size:14px!important;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--cv-ink)!important}
+#akk-crew-v66.cv70-monitor .cv66-row:disabled{cursor:default}
+#akk-crew-v66.cv70-monitor .cv69-action:disabled{cursor:default}
+#akk-crew-v66.cv70-monitor .cv66-tabs{max-width:none}
+@container (min-width:690px){
+  #akk-crew-v66.cv70-monitor .cv70-screen{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+  #akk-crew-v66.cv70-monitor .cv70-screen>.cv66-heading,#akk-crew-v66.cv70-monitor .cv70-screen>.cv66-empty,#akk-crew-v66.cv70-monitor .cv70-screen>.cv70-wide,#akk-crew-v66.cv70-monitor .cv70-screen>.cv66-active-trip{grid-column:1/-1}
+  #akk-crew-v66.cv70-monitor .cv70-screen--tugas>.cv66-active-trip{min-height:132px}
+  #akk-crew-v66.cv70-monitor .cv70-screen--tugas>.cv70-toggle{justify-self:start;min-width:270px}
+}
+@media(max-width:700px){#akk-crew-v66.cv70-monitor{height:calc(100dvh - 72px);min-height:400px}#akk-crew-v66.cv70-monitor .cv70-filters>*{flex:1;max-width:none}}

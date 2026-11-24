@@ -69,12 +69,13 @@ export function Empty({icon, title, detail, action}: {icon: typeof Truck; title:
 function Person({label, member}: {label: string; member: FieldTrip['driver']}) {
   return <div className="cv66-person"><span className="cv66-person-label">{label}</span><div className={`cv66-person-name ${member ? 'cv66-person-name--assigned' : ''}`}><span className={`cv66-person-avatar ${member ? 'cv66-person-avatar--filled' : ''}`}>{member ? initials(member.name) : <Plus size={14}/>}</span><span>{member?.name || 'Belum terisi'}</span></div></div>;
 }
-export function TripCard({trip, mine, busy, claimAllowed, onOpen, onClaim}: {trip: FieldTrip; mine: CrewSlot | null; busy: boolean; claimAllowed: boolean; onOpen: () => void; onClaim: () => void}) {
+export function TripCard({trip, mine, busy, claimAllowed, onOpen, onClaim, readOnly = false}: {trip: FieldTrip; mine: CrewSlot | null; busy: boolean; claimAllowed: boolean; onOpen: () => void; onClaim: () => void; readOnly?: boolean}) {
   const claimable = trip.phase === 'waiting' && (!trip.driver || !trip.helper) && !mine;
   return <article className="cv66-panel cv66-trip cv69-trip-card">
     <div className="cv69-trip-heading"><div className="cv69-trip-image"><CrewArt name="truck" size={60}/></div><div className="cv69-trip-heading-text"><div className="cv69-trip-kicker"><span className="cv66-trip-date cv66-inline"><CalendarDays size={12}/>{shortDate(trip.date)}</span><Status trip={trip}/></div><h2 className="cv66-trip-title">{trip.area}</h2><TripMeta trip={trip}/></div></div>
     <div className="cv66-person-grid"><Person label="Driver" member={trip.driver}/><Person label="Helper" member={trip.helper}/></div>
-    {mine ? <Button onClick={onOpen}>Buka Tugas<ChevronRight size={18}/></Button>
+    {readOnly ? <Button variant="secondary" onClick={onOpen}>Lihat Detail<ChevronRight size={18}/></Button>
+      : mine ? <Button onClick={onOpen}>Buka Tugas<ChevronRight size={18}/></Button>
       : claimable ? <Button onClick={onClaim} disabled={busy || !claimAllowed}><Plus size={19}/>Ambil Kiriman</Button>
       : <div className="cv66-unavailable"><CheckCircle2 size={16}/>{trip.phase === 'waiting' ? 'Tim lengkap' : 'Tidak bisa diambil'}</div>}
   </article>;
@@ -95,12 +96,13 @@ export function TaskRow({icon, label, detail, done = false, disabled = false, on
     {done ? <span className="cv66-done-label">Selesai</span> : <ChevronRight className="cv66-chevron" size={19}/>}
   </motion.button>;
 }
-export function Journey({trip, busy, onMove}: {trip: FieldTrip; busy: boolean; onMove: (phase: 'going' | 'returned') => void}) {
+export function Journey({trip, busy, onMove, readOnly = false}: {trip: FieldTrip; busy: boolean; onMove: (phase: 'going' | 'returned') => void; readOnly?: boolean}) {
   const missing = [!trip.driver || !trip.helper ? 'Kru' : '', !trip.odometerStart ? 'KM awal' : '', !trip.inspectionDone ? 'Cek armada' : '', !trip.waybillValidated ? 'Surat jalan' : ''].filter(Boolean);
   const stage = trip.phase === 'returned' ? 2 : trip.phase === 'going' ? 1 : 0;
   return <Panel title="Perjalanan" right={<Status trip={trip}/>} className="cv69-journey">
     <div className="cv66-steps" aria-label="Tahapan perjalanan">{['Persiapan', 'Berangkat', 'Selesai'].map((label, i) => <div key={label} className={`cv66-step ${i < stage ? 'cv66-step--done' : i === stage ? 'cv66-step--active' : ''}`} aria-current={i === stage ? 'step' : undefined}><span className="cv66-step-dot">{i < stage ? <Check size={13}/> : i+1}</span><span>{label}</span></div>)}</div>
-    {trip.phase === 'waiting' ? <><Button disabled={missing.length > 0 || busy} loading={busy} onClick={() => onMove('going')}><Navigation size={18}/>Berangkat</Button>{missing.length > 0 && <p className="cv66-required"><span className="cv66-required-label">Lengkapi:</span> {missing.join(', ')}</p>}</>
+    {readOnly ? (trip.phase === 'waiting' && missing.length > 0 ? <p className="cv66-required"><span className="cv66-required-label">Belum lengkap:</span> {missing.join(', ')}</p> : null)
+      : trip.phase === 'waiting' ? <><Button disabled={missing.length > 0 || busy} loading={busy} onClick={() => onMove('going')}><Navigation size={18}/>Berangkat</Button>{missing.length > 0 && <p className="cv66-required"><span className="cv66-required-label">Lengkapi:</span> {missing.join(', ')}</p>}</>
       : trip.phase === 'going' ? <Button disabled={busy} loading={busy} onClick={() => onMove('returned')}><CheckCircle2 size={18}/>Tiba di Gudang</Button>
       : <div className="cv66-unavailable"><CheckCircle2 size={17}/>Kiriman selesai</div>}
   </Panel>;
