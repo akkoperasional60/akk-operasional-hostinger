@@ -1,8 +1,60 @@
 import type { Express } from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { getDbPool, isDatabaseConfigured } from './db';
+import { validateCameraEvidence } from '../src/components/crew/crewCaptureEvidence';
+/* AKK_CREW_CAPTURE_V68 */
 
 const QA_KEY = 'akk_qa_kiriman_server_v65';
+const isPreviewRuntime = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+const APP_STATE_PATH = path.join(process.cwd(), 'data', 'server_app_state.json');
+
+let qaChangeListener: ((tripId?: string) => void) | null = null;
+export function setCrewQaChangedListener(cb: ((tripId?: string) => void) | null) {
+  qaChangeListener = cb;
+}
+const emitQaChanged = (tripId?: string) => {
+  try { qaChangeListener?.(tripId); } catch {}
+};
+
+let localQaQueue: Promise<void> = Promise.resolve();
+const runSerializedQaLocal = async <T>(fn: () => Promise<T> | T): Promise<T> => {
+  const prev = localQaQueue;
+  let release!: () => void;
+  localQaQueue = new Promise<void>(resolve => { release = resolve; });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+};
+
+const readLocalQaState = (): any[] => {
+  try {
+    if (!fs.existsSync(APP_STATE_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(APP_STATE_PATH, 'utf8'));
+    const parsed = raw?.[QA_KEY];
+    return Array.isArray(parsed?.schedules) ? parsed.schedules.slice(0, 150) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalQaState = (schedules: any[]): void => {
+  try {
+    const dir = path.dirname(APP_STATE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    let data: Record<string, any> = {};
+    if (fs.existsSync(APP_STATE_PATH)) {
+      try { data = JSON.parse(fs.readFileSync(APP_STATE_PATH, 'utf8')); } catch {}
+    }
+    data[QA_KEY] = { version: 65, updatedAt: new Date().toISOString(), schedules: schedules.slice(0, 150) };
+    fs.writeFileSync(APP_STATE_PATH, JSON.stringify(data, null, 2), 'utf8');
+  } catch {}
+};
+
 const json = (raw: any) => {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
@@ -38,10 +90,21 @@ const storeRows = async (conn: any, schedules: any[]) => {
 const check = (req: any, res: any): any | null => {
   const u = req.authUser;
   if (!isAdmin(u) && !isQa(u)) { res.status(403).json({success:false,error:'Hanya akun uji atau Super Admin.'}); return null; }
-  if (!isDatabaseConfigured()) {res.status(503).json({success:false,error:'Database tidak tersedia.'});return null;}
+  if (!isDatabaseConfigured() && !isPreviewRuntime) {res.status(503).json({success:false,error:'Database tidak tersedia.'});return null;}
   return u;
 };
-const mutate = async (u: any, id: string, fn: (t: any) => void) => {
+const mutate = async (u: any, id: string, fn: (t: any, list: any[]) => void) => {
+  if (!isDatabaseConfigured()) {
+    return runSerializedQaLocal(() => {
+      const list = readLocalQaState();
+      const row = list.find(t => t.id === id);
+      if (!row) throw err('Kiriman uji tidak ditemukan.', 404);
+      if (!permitted(u, row.branchId)) throw err('Cabang tidak sesuai akses akun.', 403);
+      fn(row, list);
+      writeLocalQaState(list);
+      return row;
+    });
+  }
   let conn: any;
   try {
     conn = await getDbPool().getConnection();
@@ -51,7 +114,7 @@ const mutate = async (u: any, id: string, fn: (t: any) => void) => {
     const row = list.find(t => t.id === id);
     if (!row) throw err('Kiriman uji tidak ditemukan.',404);
     if (!permitted(u,row.branchId)) throw err('Cabang tidak sesuai akses akun.',403);
-    fn(row);
+    fn(row, list);
     await storeRows(conn,list);
     await conn.commit();
     return row;
@@ -64,9 +127,14 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
   app.get('/api/crew-qa/trips', requireAuth, async (req: any, res: any) => {
     const u = check(req,res); if(!u)return;
     try {
-      const [rows] = await getDbPool().execute('SELECT state_json FROM app_state WHERE state_key=? LIMIT 1',[QA_KEY]);
-      const data = json((rows as any[])[0]?.state_json);
-      const list = Array.isArray(data?.schedules) ? data.schedules : [];
+      let list: any[];
+      if (!isDatabaseConfigured()) {
+        list = readLocalQaState();
+      } else {
+        const [rows] = await getDbPool().execute('SELECT state_json FROM app_state WHERE state_key=? LIMIT 1',[QA_KEY]);
+        const data = json((rows as any[])[0]?.state_json);
+        list = Array.isArray(data?.schedules) ? data.schedules : [];
+      }
       return res.json({success:true,trips:list.filter((t:any)=>permitted(u,t.branchId))});
     } catch(e) {return errorResponse(res,e);}
   });
@@ -79,6 +147,14 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
       return res.status(400).json({success:false,error:'Cabang, tanggal, jam atau area belum valid.'});
     const trip = {id:`qa-v65-${crypto.randomUUID()}`,branchId,area:str(area),fleetLabel:str(fleetLabel)||'Armada Uji',date,departureTime,
       driver:null,helper:null,createdAt:new Date().toISOString(),phase:'waiting',reports:[]};
+    if (!isDatabaseConfigured()) {
+      await runSerializedQaLocal(() => {
+        const rows = readLocalQaState();
+        writeLocalQaState([trip, ...rows].slice(0, 150));
+      });
+      emitQaChanged(trip.id);
+      return res.json({success:true,trip});
+    }
     let conn: any;
     try {
       conn=await getDbPool().getConnection();
@@ -86,31 +162,50 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
       await conn.beginTransaction();
       const rows=await getRows(conn,true);
       await storeRows(conn,[trip,...rows].slice(0,150));
-      await conn.commit();return res.json({success:true,trip});
+      await conn.commit();
+      emitQaChanged(trip.id);
+      return res.json({success:true,trip});
     } catch(e){if(conn)try{await conn.rollback()}catch{};return errorResponse(res,e)}finally{if(conn)conn.release()}
   });
   app.delete('/api/crew-qa/trips/:id', requireAuth, async (req:any,res:any)=>{
     const u=check(req,res);if(!u)return;
     if(!isAdmin(u))return res.status(403).json({success:false,error:'Hanya Admin yang dapat menghapus uji.'});
+    if (!isDatabaseConfigured()) {
+      await runSerializedQaLocal(() => {
+        const rows = readLocalQaState();
+        writeLocalQaState(rows.filter(t => t.id !== req.params.id));
+      });
+      emitQaChanged(req.params.id);
+      return res.json({success:true});
+    }
     let conn: any;
     try{conn=await getDbPool().getConnection();
       await conn.execute('INSERT IGNORE INTO app_state(state_key,state_json,updated_at) VALUES(?,?,NOW())', [QA_KEY, JSON.stringify({version:65,schedules:[]})]);
-      await conn.beginTransaction();const rows=await getRows(conn,true);await storeRows(conn,rows.filter(t=>t.id!==req.params.id));await conn.commit();return res.json({success:true})}
+      await conn.beginTransaction();const rows=await getRows(conn,true);await storeRows(conn,rows.filter(t=>t.id!==req.params.id));await conn.commit();emitQaChanged(req.params.id);return res.json({success:true})}
     catch(e){if(conn)try{await conn.rollback()}catch{};return errorResponse(res,e)}finally{if(conn)conn.release()}
   });
   app.post('/api/crew-qa/trips/:id/claim',requireAuth,async(req:any,res:any)=>{
     const u=check(req,res);if(!u)return;
     if(!isQa(u))return res.status(403).json({success:false,error:'Hanya akun kru uji yang dapat mengambil slot.'});
+    if(req.body?.confirmed!==true)return res.status(400).json({success:false,error:'Konfirmasi pengambilan kiriman diperlukan. Muat ulang aplikasi.'});
     const slot=req.body?.slot;
     if(slot!=='driver'&&slot!=='helper')return res.status(400).json({success:false,error:'Posisi tidak dikenal.'});
     try{
-      const trip=await mutate(u,req.params.id,t=>{
+      const trip=await mutate(u,req.params.id,(t,list)=>{
         if(t.phase!=='waiting')throw err('Kiriman sudah berjalan.',409);
+        /* AKK_CREW_LOCK_V71 */
+        if (list.some(other => other && other.id !== t.id && other.phase !== 'returned' && roleOf(other,u))) {
+          throw err('Selesaikan kiriman aktif sebelum mengambil kiriman lain.',409);
+        }
+        if (t.date && list.some(other => other && other.id !== t.id && other.date === t.date && roleOf(other, u))) {
+          throw err('Sudah memilih kiriman pada hari ini. Reset oleh Super Admin diperlukan untuk mengganti.', 409);
+        }
         if(t.driver?.id && same(t.driver.id,u.id)||t.helper?.id&&same(t.helper.id,u.id))throw err('Sudah mengambil posisi lain.',409);
         if(t[slot])throw err('Slot sudah diambil orang lain.',409);
         t[slot]={id:`crw-${u.id}`,name:str(u.full_name)};
         t.updatedAt=new Date().toISOString();
       });
+      emitQaChanged(trip.id);
       return res.json({success:true,trip});
     }catch(e){return errorResponse(res,e)}
   });
@@ -146,12 +241,37 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
           const type=str(req.body?.kind),note=str(req.body?.note);
           if(!['bbm','kendala','toko','retur','form_kirim'].includes(type)||note.length<3||note.length>1200)throw err('Laporan tidak valid.');
           if(slot==='driver'&&['toko','retur','form_kirim'].includes(type)||slot==='helper'&&type==='bbm')throw err('Jenis laporan bukan tugas posisi ini.',403);
+          const evidence=req.body?.evidence;
+          const invalid=validateCameraEvidence(evidence);
+          if(invalid)throw err(invalid,422);
           const rows=Array.isArray(t.reports)?t.reports:[];
-          t.reports=[...rows.slice(-99),{id:`qa-report-${crypto.randomUUID()}`,type,note,by:str(u.full_name),at:new Date().toISOString(),photoAttached:Boolean(req.body?.photoAttached)}];
+          // QA retains metadata only so the test state never grows with base64 images.
+          t.reports=[...rows.slice(-99),{id:`qa-report-${crypto.randomUUID()}`,type,note,by:str(u.full_name),at:new Date().toISOString(),photoAttached:true,photoSource:'camera',photoCapturedAt:evidence.capturedAt,gpsCapturedAt:evidence.gpsCapturedAt,gps:evidence.gps}];
         }
         t.updatedAt=new Date().toISOString();
       });
+      emitQaChanged(trip.id);
       return res.json({success:true,trip});
     }catch(e){return errorResponse(res,e)}
+  });
+  app.post('/api/crew-qa/trips/:id/reset', requireAuth, async (req: any, res: any) => {
+    const u = check(req, res); if (!u) return;
+    if (!isAdmin(u)) return res.status(403).json({ success: false, error: 'Hanya Super Admin yang dapat mereset kiriman uji.' });
+    try {
+      const trip = await mutate(u, req.params.id, t => {
+        t.driver = null;
+        t.helper = null;
+        t.phase = 'waiting';
+        delete t.departedAt;
+        delete t.returnedAt;
+        delete t.odometerStart;
+        delete t.inspectionDone;
+        delete t.waybillValidated;
+        t.reports = [];
+        t.updatedAt = new Date().toISOString();
+      });
+      emitQaChanged(trip.id);
+      return res.json({ success: true, trip });
+    } catch (e) { return errorResponse(res, e); }
   });
 }

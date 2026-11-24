@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   MapPin,
   RefreshCw,
+  RotateCcw,
   Search,
   XCircle
 } from 'lucide-react';
@@ -24,6 +25,8 @@ import { branchStore } from '../services/branchStore';
 import { standardizeAreaName } from '../utils/areaNormalizer';
 import { getLocalDateStr } from '../services/driverReportService';
 import { AdminScheduleWeek, getScheduleCalendarDateObj } from '../data/adminSchedule';
+import { normalizeLiveSchedule, type FieldTrip } from './crew/crewModel';
+import { listenCrewChanged, resetTripAssignment } from './crew/crewApi';
 
 export type PortalScheduleValidationStatus = 'cocok' | 'tidak_cocok';
 
@@ -95,6 +98,8 @@ function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   try {
     const token =
+      localStorage.getItem('akk_session_token_v1') ||
+      sessionStorage.getItem('akk_session_token_v1') ||
       localStorage.getItem('akk_session_token') ||
       localStorage.getItem('session_token') ||
       sessionStorage.getItem('akk_session_token') ||
@@ -677,18 +682,44 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
   // MySQL-authoritative state (no localStorage source)
   const [mysqlSchedules, setMysqlSchedules] = useState<Schedule[]>([]);
   const [mysqlShifts, setMysqlShifts] = useState<DriverShiftCheckin[]>([]);
+  const [crewTrips, setCrewTrips] = useState<FieldTrip[]>([]);
   const [persistedMySqlRows, setPersistedMySqlRows] = useState<PortalScheduleValidationRow[]>([]);
   const [branches, setBranches] = useState(() => branchStore.getActiveBranches());
+  const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const currentUser = logisticsStore.getCurrentUser();
+  const isSuperAdmin = currentUser?.role === 'super_admin' && currentUser?.status === 'approved';
+
+  useEffect(() => {
+    if (!resetFeedback) return;
+    const t = setTimeout(() => setResetFeedback(null), 2500);
+    return () => clearTimeout(t);
+  }, [resetFeedback]);
 
   const loadPersistedValidationFromMySql = useCallback(
     async (targetDate: string, targetBranchId: string) => {
       try {
+        if (logisticsStore.isPreviewEnvironment()) {
+          await logisticsStore.ensurePreviewServerSession(false);
+        }
         const qs = new URLSearchParams({ date: targetDate, branchId: targetBranchId || 'all' });
-        const res = await fetch(`/api/portal-validations?${qs.toString()}`, {
+        let res = await fetch(`/api/portal-validations?${qs.toString()}`, {
           credentials: 'include',
           cache: 'no-store',
           headers: getAuthHeaders()
         });
+        if (res.status === 401 && logisticsStore.isPreviewEnvironment()) {
+          const recovered = await logisticsStore.ensurePreviewServerSession(true);
+          if (recovered) {
+            res = await fetch(`/api/portal-validations?${qs.toString()}`, {
+              credentials: 'include',
+              cache: 'no-store',
+              headers: getAuthHeaders()
+            });
+          }
+        }
         if (!res.ok) return;
         const data = await res.json();
         const latest = Array.isArray(data?.validations) ? data.validations[0] : null;
@@ -707,30 +738,35 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
   const refreshAllFromMySql = useCallback(async () => {
     setIsSyncing(true);
     try {
-      const headers = getAuthHeaders();
-      const [schedulesRes, shiftsRes, validationsRes] = await Promise.all([
-        fetch('/api/schedules/persisted', {
-          credentials: 'include',
-          cache: 'no-store',
-          headers
-        }),
-        fetch('/api/driver-shifts', {
-          credentials: 'include',
-          cache: 'no-store',
-          headers
-        }),
-        fetch(
-          `/api/portal-validations?${new URLSearchParams({
-            date: selectedDate,
-            branchId: selectedBranchId || 'all'
-          }).toString()}`,
-          {
-            credentials: 'include',
-            cache: 'no-store',
-            headers
-          }
-        )
-      ]);
+      if (logisticsStore.isPreviewEnvironment()) {
+        await logisticsStore.ensurePreviewServerSession(false);
+      }
+      const fetchAll = () => {
+        const headers = getAuthHeaders();
+        return Promise.all([
+          fetch('/api/schedules/persisted', { credentials: 'include', cache: 'no-store', headers }),
+          fetch('/api/driver-shifts', { credentials: 'include', cache: 'no-store', headers }),
+          fetch(
+            `/api/portal-validations?${new URLSearchParams({
+              date: selectedDate,
+              branchId: selectedBranchId || 'all'
+            }).toString()}`,
+            { credentials: 'include', cache: 'no-store', headers }
+          ),
+          fetch('/api/crew-assignments', { credentials: 'include', cache: 'no-store', headers })
+        ]);
+      };
+
+      let [schedulesRes, shiftsRes, validationsRes, crewRes] = await fetchAll();
+      if (
+        logisticsStore.isPreviewEnvironment() &&
+        (schedulesRes.status === 401 || shiftsRes.status === 401 || validationsRes.status === 401 || crewRes.status === 401)
+      ) {
+        const recovered = await logisticsStore.ensurePreviewServerSession(true);
+        if (recovered) {
+          [schedulesRes, shiftsRes, validationsRes, crewRes] = await fetchAll();
+        }
+      }
 
       // 1. Parse Schedules + Manual Weeks directly from MySQL (/api/schedules/persisted)
       if (schedulesRes.ok) {
@@ -797,6 +833,17 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
         }
       }
 
+      // 4. Parse Portal Crew Assignments (/api/crew-assignments)
+      if (crewRes.ok) {
+        const crewPayload = await crewRes.json().catch(() => ({}));
+        if (crewPayload?.success && Array.isArray(crewPayload.schedules)) {
+          const normalized = (crewPayload.schedules as Schedule[])
+            .map(normalizeLiveSchedule)
+            .filter((x): x is FieldTrip => Boolean(x));
+          setCrewTrips(normalized);
+        }
+      }
+
       setBranches([...branchStore.getActiveBranches()]);
     } catch {
       // Keep current MySQL state if transient network error
@@ -822,14 +869,40 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
     };
 
     const unsubStore = logisticsStore.subscribe(scheduleRefresh);
+    const unsubCrew = listenCrewChanged(scheduleRefresh);
     window.addEventListener('driver-shift-updated', scheduleRefresh);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       unsubStore();
+      unsubCrew();
       window.removeEventListener('driver-shift-updated', scheduleRefresh);
     };
   }, [refreshAllFromMySql]);
+
+  const portalTripsForReset = useMemo(() => {
+    return crewTrips.filter(t => {
+      if (t.date !== selectedDate) return false;
+      if (selectedBranchId !== 'all' && t.branchId !== selectedBranchId) return false;
+      return Boolean(t.driver || t.helper || t.phase !== 'waiting' || t.odometerStart || t.inspectionDone || t.waybillValidated);
+    });
+  }, [crewTrips, selectedDate, selectedBranchId]);
+
+  const handleResetPortalTrip = async (tripId: string) => {
+    if (!isSuperAdmin || resetBusy || !currentUser) return;
+    setResetBusy(true);
+    setResetFeedback(null);
+    try {
+      await resetTripAssignment(currentUser, tripId);
+      setConfirmResetId(null);
+      setResetFeedback({ type: 'success', text: 'Kiriman berhasil direset seperti semula. Kru dapat memilih kiriman lagi.' });
+      await refreshAllFromMySql();
+    } catch (e) {
+      setResetFeedback({ type: 'error', text: (e as Error)?.message || 'Gagal mereset kiriman portal.' });
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   const branchNameLookup = useMemo(() => {
     const map: Record<string, string> = {};
@@ -1357,6 +1430,113 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
           </div>
         )}
       </div>
+      {/* Reset Kiriman Portal (Khusus Super Admin) */}
+      {isSuperAdmin && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                <span>Reset Kiriman Portal (Khusus Super Admin)</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Mengembalikan kiriman ke kondisi awal agar kru dapat memilih kiriman kembali pada tanggal terpilih.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {portalTripsForReset.length} kiriman terisi
+            </span>
+          </div>
+
+          {resetFeedback && (
+            <div
+              role="status"
+              className={`mx-4 mt-3 px-3 py-2 rounded-xl text-xs font-semibold border ${
+                resetFeedback.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                  : 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
+              }`}
+            >
+              {resetFeedback.text}
+            </div>
+          )}
+
+          {portalTripsForReset.length === 0 ? (
+            <div className="px-4 py-5 text-xs text-slate-500 dark:text-slate-400">
+              Tidak ada kiriman portal yang sudah dipilih atau berjalan pada {formatIsoToIndonesianDisplay(selectedDate)}.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    <th className="py-2 px-3">Area &amp; Armada</th>
+                    <th className="py-2 px-3">Driver</th>
+                    <th className="py-2 px-3">Helper</th>
+                    <th className="py-2 px-3">Status</th>
+                    <th className="py-2 px-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                  {portalTripsForReset.map(trip => {
+                    const phaseLabel =
+                      trip.phase === 'returned'
+                        ? 'Selesai'
+                        : trip.phase === 'going'
+                        ? 'Dalam perjalanan'
+                        : 'Belum berangkat';
+                    return (
+                      <tr key={trip.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="py-2 px-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{trip.area}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {trip.fleetLabel} · {trip.departureTime} WIB
+                          </div>
+                        </td>
+                        <td className="py-2 px-3 text-slate-700 dark:text-slate-200">{trip.driver?.name || '-'}</td>
+                        <td className="py-2 px-3 text-slate-700 dark:text-slate-200">{trip.helper?.name || '-'}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-700 dark:text-slate-200">{phaseLabel}</td>
+                        <td className="py-2 px-3 text-right">
+                          {confirmResetId === trip.id ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={resetBusy}
+                                onClick={() => void handleResetPortalTrip(trip.id)}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                              >
+                                {resetBusy ? 'Mereset...' : 'Konfirmasi Reset'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={resetBusy}
+                                onClick={() => setConfirmResetId(null)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-[11px] cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={resetBusy}
+                              onClick={() => setConfirmResetId(trip.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 font-bold text-[11px] cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Reset Seperti Semula</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

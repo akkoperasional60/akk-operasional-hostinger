@@ -56,13 +56,22 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const alive = useRef(true);
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const pendingRefresh = useRef(false);
   const mutationInFlight = useRef(false);
+  const selfActionAtRef = useRef(0);
+  const prevActiveTripRef = useRef<{ id: string; phase: string } | null>(null);
+  const selectedIdRef = useRef<string | null>(selectedId);
+  selectedIdRef.current = selectedId;
   const main = useRef<HTMLElement | null>(null);
 
   // A post-mutation refresh must not reuse a read started before the mutation.
   const refresh = useCallback(async (quiet = false, afterMutation = false) => {
     if (refreshInFlight.current) {
-      if (!afterMutation) { await refreshInFlight.current; return; }
+      if (!afterMutation) {
+        pendingRefresh.current = true;
+        await refreshInFlight.current;
+        return;
+      }
       await refreshInFlight.current;
     }
     if (!quiet) setRefreshing(true);
@@ -74,6 +83,28 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           // Do not unlock during a failed or stale post-claim refresh.
           setClaimReceipt(id => id && next.some(t => t.id === id && slotForUser(t,user)) ? null : id);
           if (!quiet && !afterMutation) setFault('');
+
+          const nextOngoing = next.filter(t => Boolean(slotForUser(t, user)) && !isCompleted(t));
+          const nextActive = nextOngoing.find(t => t.id === selectedIdRef.current) || nextOngoing[0] || null;
+          const prev = prevActiveTripRef.current;
+          prevActiveTripRef.current = nextActive ? { id: nextActive.id, phase: nextActive.phase } : null;
+
+          if (prev && Date.now() - selfActionAtRef.current > 2000) {
+            const prevInNext = next.find(t => t.id === prev.id);
+            if (prevInNext && prev.phase === 'waiting' && prevInNext.phase === 'going' && slotForUser(prevInNext, user)) {
+              setMessage('Kiriman sudah berangkat.');
+            } else if (prevInNext && prevInNext.phase === 'returned' && slotForUser(prevInNext, user)) {
+              setScreen('riwayat');
+              setExpandedHistory(prevInNext.id);
+              setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null);
+              setMessage('Kiriman selesai. Tiba di gudang tercatat.');
+            } else if ((!prevInNext || (prevInNext.phase === 'waiting' && !slotForUser(prevInNext, user))) && !nextActive) {
+              setScreen('kiriman');
+              setSelectedId(null);
+              setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null);
+              setMessage('Kiriman direset oleh Super Admin.');
+            }
+          }
         }
       } catch (e) {
         if (alive.current) setFault((e as Error)?.message || 'Gagal memuat jadwal.');
@@ -84,12 +115,24 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     })();
     refreshInFlight.current = request;
     try { await request; }
-    finally { if (refreshInFlight.current === request) refreshInFlight.current = null; }
+    finally {
+      if (refreshInFlight.current === request) refreshInFlight.current = null;
+      if (pendingRefresh.current && alive.current && !mutationInFlight.current) {
+        pendingRefresh.current = false;
+        void refresh(true);
+      }
+    }
   }, [user.id, user.email, user.fullName]);
   useEffect(() => {
     alive.current = true;
     void refresh();
-    const poll = () => { if (!mutationInFlight.current) void refresh(true); };
+    const poll = () => {
+      if (mutationInFlight.current) {
+        pendingRefresh.current = true;
+        return;
+      }
+      void refresh(true);
+    };
     const detach = listenCrewChanged(poll);
     const onVisibility = () => { if (document.visibilityState === 'visible') poll(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -97,6 +140,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     return () => { alive.current = false; detach(); document.removeEventListener('visibilitychange', onVisibility); clearInterval(timer); };
   }, [refresh, qa]);
   const mine = useMemo(() => trips.filter(t => Boolean(slotForUser(t, user))), [trips, user.id, user.fullName]);
+  const claimedDates = useMemo(() => new Set(mine.map(t => t.date).filter(Boolean)), [mine]);
   const ongoing = useMemo(() => mine.filter(t => !isCompleted(t)), [mine]);
   const completed = useMemo(() => mine.filter(isCompleted), [mine]);
   const hasActiveAssignment = ongoing.length > 0 || claimReceipt !== null;
@@ -112,7 +156,8 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const claimTarget = trips.find(t => t.id === claimId);
   const claimEnabled = qa || canClaimLive();
   const claimAllowed = claimEnabled && !hasActiveAssignment;
-  const claimPositionAvailable = Boolean(claimTarget && claimPosition && claimTarget.phase === 'waiting' && !claimTarget[claimPosition] && !slotForUser(claimTarget,user) && claimAllowed);
+  const claimTargetSameDayLocked = Boolean(claimTarget?.date && claimedDates.has(claimTarget.date) && !slotForUser(claimTarget, user));
+  const claimPositionAvailable = Boolean(claimTarget && claimPosition && claimTarget.phase === 'waiting' && !claimTarget[claimPosition] && !slotForUser(claimTarget,user) && claimAllowed && !claimTargetSameDayLocked);
   useEffect(() => {
     if (hasActiveAssignment) { setClaimId(null); setClaimPosition(null); setSearch(''); }
   }, [hasActiveAssignment]);
@@ -126,7 +171,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   useEffect(() => { if (!reportTrip || screen !== 'laporan') setCameraOpen(false); }, [reportTrip?.id, screen]);
   useEffect(() => {
     if (!message) return;
-    const timer = window.setTimeout(() => setMessage(''), 3500);
+    const timer = window.setTimeout(() => setMessage(''), 2500);
     return () => clearTimeout(timer);
   }, [message]);
   const resetReport = () => { setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null); };
@@ -135,7 +180,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
   const invoke = async (fn: () => Promise<void>, success: string, after?: () => void) => {
     if (mutationInFlight.current) return;
-    mutationInFlight.current = true; setBusy(true); clearNotice();
+    mutationInFlight.current = true; selfActionAtRef.current = Date.now(); setBusy(true); clearNotice();
     try {
       await fn();
       // The API has acknowledged the write. A subsequent read failure must not encourage a duplicate write.
@@ -207,7 +252,10 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                 {hasActiveAssignment && <p className="cv66-meta">Selesaikan kiriman ini untuk mengambil kiriman berikutnya.</p>}
                 {!hasActiveAssignment && (openTrips.length > 0 || search) && <label className="cv66-search"><Search size={20}/><input aria-label="Cari kiriman" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari area atau armada"/>{search && <button type="button" aria-label="Hapus pencarian" onClick={()=>setSearch('')}><X size={18}/></button>}</label>}
                 {!claimEnabled && visibleTrips.some(t=>t.phase==='waiting' && (!t.driver || !t.helper) && !slotForUser(t,user)) && <div className="cv66-required">Pengambilan kiriman belum aktif di server.</div>}
-                {visibleTrips.length ? visibleTrips.map(t=><TripCard key={t.id} trip={t} mine={slotForUser(t,user)} claimAllowed={claimAllowed} busy={busy} onOpen={()=>choose(t.id)} onClaim={()=>{if (!claimAllowed || busy) return; clearNotice();setClaimPosition(null);setClaimId(t.id);}}/>) : <Empty icon={Truck} title={hasActiveAssignment ? 'Kiriman tersimpan' : search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman'} detail={hasActiveAssignment ? 'Muat ulang untuk menampilkan kiriman aktif.' : search ? undefined : 'Jadwal dari Admin akan muncul di sini.'} action={hasActiveAssignment ? {label:'Muat Ulang',run:()=>void refresh()} : undefined}/>}
+                {visibleTrips.length ? visibleTrips.map(t => {
+                  const lockedSameDay = Boolean(t.date && claimedDates.has(t.date) && !slotForUser(t, user));
+                  return <TripCard key={t.id} trip={t} mine={slotForUser(t,user)} claimAllowed={claimAllowed} sameDayLocked={lockedSameDay} busy={busy} onOpen={()=>choose(t.id)} onClaim={()=>{if (!claimAllowed || lockedSameDay || busy) return; clearNotice();setClaimPosition(null);setClaimId(t.id);}}/>;
+                }) : <Empty icon={Truck} title={hasActiveAssignment ? 'Kiriman tersimpan' : search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman'} detail={hasActiveAssignment ? 'Muat ulang untuk menampilkan kiriman aktif.' : search ? undefined : 'Jadwal dari Admin akan muncul di sini.'} action={hasActiveAssignment ? {label:'Muat Ulang',run:()=>void refresh()} : undefined}/>}
               </>}
               {screen === 'tugas' && <>
                 <Heading title="Tugas"/>

@@ -19,7 +19,9 @@
     "lint": "tsc --noEmit",
     "test": "NODE_OPTIONS='-r ./scripts/setup_test_env.js' tsx scripts/run_e2e_tests.ts"
   },
-  "engines": { "node": "24.x" },
+  "engines": {
+    "node": "24.x"
+  },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -34,7 +36,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "date-fns": "^4.4.0",
     "dotenv": "^17.2.3",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.2",
     "express": "^4.21.2",
     "firebase": "10.14.1",
     "html2canvas": "^1.4.1",

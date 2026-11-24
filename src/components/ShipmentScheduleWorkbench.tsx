@@ -8,6 +8,46 @@ import type { Crew, Schedule, UserProfile } from '../types';
 import { getAuthHeaders } from './crew/crewModel';
 
 const QA_EVENT = 'akk-qa-kiriman-updated';
+const CUSTOM_AREA_VALUE = '__manual__';
+const SCHEDULE_AREA_LIST = [
+  'Denpasar 1',
+  'Denpasar 2',
+  'Singaraja',
+  'Negara',
+  'Galekan Retail',
+  'Sumberayu Retail',
+  'Susulan Sanggar Jajag',
+  'Jember Selatan',
+  'Grosir Banyuwangi Rogojampi',
+  'Muncar Pasar',
+  'Muncar Pinggir',
+  'Rogojampi Retail',
+  'Genteng Retail',
+  'Jember Barat',
+  'Bwi Kota Selatan',
+  'Grosir Songgon Genteng',
+  'Songgon Retail',
+  'Susulan Situbondo Bondowoso',
+  'Kalibaru Retail',
+  'Ketapang Wongsorejo',
+  'Grosir Srono Sumberayu Muncar',
+  'Susulan Rogojampi Muncar',
+  'Sanggar Retail',
+  'Sempu Kalistail',
+  'Purwo Pasar',
+  'Purwo Dambuntung',
+  'Srono Retail',
+  'Grosir Jajag Sanggar Purwo',
+  'Jember Kota',
+  'Jajag Retail',
+  'Susulan Genteng Rogojampi',
+  'Situbondo',
+  'Bondowoso',
+  'Toko Dr. Sutomo',
+  'NX',
+  'Titipan Kota-kota'
+] as const;
+
 type QaTrip = {id:string;branchId:string;area:string;fleetLabel:string;date:string;departureTime:string;
   driver:{id:string;name:string}|null;helper:{id:string;name:string}|null;createdAt:string};
 const todayJakarta = (): string => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
@@ -31,28 +71,75 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
   const active = realCreator || testCreator;
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(todayJakarta);
+  const [departureDate, setDepartureDate] = useState(todayJakarta);
+  const [returnDate, setReturnDate] = useState(todayJakarta);
+  const [departureDateEdited, setDepartureDateEdited] = useState(false);
+  const [returnDateEdited, setReturnDateEdited] = useState(false);
   const [departureTime, setDepartureTime] = useState('07:30');
   const [returnTime, setReturnTime] = useState('17:00');
-  const [area, setArea] = useState('');
+  const [areaSelect, setAreaSelect] = useState('');
+  const [customArea, setCustomArea] = useState('');
   const [branchId, setBranchId] = useState('');
   const [fleetId, setFleetId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [helperId, setHelperId] = useState('');
   const [qaTrips, setQaTrips] = useState<QaTrip[]>([]);
+  const [confirmDeleteQaId, setConfirmDeleteQaId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [storeTick, setStoreTick] = useState(0);
 
-  const branches = useMemo(() => branchStore.getActiveBranches().filter(b => branchStore.canUserAccessBranch(user, b.id)), [user]);
-  const effectiveBranchId = branches.some(b => b.id === branchId) ? branchId : branches[0]?.id || '';
-  const fleets = useMemo(() => logisticsStore.getFleets().filter(f =>
-    effectiveBranchId && branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === effectiveBranchId
-  ), [effectiveBranchId]);
+  useEffect(() => {
+    const bump = () => setStoreTick(v => v + 1);
+    const unsubLogistics = logisticsStore.subscribe(bump);
+    const unsubBranch = branchStore.subscribe(bump);
+    return () => {
+      unsubLogistics();
+      unsubBranch();
+    };
+  }, []);
+
+  const branches = useMemo(
+    () => branchStore.getActiveBranches().filter(b => branchStore.canUserAccessBranch(user, b.id)),
+    [user, storeTick]
+  );
+  const selectedOriginBranchId = branchStore.getSelectedOriginBranchId();
+  const defaultBranchId =
+    (selectedOriginBranchId && selectedOriginBranchId !== 'ALL' && branches.some(b => b.id === selectedOriginBranchId)
+      ? selectedOriginBranchId
+      : '') ||
+    branches.find(b => b.id === 'cab-banyuwangi')?.id ||
+    branches[0]?.id ||
+    '';
+  const effectiveBranchId = branches.some(b => b.id === branchId) ? branchId : defaultBranchId;
+
+  const fleets = useMemo(() => {
+    const duplicateIds = new Set(
+      logisticsStore
+        .findDuplicateFleetGroups()
+        .flatMap(group => group.duplicates.map(dup => dup.id))
+    );
+    const allDataArmadaFleets = logisticsStore
+      .getFleets()
+      .filter(f => f && f.id && f.plateNumber && !duplicateIds.has(f.id));
+    if (!effectiveBranchId) return allDataArmadaFleets;
+    const branchMatched = allDataArmadaFleets.filter(
+      f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === effectiveBranchId
+    );
+    if (branchMatched.length === 0) {
+      return allDataArmadaFleets;
+    }
+    const remaining = allDataArmadaFleets.filter(f => !branchMatched.some(bm => bm.id === f.id));
+    return [...branchMatched, ...remaining];
+  }, [effectiveBranchId, storeTick]);
+
   const crews = useMemo(() => {
     const byId = new Map<string, Crew>();
+    const allById = new Map<string, Crew>();
     const allUsers = logisticsStore.getUsers();
     [...logisticsStore.getDriverCrews(), ...logisticsStore.getHelperCrews(), ...logisticsStore.getCrews()].forEach(c => {
-      // Do not use getCrewBranchId's default-Banyuwangi fallback to classify unknown crews.
+      allById.set(c.id, c);
       const account = allUsers.find(u => u.id === c.id || `crw-${u.id}` === c.id || u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase());
       let strictBranchId = c.branchId || '';
       if (!strictBranchId && account) {
@@ -64,12 +151,18 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       }
       if (strictBranchId && strictBranchId === effectiveBranchId) byId.set(c.id, c);
     });
-    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [effectiveBranchId]);
+    const source = byId.size > 0 ? Array.from(byId.values()) : Array.from(allById.values());
+    return source.sort((a, b) => a.name.localeCompare(b.name));
+  }, [effectiveBranchId, storeTick]);
 
   useEffect(() => {
     if (!active) setOpen(false);
   }, [active]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 2500);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const loadQaTrips = async () => {
     if (!testCreator) return;
     try {
@@ -94,8 +187,19 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
   const start = () => {
     setError('');
     setNotice('');
+    setConfirmDeleteQaId(null);
+    void logisticsStore.hydrateOperationalDataFromHostinger();
+    void branchStore.syncFromServer();
     setOpen(true);
   };
+
+  const handleDeliveryDateChange = (nextDate: string) => {
+    setDate(nextDate);
+    if (!departureDateEdited) setDepartureDate(nextDate);
+    if (!returnDateEdited) setReturnDate(nextDate);
+  };
+
+  const effectiveArea = (areaSelect === CUSTOM_AREA_VALUE ? customArea : areaSelect).trim();
 
   const addQaTrip = async () => {
     const label = fleets.find(f => f.id === fleetId);
@@ -105,13 +209,13 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       const response = await fetch('/api/crew-qa/trips', {
         method: 'POST', credentials: 'same-origin',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branchId: branch?.id || effectiveBranchId, date, area: area.trim(),
+        body: JSON.stringify({ branchId: branch?.id || effectiveBranchId, date, area: effectiveArea,
           fleetLabel: label?.initialCode || label?.plateNumber || 'Armada Uji', departureTime })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) throw new Error(result?.error || 'Gagal membuat jadwal uji.');
       setNotice('Kiriman uji berhasil dibuat. Dapat diuji dari dua HP atau browser berbeda.');
-      setArea('');
+      setAreaSelect(''); setCustomArea('');
       await loadQaTrips();
       window.dispatchEvent(new Event(QA_EVENT));
     } catch (e) { setError(e instanceof Error ? e.message : 'Gagal menyimpan jadwal uji.'); }
@@ -123,8 +227,11 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     if (busy) return;
     setError(''); setNotice('');
     if (!effectiveBranchId || !branchStore.canUserAccessBranch(user, effectiveBranchId)) return setError('Cabang tidak tersedia untuk akun ini.');
-    if (!area.trim() || area.trim().length < 3) return setError('Isi area tujuan minimal 3 huruf.');
+    if (!effectiveArea || effectiveArea.length < 2) return setError('Pilih atau isi area tujuan terlebih dahulu.');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError('Pilih tanggal kirim yang benar.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(departureDate) || !/^\d{4}-\d{2}-\d{2}$/.test(returnDate)) {
+      return setError('Pilih tanggal berangkat dan tanggal pulang yang benar.');
+    }
     if (!/^\d{2}:\d{2}$/.test(departureTime) || !/^\d{2}:\d{2}$/.test(returnTime)) return setError('Isi jam keberangkatan dan perkiraan pulang.');
     if (testCreator) { await addQaTrip(); return; }
     const fleet = fleets.find(f => f.id === fleetId);
@@ -138,10 +245,10 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     if (driverId && !driver) return setError('Driver bukan kru cabang aktif.');
     if (helperId && !helper) return setError('Helper bukan kru cabang aktif.');
 
-    const starts = new Date(`${date}T${departureTime}:00+07:00`);
-    const ends = new Date(`${date}T${returnTime}:00+07:00`);
+    const starts = new Date(`${departureDate}T${departureTime}:00+07:00`);
+    const ends = new Date(`${returnDate}T${returnTime}:00+07:00`);
     if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) return setError('Tanggal atau jam tidak valid.');
-    if (ends.getTime() <= starts.getTime()) ends.setTime(ends.getTime() + 24 * 60 * 60 * 1000);
+    if (ends.getTime() <= starts.getTime()) return setError('Tanggal & jam pulang harus lebih akhir dari berangkat.');
 
     // Prevent assigning the same fleet twice in overlapping time windows.
     const fleetConflict = logisticsStore.getSchedules().some(s => {
@@ -169,7 +276,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       trackingNumber: `PO-AKK-${date.replace(/-/g, '')}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
       originName: branch.warehouseName || `Gudang ${branch.name}`,
       originCoords,
-      storeId: `area-${area.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      storeId: `area-${effectiveArea.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
       fleetId: fleet.id,
       fleet,
       armada: fleet.initialCode || fleet.plateNumber,
@@ -181,11 +288,11 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       departureDate: starts.toISOString(),
       estimatedArrival: ends.toISOString(),
       deliveryDate: date,
-      returnDate: ends.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }),
+      returnDate,
       departureTime,
       targetReturnTime: returnTime,
-      areaName: area.trim(),
-      cargoDescription: `Pengiriman area ${area.trim()}`,
+      areaName: effectiveArea,
+      cargoDescription: `Pengiriman area ${effectiveArea}`,
       cargoWeightTon: 0,
       isInterIsland: false,
       notes: driver || helper ? 'Jadwal terbit, slot kru lain menunggu.' : 'Jadwal terbit, menunggu Driver dan Helper.',
@@ -199,22 +306,23 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       if (!created?.id || created.id === 'sch-readonly-blocked') throw new Error('Tidak punya izin menyimpan jadwal.');
       branchStore.setScheduleBranchId(created.id, effectiveBranchId);
       window.dispatchEvent(new CustomEvent('akk-new-schedule-added', { detail: created }));
-      setNotice(`Kiriman ${created.trackingNumber} dibuat. ${driver ? 'Driver terisi' : 'Driver kosong'}, ${helper ? 'Helper terisi' : 'Helper kosong'}. Cek kembali setelah refresh.`);
+      setNotice(`Kiriman ${created.trackingNumber} dibuat. ${driver ? 'Driver terisi' : 'Driver kosong'}, ${helper ? 'Helper terisi' : 'Helper kosong'}.`);
       setOpen(false);
-      setArea(''); setDriverId(''); setHelperId('');
+      setAreaSelect(''); setCustomArea(''); setDriverId(''); setHelperId('');
+      setDepartureDateEdited(false); setReturnDateEdited(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Gagal menerbitkan kiriman.');
     } finally { setBusy(false); }
   };
 
   const removeQa = async (id: string) => {
-    if (!window.confirm('Hapus jadwal uji ini dari database percobaan?')) return;
     try {
       const response = await fetch(`/api/crew-qa/trips/${encodeURIComponent(id)}`, {
         method: 'DELETE', credentials: 'same-origin', headers: getAuthHeaders()
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) throw new Error(result?.error || 'Gagal menghapus jadwal.');
+      setConfirmDeleteQaId(null);
       await loadQaTrips();
       window.dispatchEvent(new Event(QA_EVENT));
     } catch (e) { setError(e instanceof Error ? e.message : 'Gagal menghapus jadwal.'); }
@@ -249,13 +357,36 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
               {testCreator && <div className="akk-ship-qa-warning"><ShieldCheck size={18}/> Data percobaan disimpan terpisah dan tersinkron antar-akun uji.</div>}
               <form id="akk-ship-create-form" onSubmit={create} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {picker('Cabang', effectiveBranchId, setBranchId, branches.map(b => ({ value: b.id, label: b.name })), true)}
-                <label><span className={labelClass}>Tanggal kirim</span><input className={fieldClass} type="date" required value={date} onChange={e => setDate(e.target.value)}/></label>
-                <label className="sm:col-span-2"><span className={labelClass}>Area tujuan</span><input className={fieldClass} required minLength={3} maxLength={100} value={area} onChange={e => setArea(e.target.value)} placeholder="Contoh: Rogojampi"/></label>
-                {picker('Armada', fleetId, setFleetId, fleets.map(f => ({ value: f.id, label: `${f.initialCode ? `[${f.initialCode}] ` : ''}${f.plateNumber}` })), !testCreator)}
-                <div className="grid grid-cols-2 gap-2">
-                  <label><span className={labelClass}>Berangkat</span><input className={fieldClass} type="time" required value={departureTime} onChange={e => setDepartureTime(e.target.value)}/></label>
-                  <label><span className={labelClass}>Pulang</span><input className={fieldClass} type="time" required value={returnTime} onChange={e => setReturnTime(e.target.value)}/></label>
+                <label><span className={labelClass}>Tanggal kirim</span><input className={fieldClass} type="date" required value={date} onChange={e => handleDeliveryDateChange(e.target.value)}/></label>
+                <div className="sm:col-span-2 space-y-2">
+                  <label className="block">
+                    <span className={labelClass}>Area tujuan</span>
+                    <select className={fieldClass} value={areaSelect} onChange={e => setAreaSelect(e.target.value)} required={areaSelect !== CUSTOM_AREA_VALUE}>
+                      <option value="">Pilih area tujuan</option>
+                      {SCHEDULE_AREA_LIST.map(item => <option key={item} value={item}>{item}</option>)}
+                      <option value={CUSTOM_AREA_VALUE}>Area lainnya (ketik manual)...</option>
+                    </select>
+                  </label>
+                  {areaSelect === CUSTOM_AREA_VALUE && (
+                    <input className={fieldClass} required minLength={2} maxLength={100} value={customArea} onChange={e => setCustomArea(e.target.value)} placeholder="Tulis nama area tujuan"/>
+                  )}
                 </div>
+                <div className="sm:col-span-2">
+                  {picker(
+                    'Armada',
+                    fleetId,
+                    setFleetId,
+                    fleets.map(f => ({
+                      value: f.id,
+                      label: `${f.initialCode ? `[${f.initialCode}] ` : ''}${f.plateNumber}${f.vehicleType ? ` — ${f.vehicleType}` : ''}`
+                    })),
+                    !testCreator
+                  )}
+                </div>
+                <label><span className={labelClass}>Tanggal berangkat</span><input className={fieldClass} type="date" required value={departureDate} onChange={e => { setDepartureDateEdited(true); setDepartureDate(e.target.value); }}/></label>
+                <label><span className={labelClass}>Berangkat</span><input className={fieldClass} type="time" required value={departureTime} onChange={e => setDepartureTime(e.target.value)}/></label>
+                <label><span className={labelClass}>Tanggal pulang</span><input className={fieldClass} type="date" required value={returnDate} onChange={e => { setReturnDateEdited(true); setReturnDate(e.target.value); }}/></label>
+                <label><span className={labelClass}>Pulang</span><input className={fieldClass} type="time" required value={returnTime} onChange={e => setReturnTime(e.target.value)}/></label>
                 {!testCreator && <div className="sm:col-span-2 akk-ship-crew-picker">
                   <strong className="flex items-center gap-2 text-sm"><Users size={18}/> Slot kru <span className="text-xs font-normal text-slate-500">(boleh kosong)</span></strong>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -271,7 +402,17 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
                 {scopedQa.length === 0 && <p className="text-xs text-slate-500">Belum ada kiriman percobaan.</p>}
                 {scopedQa.map(t => (
                   <article key={t.id} className="akk-ship-test-card">
-                    <div className="flex items-center justify-between gap-2"><strong className="text-sm">{t.area}</strong><button type="button" onClick={() => removeQa(t.id)} aria-label="Hapus jadwal uji" className="text-slate-400 hover:text-red-600"><Trash2 size={15}/></button></div>
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className="text-sm">{t.area}</strong>
+                      {confirmDeleteQaId === t.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <button type="button" onClick={() => void removeQa(t.id)} className="rounded-md bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">Hapus</button>
+                          <button type="button" onClick={() => setConfirmDeleteQaId(null)} className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">Batal</button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => setConfirmDeleteQaId(t.id)} aria-label="Hapus jadwal uji" className="text-slate-400 hover:text-red-600"><Trash2 size={15}/></button>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">{t.date} · {t.fleetLabel} · {t.departureTime}</p>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       {(['driver','helper'] as const).map(slot => <div key={slot} className="akk-ship-test-slot">

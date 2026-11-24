@@ -1713,9 +1713,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const getFleetsForBranch = (targetBranchId?: string): Fleet[] => {
     const branchFilter = targetBranchId && targetBranchId !== 'ALL' ? targetBranchId : effectiveActiveBranchId;
-    return logisticsStore.getFleets().filter(
-      f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === branchFilter
+    const duplicateIds = new Set(
+      logisticsStore
+        .findDuplicateFleetGroups()
+        .flatMap(group => group.duplicates.map(dup => dup.id))
     );
+    const allFleets = logisticsStore
+      .getFleets()
+      .filter(f => f && f.id && f.plateNumber && !duplicateIds.has(f.id));
+    const branchMatched = allFleets.filter(
+      f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === branchFilter
+    );
+    if (branchMatched.length === 0) return allFleets;
+    const remaining = allFleets.filter(f => !branchMatched.some(bm => bm.id === f.id));
+    return [...branchMatched, ...remaining];
   };
 
   useEffect(() => {
@@ -3311,7 +3322,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       ) ||
       logisticsStore.findFleetByCodeOrPlate(armada);
 
-    if (matchedFleet && branchStore.getFleetBranchId(matchedFleet.id, matchedFleet.plateNumber, matchedFleet.initialCode) !== modalBranchId) {
+    if (
+      matchedFleet &&
+      !fleets.some(f => f.id === matchedFleet.id) &&
+      branchStore.getFleetBranchId(matchedFleet.id, matchedFleet.plateNumber, matchedFleet.initialCode, matchedFleet.branchId) !== modalBranchId
+    ) {
       const brName = branchStore.getBranchById(modalBranchId)?.name || modalBranchId;
       const fleetBranchErr = `Armada ${matchedFleet.initialCode || matchedFleet.plateNumber} tidak terdaftar di Cabang ${brName}. Pilih armada sesuai cabang aktif.`;
       setEditTripModalError(fleetBranchErr);
@@ -7681,7 +7696,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                   if (
                     matchedFleetObj &&
-                    branchStore.getFleetBranchId(matchedFleetObj.id, matchedFleetObj.plateNumber, matchedFleetObj.initialCode) !== targetBranchId
+                    !branchFleetsNow.some(f => f.id === matchedFleetObj.id) &&
+                    branchStore.getFleetBranchId(matchedFleetObj.id, matchedFleetObj.plateNumber, matchedFleetObj.initialCode, matchedFleetObj.branchId) !== targetBranchId
                   ) {
                     const brErr = `Armada ${matchedFleetObj.initialCode || matchedFleetObj.plateNumber} bukan milik Cabang ${activeBranchRecord?.name || targetBranchId}.`;
                     setManualScheduleFormError(brErr);

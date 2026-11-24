@@ -7,6 +7,8 @@ import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
 import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
+import { registerCrewClaimRoutes } from './server/crewClaims';
+import { registerCrewQaRoutes, setCrewQaChangedListener } from './server/crewQa';
 
 let cachedSharpModule: any = undefined;
 async function getSharp(): Promise<any | null> {
@@ -671,6 +673,18 @@ async function startServer() {
   const previewAdminPass = String(process.env.PREVIEW_ADMIN_PASSWORD || '').trim();
   const previewAdminName = String(process.env.PREVIEW_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
   const previewSessionUsers = new Map<string, any>();
+  if (isPreviewRuntime && !isDatabaseConfigured()) {
+    const savedPreviewUsers = readPersistentAppState('preview_users_v1');
+    if (Array.isArray(savedPreviewUsers)) {
+      for (const u of savedPreviewUsers) {
+        if (u?.id) previewSessionUsers.set(String(u.id), u);
+      }
+    }
+  }
+  const persistPreviewSessionUsers = () => {
+    if (!isPreviewRuntime || isDatabaseConfigured()) return;
+    writePersistentAppState('preview_users_v1', Array.from(previewSessionUsers.values()).slice(0, 200));
+  };
   if (isPreviewRuntime && previewAdminEmail && previewAdminPass.length >= 8) {
     previewSessionUsers.set('usr-preview-admin', {
       id: 'usr-preview-admin',
@@ -685,6 +699,7 @@ async function startServer() {
       approved_at: new Date().toISOString(),
       notes: 'Preview admin (environment-only; bukan akun production)'
     });
+    persistPreviewSessionUsers();
   }
 
   const extractSessionTokenFromReq = (req: any): string => {
@@ -1510,11 +1525,57 @@ async function startServer() {
           notes: 'Pendaftaran mandiri - menunggu persetujuan Super Admin'
         };
         previewSessionUsers.set(id, previewUser);
+        persistPreviewSessionUsers();
         return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
       }
       const duplicate = String(err?.code || '').includes('DUP_ENTRY') || errMsg.toLowerCase().includes('duplicate');
       return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal mendaftarkan akun') });
     }
+  });
+
+  // Dedicated session bootstrap strictly for local/AI Studio preview when MySQL is not configured.
+  app.post('/api/auth/preview-session', (req: any, res) => {
+    if (!isPreviewRuntime || isDatabaseConfigured()) {
+      return res.status(403).json({ success: false, error: 'Sesi preview tidak tersedia pada server produksi.' });
+    }
+    const data = req.body || {};
+    const id = String(data.id || '').trim();
+    const email = String(data.email || '').trim().toLowerCase();
+    const fullName = String(data.fullName || data.name || '').trim();
+    const role = String(data.role || '').trim();
+    const allowedRoles = new Set([
+      'super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'security',
+      'driver', 'crew_helper', 'koordinator_driver', 'sales_admin', 'spv_sales_admin',
+      'purchasing_admin', 'spv_purchasing_admin', 'hr_admin', 'finance_tax_admin',
+      'warehouse_admin', 'koordinator_gudang', 'marketing_online', 'marketing_offline',
+      'spv_marketing_offline'
+    ]);
+    if (!id || !email || !fullName || !allowedRoles.has(role)) {
+      return res.status(400).json({ success: false, error: 'Data akun preview tidak valid.' });
+    }
+    const existing = previewSessionUsers.get(id) || {};
+    const permissionsJson = data.permissions !== undefined
+      ? (typeof data.permissions === 'string' ? data.permissions : JSON.stringify(data.permissions))
+      : existing.permissions_json;
+    const previewUser = {
+      ...existing,
+      id,
+      email,
+      full_name: fullName,
+      role,
+      department: String(data.department || existing.department || 'Logistik'),
+      phone: String(data.phone ?? existing.phone ?? '').trim(),
+      status: 'approved',
+      permissions_json: permissionsJson,
+      notes: data.notes ?? existing.notes ?? 'Preview session user',
+      created_at: existing.created_at || new Date().toISOString(),
+      approved_at: existing.approved_at || new Date().toISOString()
+    };
+    previewSessionUsers.set(id, previewUser);
+    persistPreviewSessionUsers();
+    const { token } = createSessionToken(id);
+    setSessionCookie(res, token);
+    return res.json({ success: true, source: 'preview_session', sessionToken: token, user: publicUser(previewUser) });
   });
 
   app.get('/api/auth/me', async (req: any, res) => {
@@ -1594,6 +1655,7 @@ async function startServer() {
           phone,
           department
         });
+        persistPreviewSessionUsers();
       }
 
       return res.json({
@@ -1635,6 +1697,7 @@ async function startServer() {
           ...existingPreview,
           password_hash: hashPassword(newPassword)
         });
+        persistPreviewSessionUsers();
       }
 
       return res.json({
@@ -2361,6 +2424,7 @@ async function startServer() {
         notes: data.notes || null
       };
       previewSessionUsers.set(id, previewUser);
+      persistPreviewSessionUsers();
       return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
     };
 
@@ -2550,6 +2614,7 @@ async function startServer() {
           notes: data.notes ?? existingPreview.notes
         };
         previewSessionUsers.set(id, updatedPreview);
+        persistPreviewSessionUsers();
         return res.json({ success: true, source: 'preview_session', user: publicUser(updatedPreview) });
       }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui pengguna' });
@@ -3158,7 +3223,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           } else {
             const exTime = ex.updatedAt ? new Date(ex.updatedAt).getTime() : 0;
             const incTime = inc.updatedAt ? new Date(inc.updatedAt).getTime() : 0;
-            const merged = (exTime > 0 && incTime > 0 && exTime > incTime)
+            const exCrewVer = Number(ex.crewClaimVersion || 0);
+            const incCrewVer = Number(inc.crewClaimVersion || 0);
+            const exNewer = (exCrewVer > incCrewVer) || (exTime > 0 && (incTime <= 0 || exTime > incTime));
+            const merged = exNewer
               ? { ...inc, ...ex }
               : { ...ex, ...inc };
             // Always preserve explicit armada / fleet metadata if incoming lost it
@@ -3203,6 +3271,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       inMemorySchedulesPayload = payload;
       lastSchedulesDbSyncAt = Date.now();
       writePersistentAppState('schedules_payload', payload);
+      broadcastCrewSyncEvent('schedules_persist');
 
       setImmediate(() => {
         mysqlQuery(
@@ -3266,7 +3335,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       let sanitized = false;
       schedules = schedules.map((sch: any) => {
         const depIso = String(sch?.departureDate || '').slice(0, 10);
-        if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl && !sch?.isChecklistBypassed) {
+        /* AKK_CREW_ARRIVAL_V71 */
+        const crewArrivalRecorded = Boolean(sch?.actualArrival && Array.isArray(sch?.crewFieldEvents) && sch.crewFieldEvents.some((event: any) =>
+          event?.action === 'arrive' && event?.at === sch.actualArrival && event?.actorId && event?.gps));
+        if (depIso >= '2026-11-12' && sch?.status === 'delivered' && !sch?.podPhotoUrl && !sch?.isChecklistBypassed && !crewArrivalRecorded) {
           sanitized = true;
           return {
             ...sch,
@@ -3312,6 +3384,22 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   let inMemoryReportsLoadedFromDb = false;
   const deletedDriverReportIds = new Set<string>();
   const driverReportSseClients = new Set<express.Response>();
+  const crewSyncSseClients = new Set<express.Response>();
+  const broadcastCrewSyncEvent = (source: string, scheduleId?: string) => {
+    const dataStr = `data: ${JSON.stringify({
+      type: 'crew_sync',
+      source,
+      scheduleId: scheduleId || undefined,
+      timestamp: new Date().toISOString()
+    })}\n\n`;
+    for (const client of crewSyncSseClients) {
+      try {
+        client.write(dataStr);
+      } catch {
+        crewSyncSseClients.delete(client);
+      }
+    }
+  };
 
   let inMemoryDriverShifts: any[] = [];
   let inMemoryDriverPins: Record<string, string> = {};
@@ -3433,7 +3521,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   const loadDriverReportsFromDbIfNeeded = async (): Promise<any[]> => {
     if (inMemoryReportsLoadedFromDb) return inMemoryDriverReports;
     inMemoryReportsLoadedFromDb = true;
-    if (!isDatabaseConfigured()) return inMemoryDriverReports;
+    if (!isDatabaseConfigured()) {
+      const diskReports = readPersistentAppState('driver_reports_payload');
+      if (Array.isArray(diskReports)) {
+        inMemoryDriverReports = diskReports.filter((r: any) => !deletedDriverReportIds.has(String(r?.id || ''))).map(sanitizeReportRecord);
+      }
+      return inMemoryDriverReports;
+    }
     try {
       const [rows, delRows] = await Promise.all([
         mysqlQuery<any[]>(
@@ -3487,7 +3581,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   const persistDriverReportsToDb = async (reportsList: any[]) => {
     inMemoryDriverReports = reportsList;
-    if (!isDatabaseConfigured()) return;
+    if (!isDatabaseConfigured()) {
+      writePersistentAppState('driver_reports_payload', reportsList.slice(0, 100));
+      return;
+    }
 
     // app_state is intentionally bounded so photo-heavy reports do not grow
     // into an oversized MySQL packet. Newest reports are retained first.
@@ -4576,6 +4673,62 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       clearInterval(heartbeat);
       driverReportSseClients.delete(res);
     });
+  });
+
+  app.get("/api/crew-assignments/events", requireAuth, (req: any, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    res.write(`data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`);
+
+    crewSyncSseClients.add(res);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: keepalive ${Date.now()}\n\n`);
+      } catch {}
+    }, 25000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      crewSyncSseClients.delete(res);
+    });
+  });
+
+  /* AKK_CREW_V65_BACKEND_INTEGRATION */
+  // QA data uses a separate MySQL key and cannot write operational schedules.
+  setCrewQaChangedListener((tripId) => broadcastCrewSyncEvent('crew_qa', tripId));
+  registerCrewQaRoutes(app, requireAuth);
+  // Only these endpoints can claim a vacant live slot using a locked transaction.
+  registerCrewClaimRoutes(app, {
+    requireAuth,
+    getSchedulesPayload: () => inMemorySchedulesPayload || readPersistentAppState('schedules_payload'),
+    onSchedulesChanged: (payload: any) => {
+      inMemorySchedulesPayload = payload;
+      lastSchedulesDbSyncAt = Date.now();
+      writePersistentAppState('schedules_payload', payload);
+      broadcastCrewSyncEvent('crew_claim');
+    },
+    getReports: async () => loadDriverReportsFromDbIfNeeded(),
+    saveReport: async (report: any) => {
+      await loadDriverReportsFromDbIfNeeded();
+      const rows = [report, ...inMemoryDriverReports.filter((entry: any) => entry.id !== report.id)].slice(0, 1500);
+      await persistDriverReportsToDb(rows);
+      if (isDatabaseConfigured()) {
+        // Legacy persistence suppresses DB errors. Do not report success to a crew
+        // member until their record is actually visible in the MySQL state.
+        const verifiedRows = await mysqlQuery<any[]>(
+          'SELECT state_json FROM app_state WHERE state_key=? LIMIT 1', ['driver_reports_payload']);
+        const latest = verifiedRows?.[0]?.state_json;
+        const persisted = typeof latest === 'string' ? JSON.parse(latest) : latest;
+        if (!Array.isArray(persisted) || !persisted.some((entry: any) => entry?.id === report.id)) {
+          throw new Error('Gagal memverifikasi laporan di database.');
+        }
+      }
+      broadcastDriverReportEvent('report_upserted', report);
+      broadcastCrewSyncEvent('crew_report', report?.scheduleId);
+    }
   });
 
   app.get("/api/driver-reports", async (_req, res) => {

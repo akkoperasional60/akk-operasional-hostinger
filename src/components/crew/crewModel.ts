@@ -169,9 +169,16 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
 }
 
 export async function fetchLiveTrips(): Promise<FieldTrip[]> {
-  const response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
-  if (!response.ok) throw new Error('Jadwal server belum bisa dibaca. Coba ulangi.');
-  const result = await response.json();
+  let response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+  if (response.status === 401 && logisticsStore.isPreviewEnvironment()) {
+    const recovered = await logisticsStore.ensurePreviewServerSession(true);
+    if (recovered) {
+      await logisticsStore.hydrateOperationalDataFromHostinger(true);
+      response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+    }
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result?.error || 'Jadwal server belum bisa dibaca. Coba ulangi.');
   if (!result?.success || !Array.isArray(result?.schedules)) throw new Error('Data jadwal dari server tidak valid.');
   const reportBySchedule = new Map<string, FieldReport[]>();
   for (const item of Array.isArray(result.reports) ? result.reports : []) {

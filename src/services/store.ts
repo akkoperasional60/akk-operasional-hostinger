@@ -572,7 +572,9 @@ class LogisticsStore {
   private middlewares: StoreMiddleware[] = [];
   private offlineScheduleQueue: OfflineScheduleStatusUpdate[] = [];
 
-  private isPreviewEnvironment(): boolean {
+  private previewSessionPromise: Promise<boolean> | null = null;
+
+  public isPreviewEnvironment(): boolean {
     if (!import.meta?.env?.PROD) return true;
     if (typeof window !== 'undefined') {
       const host = (window.location.hostname || '').toLowerCase();
@@ -581,6 +583,54 @@ class LogisticsStore {
       }
     }
     return false;
+  }
+
+  public async ensurePreviewServerSession(force: boolean = false): Promise<boolean> {
+    if (!this.isPreviewEnvironment() || typeof fetch === 'undefined') return false;
+    if (this.previewSessionPromise && !force) return this.previewSessionPromise;
+    const candidate = this.resolveLocalCandidateUser();
+    if (!candidate) return false;
+    if (!force) {
+      const existingToken =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        '';
+      if (existingToken) return true;
+    }
+    const run = (async () => {
+      try {
+        const res = await fetch('/api/auth/preview-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            id: candidate.id,
+            email: candidate.email,
+            fullName: candidate.fullName,
+            role: candidate.role,
+            department: candidate.department,
+            phone: candidate.phone,
+            permissions: candidate.permissions,
+            notes: candidate.notes
+          })
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || !payload?.sessionToken) return false;
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+        } catch {}
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    this.previewSessionPromise = run;
+    try {
+      return await run;
+    } finally {
+      if (this.previewSessionPromise === run) this.previewSessionPromise = null;
+    }
   }
 
   constructor() {
@@ -3713,6 +3763,7 @@ class LogisticsStore {
     this.users = this.deduplicateSuperAdmins(this.users);
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.setCurrentUser(resolvedUser);
+    void this.ensurePreviewServerSession(true);
     this.lastAuthError = null;
     return resolvedUser;
   }
@@ -3818,23 +3869,34 @@ class LogisticsStore {
     this.lastHydrateAt = nowMs;
     this.hydratePromise = (async () => {
       try {
-        const savedToken =
-          (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
-          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
-          '';
-        const authHeaders: Record<string, string> = {};
-        if (savedToken) {
-          authHeaders['Authorization'] = `Bearer ${savedToken}`;
-          authHeaders['x-akk-session-token'] = savedToken;
+        if (this.isPreviewEnvironment()) {
+          await this.ensurePreviewServerSession(false);
         }
+        let authHeaders = this.buildSessionAuthHeaders();
 
         // Priority 1: muat 4 data inti operasional terlebih dahulu agar UI tampil cepat tanpa membanjiri koneksi server
-        const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+        let [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
           fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
           fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
         ]);
+
+        if (
+          this.isPreviewEnvironment() &&
+          (fleetRes.status === 401 || crewRes.status === 401 || storeRes.status === 401 || scheduleRes.status === 401)
+        ) {
+          const recovered = await this.ensurePreviewServerSession(true);
+          if (recovered) {
+            authHeaders = this.buildSessionAuthHeaders();
+            [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+              fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
+            ]);
+          }
+        }
 
         if (
           fleetRes.status === 429 ||
@@ -4068,19 +4130,24 @@ class LogisticsStore {
             mergedSchedules.push(combined);
           }
 
-          // Keep un-synced local schedules created recently or portal self-checkin schedules
+          // Keep un-synced local schedules created recently, manual schedules, or portal self-checkin schedules
           const nowMs = Date.now();
+          let recoveredLocalSchedule = false;
           for (const loc of this.schedules || []) {
             if (loc?.id && !mergedIds.has(loc.id) && !deletedIdsSet.has(String(loc.id)) && !String(loc.id).startsWith('batch-')) {
               const createdMs = loc.createdAt ? new Date(loc.createdAt).getTime() : 0;
-              if (String(loc.id).startsWith('PORTAL-') || (createdMs > 0 && nowMs - createdMs < 60000)) {
+              if (String(loc.id).startsWith('PORTAL-') || loc.isManuallyEdited || (createdMs > 0 && nowMs - createdMs < 60000)) {
                 mergedSchedules.push(loc);
+                recoveredLocalSchedule = true;
               }
             }
           }
 
           this.schedules = mergedSchedules;
           this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules, true);
+          if (recoveredLocalSchedule && schedulePayload?.source !== 'hostinger_mysql') {
+            this.persistSchedulesSnapshotToBackend('hydrate_recover');
+          }
         }
 
         this.reconcileFleetAndScheduleStatuses(true);
@@ -4137,7 +4204,13 @@ class LogisticsStore {
         const candidateUser = this.resolveLocalCandidateUser();
         if (candidateUser) {
           this.setCurrentUser({ ...candidateUser, password: undefined });
-          void this.hydrateOperationalDataFromHostinger();
+          if (this.isPreviewEnvironment()) {
+            void this.ensurePreviewServerSession(true).then(() => {
+              void this.hydrateOperationalDataFromHostinger(true);
+            });
+          } else {
+            void this.hydrateOperationalDataFromHostinger();
+          }
           return true;
         }
 
@@ -4608,22 +4681,40 @@ class LogisticsStore {
     if (this.persistSchedulesTimer) {
       clearTimeout(this.persistSchedulesTimer);
     }
-    this.persistSchedulesTimer = setTimeout(() => {
+    this.persistSchedulesTimer = setTimeout(async () => {
       this.persistSchedulesTimer = null;
       const batchDeletedIds = Array.from(this.pendingDeletedScheduleIds);
       this.pendingDeletedScheduleIds.clear();
+      const bodyStr = JSON.stringify({
+        schedules: this.schedules,
+        deletedIds: batchDeletedIds,
+        replaceAll,
+        source
+      });
       try {
-        fetch('/api/schedules/persist', {
+        if (this.isPreviewEnvironment()) {
+          await this.ensurePreviewServerSession(false);
+        }
+        let res = await fetch('/api/schedules/persist', {
           method: 'POST',
           headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
           credentials: 'same-origin',
-          body: JSON.stringify({
-            schedules: this.schedules,
-            deletedIds: batchDeletedIds,
-            replaceAll,
-            source
-          })
-        }).catch(() => {});
+          body: bodyStr
+        });
+        if (res.status === 401 && this.isPreviewEnvironment()) {
+          const recovered = await this.ensurePreviewServerSession(true);
+          if (recovered) {
+            res = await fetch('/api/schedules/persist', {
+              method: 'POST',
+              headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+              credentials: 'same-origin',
+              body: bodyStr
+            });
+          }
+        }
+        if (res.ok && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('akk-portal-schedule-updated'));
+        }
       } catch {}
     }, 180);
   }
